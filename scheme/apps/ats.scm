@@ -611,7 +611,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                            (subagent-live-buffer
                              (execute* (ats-approvals-review-prompt ids)
                                        (list 'title title 'model "claude-sonnet-5-5"))))))
-            (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
+            (with-frame-windows (lambda () (display-buffer-other-window! orch)))))))
+  'modes '(ats-approvals-mode))
 (catalog-meta! 'command "ats-approvals-review" 'domain 'chat 'effects '(write spend display))
 (minor-mode-keys! "ats-approvals-mode" '(("M-O" "ats-approvals-review")))
 ;; the applications list hands its top rows, filtered to a job, to their own chats
@@ -638,7 +639,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
       (buffer-set-local! buf 'list-filters (remove ats-job-filter? (list-filters buf)))
       (if (or on? (not row))
           (list-redraw! buf)
-          (list-filter-push! buf (list "match" (string-append "job:" (ats-row-job buf row))))))))
+          (list-filter-push! buf (list "match" (string-append "job:" (ats-row-job buf row)))))))
+  'modes '(ats-approvals-mode ats-applications-mode))
 (catalog-meta! 'command "ats-filter-job" 'domain 'web 'effects '(write display))
 (minor-mode-keys! "ats-applications-mode" '(("@" "ats-filter-job")))
 (minor-mode-keys! "ats-approvals-mode" '(("@" "ats-filter-job")))
@@ -656,7 +658,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
         (lambda (text)
           (let ((name (string-trim (or text ""))))
             (site-app-set-filter! buf (if (equal? name "") #f (string-append "q=" (url-encode name))))))
-        'initial (ats-search-query buf)))))
+        'initial (ats-search-query buf))))
+  'modes '(ats-candidates-mode))
 (catalog-meta! 'command "ats-candidates-search" 'domain 'web 'effects '(read external display))
 (minor-mode-keys! "ats-candidates-mode" '(("/" "ats-candidates-search")))
 
@@ -771,7 +774,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                 (lambda (input)
                   (debounce! (string-append "ats-palette:" (selected-frame)) 150 ats-palette--refresh input)))
               (list 'filter #f)
-              (list 'style "palette"))))))
+              (list 'style "palette")))))
+  'modes '(ats-mode ats-pipeline-mode ats-detail-mode))
 (catalog-meta! 'command "ats-palette" 'domain 'web 'effects '(read external display))
 (for-each (lambda (mode) (define-key (mode-keymap mode) "s-k" "ats-palette"))
           '("ats-mode" "ats-pipeline-mode" "ats-detail-mode"))
@@ -940,14 +944,17 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
     (let ((hit (ats-pipeline-job-at (current-buffer))))
       (if hit
           (ats-pipeline-show! (plist-get (car hit) 'key) (site-app-field (car hit) 'name) (cadr hit))
-          (message "No job here")))))
+          (message "No job here"))))
+  'modes '(ats-jobs-mode))
 
 (define-command "ats-pipeline-open" "Open the candidate on this row beside the list"
   (lambda ()
-    (let ((buf (current-buffer))) (ats-pipeline-open-row! buf (list-current buf)))))
+    (let ((buf (current-buffer))) (ats-pipeline-open-row! buf (list-current buf))))
+  'modes '(ats-pipeline-mode))
 
 (define-command "ats-pipeline-refresh" "Read the job's applications and suggestions again"
-  (lambda () (ats-pipeline-read! (current-buffer))))
+  (lambda () (ats-pipeline-read! (current-buffer)))
+  'modes '(ats-pipeline-mode))
 
 (define-command "ats-pipeline-recommend" "Recommend the job to the suggested candidate on this row"
   (lambda ()
@@ -966,7 +973,8 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
                  (message (if ok
                               (string-append "Recommended to " name)
                               (string-append "Recommend failed for " name ": " (if (string? text) text ""))))
-                 (when ok (ats-pipeline-read! buf)))))))))
+                 (when ok (ats-pipeline-read! buf))))))))
+  'modes '(ats-pipeline-mode))
 
 (define-list-mode! "ats-pipeline-mode"
   (list 'doc "One job's candidates: its applications stage by stage, then the suggestions not yet in it. Moving or RET opens the candidate beside the list, an application as its application and a suggestion as its candidate page for this job. r recommends the job to a suggested candidate, / narrows (stage:applied keeps one stage, fit:strong one fit), g rereads, q quits."
@@ -1063,9 +1071,11 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
           ((ats-suggestion-at buf) (run-command "ats-suggestion-open")))))
 
 (define-command "ats-job-next" "Go to the next piece of this job page; a candidate opens beside it"
-  (lambda () (ats-job-step! 1)))
+  (lambda () (ats-job-step! 1))
+  'modes '(ats-job-mode))
 (define-command "ats-job-prev" "Go to the previous piece of this job page; a candidate opens beside it"
-  (lambda () (ats-job-step! -1)))
+  (lambda () (ats-job-step! -1))
+  'modes '(ats-job-mode))
 (catalog-meta! 'command "ats-job-next" 'domain 'web 'effects '(write external display))
 (catalog-meta! 'command "ats-job-prev" 'domain 'web 'effects '(write external display))
 (mode-keys! "ats-job-mode" '(("<down>" "ats-job-next") ("<up>" "ats-job-prev")))
@@ -1314,9 +1324,11 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
 (define-mode "ats-draft-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #f)))
 (define-command "ats-draft-save" "Save this draft to its approval on the site"
-  (lambda () (ats-draft-push! (current-buffer))))
+  (lambda () (ats-draft-push! (current-buffer)))
+  'modes '(ats-draft-mode))
 (define-command "ats-draft-abort" "Drop this draft; the approval keeps its text"
-  (lambda () (let ((b (current-buffer))) (buffer-mark-saved! b) (buffer-kill! b))))
+  (lambda () (let ((b (current-buffer))) (buffer-mark-saved! b) (buffer-kill! b)))
+  'modes '(ats-draft-mode))
 (mode-keys! "ats-draft-mode" '(("C-c C-c" "ats-draft-save") ("C-c C-k" "ats-draft-abort")))
 (mode-doc! "ats-draft-mode" "An approval's candidate-facing draft. C-c C-c saves it to the site, C-c C-k drops it.")
 

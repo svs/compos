@@ -976,25 +976,29 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--next-in (diff--hunk-lines buf) (diff--line-number buf (point)))))
-      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no next hunk")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no next hunk"))))
+  'modes '(diff-mode))
 
 (define-command "diff-prev-hunk" "Move to the previous hunk"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--prev-in (diff--hunk-lines buf) (diff--line-number buf (point)))))
-      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no previous hunk")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no previous hunk"))))
+  'modes '(diff-mode))
 
 (define-command "diff-next-file" "Move to the next file"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--next-in (diff--file-lines buf) (diff--line-number buf (point)))))
-      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no next file")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no next file"))))
+  'modes '(diff-mode))
 
 (define-command "diff-prev-file" "Move to the previous file"
   (lambda ()
     (let* ((buf (current-buffer))
            (n (diff--prev-in (diff--file-lines buf) (diff--line-number buf (point)))))
-      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no previous file")))))
+      (if n (begin (diff--goto-line! n) (diff--select-point! buf)) (message "no previous file"))))
+  'modes '(diff-mode))
 
 ;;; --- visiting the source ------------------------------------------------------
 ;;; The target line is the hunk's new-start plus the context and added rows
@@ -1033,7 +1037,8 @@
                       (browse-visit path)
                       (when (cadr target)
                         (diff--goto-line! (max 1 (cadr target)))))
-                    (message (string-append "gone: " (car target))))))))))
+                    (message (string-append "gone: " (car target)))))))))
+  'modes '(diff-mode))
 
 ;;; --- one revision, as the same cards ------------------------------------------
 ;;; A backend's `show` fetches the text of one revision and hands it here.
@@ -1155,7 +1160,8 @@
                     (begin
                       (diff--write-explanation! out answer)
                       (message "Diff explanation ready"))
-                    (message "Diff explanation discarded")))))))))
+                    (message "Diff explanation discarded"))))))))
+  'modes '(diff-mode))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -1190,7 +1196,8 @@
          (stage-file buf card
            (lambda (result)
              (diff--stage-finish! buf result (diff--get card 'file)))))
-        (else (message "this diff cannot stage changes"))))))
+        (else (message "this diff cannot stage changes")))))
+  'modes '(diff-mode))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -1213,7 +1220,8 @@
                                           (diff--get hunk 'n))
                        (diff--goto-line! (diff--get hunk 'line)))
                 (begin (diff-toggle-card! buf (diff--get card 'key))
-                       (diff--goto-line! (diff--get card 'start)))))))))
+                       (diff--goto-line! (diff--get card 'start))))))))
+  'modes '(diff-mode))
 
 (domain! 'files)
 (effects! '(write display))
@@ -1227,7 +1235,8 @@
           (begin
             (diff-toggle-card! buf (diff--get card 'key))
             (diff--goto-line! (diff--get card 'start)))
-          (message "no file here")))))
+          (message "no file here"))))
+  'modes '(diff-mode))
 
 (define (diff-toggle-all! buf)
   (let* ((keys (map (lambda (c) (diff--get c 'key)) (diff-layout buf)))
@@ -1244,17 +1253,20 @@
            (line (diff--line-number buf (point)))
            (card (diff--card-at (diff-layout buf) line)))
       (diff-toggle-all! buf)
-      (when card (diff--goto-line! (diff--get card 'start))))))
+      (when card (diff--goto-line! (diff--get card 'start)))))
+  'modes '(diff-mode))
 
 (define (diff-select-tab! buf tab)
   (buffer-set-local! buf 'diff-tab tab)
   (diff--reblock! buf))
 
 (define-command "diff-show-changes" "Show the changes tab"
-  (lambda () (diff-select-tab! (current-buffer) "changes")))
+  (lambda () (diff-select-tab! (current-buffer) "changes"))
+  'modes '(diff-mode))
 
 (define-command "diff-show-history" "Show the previous commits tab"
-  (lambda () (diff-select-tab! (current-buffer) "history")))
+  (lambda () (diff-select-tab! (current-buffer) "history"))
+  'modes '(diff-mode))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -1293,7 +1305,8 @@
       (message "no merge conflicts")))
 
 (define-command "diff-toggle-conflicts" "Show only merge-conflicted files, or show everything again"
-  (lambda () (diff-toggle-conflicts! (current-buffer))))
+  (lambda () (diff-toggle-conflicts! (current-buffer)))
+  'modes '(diff-mode))
 
 ;; the click registry (components.scm) fans the one click primitive out to
 ;; every blocks mode. The id is ours only in a diff buffer.
@@ -1322,7 +1335,8 @@
             (else
               (watch-path! root 'deep)
               (buffer-set-local! buf 'diff-watch #t)
-              (message "watch on"))))))
+              (message "watch on")))))
+  'modes '(diff-mode))
 
 ;; a dirty diff catches up the moment a window shows it again
 (define (diff--on-refresh! b keys)
@@ -1356,7 +1370,8 @@
     (let* ((buf (current-buffer))
            (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
       (buffer-set-local! buf 'render-mode (if rich? #f "blocks"))
-      (message (if rich? "plain diff" "diff cards")))))
+      (message (if rich? "plain diff" "diff cards"))))
+  'modes '(diff-mode))
 
 ;;; --- the mode -----------------------------------------------------------------
 
@@ -1368,7 +1383,8 @@
   )
 
 (define-command "diff-revert" "Re-read the diff from its backend"
-  (lambda () (diff-refresh (current-buffer))))
+  (lambda () (diff-refresh (current-buffer)))
+  'modes '(diff-mode))
 
 (mode-icon! "diff-mode" "")
 

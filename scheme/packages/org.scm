@@ -135,7 +135,8 @@
            (ln (org-line-at buf (point))))
       (if (and ln (org-heading-level (cadr ln)))
           (org-toggle-fold buf (car ln))
-          (run-command "indent-for-tab")))))
+          (run-command "indent-for-tab"))))
+  'modes '(org-mode))
 
 (define-command "org-global-cycle" "Cycle global visibility: overview or show all"
   (lambda ()
@@ -151,7 +152,8 @@
             (message "OVERVIEW"))
           (begin
             (org-set-folds! buf '())
-            (message "SHOW ALL"))))))
+            (message "SHOW ALL")))))
+  'modes '(org-mode))
 
 (define (org-unfold-all! buf)
   (org-set-folds! buf '()))
@@ -282,7 +284,8 @@
                     ((equal? cur "TODO") "DONE ")
                     (else ""))
               rest))
-          (org-refontify! buf))))))
+          (org-refontify! buf)))))
+  'modes '(org-mode))
 
 (define (org-priority-cycle dir)
   (org-on-heading-line
@@ -308,9 +311,11 @@
         (org-refontify! buf)))))
 
 (define-command "org-priority-up" "Increase the priority of the current item"
-  (lambda () (org-priority-cycle 'up)))
+  (lambda () (org-priority-cycle 'up))
+  'modes '(org-mode))
 (define-command "org-priority-down" "Decrease the priority of the current item"
-  (lambda () (org-priority-cycle 'down)))
+  (lambda () (org-priority-cycle 'down))
+  'modes '(org-mode))
 
 ;;; --- structure editing -------------------------------------------------------
 
@@ -346,9 +351,11 @@
             (org-refontify! buf)))))
 
 (define-command "org-promote" "Promote the headline at point, or de-dent the line"
-  (lambda () (org-promote-demote -1)))
+  (lambda () (org-promote-demote -1))
+  'modes '(org-mode))
 (define-command "org-demote" "Demote the headline at point, or indent the line"
-  (lambda () (org-promote-demote 1)))
+  (lambda () (org-promote-demote 1))
+  'modes '(org-mode))
 
 (define (org-subtree-shift n)
   (org-on-heading-line
@@ -370,9 +377,11 @@
             (org-refontify! buf))))))
 
 (define-command "org-promote-subtree" "Promote the entire subtree at point"
-  (lambda () (org-subtree-shift -1)))
+  (lambda () (org-subtree-shift -1))
+  'modes '(org-mode))
 (define-command "org-demote-subtree" "Demote the entire subtree at point"
-  (lambda () (org-subtree-shift 1)))
+  (lambda () (org-subtree-shift 1))
+  'modes '(org-mode))
 
 ;; swap [s1,e1) with the adjacent [e1,e2); returns nothing useful.
 ;; Normalizes a missing trailing newline on the second block (last
@@ -426,7 +435,8 @@
                        (e2 (org-block-end buf sib lv))
                        (blen (org-swap-adjacent! buf start e1 e2)))
                   (goto-char! (+ start blen))
-                  (org-refontify! buf)))))))))
+                  (org-refontify! buf))))))))
+  'modes '(org-mode))
 
 (define-command "org-move-subtree-up" "Move the subtree up past its previous sibling"
   (lambda ()
@@ -441,7 +451,8 @@
                        (e2 (org-block-end buf start lv)))
                   (org-swap-adjacent! buf sib e1 e2)
                   (goto-char! sib)
-                  (org-refontify! buf)))))))))
+                  (org-refontify! buf))))))))
+  'modes '(org-mode))
 
 ;;; --- new headlines -----------------------------------------------------------
 
@@ -454,7 +465,8 @@
     (let* ((buf (current-buffer))
            (lv (org-current-level buf)))
       (end-of-line!)
-      (insert! (string-append "\n" (string-repeat "*" lv) " ")))))
+      (insert! (string-append "\n" (string-repeat "*" lv) " "))))
+  'modes '(org-mode))
 
 (define-command "org-insert-heading-after-subtree" "Insert a headline after the subtree"
   (lambda ()
@@ -470,7 +482,8 @@
             (insert! (string-append
                        (if ends-nl "" "\n")
                        (string-repeat "*" (cadr h)) " "))
-            (unless at-eob (begin (insert! "\n") (backward-char!))))))))
+            (unless at-eob (begin (insert! "\n") (backward-char!)))))))
+  'modes '(org-mode))
 
 ;;; --- checkboxes + statistics cookies ----------------------------------------
 
@@ -556,7 +569,8 @@
                                      (substring-bytes line (cadr r) (string-byte-length line)))))
             (org-replace-line! buf (car ln) line new)
             (org-update-cookies! buf (car ln) new)
-            (org-refontify! buf))))))
+            (org-refontify! buf)))))
+  'modes '(org-mode))
 
 ;;; --- the mode ----------------------------------------------------------------
 

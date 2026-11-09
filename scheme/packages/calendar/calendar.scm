@@ -998,41 +998,52 @@
   (calendar--view-fetch! buf))
 
 (define-command "calendar-view-next" "Move to the next event"
-  (lambda () (calendar--view-step! 1)))
+  (lambda () (calendar--view-step! 1))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-previous" "Move to the previous event"
-  (lambda () (calendar--view-step! -1)))
+  (lambda () (calendar--view-step! -1))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-open" "Open the event's meeting link in the browser"
-  (lambda () (calendar--view-open! (calendar--view-event-at (current-buffer)))))
+  (lambda () (calendar--view-open! (calendar--view-event-at (current-buffer))))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-toggle-day" "Fold or unfold the day at point"
   (lambda ()
     (let* ((buf (current-buffer)) (day (calendar--view-day-at buf)))
-      (when day (calendar--view-toggle! buf day)))))
+      (when day (calendar--view-toggle! buf day))))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-later" "Show the next day, week or month"
-  (lambda () (calendar--view-step-period! (current-buffer) 1)))
+  (lambda () (calendar--view-step-period! (current-buffer) 1))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-earlier" "Show the previous day, week or month"
-  (lambda () (calendar--view-step-period! (current-buffer) -1)))
+  (lambda () (calendar--view-step-period! (current-buffer) -1))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-day" "Show one day"
-  (lambda () (calendar--view-set-span! (current-buffer) "day")))
+  (lambda () (calendar--view-set-span! (current-buffer) "day"))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-week" "Show the week"
-  (lambda () (calendar--view-set-span! (current-buffer) "week")))
+  (lambda () (calendar--view-set-span! (current-buffer) "week"))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-month" "Show the month"
-  (lambda () (calendar--view-set-span! (current-buffer) "month")))
+  (lambda () (calendar--view-set-span! (current-buffer) "month"))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-today" "Return the view to today"
-  (lambda () (calendar--view-move! (current-buffer) (calendar--now-day))))
+  (lambda () (calendar--view-move! (current-buffer) (calendar--now-day)))
+  'modes '(calendar-mode))
 
 (define-command "calendar-view-refresh" "Fetch the days on screen again"
   (lambda ()
     (set! *calendar-view-cache* '())
-    (calendar--view-fetch! (current-buffer))))
+    (calendar--view-fetch! (current-buffer)))
+  'modes '(calendar-mode))
 
 (add-hook! (list 'block-click 'calendar)
   (lambda (buf id)

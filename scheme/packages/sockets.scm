@@ -171,16 +171,20 @@
                                           (string-append " · " detail)))))))))
 
 (define-command "sockets-restart" "Restart the socket on this line"
-  (lambda () (sockets-on-current sockets-restart!)))
+  (lambda () (sockets-on-current sockets-restart!))
+  'modes '(sockets-mode))
 
 (define-command "sockets-stop" "Stop the socket on this line"
-  (lambda () (sockets-on-current sockets-stop!)))
+  (lambda () (sockets-on-current sockets-stop!))
+  'modes '(sockets-mode))
 
 (define-command "sockets-visit" "Visit the socket on this line"
-  (lambda () (sockets-on-current sockets-visit!)))
+  (lambda () (sockets-on-current sockets-visit!))
+  'modes '(sockets-mode))
 
 (define-command "sockets-refresh" "Redraw the socket list"
-  (lambda () (sockets-refresh!)))
+  (lambda () (sockets-refresh!))
+  'modes '(sockets-mode))
 
 ;;; --- the hub -------------------------------------------------------------------
 

@@ -280,7 +280,8 @@
                 (begin (subagents-show! b)
                        (message (string-append "showing " b)))
                 (message (string-append (subagents-label row)
-                                        " has no buffer any more"))))))))
+                                        " has no buffer any more")))))))
+  'modes '(isubagents-mode))
 
 (effects! '(read))
 
@@ -309,12 +310,14 @@
 (define-command "subagents-refresh" "Read the spawn edges again"
   (lambda ()
     (ibuffer-refresh! *subagents-buffer*)
-    (message "subagents: read the spawn edges again")))
+    (message "subagents: read the spawn edges again"))
+  'modes '(isubagents-mode))
 
 (define-command "subagents-one-shape"
   "Say that this table has one shape"
   (lambda ()
-    (message "the subagents table has one shape: one row per spawn edge")))
+    (message "the subagents table has one shape: one row per spawn edge"))
+  'modes '(isubagents-mode))
 
 ;;; --- the catalog -------------------------------------------------------
 

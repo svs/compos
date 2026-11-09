@@ -109,7 +109,8 @@
   "Go to the definition of the scheme name at point, or follow the link there"
   (lambda ()
     (unless (goto-address-follow-at-point!)
-      (scheme-ide--goto-definition!))))
+      (scheme-ide--goto-definition!)))
+  'modes '(scheme-mode))
 
 (define (scheme-ide--goto-definition!)
     (let ((sym (scheme-ide--symbol-at)))
@@ -147,7 +148,8 @@
       (if (not sym)
           (message "No name at point")
           (message (or (scheme-ide--doc sym)
-                       (string-append "No doc for " sym)))))))
+                       (string-append "No doc for " sym))))))
+  'modes '(scheme-mode))
 
 ;;; --- completion --------------------------------------------------------------
 
@@ -338,7 +340,8 @@
   "Show the definition of the name at point in the other window; run again to go there; a link there is followed"
   (lambda ()
     (unless (goto-address-follow-at-point!)
-      (definition-show!))))
+      (definition-show!)))
+  'modes '(morg-mode))
 
 (define (definition-show!)
     (let ((name (definition--name)))

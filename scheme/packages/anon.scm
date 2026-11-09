@@ -828,7 +828,8 @@ from the buffer, so the redaction must reach that text through the tree"
            (s (if (string=? r "") (string-trim (dom-selection-text)) r)))
       (if (string=? s "")
           (read-string "Redact: " anon--bar!)
-          (anon--bar! s)))))
+          (anon--bar! s))))
+  'modes '(anon-local-mode))
 
 (define-command "anon-forget" "Forget every cached name, common word and email handle"
   (lambda ()

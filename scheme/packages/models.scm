@@ -646,7 +646,8 @@
                  (models--daemon-op! host "load" name "loaded"))
                 (else
                  (message (string-append "loading " name "..."))
-                 (models--keep-alive! host name models-keep-alive "loaded"))))))))
+                 (models--keep-alive! host name models-keep-alive "loaded")))))))
+  'modes '(models-mode))
 
 (define-command "models-stop" "Unload the model on this line from the host memory"
   (lambda ()
@@ -656,7 +657,8 @@
               (name (plist-get e 'name)))
           (if (equal? (models--kind host) 'daemon)
               (models--daemon-op! host "unload" name "unloaded")
-              (models--keep-alive! host name 0 "unloaded")))))))
+              (models--keep-alive! host name 0 "unloaded"))))))
+  'modes '(models-mode))
 
 (define-command "models-install" "Install another model on this line's host"
   (lambda ()
@@ -674,7 +676,8 @@
                   (models--model-body name 'stream #f)
                   models-pull-timeout
                   (lambda (reply)
-                    (models--report! "installed" name reply)))))))))))
+                    (models--report! "installed" name reply))))))))))
+  'modes '(models-mode))
 
 (effects! '(destroy external))
 
@@ -690,7 +693,8 @@
                 (*models-request* (models--entry-host e) "DELETE" "/api/delete"
                   (models--model-body name) 60
                   (lambda (reply)
-                    (models--report! "uninstalled" name reply)))))))))))
+                    (models--report! "uninstalled" name reply))))))))))
+  'modes '(models-mode))
 
 ;;; --- another host, and the server on this one --------------------------------------
 
@@ -710,7 +714,8 @@
         (let ((h (string-trim input)))
           (unless (equal? h "")
             (models--add-host! h)
-            (message (string-append "models: " (models--host-name h)))))))))
+            (message (string-append "models: " (models--host-name h))))))))
+  'modes '(models-mode))
 
 (define-command "models-forget-host" "Drop this line's host from the list"
   (lambda ()
@@ -728,7 +733,8 @@
                                           models-hosts))
                  (message (string-append "models: forgot "
                                          (models--host-name host)))
-                 (cache-refresh! *models-buffer*))))))))
+                 (cache-refresh! *models-buffer*)))))))
+  'modes '(models-mode))
 
 (define-command "models-set-host" "Make one host the one models-base names"
   (lambda ()
@@ -801,7 +807,8 @@
           (let ((local (models--local-host)))
             (if local
                 (models--serve-ollama! local)
-                (message "no host here is this machine - start the server there")))))))
+                (message "no host here is this machine - start the server there"))))))
+  'modes '(models-mode))
 
 (define-command "models-unserve" "Stop the daemon this line's host is"
   (lambda ()
@@ -814,7 +821,8 @@
               (let ((ep (models--endpoint-name host)))
                 (endpoint-stop! ep)
                 (message (string-append ep ": the daemon is stopped"))
-                (cache-refresh! *models-buffer*))))))))
+                (cache-refresh! *models-buffer*)))))))
+  'modes '(models-mode))
 
 ;;; --- what a model is ----------------------------------------------------------------
 ;;; /api/show answers what the file holds. The detail goes to the window
@@ -885,7 +893,8 @@
                       (models--show-detail! name (http-json reply))
                       (message (string-append name ": "
                                               (or (http-message reply)
-                                                  "no answer"))))))))))))
+                                                  "no answer")))))))))))
+  'modes '(models-mode))
 
 ;;; --- the list buffer ------------------------------------------------------------------
 
@@ -894,7 +903,8 @@
 (define-command "models-refresh" "Ask the host for its models again"
   (lambda ()
     (message "asking the host...")
-    (cache-refresh! *models-buffer*)))
+    (cache-refresh! *models-buffer*))
+  'modes '(models-mode))
 
 (define-list-mode! "models-mode"
   (list

@@ -512,7 +512,8 @@
 (define-command "workspace-visit-files" "Open the selected workspace in dired"
   (lambda ()
     (let ((wt (worktree--current)))
-      (when wt (dired-open (plist-get wt 'path))))))
+      (when wt (dired-open (plist-get wt 'path)))))
+  'modes '(worktrees-mode))
 
 ;; the full "what this agent did" view: committed AND uncommitted work,
 ;; one diff against the base branch
@@ -534,7 +535,8 @@
                 (diff-show! out text)
                 ;; RET on a file card must open the workspace's copy.
                 (buffer-set-local! out 'diff-backend "git")
-                (buffer-set-local! out 'diff-root path))))))))
+                (buffer-set-local! out 'diff-root path)))))))
+  'modes '(worktrees-mode))
 
 (define-command "workspace-new" "Create a task workspace"
   (lambda ()
@@ -561,7 +563,8 @@
                 ((and slug (boundp (quote agent-buf))
                       (buffer-exists? (agent-buf slug)))
                  (switch-to-buffer! (agent-buf slug)))
-                (else (message "no chat for this worktree"))))))))
+                (else (message "no chat for this worktree")))))))
+  'modes '(worktrees-mode))
 
 (define-command "workspace-land" "Merge this workspace into the primary checkout"
   (lambda ()
@@ -583,7 +586,8 @@
                                (string-append "git merge --no-ff " (sh-quote branch))
                                root)))
                     (workspace--refresh-state! state)
-                    (message (string-trim out))))))))))
+                    (message (string-trim out)))))))))
+  'modes '(worktrees-mode))
 
 (define (workspace--rebase-prompt state)
   (string-append
@@ -629,7 +633,8 @@
                  (message "workspace has unsaved buffers — save them first"))
                 ((> (plist-get state 'dirty) 0)
                  (message "workspace has uncommitted changes — commit them first"))
-                (else (workspace--start-rebase-chat! state))))))))
+                (else (workspace--start-rebase-chat! state)))))))
+  'modes '(worktrees-mode))
 
 ;; Cancel is the flagged x, dired-style. It removes only a clean worktree.
 ;; The branch stays as a recovery path. The daemon claim does not.
@@ -658,7 +663,8 @@
               removed?)))))
 
 (define-command "workspace-manage-refresh" "Refresh the workspace management list"
-  (lambda () (list-refresh! *worktrees-buffer*)))
+  (lambda () (list-refresh! *worktrees-buffer*))
+  'modes '(worktrees-mode))
 
 (define-command "workspace-cancel" "Cancel and remove this clean task workspace"
   (lambda ()

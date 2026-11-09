@@ -409,7 +409,8 @@
                 (when key
                   (let* ((applied (panes-apply! next))
                          (h (panes-handle applied key)))
-                    (when (and h (window-exists? h)) (select-window! h))))))))))
+                    (when (and h (window-exists? h)) (select-window! h)))))))))
+  'modes '(panes-list-mode))
 
 ;; move the window on this row one pane over, on top of that pane's windows; a
 ;; pane row moves the pane. At the edge a window takes a new pane while there is room
@@ -484,7 +485,8 @@
                           (when row
                             (panes-board-edit!
                               (lambda (current source) (panes-board-move-row current source (cadr row))) id))))
-                      'require-match #t))))))))
+                      'require-match #t)))))))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-close"
   "Close this window (its buffers stay open), take this buffer out of its window, or remove this pane"
@@ -493,7 +495,8 @@
       ;; the floating preview closes as a preview does; no layout changes
       (if (and id (equal? (panes-board-kind id) "f"))
           (begin (if (preview-slot) (preview-end #f) (float-close!)) (panes-board-refresh!))
-          (panes-board-close--pane!)))))
+          (panes-board-close--pane!))))
+  'modes '(panes-list-mode))
 
 (define (panes-board-close--pane!)
     (panes-board-edit!
@@ -512,18 +515,21 @@
 
 (define-command "panes-board-add-pane" "Add an empty pane after the pane on this row"
   (lambda ()
-    (panes-board-edit! (lambda (l id) (car (panes-add-empty-pane l (panes-board-pane-of id)))))))
+    (panes-board-edit! (lambda (l id) (car (panes-add-empty-pane l (panes-board-pane-of id))))))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-kill" "Kill the buffer on this row"
   (lambda ()
     (let ((id (list-current (panes-board-buffer))))
       (if (and id (equal? (panes-board-kind id) "b"))
           (kill-buffer-confirm! (panes-board-buffer-of id) (lambda (done) (panes-board-refresh!)))
-          (message "K on a buffer row kills it")))))
+          (message "K on a buffer row kills it"))))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-consolidate" "Give every mode one window"
   (lambda ()
-    (panes-board-edit! (lambda (l id) (panes-consolidate l panes--buffer-mode)))))
+    (panes-board-edit! (lambda (l id) (panes-consolidate l panes--buffer-mode))))
+  'modes '(panes-list-mode))
 
 (define (panes-board-resize! factor)
   (panes-board-edit!
@@ -533,11 +539,15 @@
              (share (and p (let ((s (plist-get p 'share))) (if (and (number? s) (> s 0)) s 1)))))
         (if p (panes-set-share l pid (* share factor)) l)))))
 
-(define-command "panes-board-wider" "Give this pane more of the width" (lambda () (panes-board-resize! 1.25)))
-(define-command "panes-board-narrower" "Give this pane less of the width" (lambda () (panes-board-resize! 0.8)))
+(define-command "panes-board-wider" "Give this pane more of the width" (lambda () (panes-board-resize! 1.25))
+  'modes '(panes-list-mode))
+(define-command "panes-board-narrower" "Give this pane less of the width" (lambda () (panes-board-resize! 0.8))
+  'modes '(panes-list-mode))
 (define-command "panes-board-equalize" "Every pane an equal share"
-  (lambda () (panes-board-edit! (lambda (l id) (panes-equalize l)))))
-(define-command "panes-board-refresh" "Redraw the board" (lambda () (panes-board-refresh!)))
+  (lambda () (panes-board-edit! (lambda (l id) (panes-equalize l))))
+  'modes '(panes-list-mode))
+(define-command "panes-board-refresh" "Redraw the board" (lambda () (panes-board-refresh!))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-fold" "Fold or unfold the group, pane or window on this row"
   (lambda ()
@@ -548,7 +558,8 @@
           (cond ((member kind '("g" "c" "p")) (panes-board--toggle! buf 'panes-board-shut id))
                 ((equal? kind "w") (panes-board--toggle! buf 'panes-board-open id))
                 (else (panes-board--toggle! buf 'panes-board-open (panes-board--id "w" (panes-board-group id) (panes-board-key id))))))
-        (panes-board-refresh!)))))
+        (panes-board-refresh!))))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-fold-all" "Fold every row below the top level of the zoom, or unfold them all when some are folded"
   (lambda ()
@@ -570,7 +581,8 @@
                 (map (lambda (g) (let ((l (panes-board-layout-of g)))
                                    (if l (map (lambda (k) (panes-board--id "w" g k)) (panes-window-keys l)) '())))
                      (panes-board--groups))))))
-      (panes-board-refresh!))))
+      (panes-board-refresh!)))
+  'modes '(panes-list-mode))
 
 (define (panes-board--rezoom! buf root keep)
   ;; the row KEEP stays under the cursor when it is still shown
@@ -585,7 +597,8 @@
            (target (and id (panes-board-zoom-target buf id))))
       (if target
           (panes-board--rezoom! buf target id)
-          (message "Zoomed in as far as it goes")))))
+          (message "Zoomed in as far as it goes"))))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-zoom-out" "Zoom back out one level"
   (lambda ()
@@ -593,7 +606,8 @@
            (root (panes-board-root buf)))
       (if root
           (panes-board--rezoom! buf (panes-board-zoom-parent buf root) root)
-          (message "Zoomed out as far as it goes")))))
+          (message "Zoomed out as far as it goes"))))
+  'modes '(panes-list-mode))
 
 (define (panes-board--set-view! buf view)
   (buffer-set-local! buf 'panes-board-view view)
@@ -601,13 +615,16 @@
   (list-refresh! buf))
 
 (define-command "panes-board-next-group" "Go to the next group's heading"
-  (lambda () (list-move-section! (panes-board-buffer) 1)))
+  (lambda () (list-move-section! (panes-board-buffer) 1))
+  'modes '(panes-list-mode))
 (define-command "panes-board-previous-group" "Go to the previous group's heading"
-  (lambda () (list-move-section! (panes-board-buffer) -1)))
+  (lambda () (list-move-section! (panes-board-buffer) -1))
+  'modes '(panes-list-mode))
 
 (define-command "panes-board-view-next" "Switch between the views: All, Group"
   (lambda () (let ((buf (panes-board-buffer)))
-               (panes-board--set-view! buf (if (equal? (panes-board-view buf) 'all) 'group 'all)))))
+               (panes-board--set-view! buf (if (equal? (panes-board-view buf) 'all) 'group 'all))))
+  'modes '(panes-list-mode))
 
 (define-list-mode! "panes-list-mode"
   (list
@@ -749,7 +766,8 @@
   (panes-raise-window! win))
 
 (define-command "windows-list-visit" "Show the window on this line in the list's pane"
-  (lambda () (windows-list-on-current windows-list-take!)))
+  (lambda () (windows-list-on-current windows-list-take!))
+  'modes '(windows-mode))
 
 (define-command "windows-list-close" "Close the window on this line"
   (lambda ()
@@ -757,7 +775,8 @@
       (lambda (win)
         (let* ((l (panes--ensure-layout!)) (k (panes-key-of-handle l win)))
           (when k (panes-apply! (panes-remove-window l k))))
-        (list-refresh! *windows-list-buffer*)))))
+        (list-refresh! *windows-list-buffer*))))
+  'modes '(windows-mode))
 
 (define-command "windows-list-consolidate"
   "Give every major mode one window, from the window on this line; visible panes keep their modes"
@@ -770,16 +789,19 @@
               (when (member win (map car (window-list))) (select-window! win))
               (consolidate!))
           (when (window-exists? list-win) (select-window! list-win))
-          (list-refresh! *windows-list-buffer*))))))
+          (list-refresh! *windows-list-buffer*)))))
+  'modes '(windows-mode))
 
 (define-command "windows-list-refresh" "Redraw the window list"
-  (lambda () (list-refresh! *windows-list-buffer*)))
+  (lambda () (list-refresh! *windows-list-buffer*))
+  'modes '(windows-mode))
 
 (define-command "windows-list-rename" "Name the window on this line"
   (lambda ()
     (windows-list-on-current
       (lambda (win)
-        (window-rename-prompt! win (lambda () (list-refresh! *windows-list-buffer*)))))))
+        (window-rename-prompt! win (lambda () (list-refresh! *windows-list-buffer*))))))
+  'modes '(windows-mode))
 
 (define-list-mode! "windows-mode"
   (list

@@ -449,12 +449,14 @@
           (begin
             (buffer-set-local! buf 'morg-narrow-anchor (car entry))
             (morg-apply-narrow! buf)
-            (message (string-append "Narrowed to " (markdown--title entry))))))))
+            (message (string-append "Narrowed to " (markdown--title entry)))))))
+  'modes '(morg-mode))
 
 (define-command "morg-widen" "Show the complete Morg document"
   (lambda ()
     (morg-clear-narrow! (current-buffer))
-    (message "Widened Morg document")))
+    (message "Widened Morg document"))
+  'modes '(morg-mode))
 
 (define-command "morg-cycle" "Fold the heading or the code block at point, else indent"
   (lambda ()
@@ -468,7 +470,8 @@
                         (else (morg-block-open scan (point)))))))
       (if anchor
           (morg-toggle-fold buf anchor)
-          (run-command "indent-for-tab")))))
+          (run-command "indent-for-tab"))))
+  'modes '(morg-mode))
 
 (define-command "morg-outline" "Hide body text and keep every heading visible"
   (lambda ()
@@ -498,7 +501,8 @@
             (message "OVERVIEW"))
           (begin
             (morg-set-folds! buf '())
-            (message "SHOW ALL"))))))
+            (message "SHOW ALL")))))
+  'modes '(morg-mode))
 
 ;;; A folded line stands for more source than its visible text. When the
 ;;; complete visible line is selected, copy and cut must use that source range.
@@ -676,7 +680,8 @@
              (message "Freeform checkbox status — left alone"))
             ((equal? state "NONE") (message "TODO state cleared"))
             (state (message state))
-            (else (message "Point is not on a heading or a checkbox"))))))
+            (else (message "Point is not on a heading or a checkbox")))))
+  'modes '(morg-mode))
 
 ;;; --- fontification -----------------------------------------------------------
 
@@ -1027,7 +1032,8 @@
                   (morg--section-bounds buf (point)))))
       (if b
           (begin (set-mark! (car b)) (goto-char! (cadr b)) b)
-          (begin (message "No block or section here") #f)))))
+          (begin (message "No block or section here") #f))))
+  'modes '(morg-mode))
 
 ;; The anchors of a note: every heading at any level, every paragraph,
 ;; every fenced block whatever its language, and every link. One key
@@ -1098,13 +1104,15 @@
   "Move to the next heading"
   (lambda ()
     (morg--land! (morg--heading-after (current-buffer) (point) #f)
-                 "next heading")))
+                 "next heading"))
+  'modes '(morg-mode browse-mode))
 
 (define-command "morg-previous-heading"
   "Move to the previous heading"
   (lambda ()
     (morg--land! (morg--heading-before (current-buffer) (point) #f)
-                 "previous heading")))
+                 "previous heading"))
+  'modes '(morg-mode browse-mode))
 
 (define-command "morg-forward-same-level"
   "Move to the next heading at this level"
@@ -1112,7 +1120,8 @@
     (let* ((buf (current-buffer))
            (level (morg--level-here buf (point))))
       (morg--land! (and level (morg--heading-after buf (point) level))
-                   "next heading at this level"))))
+                   "next heading at this level")))
+  'modes '(morg-mode))
 
 (define-command "morg-backward-same-level"
   "Move to the previous heading at this level"
@@ -1120,36 +1129,42 @@
     (let* ((buf (current-buffer))
            (level (morg--level-here buf (point))))
       (morg--land! (and level (morg--heading-before buf (point) level))
-                   "previous heading at this level"))))
+                   "previous heading at this level")))
+  'modes '(morg-mode))
 
 (define-command "morg-next-link"
   "Move to the next link"
   (lambda ()
     (morg--land! (morg--first-after (morg--link-positions (current-buffer))
                                     (point))
-                 "next link")))
+                 "next link"))
+  'modes '(morg-mode))
 
 (define-command "morg-previous-link"
   "Move to the previous link"
   (lambda ()
     (morg--land! (morg--last-before (morg--link-positions (current-buffer))
                                     (point))
-                 "previous link")))
+                 "previous link"))
+  'modes '(morg-mode))
 
 (define-command "morg-next-landmark"
   "Move down to the next heading, paragraph, block or link, or one page when none is that near"
-  (lambda () (morg--landmark-step! 1 "next landmark")))
+  (lambda () (morg--landmark-step! 1 "next landmark"))
+  'modes '(morg-mode browse-mode))
 
 (define-command "morg-previous-landmark"
   "Move up to the previous heading, paragraph, block or link, or one page when none is that near"
-  (lambda () (morg--landmark-step! -1 "previous landmark")))
+  (lambda () (morg--landmark-step! -1 "previous landmark"))
+  'modes '(morg-mode browse-mode))
 
 (define-command "morg-newline"
   "Close a freshly typed fence, or insert the newline RET means here"
   (lambda ()
     (if (block-electric-close!)
         #t
-        (run-command "preview-newline"))))
+        (run-command "preview-newline")))
+  'modes '(morg-mode))
 
 (define (morg-install-keys buf)
   

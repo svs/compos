@@ -176,23 +176,30 @@
                   (if old
                       (panes-focus-window l old)
                       (let ((made (panes-add-window l pid buf "pane-overview-mode")))
-                        (panes-focus-window (car made) (cadr made)))))))))))
+                        (panes-focus-window (car made) (cadr made))))))))))
+  'modes '(pane-overview-mode))
 
 (define-command "pane-overview-pick" "Bring the window of the selected tile to the front"
   (lambda ()
     (let ((buf (pane-overview--here)))
-      (when buf (pane-overview--pick! (or (buffer-local buf 'pane-overview-sel) 0))))))
+      (when buf (pane-overview--pick! (or (buffer-local buf 'pane-overview-sel) 0)))))
+  'modes '(pane-overview-mode))
 
 (define-command "pane-overview-quit" "Leave the overview; the pane shows what it showed before"
   (lambda ()
     (let* ((buf (pane-overview--here))
            (tiles (and buf (buffer-local buf 'pane-overview-tiles))))
-      (when buf (pane-overview--leave! buf (and (pair? tiles) (car (car tiles))))))))
+      (when buf (pane-overview--leave! buf (and (pair? tiles) (car (car tiles)))))))
+  'modes '(pane-overview-mode))
 
-(define-command "pane-overview-next" "Select the next tile" (lambda () (pane-overview--step! 1)))
-(define-command "pane-overview-previous" "Select the previous tile" (lambda () (pane-overview--step! -1)))
-(define-command "pane-overview-down" "Select the tile below" (lambda () (pane-overview--step! (pane-overview--row))))
-(define-command "pane-overview-up" "Select the tile above" (lambda () (pane-overview--step! (- (pane-overview--row)))))
+(define-command "pane-overview-next" "Select the next tile" (lambda () (pane-overview--step! 1))
+  'modes '(pane-overview-mode))
+(define-command "pane-overview-previous" "Select the previous tile" (lambda () (pane-overview--step! -1))
+  'modes '(pane-overview-mode))
+(define-command "pane-overview-down" "Select the tile below" (lambda () (pane-overview--step! (pane-overview--row)))
+  'modes '(pane-overview-mode))
+(define-command "pane-overview-up" "Select the tile above" (lambda () (pane-overview--step! (- (pane-overview--row))))
+  'modes '(pane-overview-mode))
 
 (for-each
   (lambda (n)

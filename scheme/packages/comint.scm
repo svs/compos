@@ -143,7 +143,8 @@
            (texts (map term--key-text keys)))
       (if (and (pair? texts) (= (length (filter string? texts)) (length texts)))
           (process-send! (current-buffer) (apply string-append texts))
-          (message (string-append (string-join keys " ") " is undefined"))))))
+          (message (string-append (string-join keys " ") " is undefined")))))
+  'modes '(term-mode))
 
 (mode-keys! "term-mode"
   (map (lambda (entry) (list (car entry) "term-send-key")) term--key-bytes))
@@ -157,16 +158,20 @@
   (max 1 (- (or (window-rows) 24) 2)))
 
 (define-command "term-scroll-up" "Show the older output, one screen back"
-  (lambda () (term--scroll! (- (term--page)))))
+  (lambda () (term--scroll! (- (term--page))))
+  'modes '(term-mode))
 
 (define-command "term-scroll-down" "Show the newer output, one screen on"
-  (lambda () (term--scroll! (term--page))))
+  (lambda () (term--scroll! (term--page)))
+  'modes '(term-mode))
 
 (define-command "term-scroll-to-top" "Show the oldest output the terminal keeps"
-  (lambda () (term--scroll! -100000)))
+  (lambda () (term--scroll! -100000))
+  'modes '(term-mode))
 
 (define-command "term-scroll-to-bottom" "Go back to the prompt"
-  (lambda () (term--scroll! 100000)))
+  (lambda () (term--scroll! 100000))
+  'modes '(term-mode))
 
 (mode-keys! "term-mode"
   '(("M-v" "term-scroll-up") ("<prior>" "term-scroll-up")

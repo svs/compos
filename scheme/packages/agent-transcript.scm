@@ -150,7 +150,8 @@
                           (list (car f) (car (cdr f)) (not (car (cdr (cdr f)))))
                           f))
                     (buffer-local buf 'agent-folds)))
-             (agent-apply-folds! buf))))))
+             (agent-apply-folds! buf)))))
+  'modes '(chat-mode))
 
 (define (agent-blocks buf) (or (buffer-local buf 'agent-blocks) '()))
 (public! 'agent-blocks "(agent-blocks BUF) — the transcript blocks of chat BUF, newest first, as (START END KIND META...)")
@@ -1484,10 +1485,12 @@
             (chat-view-sync! buf))))))
 
 (define-command "chat-previous-block" "Show the previous block of this chat at the top"
-  (lambda () (chat-view-step! (current-buffer) -1)))
+  (lambda () (chat-view-step! (current-buffer) -1))
+  'modes '(chat-mode))
 
 (define-command "chat-next-block" "Show the next block of this chat at the top; past the newest, follow the bottom"
-  (lambda () (chat-view-step! (current-buffer) 1)))
+  (lambda () (chat-view-step! (current-buffer) 1))
+  'modes '(chat-mode))
 
 ;; The bottom is home, as at a shell prompt: there the view follows new
 ;; output. M-<up> leaves it for the history, a block at a time, and so
@@ -1535,9 +1538,11 @@
         (scroll-other-window-page! sign))))
 
 (define-command "chat-scroll-linked-up" "Scroll up the window that shows the buffer this chat opened last"
-  (lambda () (chat-scroll-linked! -1)))
+  (lambda () (chat-scroll-linked! -1))
+  'modes '(chat-mode))
 (define-command "chat-scroll-linked-down" "Scroll down the window that shows the buffer this chat opened last"
-  (lambda () (chat-scroll-linked! 1)))
+  (lambda () (chat-scroll-linked! 1))
+  'modes '(chat-mode))
 (define-key "chat-mode-map" "M-u" "chat-scroll-linked-up")
 (define-key "chat-mode-map" "M-d" "chat-scroll-linked-down")
 
@@ -1580,7 +1585,8 @@
   (lambda ()
     (let ((part (chat-component--here)))
       (when part
-        (chat-component-run! (current-buffer) part (car (car (component-actions (nth 3 part)))))))))
+        (chat-component-run! (current-buffer) part (car (car (component-actions (nth 3 part))))))))
+  'modes '(chat-mode))
 
 (define-command "chat-component-actions" "Choose an action of the component M-up/M-down stepped to, else of the newest one"
   (lambda ()
@@ -1591,7 +1597,8 @@
           (completing-read (string-append (nth 3 part) ": ") (map label acts)
             (lambda (choice)
               (let ((a (find (lambda (a) (equal? (label a) choice)) acts)))
-                (when a (chat-component-run! buf part (car a)))))))))))
+                (when a (chat-component-run! buf part (car a))))))))))
+  'modes '(chat-mode))
 
 (define-key "chat-mode-map" "M-RET" "chat-component-default")
 (define-key "chat-mode-map" "C-c C-o" "chat-component-actions")

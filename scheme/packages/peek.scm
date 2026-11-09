@@ -270,9 +270,12 @@
     (let ((owner (peek-owner)))
       (when owner (buffer-set-local! owner 'listing-preview-dismissed-row (peek-buffer)))
       (peek-dismiss! #t))))
-(define-command "peek-next" "Peek the next row of the list" (lambda () (peek-step! 1)))
-(define-command "peek-previous" "Peek the previous row of the list" (lambda () (peek-step! -1)))
-(define-command "peek-keep" "Keep the peek as a normal window" (lambda () (peek-keep! #t)))
+(define-command "peek-next" "Peek the next row of the list" (lambda () (peek-step! 1))
+  'modes '(peek-mode))
+(define-command "peek-previous" "Peek the previous row of the list" (lambda () (peek-step! -1))
+  'modes '(peek-mode))
+(define-command "peek-keep" "Keep the peek as a normal window" (lambda () (peek-keep! #t))
+  'modes '(peek-mode))
 
 ;; C-g and ESC dismiss the peek
 (mode-quit! "peek-mode" (lambda (buf) (run-command "peek-quit") #t))

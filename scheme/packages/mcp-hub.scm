@@ -133,32 +133,39 @@
     (if name (fn name) (message "no server on this line"))))
 
 (define-command "mcp-hub-start" "Start the MCP server on this line"
-  (lambda () (mcp-hub-on-current mcp-hub-start!)))
+  (lambda () (mcp-hub-on-current mcp-hub-start!))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-stop" "Stop the MCP server on this line"
-  (lambda () (mcp-hub-on-current mcp-hub-stop!)))
+  (lambda () (mcp-hub-on-current mcp-hub-stop!))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-restart" "Restart the MCP server on this line"
-  (lambda () (mcp-hub-on-current mcp-hub-restart!)))
+  (lambda () (mcp-hub-on-current mcp-hub-restart!))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-start-all" "Start every registered MCP server"
   (lambda ()
     (for-each mcp-hub-start! (mcp-hub-names))
-    (message "starting every registered server")))
+    (message "starting every registered server"))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-stop-all" "Stop every running MCP server"
   (lambda ()
     (for-each (lambda (c) (mcp-disconnect! (car c))) (mcp-connections))
     (mcp-hub-refresh!)
-    (message "all servers stopped")))
+    (message "all servers stopped"))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-restart-all" "Restart every running MCP server"
   (lambda ()
     (for-each (lambda (c) (mcp-hub-restart! (car c))) (mcp-connections))
-    (message "restarting")))
+    (message "restarting"))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-refresh" "Redraw the server list"
-  (lambda () (mcp-hub-refresh!)))
+  (lambda () (mcp-hub-refresh!))
+  'modes '(mcp-hub-mode))
 
 ;;; --- what a server serves -----------------------------------------------------
 
@@ -272,12 +279,14 @@
         (display-buffer-detail! buf *mcp-hub-buffer*))))
 
 (define-command "mcp-hub-detail" "Show what the server on this line serves"
-  (lambda () (mcp-hub-on-current mcp-hub-show-detail)))
+  (lambda () (mcp-hub-on-current mcp-hub-show-detail))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-detail-refresh" "Re-read this server's tools"
   (lambda ()
     (let ((name (buffer-local (current-buffer) 'mcp-hub-name)))
-      (when name (mcp-hub-render-detail! (current-buffer) name)))))
+      (when name (mcp-hub-render-detail! (current-buffer) name))))
+  'modes '(mcp-detail-mode))
 
 ;;; --- the wire ------------------------------------------------------------------
 
@@ -331,18 +340,21 @@
     (display-buffer buf)))
 
 (define-command "mcp-hub-log" "Show the JSON-RPC frames for the server on this line"
-  (lambda () (mcp-hub-on-current mcp-hub-show-log)))
+  (lambda () (mcp-hub-on-current mcp-hub-show-log))
+  'modes '(mcp-hub-mode))
 
 (define-command "mcp-hub-log-refresh" "Re-read this server's frames"
   (lambda ()
     (let ((name (buffer-local (current-buffer) 'mcp-hub-name)))
-      (when name (mcp-hub-render-log! (current-buffer) name)))))
+      (when name (mcp-hub-render-log! (current-buffer) name))))
+  'modes '(mcp-log-mode))
 
 ;; from a detail buffer, l opens that server's log
 (define-command "mcp-hub-detail-log" "Show this server's frames"
   (lambda ()
     (let ((name (buffer-local (current-buffer) 'mcp-hub-name)))
-      (when name (mcp-hub-show-log name)))))
+      (when name (mcp-hub-show-log name))))
+  'modes '(mcp-detail-mode))
 
 ;;; --- the hub -------------------------------------------------------------------
 

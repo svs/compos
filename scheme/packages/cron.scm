@@ -285,16 +285,19 @@
 (define-command "cron-run-now" "Run the job on this line now"
   (lambda ()
     (cron--on-current
-      (lambda (name) (cron-run-now! name) (message (string-append "cron: ran " name))))))
+      (lambda (name) (cron-run-now! name) (message (string-append "cron: ran " name)))))
+  'modes '(cron-mode))
 
 (define-command "cron-remove" "Stop the job on this line and forget it"
   (lambda ()
     (cron--on-current
       (lambda (name) (cron-remove! name) (cron-refresh!)
-        (message (string-append "cron: removed " name))))))
+        (message (string-append "cron: removed " name)))))
+  'modes '(cron-mode))
 
 (define-command "cron-refresh" "Redraw the job list"
-  (lambda () (cron-refresh!)))
+  (lambda () (cron-refresh!))
+  'modes '(cron-mode))
 
 (define-list-mode! "cron-mode"
   (list

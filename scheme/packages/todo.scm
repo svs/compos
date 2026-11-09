@@ -1120,24 +1120,31 @@
     (let ((t (todo--at)))
       (if t
           (begin (visit (plist-get t 'file)) (goto-char! (plist-get t 'pos)))
-          (message "No task at point")))))
+          (message "No task at point"))))
+  'modes '(todo-mode))
 
 (define-command "todo-accept" "Mark the task todo: triage it, or approve it from review"
-  (lambda () (todo--set-at! 'state "todo")))
+  (lambda () (todo--set-at! 'state "todo"))
+  'modes '(todo-mode))
 (define-command "todo-mark-done" "Mark the task done"
-  (lambda () (todo--set-at! 'state "done")))
+  (lambda () (todo--set-at! 'state "done"))
+  'modes '(todo-mode))
 (define-command "todo-mark-cancelled" "Cancel the task"
-  (lambda () (todo--set-at! 'state "cancelled")))
+  (lambda () (todo--set-at! 'state "cancelled"))
+  'modes '(todo-mode))
 (define-command "todo-mark-waiting" "Park the task as waiting"
-  (lambda () (todo--set-at! 'state "waiting")))
+  (lambda () (todo--set-at! 'state "waiting"))
+  'modes '(todo-mode))
 (define-command "todo-mark-doing" "Mark the task in progress"
-  (lambda () (todo--set-at! 'state "doing")))
+  (lambda () (todo--set-at! 'state "doing"))
+  'modes '(todo-mode))
 
 (define-command "todo-toggle-urgent" "Mark the task time-sensitive, or not"
   (lambda ()
     (todo--with-tasks "Toggle urgent on"
       (lambda (t)
-        (todo-update (plist-get t 'id) (list 'urgent (not (plist-get t 'urgent))))))))
+        (todo-update (plist-get t 'id) (list 'urgent (not (plist-get t 'urgent)))))))
+  'modes '(todo-mode))
 
 (define-command "todo-cycle-priority" "Cycle the task's priority: A, B, C, none"
   (lambda ()
@@ -1145,7 +1152,8 @@
       (lambda (t)
         (let ((p (plist-get t 'priority)))
           (todo-update (plist-get t 'id)
-                       (list 'priority (cond ((not p) "A") ((equal? p "A") "B") ((equal? p "B") "C") (else #f)))))))))
+                       (list 'priority (cond ((not p) "A") ((equal? p "A") "B") ((equal? p "B") "C") (else #f))))))))
+  'modes '(todo-mode))
 
 ;; assigning hands the task to a fresh chat in a group: the chat is the
 ;; assignee, and its first message is the brief
@@ -1428,12 +1436,14 @@
 (define-command "todo-attach-chat" "Attach another open chat to the task at point, beside the one it is assigned to"
   (lambda ()
     (let ((t (todo--at)))
-      (if t (todo--attach-read! t (lambda () #t)) (message "No task at point")))))
+      (if t (todo--attach-read! t (lambda () #t)) (message "No task at point"))))
+  'modes '(todo-mode))
 
 (define-command "todo-detail-attach-chat" "Attach another open chat to this task, beside the one it is assigned to"
   (lambda ()
     (let* ((buf (current-buffer)) (t (todo--detail-task buf)))
-      (if t (todo--attach-read! t (lambda () (todo--detail-render! buf))) (message "The task is gone")))))
+      (if t (todo--attach-read! t (lambda () (todo--detail-render! buf))) (message "The task is gone"))))
+  'modes '(todo-detail-mode))
 
 (define-command "todo-attach-this-chat" "Attach the chat you are in to an open task"
   (lambda ()
@@ -1513,7 +1523,8 @@
       (cond ((not t) (message "No task at point"))
             ((pair? (todo-chats t)) (todo--pick-chat! t))
             (chat (todo--show-chat! chat))
-            (else (message "The task is not with a live chat"))))))
+            (else (message "The task is not with a live chat")))))
+  'modes '(todo-mode))
 
 ;; one task as its own page beside the list. Its chat is the assignee, the
 ;; chat that works the task, never the one that filed it
@@ -1702,7 +1713,8 @@
 (define-command "todo-show" "Show the task as its own page beside the list"
   (lambda ()
     (let ((t (todo--at)))
-      (if t (todo-show-detail! (plist-get t 'id)) (message "No task at point")))))
+      (if t (todo-show-detail! (plist-get t 'id)) (message "No task at point"))))
+  'modes '(todo-mode))
 
 (define-command "todo-detail-goto-chat" "Go to the chat working this task; with several, ask which"
   (lambda ()
@@ -1711,7 +1723,8 @@
             ((pair? (todo-chats t)) (todo--pick-chat! t))
             (chat (todo--show-chat! chat))
             ((plist-get t 'assignee) (message "The task's chat is not live"))
-            (else (message "The task is not assigned to a chat"))))))
+            (else (message "The task is not assigned to a chat")))))
+  'modes '(todo-detail-mode))
 
 (define-command "todo-detail-agent" "Go to the agent working this task; start one in the group that filed it, else the group you are in, when none is live"
   (lambda ()
@@ -1727,17 +1740,20 @@
       (cond ((not t) (message "The task is gone"))
             (chat (todo--show-chat! chat))
             (here (start! here))
-            (else (group-read-or-create! "Start an agent in group: " start!))))))
+            (else (group-read-or-create! "Start an agent in group: " start!)))))
+  'modes '(todo-detail-mode))
 
 (define-command "todo-detail-visit" "Open the task's file at its heading"
   (lambda ()
     (let ((t (todo--detail-task (current-buffer))))
       (if t
           (begin (visit (plist-get t 'file)) (goto-char! (plist-get t 'pos)))
-          (message "The task is gone")))))
+          (message "The task is gone"))))
+  'modes '(todo-detail-mode))
 
 (define-command "todo-detail-refresh" "Read the task again"
-  (lambda () (todo--detail-render! (current-buffer))))
+  (lambda () (todo--detail-render! (current-buffer)))
+  'modes '(todo-detail-mode))
 
 (define (todo--detail-setup!)
   (desktop-skip! (current-buffer) 'render-blocks)
@@ -1811,7 +1827,8 @@
             ((or ask? (not here))
              (group-read-or-create! "Assign to a new chat in group: "
                (lambda (g) (assign-one! g))))
-            (else (assign-one! here))))))
+            (else (assign-one! here)))))
+  'modes '(todo-mode))
 (define (todo--task-chat! t)
   (if (todo--revive-chat t)
       (todo--show-chat! (todo--revive-chat t))
@@ -1824,10 +1841,12 @@
         (if here (start! here) (group-read-or-create! "Start a chat in group: " start!)))))
 
 (define-command "todo-task-chat" "Open the task's chat, or start one titled with the task; the chat is also attached to the task's parent"
-  (lambda () (let ((t (todo--at))) (if t (todo--task-chat! t) (message "No task at point")))))
+  (lambda () (let ((t (todo--at))) (if t (todo--task-chat! t) (message "No task at point"))))
+  'modes '(todo-mode))
 
 (define-command "todo-detail-task-chat" "Open this task's chat, or start one titled with the task; the chat is also attached to the task's parent"
-  (lambda () (let ((t (todo--detail-task (current-buffer)))) (if t (todo--task-chat! t) (message "The task is gone")))))
+  (lambda () (let ((t (todo--detail-task (current-buffer)))) (if t (todo--task-chat! t) (message "The task is gone"))))
+  'modes '(todo-detail-mode))
 
 ;; a card follows its chat: an event on a chat topic redraws the list
 ;; when a window shows it, and marks it dirty when none does. A card shows
@@ -1868,7 +1887,8 @@
 (add-hook! 'buffer-refresh-hook 'todo--on-refresh!)
 
 (define-command "todo-set-deadline" "Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w"
-  (lambda () (todo--ask-at! "Deadline: " 'deadline)))
+  (lambda () (todo--ask-at! "Deadline: " 'deadline))
+  'modes '(todo-mode))
 (define-command "todo-set-project" "Move the task, or the marked tasks, to another project; a new name makes a new project"
   (lambda ()
     (let ((t (todo--at)))
@@ -1878,9 +1898,11 @@
               (todo--with-tasks (string-append "Move to " s ":")
                 (lambda (t) (todo-update (plist-get t 'id) (list 'project s)))))
             'default (or (and t (plist-get t 'project)) ""))
-          (message "No task at point")))))
+          (message "No task at point"))))
+  'modes '(todo-mode))
 (define-command "todo-add-note" "Add a note to the task"
-  (lambda () (todo--ask-at! "Note: " 'note)))
+  (lambda () (todo--ask-at! "Note: " 'note))
+  'modes '(todo-mode))
 
 (define-command "todo-capture" "File a new task"
   (lambda ()
@@ -1914,7 +1936,8 @@
                                                            '())))))
                    (todo--refresh-all!)
                    (message (string-append "Filed " id ": " title))))
-               'initial chat))))))
+               'initial chat)))))
+  'modes '(chat-mode))
 
 (define (todo--view-set! buf name)
   (list-tab-set! buf name)
@@ -1975,10 +1998,12 @@
                 (begin (todo--view-set! buf name) #t))))))
 
 (define-command "todo-next-view" "Show the next status tab: open, inbox, review, doing, waiting, mine, overdue, closed, all"
-  (lambda () (todo--view-step! (todo--list-buffer) 1)))
+  (lambda () (todo--view-step! (todo--list-buffer) 1))
+  'modes '(todo-mode))
 
 (define-command "todo-prev-view" "Show the previous status tab"
-  (lambda () (todo--view-step! (todo--list-buffer) -1)))
+  (lambda () (todo--view-step! (todo--list-buffer) -1))
+  'modes '(todo-mode))
 
 (define-command "todo-filter-project" "Show one project's tasks: pick it from the list; all shows every project"
   (lambda ()
@@ -1986,10 +2011,12 @@
       (completing-read "Project: " (cons "all" (todo-projects))
         (lambda (p)
           (list-facet-set! buf (list-facet buf "project") (if (member p '("" "all")) #f p)))
-        'default "all"))))
+        'default "all")))
+  'modes '(todo-mode))
 
 (define-command "todo-refresh" "Re-read the todo files, and look again for new ones"
-  (lambda () (todo--refresh-all!) (todo--rescan!)))
+  (lambda () (todo--refresh-all!) (todo--rescan!))
+  'modes '(todo-mode))
 
 (define-command "todo-next-sort" "Cycle the order: status, urgency, deadline, created, active"
   (lambda ()

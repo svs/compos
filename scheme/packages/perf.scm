@@ -356,7 +356,8 @@
       (set-mode! "perf-mode"))))
 
 (define-command "perf-refresh" "Sample the lanes now"
-  (lambda () (perf--refresh! (current-buffer))))
+  (lambda () (perf--refresh! (current-buffer)))
+  'modes '(perf-mode))
 
 (define-command "perf-pause" "Pause or resume the samples"
   (lambda ()
@@ -366,7 +367,8 @@
       (if paused
           (perf--render! buf)
           (perf--arm! buf 0))
-      (message (if paused "perf paused" "perf resumed")))))
+      (message (if paused "perf paused" "perf resumed"))))
+  'modes '(perf-mode))
 
 (effects! '(read))
 

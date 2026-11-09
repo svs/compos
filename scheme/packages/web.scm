@@ -1431,7 +1431,8 @@
            (on (minor-mode-on? buf "index-mode")))
       (buffer-set-local! buf 'browse-index-pinned #t)
       (index-set! buf (if on 'none *web-index-spec*))
-      (message (if on "browse: a page" "browse: an index; RET opens a link beside it")))))
+      (message (if on "browse: a page" "browse: an index; RET opens a link beside it"))))
+  'modes '(browse-mode))
 
 (define (web--render! buf md)
   (let* ((t0 (monotonic-ms))
@@ -1724,7 +1725,8 @@
             (cond ((web--image-url? url) (web--open-image! url))
                   ;; an index keeps its place: the link opens beside it
                   ((minor-mode-on? buf "index-mode") (run-command "browse-follow-other-window"))
-                  (else (web--goto-url! buf url #t)))))))))
+                  (else (web--goto-url! buf url #t))))))))
+  'modes '(browse-mode))
 
 ;; Cmd-RET, the browser reflex: the link at point opens as its own tab
 (define-command "browse-follow-new-tab" "Open the link at point in a new tab"
@@ -1737,13 +1739,15 @@
                                    (or (buffer-local buf 'browse-url) ""))))
             (if (web--image-url? url)
                 (web--open-image! url)
-                (web--open-tab! url)))))))
+                (web--open-tab! url))))))
+  'modes '(browse-mode))
 
 (define-command "browse-next-link" "Move point to the next link"
   (lambda ()
     (let* ((buf (current-buffer))
            (l (web--link-after buf (point))))
-      (if l (goto-char! (car l)) (message "no more links")))))
+      (if l (goto-char! (car l)) (message "no more links"))))
+  'modes '(browse-mode))
 
 (define-command "browse-prev-link" "Move point to the previous link"
   (lambda ()
@@ -1762,7 +1766,8 @@
             (when here (web--history-push! buf 'browse-forward here))
             (buffer-set-local! buf 'browse-history (cdr h))
             (web--goto-url! buf (web--entry-url (car h)) #f
-                            (web--entry-point (car h))))))))
+                            (web--entry-point (car h)))))))
+  'modes '(browse-mode))
 
 (define-command "browse-forward" "Go forward to the page you came back from"
   (lambda ()
@@ -1775,7 +1780,8 @@
             (when here (web--history-push! buf 'browse-history here))
             (buffer-set-local! buf 'browse-forward (cdr f))
             (web--goto-url! buf (web--entry-url (car f)) #f
-                            (web--entry-point (car f))))))))
+                            (web--entry-point (car f)))))))
+  'modes '(browse-mode))
 
 ;; the parent path, and the site root: the two directions a URL has
 ;; besides the links on the page
@@ -1785,14 +1791,16 @@
            (url (buffer-local buf 'browse-url)))
       (cond ((not url) (message "no page here"))
             ((equal? (web--parent-url url) url) (message "at the top"))
-            (else (web--goto-url! buf (web--parent-url url) #t))))))
+            (else (web--goto-url! buf (web--parent-url url) #t)))))
+  'modes '(browse-mode))
 
 (define-command "browse-top" "Go to the root of this page's site"
   (lambda ()
     (let* ((buf (current-buffer))
            (url (buffer-local buf 'browse-url)))
       (cond ((not url) (message "no page here"))
-            (else (web--goto-url! buf (string-append (web--origin url) "/") #t))))))
+            (else (web--goto-url! buf (string-append (web--origin url) "/") #t)))))
+  'modes '(browse-mode))
 
 ;; g asks WHERE: this page leads as the default, so a plain RET
 ;; refetches it — and the visited sites complete, so g also goes
@@ -1810,7 +1818,8 @@
             ;; Do not mutate the canonical page URL. The cache-busting
             ;; request is handled by the fetch pipeline instead.
             (buffer-set-local! buf 'web-hard-refresh #t)
-            (cache-refresh! buf))))))
+            (cache-refresh! buf)))))
+  'modes '(browse-mode))
 
 (define-command "browse-refresh" "Fetch a page: this one again, or another"
   (lambda ()
@@ -1833,7 +1842,8 @@
                                                       (buffer-point buf))
                                    (message "fetching…")
                                    (cache-refresh! buf))
-                                  (else (browse u))))))))))))
+                                  (else (browse u)))))))))))
+  'modes '(browse-mode))
 
 ;; The switch re-reads the html this buffer already holds: one
 ;; conversion, no network. Only a page served from the session copy —
@@ -1869,7 +1879,8 @@
     (let ((buf (current-buffer)))
       (cond ((web--page? buf) (web--calm-apply! buf))
             ((equal? (web--want buf) "calm") (web--calm-teardown! buf))
-            (else (web--page-show! buf (lambda () (web--calm-apply! buf))))))))
+            (else (web--page-show! buf (lambda () (web--calm-apply! buf)))))))
+  'modes '(browse-mode))
 
 ;;; --- the page itself ------------------------------------------------------------
 ;;; The third view: the live page, drawn in the window by the site's own
@@ -1996,7 +2007,8 @@ whole document. R cycles calm, full and the page itself.")
 (define-command "browse-open-external" "Open this page in the real browser"
   (lambda ()
     (let ((url (buffer-local (current-buffer) 'browse-url)))
-      (when url (tab-open url)))))
+      (when url (tab-open url))))
+  'modes '(browse-mode))
 
 ;; the link's page beside this one: the tab opens in another window and
 ;; point stays here, so the reader keeps their place in the page
@@ -2011,7 +2023,8 @@ whole document. R cycles calm, full and the page itself.")
                                    (or (buffer-local buf 'browse-url) ""))))
             (if (web--image-url? url)
                 (web--open-image! url)
-                (browse-beside! url buf)))))))
+                (browse-beside! url buf))))))
+  'modes '(browse-mode))
 
 ;; the link at point, else the page: eww's `w` does the same
 (define (web--url-at-point buf)
@@ -2030,7 +2043,8 @@ whole document. R cycles calm, full and the page itself.")
             ;; still pastes it with C-y
             (kill-push! url)
             (clipboard-put! url)
-            (message url))))))
+            (message url)))))
+  'modes '(browse-mode))
 
 ;; the html the tab holds, in a buffer of its own. A page served from
 ;; the session copy holds markdown only; it says so.
@@ -2051,7 +2065,8 @@ whole document. R cycles calm, full and the page itself.")
                 (buffer-set-read-only! name #t)
                 (buffer-goto! name 0)
                 (switch-to-buffer! name)
-                (set-mode! "html-mode")))))))
+                (set-mode! "html-mode"))))))
+  'modes '(browse-mode))
 
 (defcustom 'browse-download-directory (string-append (getenv "HOME") "/Downloads")
   "Where `d` saves a link or a page."
@@ -2083,7 +2098,8 @@ whole document. R cycles calm, full and the page itself.")
 (define-command "browse-download" "Save the link at point, else the page, to the download directory"
   (lambda ()
     (let ((url (web--url-at-point (current-buffer))))
-      (if url (web--download! url) (message "no page here")))))
+      (if url (web--download! url) (message "no page here"))))
+  'modes '(browse-mode))
 
 ;; the browse tabs in buffer-list order: M-n and M-p walk them, the way
 ;; a browser walks its tabs
@@ -2102,12 +2118,14 @@ whole document. R cycles calm, full and the page itself.")
 (define-command "browse-next-tab" "Switch to the next browse tab"
   (lambda ()
     (let ((next (web--tab-step (current-buffer) 1)))
-      (if next (switch-to-buffer! next) (message "no other tab")))))
+      (if next (switch-to-buffer! next) (message "no other tab"))))
+  'modes '(browse-mode))
 
 (define-command "browse-prev-tab" "Switch to the previous browse tab"
   (lambda ()
     (let ((prev (web--tab-step (current-buffer) -1)))
-      (if prev (switch-to-buffer! prev) (message "no other tab")))))
+      (if prev (switch-to-buffer! prev) (message "no other tab"))))
+  'modes '(browse-mode))
 
 ;; the switcher on the page's group: the tabs that opened here, and the
 ;; work around them. The tabs themselves are found by mode.
@@ -2116,7 +2134,8 @@ whole document. R cycles calm, full and the page itself.")
     (let ((g (buffer-group (current-buffer))))
       (if (and g (boundp 'switch-open!))
           (switch-open! (list 'locked g))
-          (run-command "switch-to-buffer")))))
+          (run-command "switch-to-buffer"))))
+  'modes '(browse-mode))
 
 (define (web--browse-group!)
   (group-ensure-record! "browse"))
@@ -2181,7 +2200,8 @@ whole document. R cycles calm, full and the page itself.")
            (next (cond ((equal? view "mono") "serif")
                        ((equal? view "serif") "source")
                        (else "mono"))))
-      (web--apply-view! buf next))))
+      (web--apply-view! buf next)))
+  'modes '(browse-mode))
 
 (public! 'browse-cycle-view
   "(run-command \"browse-cycle-view\") — cycle rendered monospace, rendered serif, and Markdown source")
@@ -2469,38 +2489,45 @@ the tabs. C-s searches to any link.")
         (list (car e) "dim")))
 
 (define-command "browse-history" "List every page you read, newest first"
-  (lambda () (list-mode-show! "browse-history-mode")))
+  (lambda () (list-mode-show! "browse-history-mode"))
+  'modes '(browse-mode))
 
 (define-command "browse-history-open" "Open the page on this row"
   (lambda ()
     (let ((e (list-current *web-history-buffer*)))
-      (when e (web--open-tab! (car e))))))
+      (when e (web--open-tab! (car e)))))
+  'modes '(browse-history-mode))
 
 (define-command "browse-history-open-other-window" "Open the page on this row in another window"
   (lambda ()
     (let ((e (list-current *web-history-buffer*)))
-      (when e (web--show-tab-other-window! (car e))))))
+      (when e (web--show-tab-other-window! (car e)))))
+  'modes '(browse-history-mode))
 
 (define-command "browse-history-open-external" "Open the page on this row in the real browser"
   (lambda ()
     (let ((e (list-current *web-history-buffer*)))
-      (when e (tab-open (car e))))))
+      (when e (tab-open (car e)))))
+  'modes '(browse-history-mode))
 
 (define-command "browse-history-forget" "Forget the page on this row"
   (lambda ()
     (let ((e (list-current *web-history-buffer*)))
       (when e
         (web--forget-visit! (car e))
-        (list-refresh! *web-history-buffer*)))))
+        (list-refresh! *web-history-buffer*))))
+  'modes '(browse-history-mode))
 
 (define-command "browse-history-clear" "Forget every page"
   (lambda ()
     (web--history-write! '())
     (list-refresh! *web-history-buffer*)
-    (message "history cleared")))
+    (message "history cleared"))
+  'modes '(browse-history-mode))
 
 (define-command "browse-history-refresh" "Read the history file again"
-  (lambda () (list-refresh! *web-history-buffer*)))
+  (lambda () (list-refresh! *web-history-buffer*))
+  'modes '(browse-history-mode))
 
 (define-list-mode! "browse-history-mode"
   (list

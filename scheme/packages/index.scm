@@ -77,10 +77,12 @@
         (if ix (index-step! ix dir) (message "This page has no list to walk")))))
 
 (define-command "index-next-item" "Open the next item of the list this page came from, here"
-  (lambda () (index--walk! 1)))
+  (lambda () (index--walk! 1))
+  'modes '(revision-mode detail-mode))
 
 (define-command "index-previous-item" "Open the previous item of the list this page came from, here"
-  (lambda () (index--walk! -1)))
+  (lambda () (index--walk! -1))
+  'modes '(revision-mode detail-mode))
 
 (define (index-hide! ix)
   ;; HIDE, run in the index, takes the item at point out; OPEN then shows the one now there
@@ -97,7 +99,8 @@
     (if (not (buffer-read-only? (current-buffer)))
         (run-command "self-insert-command")
         (let ((ix (detail-owner)))
-          (if ix (index-hide! ix) (message "This page has no list"))))))
+          (if ix (index-hide! ix) (message "This page has no list")))))
+  'modes '(detail-mode))
 
 (define-command "index-up" "Go to the list this page came from"
   (lambda ()
@@ -107,7 +110,8 @@
           (if (not ix)
               (message "This page has no list")
               (let ((w (find (lambda (w) (equal? (window-buffer w) ix)) (display--work-windows))))
-                (if w (select-window! w) (switch-to-buffer! ix))))))))
+                (if w (select-window! w) (switch-to-buffer! ix)))))))
+  'modes '(detail-mode))
 
 (for-each index--sync! (buffer-list))
 

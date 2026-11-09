@@ -464,7 +464,8 @@
     (let ((b (ibuffer-current (chat-list-buffer))))
       (if (not (and (string? b) (buffer-known? b)))
           (message "no chat here")
-          (chat-retitle! b agents-relist!)))))
+          (chat-retitle! b agents-relist!))))
+  'modes '(chat-list-mode))
 
 (catalog-meta! 'command "chat-retitle-at-point" 'domain 'chat 'effects '(write external spend))
 
@@ -550,7 +551,8 @@
               (unless (equal? msg "")
                 (for-each (lambda (b) (agent-send-msg! (agents-live-slug b) msg)) bs)
                 (agents-relist!)
-                (agents-report "steered" bs))))))))
+                (agents-report "steered" bs)))))))
+  'modes '(chat-list-mode))
 
 (define (agents-answer! exact prefix verb)
   (let* ((targets (agents-targets))
@@ -569,7 +571,8 @@
            (agents-report verb bs)))))
 
 (define-command "agents-allow" "Allow the pending permission of the chat at point"
-  (lambda () (agents-answer! "allow_once" "allow" "allowed")))
+  (lambda () (agents-answer! "allow_once" "allow" "allowed"))
+  'modes '(chat-list-mode))
 
 (define-command "agents-deny" "Deny the pending permission of the chat at point"
   (lambda () (agents-answer! "reject_once" "reject" "denied")))
@@ -629,7 +632,8 @@
     (when (window-exists? here) (select-window! here))))
 
 (define-command "agents-refresh" "Refresh the chat list"
-  (lambda () (agents-refresh!)))
+  (lambda () (agents-refresh!))
+  'modes '(chat-list-mode))
 
 (define-command "chats-watch" "Watch the chats: one list, the busiest first, kept up as they change"
   (lambda ()
@@ -652,7 +656,8 @@
           (begin
             (for-each agents-archive! bs)
             (agents-relist!)
-            (agents-report "archived" bs))))))
+            (agents-report "archived" bs)))))
+  'modes '(chat-list-mode))
 
 (define (agents-delete! b)
   ;; a chat is never trashed: delete archives it, its .chat file stays
@@ -673,7 +678,8 @@
               (when yes
                 (for-each agents-delete! bs)
                 (agents-relist!)
-                (agents-report "deleted" bs))))))))
+                (agents-report "deleted" bs)))))))
+  'modes '(chat-list-mode))
 
 ;; k stops the runtime and keeps the transcript: the chat stays in the
 ;; list, readable, and the next message you send revives it
@@ -1041,7 +1047,8 @@
       (buffer-set-local! buf 'mode-list-extra-only on)
       (list-refresh! buf)
       (list-goto-first-entry buf)
-      (message (if on "The 100 newest archived chats; A shows the live ones again" "The live chats")))))
+      (message (if on "The 100 newest archived chats; A shows the live ones again" "The live chats"))))
+  'modes '(chat-list-mode))
 
 ;; / on the chat list has a Status tab: working, needs you, streaming and
 ;; the rest, the words the row shows. is:needs types the same filter.

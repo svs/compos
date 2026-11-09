@@ -294,7 +294,8 @@
 
 (define-command "scheme-repl-newline"
   "Break the line and indent, without running the form"
-  (lambda () (repl--newline! (current-buffer))))
+  (lambda () (repl--newline! (current-buffer)))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-return"
   "Run the form at the prompt, or bring the form at point down to the prompt"
@@ -317,23 +318,28 @@
           (let ((src (string-trim (repl-input buf))))
             (cond ((equal? src "") (repl--prompt! buf))
                   ((repl--complete? src) (repl-eval! buf src))
-                  (else (repl--newline! buf)))))))))
+                  (else (repl--newline! buf))))))))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-previous-input"
   "Put the previous form at the prompt"
-  (lambda () (repl--walk! (current-buffer) 1 #f)))
+  (lambda () (repl--walk! (current-buffer) 1 #f))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-next-input"
   "Put the next form at the prompt"
-  (lambda () (repl--walk! (current-buffer) -1 #f)))
+  (lambda () (repl--walk! (current-buffer) -1 #f))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-previous-matching-input"
   "Put the previous form that opens with what you typed at the prompt"
-  (lambda () (repl--walk! (current-buffer) 1 #t)))
+  (lambda () (repl--walk! (current-buffer) 1 #t))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-next-matching-input"
   "Put the next form that opens with what you typed at the prompt"
-  (lambda () (repl--walk! (current-buffer) -1 #t)))
+  (lambda () (repl--walk! (current-buffer) -1 #t))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-up"
   "Walk back through the history, or move up inside the form"
@@ -398,11 +404,13 @@
 
 (define-command "scheme-repl-previous-prompt"
   "Go up to the previous form in the transcript"
-  (lambda () (repl--goto-prompt! (current-buffer) #t)))
+  (lambda () (repl--goto-prompt! (current-buffer) #t))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-next-prompt"
   "Go down to the next form in the transcript"
-  (lambda () (repl--goto-prompt! (current-buffer) #f)))
+  (lambda () (repl--goto-prompt! (current-buffer) #f))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-search-history"
   "Search every form you have run and put the one you pick at the prompt"
@@ -424,13 +432,15 @@
                 (when (pair? hit)
                   (repl-set-input! buf (car hit))
                   (repl--forget-walk! buf))))
-            'category 'scheme-form)))))
+            'category 'scheme-form))))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-kill-input"
   "Clear the form at the prompt"
   (lambda ()
     (repl-set-input! (current-buffer) "")
-    (repl--forget-walk! (current-buffer))))
+    (repl--forget-walk! (current-buffer)))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-clear"
   "Clear the transcript; the form at the prompt stays"
@@ -439,7 +449,8 @@
       (buffer-delete-range! buf 0 (buffer-size buf))
       (buffer-insert! buf 0 *scheme-repl-banner*)
       (repl--prompt! buf)
-      (repl-set-input! buf input))))
+      (repl-set-input! buf input)))
+  'modes '(scheme-repl-mode))
 
 (define-command "scheme-repl-beginning-of-input"
   "Move to the start of the form at the prompt"
@@ -449,7 +460,8 @@
            (pos (buffer-point buf)))
       (if (and start (> pos start))
           (buffer-goto! buf start)
-          (beginning-of-line!)))))
+          (beginning-of-line!))))
+  'modes '(scheme-repl-mode))
 
 ;;; --- the buffer --------------------------------------------------------------
 
@@ -569,7 +581,8 @@
             (buffer-set-local! buf 'repl-from here)
             (repl-set-input! buf (string-trim src))
             (repl-eval! buf (string-trim src))
-            (display-buffer-other-window! buf))))))
+            (display-buffer-other-window! buf)))))
+  'modes '(scheme-mode))
 
 (mode-keys! "scheme-mode"
   '(("C-c C-z" "scheme-repl")

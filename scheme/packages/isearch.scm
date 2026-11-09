@@ -109,10 +109,12 @@
                 (isearch--step! q backward from #t))))))))
 
 (define-command "isearch-repeat-forward" "During a search, move to the next match"
-  (lambda () (isearch--repeat! #f)))
+  (lambda () (isearch--repeat! #f))
+  'modes '(minibuffer-mode))
 (define-command "isearch-repeat-backward"
   "During a search, move to the previous match"
-  (lambda () (isearch--repeat! #t)))
+  (lambda () (isearch--repeat! #t))
+  'modes '(minibuffer-mode))
 
 (catalog-meta! 'command "isearch-repeat-forward" 'domain 'targets 'effects '(write))
 (catalog-meta! 'command "isearch-repeat-backward" 'domain 'targets 'effects '(write))

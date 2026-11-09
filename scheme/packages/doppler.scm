@@ -376,7 +376,8 @@
     (let ((buf (current-buffer)))
       (dp--fallback-drop! (doppler--project buf) (doppler--config buf))
       (doppler-forget!)
-      (list-refresh! buf))))
+      (list-refresh! buf)))
+  'modes '(doppler-mode))
 
 (define-command "doppler-select-config" "Select the Doppler config to list"
   (lambda ()
@@ -388,7 +389,8 @@
             (buffer-set-local! buf 'doppler-config config)
             (list-clear-marks! buf)
             (list-refresh! buf)
-            (message (string-append project "/" config))))))))
+            (message (string-append project "/" config)))))))
+  'modes '(doppler-mode))
 
 (define-command "doppler-select-project" "Select the Doppler project and config to list"
   (lambda ()
@@ -409,7 +411,8 @@
                         (buffer-set-local! buf 'doppler-config config)
                         (list-clear-marks! buf)
                         (list-refresh! buf)
-                        (message (string-append project "/" config)))))))))))))
+                        (message (string-append project "/" config))))))))))))
+  'modes '(doppler-mode))
 
 (domain! 'secrets)
 (effects! '(write external execute))
@@ -423,7 +426,8 @@
             (if (not (doppler--valid-name? name))
                 (message "Use uppercase letters, numbers, and underscores in a secret name")
                 (minibuffer-read (string-append "Value for " name ": ") '()
-                  (lambda (value) (doppler--set-value buf name value))))))))))
+                  (lambda (value) (doppler--set-value buf name value)))))))))
+  'modes '(doppler-mode))
 
 (define-command "doppler-secret-set" "Replace the value of the secret at point"
   (lambda ()
@@ -432,7 +436,8 @@
       (if (not name)
           (message "No secret on this line")
           (minibuffer-read (string-append "New value for " name ": ") '()
-            (lambda (value) (doppler--set-value buf name value)))))))
+            (lambda (value) (doppler--set-value buf name value))))))
+  'modes '(doppler-mode))
 
 (define-command "doppler-secret-copy" "Copy the value of the secret at point"
   (lambda ()
@@ -446,7 +451,8 @@
                 (begin
                   (clipboard-put! value)
                   (message (string-append "Copied " name)))
-                (message (string-append "Cannot read " name))))))))
+                (message (string-append "Cannot read " name)))))))
+  'modes '(doppler-mode))
 
 (define (doppler--click-command id)
   (cond ((equal? id "doppler:project") "doppler-select-project")

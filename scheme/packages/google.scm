@@ -135,7 +135,8 @@
 (define-command "google-service-open" "Open the selected Google application"
   (lambda ()
     (let ((s (list-current (current-buffer))) (id (buffer-local (current-buffer) 'google-account)))
-      (when (and s id) (google-open id (plist-get s 'id))))))
+      (when (and s id) (google-open id (plist-get s 'id)))))
+  'modes '(google-mode))
 
 ;;; Lists keep their account, query, parent, and page. Each fetch has a generation.
 (define (google--list-spec buf)
@@ -407,13 +408,15 @@
               'body (list 'name name 'mimeType "application/vnd.google-apps.folder" 'parents (list parent)))))))))))
 
 (define-command "google-drive-flag" "Flag this Google file for trash"
-  (lambda () (list-mark-at-point! "D")))
+  (lambda () (list-mark-at-point! "D"))
+  'modes '(google-drive-mode))
 (define-command "google-drive-trash" "Trash flagged files, otherwise marked files or the current file"
   (lambda ()
     (let* ((buf (current-buffer))
            (flagged (filter (lambda (row) (equal? (list-mark-of buf row) "D")) (list-entries buf)))
            (rows (if (pair? flagged) flagged (google--file-targets buf))))
-      (google--file-apply buf "Trash" (map (lambda (row) (google--file-op row "PATCH" "" '() '(trashed #t))) rows)))))
+      (google--file-apply buf "Trash" (map (lambda (row) (google--file-op row "PATCH" "" '() '(trashed #t))) rows))))
+  'modes '(google-drive-mode))
 
 (define (google-open account service &optional parent)
   (let ((buf (string-append "*Google " (google--email account) " [" account "] / " service
@@ -431,14 +434,17 @@
   (buffer-set-local! buf 'cache-inflight #f)
   (cache-refresh! buf))
 (define-command "google-refresh" "Refresh the current Google page"
-  (lambda () (google--refresh (current-buffer))))
+  (lambda () (google--refresh (current-buffer)))
+  'modes '(google-service-mode))
 (define-command "google-first-page" "Return to the first Google page"
-  (lambda () (buffer-set-local! (current-buffer) 'google-page #f) (google--refresh (current-buffer))))
+  (lambda () (buffer-set-local! (current-buffer) 'google-page #f) (google--refresh (current-buffer)))
+  'modes '(google-drive-mode google-service-mode))
 (define-command "google-next-page" "Fetch the next Google page"
   (lambda ()
     (let* ((buf (current-buffer)) (page (buffer-local buf 'google-next-page)))
       (if page (begin (buffer-set-local! buf 'google-page page) (google--refresh buf))
-          (message "No next page.")))))
+          (message "No next page."))))
+  'modes '(google-drive-mode google-service-mode))
 (define-command "google-search" "Search mail, events, or Drive files"
   (lambda ()
     (let* ((buf (current-buffer)) (service (buffer-local buf 'google-service)))
@@ -447,7 +453,8 @@
           (minibuffer-read "Google search: " '()
             (lambda (q) (buffer-set-local! buf 'google-query q)
                         (buffer-set-local! buf 'google-page #f) (google--refresh buf)))
-          (message "Use / to filter these rows. Open a calendar before searching events.")))))
+          (message "Use / to filter these rows. Open a calendar before searching events."))))
+  'modes '(google-drive-mode google-service-mode))
 
 ;;; Item buffers expose readable text and complete structured API data.
 (define (google--base64url-decode text)
@@ -525,7 +532,8 @@
                 (lambda (r)
                   (if (plist-get r 'ok)
                       (google--show-result account target (google--row-title row) (plist-get r 'data))
-                      (message (plist-get r 'error))))))))))))
+                      (message (plist-get r 'error)))))))))))
+  'modes '(google-service-mode))
 
 ;;; Reviewable API drafts cover the full REST surface of each service.
 ;;; Templates are data. Nothing runs when a draft opens or is restored.
@@ -610,7 +618,8 @@
           (completing-read "Google operation: " (map (lambda (op) (plist-get op 'name)) google--operations)
             (lambda (name)
               (let ((hits (filter (lambda (op) (equal? name (plist-get op 'name))) google--operations)))
-                (when (pair? hits) (google-draft account (google--context-operation (car hits) source))))))))))
+                (when (pair? hits) (google-draft account (google--context-operation (car hits) source)))))))))
+  'modes '(google-drive-mode google-service-mode google-mode google-detail-mode))
 (define-command "google-submit" "Submit the reviewed Google request for its original account"
   (lambda ()
     (let* ((buf (current-buffer)) (account (buffer-local buf 'google-account))
@@ -634,7 +643,8 @@
                             (begin (when (buffer-exists? buf) (buffer-set-local! buf 'google-last-result r)
                                   (buffer-set-local! buf 'google-submitted-request request-text))
                               (google--show-result account (plist-get request 'service) "Request result" (plist-get r 'data)))
-                            (message (plist-get r 'error)))))))))))))
+                            (message (plist-get r 'error))))))))))))
+  'modes '(google-request-mode))
 
 ;;; Mail starts as a readable local draft. Sending remains an explicit operation.
 (define (google--mime-lines encoded)
@@ -673,8 +683,10 @@
           (if send?
               (google-draft account (list 'service "gmail" 'method "POST" 'path "/users/me/messages/send" 'body message-data))
               (google-draft account op))))))
-(define-command "google-save-mail-draft" "Prepare saving this message to Gmail drafts" (lambda () (google--compose-operation #f)))
-(define-command "google-send-mail" "Prepare sending this message through Gmail" (lambda () (google--compose-operation #t)))
+(define-command "google-save-mail-draft" "Prepare saving this message to Gmail drafts" (lambda () (google--compose-operation #f))
+  'modes '(google-compose-mode))
+(define-command "google-send-mail" "Prepare sending this message through Gmail" (lambda () (google--compose-operation #t))
+  'modes '(google-compose-mode))
 
 (category! 'google)
 (effects! '(read))

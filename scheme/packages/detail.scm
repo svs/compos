@@ -227,7 +227,8 @@
 
 (define-command "detail-keep"
   "Keep this detail: it takes a name of its own, and the next row opens a new one"
-  (lambda () (detail-keep!)))
+  (lambda () (detail-keep!))
+  'modes '(detail-mode))
 
 ;;; --- the walk -------------------------------------------------------------------
 
@@ -254,11 +255,13 @@
 
 (define-command "detail-next"
   "Walk the details opened from this list, most recently used first"
-  (lambda () (detail-cycle! 1)))
+  (lambda () (detail-cycle! 1))
+  'modes '(detail-mode))
 
 (define-command "detail-previous"
   "Walk the details opened from this list, the other way"
-  (lambda () (detail-cycle! -1)))
+  (lambda () (detail-cycle! -1))
+  'modes '(detail-mode))
 
 ;; the key is the detail's own, so it shadows the global binding only
 ;; while you stand in a detail, the way chat-mode shadows it in a chat

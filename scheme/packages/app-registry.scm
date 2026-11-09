@@ -243,15 +243,18 @@
       buf)))
 
 (define-command "app-registry-open" "Open the app at point"
-  (lambda () (app-registry-open! (app-registry--at))))
+  (lambda () (app-registry-open! (app-registry--at)))
+  'modes '(app-registry-detail-mode app-registry-mode))
 
 (define-command "app-registry-source" "Visit the source of the app at point in the other window"
-  (lambda () (app-registry-visit-source! (app-registry--at))))
+  (lambda () (app-registry-visit-source! (app-registry--at)))
+  'modes '(app-registry-detail-mode app-registry-mode))
 
 (define-command "app-registry-refresh" "Read the apps again"
   (lambda ()
     (list-refresh! (app-registry--list))
-    (app-registry-show-detail! (app-registry--at))))
+    (app-registry-show-detail! (app-registry--at)))
+  'modes '(app-registry-detail-mode app-registry-mode))
 
 (effects! '(read))
 (public! 'app-registry-apps "(app-registry-apps) -- every app as a plist: name entry modes commands package section file source doc")

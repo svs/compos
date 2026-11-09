@@ -355,7 +355,8 @@
             (else
              (run-command "ibuffer-visit")
              (when (and after (string? row) (equal? (window-buffer (active-window)) row))
-               (after row)))))))
+               (after row))))))
+  'modes '(chat-list-mode))
 
 (define-command "mode-list-toggle-groups"
   "Turn the sections off and on; off is one list, most recent first"
@@ -371,7 +372,8 @@
             (buffer-set-local! buf 'mode-list-grouping-was grouping)
             (ibuffer-set-sort! 'recent buf)
             (ibuffer-set-grouping! 'none buf)
-            (message "ungrouped -- most recent first"))))))
+            (message "ungrouped -- most recent first")))))
+  'modes '(chat-list-mode))
 
 (effects! '(read))
 

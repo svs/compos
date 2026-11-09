@@ -333,7 +333,8 @@
       buf)))
 
 (define-command "watchers-show" "Show the watcher at point as its own page beside the list"
-  (lambda () (watchers-show-detail! (watchers--at))))
+  (lambda () (watchers-show-detail! (watchers--at)))
+  'modes '(watchers-mode))
 
 (define-command "watchers-refresh" "Read the watchers again"
   (lambda ()
@@ -341,7 +342,8 @@
     (let ((row (buffer-local (current-buffer) 'watcher)))
       (when row
         (let ((now (find (lambda (r) (equal? (plist-get r 'id) (plist-get row 'id))) (watchers--rows (watchers--list)))))
-          (when now (watchers-show-detail! now)))))))
+          (when now (watchers-show-detail! now))))))
+  'modes '(watchers-detail-mode watchers-mode))
 
 (define-command "watchers-cancel" "Cancel the watcher at point; it wakes its chat no more"
   (lambda ()
@@ -351,19 +353,22 @@
              (message (string-append (plist-get row 'id) " is not listening")))
             (else (agent-listen-cancel! (plist-get row 'id))
                   (message (string-append "cancelled " (plist-get row 'id)))
-                  (watchers--redraw! #f))))))
+                  (watchers--redraw! #f)))))
+  'modes '(watchers-detail-mode watchers-mode))
 
 (define-command "watchers-chat" "Show the chat the watcher at point wakes"
   (lambda ()
     (let* ((row (watchers--at)) (buf (and row (watchers--chat-buffer row))))
-      (if buf (display-buffer-other-window! buf) (message "its chat is not open")))))
+      (if buf (display-buffer-other-window! buf) (message "its chat is not open"))))
+  'modes '(watchers-detail-mode watchers-mode))
 
 (define-command "watchers-task" "Show the task the watcher at point waits on"
   (lambda ()
     (let* ((row (watchers--at)) (id (and row (plist-get row 'task))))
       (if (and (not (watchers--blank? id)) (todo-get id))
           (todo-show-detail! id)
-          (message "no task for this watcher")))))
+          (message "no task for this watcher"))))
+  'modes '(watchers-detail-mode watchers-mode))
 
 ;; ---- the daily sweep ------------------------------------------------------
 ;; Once a day the live watchers past due go to one agent. It reads each

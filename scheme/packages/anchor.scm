@@ -285,10 +285,12 @@
     (anchor--land! buf target (if (> dir 0) "next anchor" "previous anchor"))))
 
 (define-command "anchor-next" "Move point to the next anchor"
-  (lambda () (anchor--step! 1)))
+  (lambda () (anchor--step! 1))
+  'modes '(anchor-mode))
 
 (define-command "anchor-previous" "Move point to the previous anchor"
-  (lambda () (anchor--step! -1)))
+  (lambda () (anchor--step! -1))
+  'modes '(anchor-mode))
 
 ;; The arrows' walk: a page whose parts are anchors moves from part to part,
 ;; and past the last one (or in a buffer with none) the arrow is a line again.
@@ -345,9 +347,11 @@
                (anchor--land! buf a "anchor"))))))))
 
 (define-command "anchor-right" "Move to the same place in the column to the right, or a character right on a page without columns"
-  (lambda () (anchor--sideways! 1)))
+  (lambda () (anchor--sideways! 1))
+  'modes '(anchor-mode))
 (define-command "anchor-left" "Move to the same place in the column to the left, or a character left on a page without columns"
-  (lambda () (anchor--sideways! -1)))
+  (lambda () (anchor--sideways! -1))
+  'modes '(anchor-mode))
 
 ;; The reading walk, M-<up> and M-<down>. An anchor always comes first,
 ;; however far: the page chose its stops. Past the last one the key pages,
@@ -398,9 +402,11 @@
           (else (message (if (> dir 0) "No next anchor" "No previous anchor"))))))
 
 (define-command "anchor-read-next" "Move to the next anchor, or one page down past the last"
-  (lambda () (anchor--read! 1)))
+  (lambda () (anchor--read! 1))
+  'modes '(anchor-mode))
 (define-command "anchor-read-previous" "Move to the previous anchor, or one page up before the first"
-  (lambda () (anchor--read! -1)))
+  (lambda () (anchor--read! -1))
+  'modes '(anchor-mode))
 
 (define-command "anchor-jump" "Go to an anchor of this buffer by name"
   (lambda ()
@@ -411,7 +417,8 @@
           (completing-read "Anchor: " names
             (lambda (name)
               (when (and (string? name) (not (equal? name "")))
-                (anchor-goto! buf name))))))))
+                (anchor-goto! buf name)))))))
+  'modes '(anchor-mode))
 
 ;;; --- the mode --------------------------------------------------------------
 

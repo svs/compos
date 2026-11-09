@@ -77,12 +77,14 @@
           (message "racket-run: this buffer has no file")
           (begin
             (when (buffer-modified? (current-buffer)) (buffer-save!))
-            (display-buffer-other-window! (racket--repl! path)))))))
+            (display-buffer-other-window! (racket--repl! path))))))
+  'modes '(racket-mode))
 
 (define-command "racket-repl" "Go to the Racket REPL, starting one when there is none"
   (lambda ()
     (pop-to-buffer (racket--repl-buffer))
-    (end-of-buffer!)))
+    (end-of-buffer!))
+  'modes '(racket-mode))
 
 (define-command "racket-send-definition" "Send the definition at point to the Racket REPL"
   (lambda ()
@@ -90,14 +92,16 @@
            (src (code-read here (car (buffer-line-at-point here)))))
       (if (and (string? src) (not (equal? (string-trim src) "")))
           (racket--send! src)
-          (message "No definition at point")))))
+          (message "No definition at point"))))
+  'modes '(racket-mode))
 
 (define-command "racket-send-region" "Send the region to the Racket REPL"
   (lambda ()
     (let ((text (and (mark) (region-text))))
       (if (and (string? text) (not (equal? (string-trim text) "")))
           (racket--send! text)
-          (message "No region")))))
+          (message "No region"))))
+  'modes '(racket-mode))
 
 (effects! '(write external execute))
 
@@ -112,7 +116,8 @@
                       (default-directory))))
             (message (if (equal? (string-trim out) "")
                          (string-append "DrRacket: " path)
-                         (string-trim out))))))))
+                         (string-trim out)))))))
+  'modes '(racket-mode))
 
 (mode-keys! "racket-mode"
   '(("C-c C-c" "racket-run")

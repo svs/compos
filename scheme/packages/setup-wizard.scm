@@ -882,19 +882,24 @@
 ;; the wizard's own command for c: a mode map that bound llm-connectors
 ;; itself would take it out of M-x everywhere else
 (define-command "setup-wizard-connectors" "Set up and test the model connectors"
-  (lambda () (run-command "llm-connectors")))
+  (lambda () (run-command "llm-connectors"))
+  'modes '(setup-wizard-mode))
 
 (define-command "setup-wizard-next" "Go to the next setup step"
-  (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) 1))))
+  (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) 1)))
+  'modes '(setup-wizard-mode))
 
 (define-command "setup-wizard-back" "Go to the previous setup step"
-  (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) -1))))
+  (lambda () (setup-wizard-go! (current-buffer) (setup-wizard--step-after (current-buffer) -1)))
+  'modes '(setup-wizard-mode))
 
 (define-command "setup-wizard-rescan" "Scan this machine for models again"
-  (lambda () (laya-rescan!) (setup-wizard-redraw! (current-buffer))))
+  (lambda () (laya-rescan!) (setup-wizard-redraw! (current-buffer)))
+  'modes '(setup-wizard-mode))
 
 (define-command "setup-wizard-decide-test" "Ask the decision model in use a test question"
-  (lambda () (setup-wizard-decide-test! (current-buffer))))
+  (lambda () (setup-wizard-decide-test! (current-buffer)))
+  'modes '(setup-wizard-mode))
 
 (mode-keys! "setup-wizard-mode"
   '(("n" "setup-wizard-next")

@@ -667,19 +667,22 @@
             (bookmark-set-annotation! name text)
             (buffer-mark-saved! (current-buffer))
             (run-command "quit-window")
-            (message (string-append "Saved annotation for " name)))))))
+            (message (string-append "Saved annotation for " name))))))
+  'modes '(bookmark-annotation-edit-mode))
 
 (define-command "bookmark-annotation-abort" "Discard this bookmark annotation edit"
   (lambda ()
     (buffer-mark-saved! (current-buffer))
     (run-command "quit-window")
-    (message "Discarded annotation edit")))
+    (message "Discarded annotation edit"))
+  'modes '(bookmark-annotation-edit-mode))
 
 (define-command "bookmark-annotation-edit-current" "Edit the displayed bookmark annotation"
   (lambda ()
     (let ((name (buffer-local (current-buffer) 'bookmark-name)))
       (if name (bookmark-edit-annotation-name! name)
-          (message "This view does not name one bookmark")))))
+          (message "This view does not name one bookmark"))))
+  'modes '(bookmark-annotation-view-mode))
 
 (mode-icon! "bookmark-annotation-view-mode" "")
 (define-mode "bookmark-annotation-view-mode"
@@ -768,13 +771,15 @@
 (define-command "bookmark-bmenu-visit" "Visit the bookmark on this row"
   (lambda ()
     (let ((record (list-current (current-buffer))))
-      (when record (bookmark-jump! (bookmark--get record 'name ""))))))
+      (when record (bookmark-jump! (bookmark--get record 'name "")))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-other-window" "Visit this bookmark in another window"
   (lambda ()
     (let ((record (list-current (current-buffer))))
       (when record
-        (bookmark-jump! (bookmark--get record 'name "") "other")))))
+        (bookmark-jump! (bookmark--get record 'name "") "other"))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-view-marked" "Preview marked bookmarks in other windows"
   (lambda ()
@@ -783,18 +788,21 @@
                   (bookmark-jump! (bookmark--get record 'name "") "preview"))
                 records)
       (message (string-append "Displayed " (number->string (length records))
-                              " bookmarks")))))
+                              " bookmarks"))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-show-annotation" "Show this row's annotation"
   (lambda ()
     (let ((record (list-current (current-buffer))))
-      (when record (bookmark--show-annotation record)))))
+      (when record (bookmark--show-annotation record))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-edit-annotation" "Edit this row's annotation"
   (lambda ()
     (let ((record (list-current (current-buffer))))
       (when record
-        (bookmark-edit-annotation-name! (bookmark--get record 'name ""))))))
+        (bookmark-edit-annotation-name! (bookmark--get record 'name "")))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-rename" "Rename the bookmark on this row"
   (lambda ()
@@ -805,7 +813,8 @@
             (lambda (new)
               (if (bookmark-rename! old new)
                   (message (string-append "Renamed bookmark to " new))
-                  (message (string-append "Bookmark exists: " new))))))))))
+                  (message (string-append "Bookmark exists: " new)))))))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-relocate" "Relocate the bookmark on this row"
   (lambda ()
@@ -813,17 +822,20 @@
       (when record
         (let ((name (bookmark--get record 'name "")))
           (read-file-name (string-append "Relocate " name " to: ")
-            (lambda (path) (bookmark-relocate! name path))))))))
+            (lambda (path) (bookmark-relocate! name path)))))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-locate" "Show this row's location"
   (lambda ()
     (let ((record (list-current (current-buffer))))
-      (when record (message (bookmark-location record))))))
+      (when record (message (bookmark-location record)))))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-toggle-locations" "Show or hide bookmark locations"
   (lambda ()
     (set! *bookmark-show-locations* (not *bookmark-show-locations*))
-    (list-refresh! (current-buffer))))
+    (list-refresh! (current-buffer)))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-cycle-sort" "Cycle bookmark list sorting"
   (lambda ()
@@ -832,12 +844,14 @@
             ((equal? bookmark-sort-order "modified") "created")
             (else "name")))
     (list-refresh! (current-buffer))
-    (message (string-append "Sorted bookmarks by " bookmark-sort-order))))
+    (message (string-append "Sorted bookmarks by " bookmark-sort-order)))
+  'modes '(bookmark-bmenu-mode))
 
 (define-command "bookmark-bmenu-refresh" "Reload and refresh the bookmark list"
   (lambda ()
     (set! *bookmarks* #f)
-    (list-refresh! (current-buffer))))
+    (list-refresh! (current-buffer)))
+  'modes '(bookmark-bmenu-mode))
 
 (mode-icon! "bookmark-bmenu-mode" "")
 

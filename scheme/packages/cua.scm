@@ -14,29 +14,40 @@
   (mover))
 
 (define-command "cua-select-backward" "Extend the region one character left"
-  (lambda () (cua--select! backward-char!)))
+  (lambda () (cua--select! backward-char!))
+  'modes '(cua-mode))
 (define-command "cua-select-forward" "Extend the region one character right"
-  (lambda () (cua--select! forward-char!)))
+  (lambda () (cua--select! forward-char!))
+  'modes '(cua-mode))
 (define-command "cua-select-backward-word" "Extend the region one word left"
-  (lambda () (cua--select! backward-word!)))
+  (lambda () (cua--select! backward-word!))
+  'modes '(cua-mode))
 (define-command "cua-select-forward-word" "Extend the region one word right"
-  (lambda () (cua--select! forward-word!)))
+  (lambda () (cua--select! forward-word!))
+  'modes '(cua-mode))
 (define-command "cua-select-up" "Extend the region one visual line up"
-  (lambda () (visual-previous-line! #t)))
+  (lambda () (visual-previous-line! #t))
+  'modes '(cua-mode))
 (define-command "cua-select-down" "Extend the region one visual line down"
-  (lambda () (visual-next-line! #t)))
+  (lambda () (visual-next-line! #t))
+  'modes '(cua-mode))
 (define-command "cua-select-line-start" "Extend the region to the start of the line"
-  (lambda () (visual-beginning-of-line! #t)))
+  (lambda () (visual-beginning-of-line! #t))
+  'modes '(cua-mode))
 (define-command "cua-select-line-end" "Extend the region to the end of the line"
-  (lambda () (visual-end-of-line! #t)))
+  (lambda () (visual-end-of-line! #t))
+  'modes '(cua-mode))
 (define-command "cua-select-buffer-start" "Extend the region to the start of the buffer"
-  (lambda () (cua--select! beginning-of-buffer!)))
+  (lambda () (cua--select! beginning-of-buffer!))
+  'modes '(cua-mode))
 (define-command "cua-select-buffer-end" "Extend the region to the end of the buffer"
-  (lambda () (cua--select! end-of-buffer!)))
+  (lambda () (cua--select! end-of-buffer!))
+  'modes '(cua-mode))
 (define-command "cua-select-all" "Select the entire buffer"
   (lambda ()
     (set-mark! (buffer-size (current-buffer)))
-    (goto-char! 0)))
+    (goto-char! 0))
+  'modes '(cua-mode))
 
 ;; a page is a screenful of visual rows, the same page the plain motion
 ;; steps by (visual-page!)
@@ -47,9 +58,11 @@
                (move-lines n (if (> dir 0) next-line! previous-line!))))))
 
 (define-command "cua-select-page-up" "Extend the region one screen up"
-  (lambda () (cua--select-page! -1)))
+  (lambda () (cua--select-page! -1))
+  'modes '(cua-mode))
 (define-command "cua-select-page-down" "Extend the region one screen down"
-  (lambda () (cua--select-page! 1)))
+  (lambda () (cua--select-page! 1))
+  'modes '(cua-mode))
 
 ;; the bindings cua-mode puts in force in a buffer you are editing
 (define cua--keys

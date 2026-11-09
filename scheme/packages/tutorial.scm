@@ -892,7 +892,8 @@
 
 ;; the slide's c: set up and test the models in M-x llm-connectors
 (define-command "tutorial-connectors" "Set up and test the model connectors"
-  (lambda () (run-command "llm-connectors")))
+  (lambda () (run-command "llm-connectors"))
+  'modes '(tutorial-detail-mode))
 
 (add-hook! (list 'block-click 'tutorial)
   (lambda (buf id)
@@ -1322,49 +1323,63 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 (define-key "help-map" "t" "help-with-tutorial")
 
 (define-command "tutorial-close" "Close the tutorial; C-h t opens it again where you were"
-  (lambda () (tutorial-close!)))
+  (lambda () (tutorial-close!))
+  'modes '(tutorial-detail-mode))
 
 (define-command "tutorial-next" "Go to the next step of the tutorial"
-  (lambda () (tutorial-next!)))
+  (lambda () (tutorial-next!))
+  'modes '(tutorial-detail-mode tutorial-practice-mode))
 
 (define-command "tutorial-back" "Go to the previous step of the tutorial"
-  (lambda () (tutorial-back!)))
+  (lambda () (tutorial-back!))
+  'modes '(tutorial-detail-mode tutorial-practice-mode))
 
 (define-command "tutorial-next-lesson" "Go to the next lesson"
-  (lambda () (tutorial--move! 1)))
+  (lambda () (tutorial--move! 1))
+  'modes '(tutorial-detail-mode))
 
 (define-command "tutorial-previous-lesson" "Go to the previous lesson"
-  (lambda () (tutorial--move! -1)))
+  (lambda () (tutorial--move! -1))
+  'modes '(tutorial-detail-mode))
 
 (define-command "tutorial-tick-step" "Mark the step on the slide done"
-  (lambda () (tutorial-tick-step!)))
+  (lambda () (tutorial-tick-step!))
+  'modes '(tutorial-practice-mode))
 
 (define-command "tutorial-index" "Show the list of lessons over the practice page"
-  (lambda () (tutorial-show-index!)))
+  (lambda () (tutorial-show-index!))
+  'modes '(tutorial-detail-mode tutorial-practice-mode))
 
 (define-command "tutorial-index-visit" "Go to the lesson on this row"
   (lambda ()
     (let ((l (list-current *tutorial-index-buffer*)))
       (tutorial-index-quit!)
-      (when l (tutorial--go! l)))))
+      (when l (tutorial--go! l))))
+  'modes '(tutorial-index-mode))
 
 (define-command "tutorial-index-quit" "Put the practice page back"
-  (lambda () (tutorial-index-quit!)))
+  (lambda () (tutorial-index-quit!))
+  'modes '(tutorial-index-mode))
 
 (define-command "tutorial-toggle-done" "Mark the lesson on this row done, or not done"
-  (lambda () (tutorial-toggle-done!)))
+  (lambda () (tutorial-toggle-done!))
+  'modes '(tutorial-index-mode))
 
 (define-command "tutorial-retry" "Run the check of the step on the slide again"
-  (lambda () (tutorial-retry!)))
+  (lambda () (tutorial-retry!))
+  'modes '(tutorial-detail-mode))
 
 (define-command "tutorial-restart-lesson" "Start the lesson on the slide again"
-  (lambda () (tutorial-restart-lesson!)))
+  (lambda () (tutorial-restart-lesson!))
+  'modes '(tutorial-detail-mode))
 
 (define-command "tutorial-reset" "Forget all tutorial progress"
-  (lambda () (tutorial-reset!)))
+  (lambda () (tutorial-reset!))
+  'modes '(tutorial-index-mode tutorial-detail-mode))
 
 (define-command "tutorial-refresh" "Redraw the list of lessons"
-  (lambda () (list-refresh! *tutorial-index-buffer*)))
+  (lambda () (list-refresh! *tutorial-index-buffer*))
+  'modes '(tutorial-index-mode))
 
 
 ;; a chat sends with RET, which runs agent-send
@@ -1457,7 +1472,8 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
                              "the lesson as a whole"))))))
 
 (define-command "tutorial-help" "Ask the setup chat about the step on the slide"
-  (lambda () (tutorial-ask-help!)))
+  (lambda () (tutorial-ask-help!))
+  'modes '(tutorial-detail-mode tutorial-practice-mode))
 
 ;; the steps are watched from the start, not only once C-h t is open
 (ignore-errors (lambda () (tutorial--load!) (tutorial--arm!)))

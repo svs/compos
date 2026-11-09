@@ -1800,7 +1800,8 @@
               (when (and group (not (equal? group (frame-group))))
                 (switch-to-group! group)))
             (show-in-other-work-window! target))
-          (run-command "other-window")))))
+          (run-command "other-window"))))
+  'modes '(list-mode))
 
 (define (listing-preview-schedule! owner target)
   (let ((ticket (+ 1 (or (frame-local 'listing-preview-ticket) 0)))
@@ -1834,7 +1835,8 @@
       (unless disabled
         (buffer-set-local! owner 'listing-preview-dismissed-row #f)
         (listing-preview! owner (list-current owner)))
-      (message (if disabled "Previews off" "Previews on")))))
+      (message (if disabled "Previews off" "Previews on"))))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define (listing-preview-hide!)
   (let ((owner (listing-preview-owner)))
@@ -2205,13 +2207,15 @@
   (lambda ()
     (if (ibuffer-tab (current-buffer))
         (ibuffer-tab-step! (current-buffer) 1)
-        (run-command "forward-char"))))
+        (run-command "forward-char")))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-tab-prev" "Show the previous tab of the list: all, group"
   (lambda ()
     (if (ibuffer-tab (current-buffer))
         (ibuffer-tab-step! (current-buffer) -1)
-        (run-command "backward-char"))))
+        (run-command "backward-char")))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-pretty" "List buffers with the pretty table presentation"
   (lambda () (ibuffer-open! #f #f "ibuffer-pretty-mode" #f '(pretty #t))))
@@ -2226,7 +2230,8 @@
           (ibuffer-toggle-fold! (ibuffer-heading-key b))
           (begin
             ;; RET opens the pick beside the table; only q leaves it
-            (listing-visit-beside! view b))))))
+            (listing-visit-beside! view b)))))
+  'modes '(ibuffer-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-quit" "Dismiss the preview, else give the frame back"
   (lambda ()
@@ -2244,10 +2249,12 @@
              ;; with nothing recorded — the minibuffer form, or a table
              ;; that stopped standing — the ordinary quit still answers
              (unless (transient-frame-exit! 'ibuffer)
-               (listing-quit! (ibuffer-view))))))))
+               (listing-quit! (ibuffer-view)))))))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-refresh" "Refresh the buffer table"
-  (lambda () (ibuffer-refresh!)))
+  (lambda () (ibuffer-refresh!))
+  'modes '(ibuffer-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-toggle-filter-group"
   "Fold or unfold the rows under the row at point, else the section at point"
@@ -2259,11 +2266,13 @@
           (let ((row (ibuffer-section-at)))
             (if row
                 (ibuffer-toggle-fold! (ibuffer-heading-key row))
-                (message "no section here")))))))
+                (message "no section here"))))))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-toggle-all-filter-groups"
   "Fold every section, or open them all when all are folded"
-  (lambda () (ibuffer-toggle-fold-all!)))
+  (lambda () (ibuffer-toggle-fold-all!))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-keymap! "ibuffer-filter-map")
 (for-each (lambda (p) (define-key "ibuffer-filter-map" (car p) (cadr p)))
@@ -2377,9 +2386,11 @@
       (listing-preview-schedule! owner target))))
 
 (define-command "ibuffer-next-group" "Move to the next group in this buffer list"
-  (lambda () (list-move-section! (ibuffer-view) 1)))
+  (lambda () (list-move-section! (ibuffer-view) 1))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 (define-command "ibuffer-previous-group" "Move to the previous group in this buffer list"
-  (lambda () (list-move-section! (ibuffer-view) -1)))
+  (lambda () (list-move-section! (ibuffer-view) -1))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-next" "Move down to the next buffer"
   (lambda () (list-move! 1)))
@@ -2504,7 +2515,8 @@
   ;; filter shows. K is the group kill.
   (lambda ()
     (let ((view (current-buffer)))
-      (ibuffer-kill-targets! view (ibuffer-targets view) 0 0))))
+      (ibuffer-kill-targets! view (ibuffer-targets view) 0 0)))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 ;; the group at point: under group sectioning, the section's group;
 ;; otherwise the group of the buffer on the row
@@ -2528,7 +2540,8 @@
       (if g
           (begin (group-kill! g)
                  (when (buffer-known? view) (ibuffer-refresh! view)))
-          (message "no group here")))))
+          (message "no group here"))))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
 
 (effects! '(read))
 
@@ -2990,7 +3003,8 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
   (lambda ()
     (let ((buf (or (mb-list-target) (current-buffer))))
       (ibuffer-set-render-option! buf 'info (not (ibuffer-info? buf)))
-      (ibuffer-table-redraw!))))
+      (ibuffer-table-redraw!)))
+  'modes '(ibuffer-mode chat-list-mode minibuffer-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-command "ibuffer-toggle-hidden" "Show the hidden buffers in this list too, or put them away"
   ;; the switch is a filter, hidden:on, the way dired-filter-dotfiles keeps
@@ -3005,7 +3019,8 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
       ;; the filter changes what the source reads, so the rows are read again
       (list-refresh! buf)
       (list-goto-first-entry buf)
-      (message (string-append "Filter: " (list-filters-text buf))))))
+      (message (string-append "Filter: " (list-filters-text buf)))))
+  'modes '(chat-list-mode))
 (define-command "ibuffer-toggle-pretty" "Toggle this list's formatting and report redraw milliseconds"
   (lambda ()
     (let* ((buf (or (mb-list-target) (current-buffer)))
@@ -3014,7 +3029,8 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
       (ibuffer-set-render-option! buf 'pretty pretty?)
       (ibuffer-table-redraw!)
       (message (string-append "Pretty " (if pretty? "on" "off")
-                             " · redraw " (number->string (- (monotonic-ms) start)) " ms")))))
+                             " · redraw " (number->string (- (monotonic-ms) start)) " ms"))))
+  'modes '(ibuffer-mode chat-list-mode minibuffer-mode isubagents-mode ibuffer-pretty-mode))
 
 (define-list-mode! "ibuffer-mode" *ibuffer-opts*)
 (mode-dismissible! "ibuffer-mode")

@@ -281,25 +281,30 @@
 (define-command "messages-filter-level" "Filter *Messages* by log level"
   (lambda ()
     (messages--prompt-filter "Log level: " 'level
-                             '("debug" "info" "warning" "error"))))
+                             '("debug" "info" "warning" "error")))
+  'modes '(messages-mode))
 
 (define-command "messages-filter-group" "Filter *Messages* by source group"
   (lambda ()
     (messages--prompt-filter "Message group: " 'group
-                             (messages--filter-values 'group))))
+                             (messages--filter-values 'group)))
+  'modes '(messages-mode))
 
 (define-command "messages-filter-project" "Filter *Messages* by source project"
   (lambda ()
     (messages--prompt-filter "Message project: " 'project
-                             (messages--filter-values 'project))))
+                             (messages--filter-values 'project)))
+  'modes '(messages-mode))
 
 (define-command "messages-refresh" "Refresh the structured *Messages* list"
-  (lambda () (list-refresh! *messages-buffer*)))
+  (lambda () (list-refresh! *messages-buffer*))
+  'modes '(messages-mode))
 
 (define-command "messages-clear" "Clear the *Messages* log"
   (lambda ()
     (messages-clear!)
-    (list-refresh! *messages-buffer*)))
+    (list-refresh! *messages-buffer*))
+  'modes '(messages-mode))
 
 (define-command "messages-watch-list" "Say which message watches are in force"
   (lambda ()
@@ -309,7 +314,8 @@
             "no message watches"
             (string-append
               "watching: "
-              (string-join (map (lambda (w) (car w)) ws) ", ")))))))
+              (string-join (map (lambda (w) (car w)) ws) ", "))))))
+  'modes '(messages-mode))
 
 (define (messages--meta buf)
   (let ((rows (list-entries buf)))

@@ -186,14 +186,18 @@
     (let ((buf (current-buffer)))
       (if (ghost-rewrite--state buf)
           (ghost-rewrite--ask! buf)
-          (ghost-rewrite--start! buf)))))
+          (ghost-rewrite--start! buf))))
+  'modes '(copilot-mode))
 
 (define-command "ghost-rewrite-accept" "Take the rewrite shown"
-  (lambda () (ghost-rewrite--accept! (current-buffer))))
+  (lambda () (ghost-rewrite--accept! (current-buffer)))
+  'modes '(ghost-rewrite-mode))
 (define-command "ghost-rewrite-next" "Show the next rewrite"
-  (lambda () (ghost-rewrite--step! (current-buffer) 1)))
+  (lambda () (ghost-rewrite--step! (current-buffer) 1))
+  'modes '(ghost-rewrite-mode))
 (define-command "ghost-rewrite-previous" "Show the previous rewrite"
-  (lambda () (ghost-rewrite--step! (current-buffer) -1)))
+  (lambda () (ghost-rewrite--step! (current-buffer) -1))
+  'modes '(ghost-rewrite-mode))
 (define-command "ghost-rewrite-quit" "Let the rewrites go"
   (lambda () (ghost-rewrite--dismiss! (current-buffer)) (message "Rewrites dropped")))
 

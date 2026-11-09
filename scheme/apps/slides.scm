@@ -168,10 +168,12 @@
         (message "This deck is not presented: C-c C-s presents it"))))
 
 (define-command "slides-next" "Step the presented slides forward from the deck"
-  (lambda () (slides--step! "next")))
+  (lambda () (slides--step! "next"))
+  'modes '(slides-deck-mode))
 
 (define-command "slides-previous" "Step the presented slides back from the deck"
-  (lambda () (slides--step! "prev")))
+  (lambda () (slides--step! "prev"))
+  'modes '(slides-deck-mode))
 
 (register-minor-mode! "slides-deck-mode"
   (lambda (buf) (when (buffer-local buf 'slides-app) (slides--watch! buf)))
@@ -300,10 +302,12 @@
     (if to (goto-char! to) (message (if (equal? dir 'next) "Last slide" "First slide")))))
 
 (define-command "slides-next-slide" "Move to the next slide of the deck"
-  (lambda () (slides--goto-slide! 'next)))
+  (lambda () (slides--goto-slide! 'next))
+  'modes '(slides-deck-mode))
 
 (define-command "slides-previous-slide" "Move to the previous slide of the deck"
-  (lambda () (slides--goto-slide! 'prev)))
+  (lambda () (slides--goto-slide! 'prev))
+  'modes '(slides-deck-mode))
 
 ;; The region grows a whole slide at a time. With no region the mark goes
 ;; to the far side of the slide at point, so the first press takes it all.
@@ -319,10 +323,12 @@
     (if to (goto-char! to) (message (if (equal? dir 'next) "Last slide" "First slide")))))
 
 (define-command "slides-select-next" "Select the slide at point, then one more slide forward each time"
-  (lambda () (slides--select-slide! 'next)))
+  (lambda () (slides--select-slide! 'next))
+  'modes '(slides-deck-mode))
 
 (define-command "slides-select-previous" "Select the slide at point, then one more slide back each time"
-  (lambda () (slides--select-slide! 'prev)))
+  (lambda () (slides--select-slide! 'prev))
+  'modes '(slides-deck-mode))
 
 ;; f in the page gives the slides the whole frame, and f again puts the
 ;; frame back. The saved layout counts only while the slides still fill the
@@ -451,14 +457,16 @@
   (lambda ()
     (let ((app (slides-present! (slides--source-of (current-buffer)))))
       (unless (window-showing app) (display-buffer-other-window! app))
-      (message "Slides: → next, ← back, o overview, f maximize, ? keys. C-g gives the keyboard back."))))
+      (message "Slides: → next, ← back, o overview, f maximize, ? keys. C-g gives the keyboard back.")))
+  'modes '(morg-mode slides-deck-mode))
 
 (define-command "slides-reload" "Redraw the slides from their deck, from the slide at its point"
   (lambda ()
     (let ((source (slides--deck (current-buffer))))
       (if source
           (begin (slides-present! source) (message "Slides redrawn"))
-          (message "The deck of these slides is gone")))))
+          (message "The deck of these slides is gone"))))
+  'modes '(slides-mode))
 
 ;;;###autoload
 (define-command "slides-edit" "Show the deck at the slide the presenter shows"
@@ -472,7 +480,8 @@
             (display-buffer-other-window! source)
             (with-current-buffer source
               (lambda () (goto-char! (line-start-position line)))))
-          (message "The deck of these slides is gone")))))
+          (message "The deck of these slides is gone"))))
+  'modes '(slides-mode))
 
 (define (slides--starter)
   (read-file (string-append (slides--directory) "/starter.md")))
@@ -536,7 +545,8 @@
     (let* ((keys (last-keys))
            (entry (and (pair? keys) (assoc (car keys) slides--page-keys))))
       (when entry
-        (app-post! (current-buffer) (list 'key (cadr entry)))))))
+        (app-post! (current-buffer) (list 'key (cadr entry))))))
+  'modes '(slides-mode))
 
 (mode-keys! "slides-mode"
   (append '(("g" "slides-reload")

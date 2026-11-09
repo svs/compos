@@ -356,9 +356,11 @@
 (define-command "preview-tab-preview" "Show the rendered page"
   (lambda () (preview-view! (current-buffer) #t) (editing-quit!)))
 (define-command "preview-tab-left" "Show the raw tab; the client sends the arrow only in the movement state"
-  (lambda () (preview-tab-step! #f)))
+  (lambda () (preview-tab-step! #f))
+  'modes '(morg-mode))
 (define-command "preview-tab-right" "Show the preview tab; the client sends the arrow only in the movement state"
-  (lambda () (preview-tab-step! #t)))
+  (lambda () (preview-tab-step! #t))
+  'modes '(morg-mode))
 (define-key "morg-mode-map" "<left>" "preview-tab-left")
 (define-key "morg-mode-map" "<right>" "preview-tab-right")
 

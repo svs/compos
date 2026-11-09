@@ -399,7 +399,8 @@
                (string-append "Executed " (cadr r) " block"))
               ((equal? (car r) 'pending)
                (string-append "Running " (cadr r) " block"))
-              (else (cadr r)))))))
+              (else (cadr r))))))
+  'modes '(morg-mode))
 
 ;; Keep the old command name for init files and restored keymaps.
 (define-command "morg-execute-block" "Run the Morg code block at point"

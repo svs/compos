@@ -493,7 +493,8 @@
     (let ((r (list-current (current-buffer))))
       (if (and r (webhooks--request-row? r))
           (webhooks--show-payload! (current-buffer) (cadr r))
-          (message "no request on this line")))))
+          (message "no request on this line"))))
+  'modes '(webhooks-detail-mode))
 
 
 (define (webhooks--list)
@@ -598,7 +599,8 @@
                       (webhooks--said name "changed"))
                     'initial (or (plist-get hook 'token) "")))
                 'initial (string-join (plist-get hook 'methods) ",")))
-            'initial (plist-get hook 'path)))))))
+            'initial (plist-get hook 'path))))))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-attach-workflow" "Run a Scheme handler, as a workflow, on every request to the webhook on this line"
   (lambda ()
@@ -613,7 +615,8 @@
                     (begin (webhook-attach-workflow! name sym)
                            (webhooks--keep! name)
                            (webhooks--said name (string-append "workflow " (symbol->string sym))))))))
-          'initial (let ((h (webhook-workflow name))) (if h (symbol->string h) "")))))))
+          'initial (let ((h (webhook-workflow name))) (if h (symbol->string h) ""))))))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-history" "Show the requests the webhook on this line took, newest first"
   (lambda ()
@@ -621,7 +624,8 @@
       (lambda (name)
         (events-list-open!)
         (events-list-set-topic! (string-append "webhook:" name))
-        (list-mode-show! "events-mode")))))
+        (list-mode-show! "events-mode"))))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-detach-workflow" "Stop the workflow on the webhook on this line"
   (lambda ()
@@ -631,10 +635,12 @@
             (message (string-append "webhook " name " has no workflow"))
             (begin (webhook-detach-workflow! name)
                    (webhooks--keep! name)
-                   (webhooks--said name "workflow stopped")))))))
+                   (webhooks--said name "workflow stopped"))))))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-remove" "Remove the webhook on this line and forget it"
-  (lambda () (webhooks--on-current webhooks--delete!)))
+  (lambda () (webhooks--on-current webhooks--delete!))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-copy-url" "Copy the URL of the webhook on this line"
   (lambda ()
@@ -643,7 +649,8 @@
         (let ((url (webhook-url name)))
           (if url
               (begin (kill-new url) (message (string-append "copied " url)))
-              (message "the server is stopped, s starts it")))))))
+              (message "the server is stopped, s starts it"))))))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-toggle-public" "Let the webhook on this line answer through the tunnel, or keep it local"
   (lambda ()
@@ -656,7 +663,8 @@
                   'data (plist-get hook 'data) 'public (not (plist-get hook 'public)))
             (plist-get hook 'handler))
           (webhooks--keep! name)
-          (webhooks--said name (if (plist-get (webhook-get name) 'public) "is public" "is local")))))))
+          (webhooks--said name (if (plist-get (webhook-get name) 'public) "is public" "is local"))))))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-command "webhooks-toggle-server" "Start the webhook server, or stop it"
   (lambda ()
@@ -666,10 +674,12 @@
         (let ((url (webhooks-start!)))
           (customize-save! 'webhooks-enabled #t)
           (message (string-append "webhooks listen on " url))))
-    (webhooks-refresh!)))
+    (webhooks-refresh!))
+  'modes '(webhooks-mode))
 
 (define-command "webhooks-refresh" "Redraw the webhook list"
-  (lambda () (webhooks-refresh!)))
+  (lambda () (webhooks-refresh!))
+  'modes '(webhooks-detail-mode webhooks-mode))
 
 (define-list-mode! "webhooks-mode"
   (list
@@ -742,7 +752,8 @@
 
 
 (define-command "webhooks-show" "Show the webhook at point as its own page beside the list: its config and its requests"
-  (lambda () (webhooks--on-current webhooks-show-detail!)))
+  (lambda () (webhooks--on-current webhooks-show-detail!))
+  'modes '(webhooks-mode))
 
 (define-command "webhooks" "List the webhook endpoints: define, edit, attach workflows"
   (lambda ()

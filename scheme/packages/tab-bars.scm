@@ -232,6 +232,7 @@
 
 (define-command "tab-bars-pick"
   "Show any tab of the list or the page beside it by name: the minibuffer's tabs are the tab bars, and typing filters across all of them"
-  (lambda () (tab-bars-pick! (current-buffer))))
+  (lambda () (tab-bars-pick! (current-buffer)))
+  'modes '(ats-mode travel-detail-mode site-app-detail-mode))
 
 (provide 'tab-bars)

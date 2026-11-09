@@ -377,7 +377,8 @@
               (when chat
                 (chat-switch! chat #f model)
                 (buffer-set-local! buf 'llm-session-id (buffer-local chat 'agent-slug))))
-            (message (string-append "C-RET · " model))))))))
+            (message (string-append "C-RET · " model)))))))
+  'modes '(llm-mode))
 
 ;; The live inline turn is data on the document's chat, not a registry of
 ;; its own: the chat knows its document (its inline relation) and its session,
@@ -2092,7 +2093,8 @@
               (group-chat-init! buf (or g buf))
               (with-current-buffer buf
                 (lambda () (set-mode! "chat-mode") (end-of-buffer!)))
-              (message "Chat reset")))))))
+              (message "Chat reset"))))))
+  'modes '(chat-mode))
 
 ;; the manual door for the same repair the mode setup runs on restore. A
 ;; turn that shows as running while the runtime is idle or gone stays hung
@@ -2879,7 +2881,8 @@
                     (number->string (or (plist-get u 'output) 0)) " tokens"
                     (let ((tc (plist-get u 'cost)))
                       (if tc (string-append " (" (format-usd tc) ")") "")))
-                  "")))))))
+                  ""))))))
+  'modes '(chat-mode))
 
 (define-command "llm-costs" "Show LLM spend by day and model (the usage ledger)"
   (lambda ()
@@ -2952,7 +2955,8 @@
              (chat-clear-input! buf)
              (when (group-chat-new! g)
                (insert! typed)
-               (run-command "agent-send")))))))
+               (run-command "agent-send"))))))
+  'modes '(chat-mode))
 
 (global-set-key "C-c n" "chat-new")
 (global-set-key "C-c r" "chat-send-region")

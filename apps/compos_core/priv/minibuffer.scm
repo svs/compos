@@ -131,17 +131,22 @@
 
 (define-command "minibuffer-rail-enter"
   "Move the arrows into the list on the right of the palette, or to the next tab"
-  (lambda () (cond ((mb-rail-enter!) #t) ((mb-tab-step! 1) #t) (else (run-command "forward-char")))))
+  (lambda () (cond ((mb-rail-enter!) #t) ((mb-tab-step! 1) #t) (else (run-command "forward-char"))))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-rail-exit"
   "Leave the list on the right and go back to the candidates, or to the previous tab"
-  (lambda () (cond ((mb-rail-exit!) #t) ((mb-tab-step! -1) #t) (else (run-command "backward-char")))))
+  (lambda () (cond ((mb-rail-exit!) #t) ((mb-tab-step! -1) #t) (else (run-command "backward-char"))))
+  'modes '(minibuffer-mode))
 
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
-  (lambda () (if (mb-rail-confirm!) #t (minibuffer-confirm!))))
+  (lambda () (if (mb-rail-confirm!) #t (minibuffer-confirm!)))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-confirm-input" "Accept the minibuffer input exactly as typed"
-  (lambda () (minibuffer-confirm-input!)))
+  (lambda () (minibuffer-confirm-input!))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
-  (lambda () (minibuffer-cancel!)))
+  (lambda () (minibuffer-cancel!))
+  'modes '(minibuffer-mode))
 
 ;;; The shape is not a different prompt. What you opened as a modal can
 ;;; finish as the bottom bar and go back, carrying the same input, the same
@@ -262,17 +267,20 @@
             (else
               (let ((next (minibuffer-shape-after (minibuffer-shape))))
                 (minibuffer-style! next)
-                (message next))))))))
+                (message next)))))))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
   (lambda ()
     (cond ((mb-rail-move! 1) #t)
           ((mb-list-move! 1) #t)
-          (else (minibuffer-next!) (mb-select-notify!)))))
+          (else (minibuffer-next!) (mb-select-notify!))))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-previous-candidate" "Select the previous minibuffer candidate"
   (lambda ()
     (cond ((mb-rail-move! -1) #t)
           ((mb-list-move! -1) #t)
-          (else (minibuffer-prev!) (mb-select-notify!)))))
+          (else (minibuffer-prev!) (mb-select-notify!))))
+  'modes '(minibuffer-mode))
 ;; A prompt may let its rows be deleted: *mb-row-delete-fn* is a thunk that
 ;; deletes the highlighted row. <delete> runs it, and DEL does on an empty
 ;; input, where there is no character to delete.
@@ -282,29 +290,34 @@
   (lambda ()
     (if (and *mb-row-delete-fn* (equal? (minibuffer-input) ""))
         (*mb-row-delete-fn*)
-        (minibuffer-del!))))
+        (minibuffer-del!)))
+  'modes '(minibuffer-mode))
 
 (define-command "minibuffer-delete-row" "Delete the highlighted row, in a prompt that allows it"
   (lambda ()
     (if *mb-row-delete-fn*
         (*mb-row-delete-fn*)
-        (message "Nothing here deletes a row"))))
+        (message "Nothing here deletes a row")))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-complete"
   "Fold the row or section at hand, else complete the input"
   (lambda ()
     (cond ((and *mb-fold-fn* (minibuffer-selected) (*mb-fold-fn* (minibuffer-selected))) #t)
           ((mb-list-call! 'fold) #t)
-          (else (minibuffer-complete!)))))
+          (else (minibuffer-complete!))))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-regroup"
   "Cycle what a section is in the list behind the prompt"
-  (lambda () (if (mb-list-call! 'regroup) #t (message "no list here"))))
+  (lambda () (if (mb-list-call! 'regroup) #t (message "no list here")))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-next-section"
   "Move to the next section in the list behind the prompt, else the next history entry"
   (lambda ()
     (cond ((and *mb-history-key* (>= *mb-history-pos* 0))
            (run-command "next-history-element"))
           ((mb-list-section! 1) #t)
-          (else (run-command "next-history-element")))))
+          (else (run-command "next-history-element"))))
+  'modes '(minibuffer-mode))
 (define-command "minibuffer-previous-section"
   "Move to the previous section in the list behind the prompt, else the previous history entry"
   ;; an empty prompt, or one already walking its history, walks the history
@@ -312,7 +325,8 @@
     (cond ((and *mb-history-key* (or (>= *mb-history-pos* 0) (equal? (minibuffer-input) "")))
            (run-command "previous-history-element"))
           ((mb-list-section! -1) #t)
-          (else (run-command "previous-history-element")))))
+          (else (run-command "previous-history-element"))))
+  'modes '(minibuffer-mode))
 
 ;;; --- candidate preview (the consult mechanism) -------------------------------
 ;;; Emacs previews by hooking SELECTION, not windows: consult registers a
@@ -455,7 +469,8 @@
   (lambda ()
     (if (equal? (minibuffer-input) "")
         (run-command "minibuffer-confirm")
-        (run-command "self-insert-command"))))
+        (run-command "self-insert-command")))
+  'modes '(minibuffer-mode))
 
 ;; RET in a path prompt (find-file) means the HIGHLIGHTED candidate
 ;; whenever one exists (vertico), resolved through the completion handler.

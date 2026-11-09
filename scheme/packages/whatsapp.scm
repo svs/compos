@@ -541,7 +541,8 @@
     (let ((chat (list-current *whatsapp-buffer*)))
       (if chat
           (whatsapp--open-chat! chat #t)
-          (message "No WhatsApp chat is selected")))))
+          (message "No WhatsApp chat is selected"))))
+  'modes '(whatsapp-mode))
 
 (domain! 'chat)
 (effects! '(read external))
@@ -549,10 +550,12 @@
 (define-command "whatsapp-refresh" "Refresh recent WhatsApp chats"
   (lambda ()
     (message "Refreshing WhatsApp chats…")
-    (cache-refresh! *whatsapp-buffer*)))
+    (cache-refresh! *whatsapp-buffer*))
+  'modes '(whatsapp-mode))
 
 (define-command "whatsapp-chat-refresh" "Refresh this WhatsApp conversation"
-  (lambda () (whatsapp--refresh-conversation! (current-buffer))))
+  (lambda () (whatsapp--refresh-conversation! (current-buffer)))
+  'modes '(whatsapp-chat-mode))
 
 (domain! 'chat)
 (effects! '(write external))
@@ -572,13 +575,16 @@
                 (if row
                     (string-append (whatsapp--quote row) trimmed)
                     trimmed)))))
-        'history 'whatsapp-reply-history))))
+        'history 'whatsapp-reply-history)))
+  'modes '(whatsapp-mode whatsapp-chat-mode))
 
 (define-command "whatsapp-next-message" "Move to the next message"
-  (lambda () (whatsapp--goto-message! (current-buffer) 'next)))
+  (lambda () (whatsapp--goto-message! (current-buffer) 'next))
+  'modes '(whatsapp-chat-mode))
 
 (define-command "whatsapp-prev-message" "Move to the previous message"
-  (lambda () (whatsapp--goto-message! (current-buffer) 'prev)))
+  (lambda () (whatsapp--goto-message! (current-buffer) 'prev))
+  'modes '(whatsapp-chat-mode))
 
 (mode-icon! "whatsapp-mode" "W")
 (mode-icon! "whatsapp-chat-mode" "W")

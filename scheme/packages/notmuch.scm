@@ -786,10 +786,12 @@ when a message has no text/plain part." 'group 'notmuch)
     (let ((s (nm--hello-at (current-buffer))))
       (if s
           (nm--open-index! (cadr s))
-          (message "No mailbox on this line")))))
+          (message "No mailbox on this line"))))
+  'modes '(notmuch-hello-mode))
 
 (define-command "notmuch-hello-refresh" "Refresh the mailbox counts"
-  (lambda () (list-refresh! (current-buffer)) (message "Refreshed")))
+  (lambda () (list-refresh! (current-buffer)) (message "Refreshed"))
+  'modes '(notmuch-hello-mode))
 
 ;;; A thread id belongs to one database, so a host change makes every cached
 ;;; view stale. Drop the rows and read again rather than keep ids that no
@@ -821,7 +823,8 @@ when a message has no text/plain part." 'group 'notmuch)
                  (profile (if (null? hit) "" (cadr (car hit)))))
             (customize-save! 'notmuch-host host)
             (customize-save! 'notmuch-profile profile)
-            (nm--host-changed! buf)))))))
+            (nm--host-changed! buf))))))
+  'modes '(notmuch-hello-mode))
 
 ;; the mail views are derived state — killing them loses nothing. The
 ;; chat survives (it holds a conversation); a scene toggle in init.scm
@@ -947,7 +950,8 @@ when a message has no text/plain part." 'group 'notmuch)
         (nm--refresh! buf)))))
 
 (define-command "notmuch-preview" "Preview the thread at point in the other window"
-  (lambda () (nm--preview! (current-buffer))))
+  (lambda () (nm--preview! (current-buffer)))
+  'modes '(notmuch-mode))
 
 ;; The index's current thread as its page, read by name: it never consults
 ;; the current buffer, point or the windows. Answers the page, or #f while
@@ -1047,24 +1051,29 @@ when a message has no text/plain part." 'group 'notmuch)
   (list-move-in! (current-buffer) step))
 
 (define-command "notmuch-next" "Move down; the shown mail follows"
-  (lambda () (nm--move! 1)))
+  (lambda () (nm--move! 1))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-prev" "Move up; the shown mail follows"
-  (lambda () (nm--move! -1)))
+  (lambda () (nm--move! -1))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-first-thread" "Jump to the newest thread"
-  (lambda () (list-goto-first-entry (current-buffer))))
+  (lambda () (list-goto-first-entry (current-buffer)))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-last-thread" "Jump to the oldest listed thread"
   (lambda ()
     (let* ((buf (current-buffer)) (n (length (list-entries buf))))
-      (when (> n 0) (list-goto-index! buf (- n 1))))))
+      (when (> n 0) (list-goto-index! buf (- n 1)))))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-refresh" "Re-run the search and refresh the listing"
   (lambda ()
     (let ((buf (current-buffer)))
       (nm--after-change! buf)
-      (message "Refreshed"))))
+      (message "Refreshed")))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-search" "Prompt for a notmuch query and show it"
   (lambda ()
@@ -1145,13 +1154,15 @@ when a message has no text/plain part." 'group 'notmuch)
     (let ((buf (current-buffer)))
       (if (nm--any-marked? buf)
           (nm--confirm-marked buf "Archive" "-inbox")
-          (nm--tag! buf "-inbox")))))
+          (nm--tag! buf "-inbox"))))
+  'modes '(notmuch-mode))
 (define-command "notmuch-trash" "Trash the marked threads, or the thread at point (+trash -inbox -unread)"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (nm--any-marked? buf)
           (nm--confirm-marked buf "Trash" "+trash -inbox -unread")
-          (nm--tag! buf "+trash -inbox -unread")))))
+          (nm--tag! buf "+trash -inbox -unread"))))
+  'modes '(notmuch-mode))
 (catalog-meta! 'command "notmuch-trash" 'domain 'mail 'effects '(destroy))
 
 (define-command "notmuch-toggle-unread" "Toggle the unread tag on the thread at point"
@@ -1163,7 +1174,8 @@ when a message has no text/plain part." 'group 'notmuch)
           (begin
             (nm--skip-follow!)
             (nm--tag! buf (if (member "unread" (nm--th-tags th)) "-unread" "+unread")))
-          (message "No thread on this line")))))
+          (message "No thread on this line"))))
+  'modes '(notmuch-mode))
 
 ;; on a plain tag:X search, u strips that tag from the thread — inbox zero
 ;; as a single keystroke on any tag view
@@ -1176,7 +1188,8 @@ when a message has no text/plain part." 'group 'notmuch)
             ((and (string-prefix? "tag:" query)
                   (not (string-contains? query " ")))
              (nm--tag! buf (string-append "-" (substring query 4 (string-length query)))))
-            (else (message "Not a simple tag: search"))))))
+            (else (message "Not a simple tag: search")))))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-edit-tags" "Edit tags of the thread at point (+tag -tag ...)"
   (lambda ()
@@ -1184,7 +1197,8 @@ when a message has no text/plain part." 'group 'notmuch)
       (if (nm--thread-at buf)
           (minibuffer-read "Tags (+add -remove): " '()
             (lambda (changes) (nm--tag! buf changes)))
-          (message "No thread on this line")))))
+          (message "No thread on this line"))))
+  'modes '(notmuch-mode))
 
 ;; every tag in the database — the completion source for +
 (define (nm--all-tags)
@@ -1211,7 +1225,8 @@ when a message has no text/plain part." 'group 'notmuch)
                 (if (nm--any-marked? buf)
                     (nm--tag-marked! buf (sh-quote (string-append "+" (string-trim tag))))
                     (nm--tag! buf (sh-quote (string-append "+" (string-trim tag))))))))
-          (message "No thread on this line")))))
+          (message "No thread on this line"))))
+  'modes '(notmuch-mode))
 
 (catalog-meta! 'command "notmuch-add-tag" 'domain 'mail 'effects '(write external execute))
 
@@ -1227,7 +1242,8 @@ when a message has no text/plain part." 'group 'notmuch)
                 (if (nm--any-marked? buf)
                     (nm--tag-marked! buf (sh-quote (string-append "-" (string-trim tag))))
                     (nm--tag! buf (sh-quote (string-append "-" (string-trim tag))))))))
-          (message "No thread on this line")))))
+          (message "No thread on this line"))))
+  'modes '(notmuch-mode))
 (catalog-meta! 'command "notmuch-remove-tag" 'domain 'mail 'effects '(write external execute))
 ;; Archive drops one tag and trash swaps three. This is the blunt one:
 ;; after it the thread answers to no tag: search at all, so it names the
@@ -1253,7 +1269,8 @@ when a message has no text/plain part." 'group 'notmuch)
                   (if marked?
                       (nm--tag-marked! buf "--remove-all")
                       (nm--tag! buf "--remove-all"))
-                  (message "Cancelled"))))))))
+                  (message "Cancelled")))))))
+  'modes '(notmuch-mode))
 (catalog-meta! 'command "notmuch-remove-all-tags" 'domain 'mail 'effects '(destroy))
 ;; Autotag: the mailbox's own tag list is the label set, sent to JEV as the
 ;; options of one choice question. JEV reads the thread and picks exactly one of
@@ -1649,7 +1666,8 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
       (cond ((null? ids) (message "Autotag: no unprocessed thread here (C-u to take all)"))
             ((null? vocab) (message "This mailbox has no tags to classify with"))
             ((not (jev-api-key)) (message "Autotag needs a JEV key: set TYPESAFE_API_KEY"))
-            (else (nm--autotag-run! buf ids vocab))))))
+            (else (nm--autotag-run! buf ids vocab)))))
+  'modes '(notmuch-mode))
 (catalog-meta! 'command "notmuch-autotag" 'domain 'mail
                'effects '(write external execute spend))
 
@@ -1786,7 +1804,8 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
             (unless (equal? term "")
               (nm--query-push! buf term)
               (nm--refresh! buf)
-              (list-goto-first-entry buf))))))))
+              (list-goto-first-entry buf)))))))
+  'modes '(notmuch-mode))
 
 (domain! 'mail)
 (effects! '(write external execute))
@@ -1805,7 +1824,8 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
                   (nm--query-push! buf (string-append "tag:" tag))
                   (nm--refresh! buf)
                   (list-goto-first-entry buf)
-                  (message (string-append "Added tag filter: " tag))))))))))
+                  (message (string-append "Added tag filter: " tag)))))))))
+  'modes '(notmuch-mode))
 
 (effects! '(unknown))
 
@@ -1818,13 +1838,15 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
           (message "No structured notmuch filters to remove")
           (begin
             (nm--after-change! buf pos)
-            (message "Removed last notmuch filter"))))))
+            (message "Removed last notmuch filter")))))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-back" "Remove the last mail filter, or return to mailboxes"
   (lambda ()
     (if (pair? (nm--query-filters-of (current-buffer)))
         (run-command "notmuch-unfilter-last")
-        (run-command "notmuch"))))
+        (run-command "notmuch")))
+  'modes '(notmuch-mode))
 (catalog-meta! 'command "notmuch-back" 'domain 'mail 'effects '(write external execute))
 
 (define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"
@@ -1839,7 +1861,8 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
           (nm--query-push-only! buf (string-append "from:" email))
           (nm--refresh! buf)
           (list-goto-first-entry buf)
-          (message (string-append "from:" email)))))))
+          (message (string-append "from:" email))))))
+  'modes '(notmuch-mode))
 
 (define (nm--thread-here)
   "The thread the command acts on: an open notmuch-show buffer names its thread, a list row carries one."
@@ -2032,7 +2055,8 @@ them the address is live, so a purge never follows one."
           (let ((email (nm--thread-sender thread-id)))
             (if (equal? email "")
                 (message "Could not extract the sender")
-                (nm--purge-run! thread-id email)))))))
+                (nm--purge-run! thread-id email))))))
+  'modes '(notmuch-mode))
 
 (catalog-meta! 'command "notmuch-purge-sender" 'domain 'mail 'effects '(destroy external))
 
@@ -2080,7 +2104,8 @@ them the address is live, so a purge never follows one."
                    (nm--refresh! *notmuch-search-buffer*))
                  (message "Liked")))))
         ((nm--any-marked? buf) (nm--confirm-marked buf "Like" "+liked -inbox"))
-        (else (nm--tag! buf "+liked -inbox"))))))
+        (else (nm--tag! buf "+liked -inbox")))))
+  'modes '(notmuch-mode notmuch-show-mode))
 
 (catalog-meta! 'command "notmuch-like" 'domain 'mail 'effects '(write))
 
@@ -2161,7 +2186,8 @@ them the address is live, so a purge never follows one."
     (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
       (if th
           (begin (nm--toggle-selection! buf (nm--th-id th)) (list-move-in! buf 1))
-          (message "No thread on this line")))))
+          (message "No thread on this line"))))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-mark-all" "Select the entire filtered inbox or search locally; again clears selection"
   (lambda ()
@@ -2179,14 +2205,16 @@ them the address is live, so a purge never follows one."
         (else
           (nm--set-selection! buf #t '())
           (nm--redraw-marks! buf)
-          (message "Selected entire search"))))))
+          (message "Selected entire search")))))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-unmark-all" "Clear local mail selection"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'notmuch-selection #f)
       (nm--redraw-marks! buf)
-      (message "Unmarked all"))))
+      (message "Unmarked all")))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-filter-marked" "Open the selected messages as a search"
   (lambda ()
@@ -2196,7 +2224,8 @@ them the address is live, so a purge never follows one."
           (begin
             (nm--query-push-only! buf (nm--marked-query buf))
             (nm--refresh! buf)
-            (list-goto-first-entry buf))))))
+            (list-goto-first-entry buf)))))
+  'modes '(notmuch-mode))
 
 (for-each (lambda (name)
             (catalog-meta! 'command name 'domain 'mail 'effects '(read write display)))
@@ -2212,16 +2241,19 @@ them the address is live, so a purge never follows one."
 
 (define-command "notmuch-archive-marked" "Archive all marked threads"
   (lambda () (nm--confirm-marked (current-buffer) "Archive"
-                        "-inbox")))
+                        "-inbox"))
+  'modes '(notmuch-mode))
 (define-command "notmuch-trash-marked" "Trash all marked threads"
   (lambda () (nm--confirm-marked (current-buffer) "Trash"
-                        "+trash -inbox -unread")))
+                        "+trash -inbox -unread"))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-tag-marked" "Apply tag changes to all marked threads"
   (lambda ()
     (let ((buf (current-buffer)))
       (minibuffer-read "Tag marked (+add -remove): " '()
-        (lambda (changes) (nm--tag-marked! buf changes) (message changes))))))
+        (lambda (changes) (nm--tag-marked! buf changes) (message changes)))))
+  'modes '(notmuch-mode))
 
 ;;; --- thread (show) buffer -------------------------------------------------------
 
@@ -2312,7 +2344,8 @@ them the address is live, so a purge never follows one."
           (minibuffer-read "Open attachment: " (map car choices)
             (lambda (choice)
               (let ((hit (assoc choice choices)))
-                (when hit (nm--open-attachment! (cadr hit))))))))))
+                (when hit (nm--open-attachment! (cadr hit)))))))))
+  'modes '(notmuch-mode notmuch-show-mode))
 (catalog-meta! 'command "notmuch-open-attachment" 'domain 'mail 'effects '(write external execute display))
 
 ;; Body text excludes attachments, which have their own visible list.
@@ -2620,21 +2653,24 @@ them the address is live, so a purge never follows one."
             (let* ((page (nm--thread-buffer id))
                    (pane (and page (window-showing page))))
               (when pane (select-window! pane))))
-          (message "No thread on this line")))))
+          (message "No thread on this line"))))
+  'modes '(notmuch-mode))
 
 (define-command "notmuch-show-toggle-view" "Switch between the HTML and text views"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'notmuch-view
         (if (equal? (buffer-local buf 'notmuch-view) "text") "html" "text"))
-      (set-mode! "notmuch-show-mode"))))
+      (set-mode! "notmuch-show-mode")))
+  'modes '(notmuch-show-mode))
 
 (define-command "notmuch-show-quit" "Close this thread's pane; it stays closed until you move to another thread"
   (lambda ()
     (set! *nm-dismissed* (or (and (buffer-exists? *notmuch-search-buffer*)
                                   (nm--id-at *notmuch-search-buffer*))
                              (buffer-local (current-buffer) 'notmuch-thread)))
-    (run-command "quit-window")))
+    (run-command "quit-window"))
+  'modes '(notmuch-show-mode))
 
 (define-command "notmuch-show-archive" "Archive this thread and go back"
   (lambda ()
@@ -2644,7 +2680,8 @@ them the address is live, so a purge never follows one."
         (run-command "quit-window")
         (when (buffer-exists? *notmuch-search-buffer*)
           (nm--refresh! *notmuch-search-buffer*))
-        (message "Archived")))))
+        (message "Archived"))))
+  'modes '(notmuch-show-mode))
 
 ;; the message the point is in: last offset <= point (above the first
 ;; message — on the subject line — it means the first message)
@@ -2737,7 +2774,8 @@ them the address is live, so a purge never follows one."
     (let ((msg (nm--msg-at (current-buffer))))
       (if msg
           (nm--compose-reply! (cadr msg))
-          (message "No message at point")))))
+          (message "No message at point"))))
+  'modes '(notmuch-show-mode))
 
 ;; newest message id of a thread (search sorts newest-first)
 (define (nm--newest-msg-id thread-id)
@@ -2755,7 +2793,8 @@ them the address is live, so a purge never follows one."
           (let ((id (nm--newest-msg-id (nm--th-id th))))
             (if id
                 (nm--compose-reply! id)
-                (message "No message found in thread")))))))
+                (message "No message found in thread"))))))
+  'modes '(notmuch-mode))
 
 (define (nm--from-header text)
   "The From address of a composed message, read from the header block alone."
@@ -2884,7 +2923,8 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
            (sent (mail-send-text! text)))
       (if (equal? sent #t)
           (begin (run-command "quit-window") (message "Sent"))
-          (message (string-append "Send failed: " sent))))))
+          (message (string-append "Send failed: " sent)))))
+  'modes '(mail-compose-mode))
 
 (define-command "mail-abort" "Abandon this compose buffer"
   (lambda ()
@@ -2892,7 +2932,8 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
            (others (filter (lambda (b) (not (equal? b buf))) (buffer-list-mru))))
       (buffer-kill! buf)
       (switch-to-buffer! (if (null? others) "*scratch*" (car others)))
-      (message "Aborted"))))
+      (message "Aborted")))
+  'modes '(mail-compose-mode))
 
 ;;; --- targets & actions: the email at point, embark-style -------------------------
 

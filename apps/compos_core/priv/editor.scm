@@ -271,11 +271,18 @@
 (define *command-generation*
   (if (boundp '*command-generation*) *command-generation* 0))
 
+(define *command-modes* (if (boundp '*command-modes*) *command-modes* '()))
+
+;; (define-command NAME [DOC] [SPEC] FN ['modes '(MODE ...)]): 'modes
+;; offers the command in M-x and the palette only in buffers of those
+;; modes, as Emacs's (interactive nil MODE ...); without it, everywhere.
 (define (define-command name &rest args)
   (let* ((doc (if (and (pair? args) (string? (car args))) (car args) ""))
          (rest (if (and (pair? args) (string? (car args))) (cdr args) args))
          (spec (and (pair? rest) (interactive-spec? (car rest)) (car rest)))
          (fn (if spec (cadr rest) (car rest)))
+         (opts (if spec (cddr rest) (cdr rest)))
+         (modes (let ((m (memq 'modes opts))) (and m (pair? (cdr m)) (cadr m))))
          ;; A command with no spec is its own function: run-command calls
          ;; it with no arguments and describe-function shows its body. A
          ;; command with a spec is wrapped: run-command's empty call
@@ -291,6 +298,9 @@
     (if (> (string-length doc) 0)
         (define-command--raw name doc entry)
         (define-command--raw name entry))
+    (when modes
+      (set! *command-modes*
+            (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
     (set! *command-generation* (+ *command-generation* 1))
     (catalog-register! 'command name doc
       'use (string-append "(run-command \"" name "\")")
@@ -5533,13 +5543,12 @@
 
 (effects! '(read))
 
-;; Mode scoping, as Emacs's (interactive nil MODES): a mode's commands are
-;; offered in its buffers alone. A command names its modes with
-;; command-modes!; else its modes are the ones whose -mode-map binds it when
-;; no global map does. An app's commands are offered in the app alone, its
-;; entry command everywhere (apps.scm). M-x and the palette ask
-;; command-applicable?, and command-mode-scoping #f turns it off.
-(define *command-modes* '())
+;; Mode scoping, as Emacs's (interactive nil MODES): a command names its
+;; modes where it is defined, with define-command's 'modes, or later with
+;; command-modes!; a command with no modes is offered everywhere. An app's
+;; commands are offered in the app alone, its entry command everywhere
+;; (apps.scm). M-x and the palette ask command-applicable?, and
+;; command-mode-scoping #f turns it off.
 
 ;; NAMES less every name in GONE, sorted: one sort, not a member scan per
 ;; name. A name in GONE sorts before the same name in NAMES.
@@ -5563,37 +5572,19 @@
     (or (buffer-derived-mode? buf m)
         (member (string-append m "-map") maps))))
 
-;; the commands that do not apply in BUF
-(define *command--mode-map-commands* #f)
-
-(define (command--mode-map-commands)
-  "the commands bound in some -mode-map, kept until a keymap changes"
-  (let ((key (list *keymap-generation* (length (keymap-names)))))
-    (if (and *command--mode-map-commands* (equal? (car *command--mode-map-commands*) key))
-        (cadr *command--mode-map-commands*)
-        (let ((cmds (apply append
-                           (map command--map-commands
-                                (filter (lambda (n) (string-suffix? "-mode-map" n))
-                                        (keymap-names))))))
-          (set! *command--mode-map-commands* (list key cmds))
-          cmds))))
-
 (define (commands-out-of-scope buf &optional names)
   (if (and (boundp 'command-mode-scoping) (not command-mode-scoping))
       '()
       (let* ((maps (or (ignore-errors (lambda () (buffer-keymaps buf))) '()))
              (open (apply append (map command--map-commands
                                       (append (list "global") (global-minor-maps) maps))))
-             (derived (names-less (command--mode-map-commands)
-                                  (append open (map car *command-modes*))))
-             ;; no modes is everywhere: a command a mode map binds that
-             ;; still works in any buffer says so with (command-modes! NAME '())
+             ;; no modes is everywhere
              (named (map car (remove (lambda (row)
                                        (or (null? (cadr row))
                                            (any (lambda (m) (command--mode-on? m buf maps)) (cadr row))))
                                      *command-modes*))))
         ;; an app's commands are offered in the app alone (apps.scm)
-        (append named derived
+        (append named
                 (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open names) '())))))
 
 (define (command-applicable? name &optional buf)
@@ -7013,7 +7004,7 @@
 (catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
 
 (category! 'commands)
-(public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
+(public! 'define-command "(define-command NAME [DOC] [SPEC] FN ['modes '(MODE ...)]) — register an M-x command; DOC shows in M-x; 'modes offers it only in buffers of those modes, as Emacs's (interactive nil MODE ...)")
 (public! 'domain! "(domain! 'NAME) — stamp following catalog declarations with their subject area")
 (public! 'effects! "(effects! '(LEVEL MODIFIERS...)) — LEVEL is pure/read/write/destroy/unknown; modifiers include external/execute/spend/display")
 (public! 'namespace! "(namespace! 'NAME) — set the public vocabulary for following declarations")

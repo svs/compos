@@ -507,7 +507,8 @@
     (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf))))
 
 (define-command "site-app-filter-next" "Show the next status tab of this section"
-  (lambda () (site-app-filter-step! 1)))
+  (lambda () (site-app-filter-step! 1))
+  'modes '(ats-mode))
 
 (define (site-app-filter-label tab)
   (let ((count (plist-get tab 'count)))
@@ -529,7 +530,8 @@
                       (else (loop (cdr rest))))))
             'require-match #t)))))
 (define-command "site-app-filter-prev" "Show the previous status tab of this section"
-  (lambda () (site-app-filter-step! -1)))
+  (lambda () (site-app-filter-step! -1))
+  'modes '(ats-mode))
 
 (for-each
   (lambda (n)
@@ -627,7 +629,8 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (spec (site-app-get buf 'spec)))
-      (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf)))))
+      (site-app-read-page! (plist-get spec 'name) (site-app-current-page buf))))
+  'modes '(ats-mode))
 
 (define (site-app-row-anchor buf row)
   ;; a section's row is an anchor named for it, filed under its kind, so a list
@@ -1666,9 +1669,11 @@
           (else (previous-line!) (anchor--clamp-top! buf)))))
 
 (define-command "site-app-detail-next" "Go to the next piece of this page"
-  (lambda () (site-app-detail-stop! 1)))
+  (lambda () (site-app-detail-stop! 1))
+  'modes '(site-app-detail-mode))
 (define-command "site-app-detail-prev" "Go to the previous piece of this page"
-  (lambda () (site-app-detail-stop! -1)))
+  (lambda () (site-app-detail-stop! -1))
+  'modes '(site-app-detail-mode))
 
 (define (site-app-c-tabs? x)
   (and (pair? x) (re-match? "\\bc-tabs\\b" (or (plist-get x 'class) ""))))
@@ -2391,8 +2396,10 @@
 (define-command "site-app-detail-tab-3" "Show this page's third tab" (lambda () (site-app-detail-nth! 3)))
 (define-command "site-app-detail-tab-4" "Show this page's fourth tab" (lambda () (site-app-detail-nth! 4)))
 (define-command "site-app-detail-tab-5" "Show this page's fifth tab" (lambda () (site-app-detail-nth! 5)))
-(define-command "site-app-detail-next-tab" "Show this page's next tab" (lambda () (site-app-detail-step! 1)))
-(define-command "site-app-detail-prev-tab" "Show this page's previous tab" (lambda () (site-app-detail-step! -1)))
+(define-command "site-app-detail-next-tab" "Show this page's next tab" (lambda () (site-app-detail-step! 1))
+  'modes '(site-app-detail-mode))
+(define-command "site-app-detail-prev-tab" "Show this page's previous tab" (lambda () (site-app-detail-step! -1))
+  'modes '(site-app-detail-mode))
 (define (site-app-fold-anchor! buf a)
   ;; a card folds by its own state, so the page redraws it shut or open and a
   ;; card that reads more from the site reads it on opening; #f when A is no card
@@ -2488,8 +2495,10 @@
                (j (cond ((< j 0) (- n 1)) ((>= j n) 0) (else j))))
           (site-app-stage-select! buf (plist-get (nth j shown) 'status))))))
 
-(define-command "site-app-detail-stage-next" "Show this tab's next stage" (lambda () (site-app-stage-step! 1)))
-(define-command "site-app-detail-stage-prev" "Show this tab's previous stage" (lambda () (site-app-stage-step! -1)))
+(define-command "site-app-detail-stage-next" "Show this tab's next stage" (lambda () (site-app-stage-step! 1))
+  'modes '(site-app-detail-mode))
+(define-command "site-app-detail-stage-prev" "Show this tab's previous stage" (lambda () (site-app-stage-step! -1))
+  'modes '(site-app-detail-mode))
 (define-command "site-app-detail-stage" "Ask for one of this tab's stages and show it"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -2578,7 +2587,8 @@
                     (line (car (buffer-line-at-point buf)))
                     (text (string-trim (list-ref (string-split (buffer-text buf) "\n") (- line 1)))))
                (site-app-show-detail! list-buf (list 'href href 'key key 'name text) page)))
-            (else (tab-open (site-app-url spec href)))))))
+            (else (tab-open (site-app-url spec href))))))
+  'modes '(site-app-detail-mode))
 (define-command "site-app-detail-reload" "Read this page again from the site"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -2589,12 +2599,14 @@
       ;; and a tab that opens on an empty stage may skip it again
       (site-app-set! buf 'stage-skipped '())
       (site-app-show-detail! (site-app-get buf 'list) (site-app-get buf 'row)
-                             (site-app-get buf 'for-page)))))
+                             (site-app-get buf 'for-page))))
+  'modes '(site-app-detail-mode))
 (define-command "site-app-detail-open" "Open this page on the site"
   (lambda ()
     (let ((buf (current-buffer)))
       (tab-open (site-app-url (site-app-spec (site-app-get buf 'name))
-                              (plist-get (site-app-get buf 'row) 'href))))))
+                              (plist-get (site-app-get buf 'row) 'href)))))
+  'modes '(site-app-detail-mode))
 
 (mode-keys! "site-app-detail-mode"
   (list (list "TAB" "site-app-detail-next-tab")
@@ -2649,19 +2661,24 @@
                 (else (loop (cdr ts) (+ i 1))))))))
 
 (define-command "site-app-detail-tab-next-beside" "Show the next tab of the page beside the list"
-  (lambda () (site-app-detail-tab-step-beside! 1)))
+  (lambda () (site-app-detail-tab-step-beside! 1))
+  'modes '(ats-mode))
 (define-command "site-app-detail-tab-prev-beside" "Show the previous tab of the page beside the list"
-  (lambda () (site-app-detail-tab-step-beside! -1)))
+  (lambda () (site-app-detail-tab-step-beside! -1))
+  'modes '(ats-mode))
 
 (define-command "site-app-detail-anchor-next" "Go to the next part of the page beside the list"
-  (lambda () (site-app-detail-anchor-step! "anchor-read-next")))
+  (lambda () (site-app-detail-anchor-step! "anchor-read-next"))
+  'modes '(ats-mode))
 (define-command "site-app-detail-anchor-prev" "Go to the previous part of the page beside the list"
-  (lambda () (site-app-detail-anchor-step! "anchor-read-previous")))
+  (lambda () (site-app-detail-anchor-step! "anchor-read-previous"))
+  'modes '(ats-mode))
 
 (define-command "site-app-detail" "Open the item on this website app row"
   (lambda ()
     (let ((buf (current-buffer)))
-      (site-app-show-detail! buf (list-current buf)))))
+      (site-app-show-detail! buf (list-current buf))))
+  'modes '(ats-mode))
 
 ;; the row's page and the chat of its own, as M-o on the page
 ;; a row and its page are one thing with one chat: the row's key names it
@@ -2672,7 +2689,8 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (page (site-app-show-detail! buf (list-current buf))))
-      (when page (llm-companion-open! page)))))
+      (when page (llm-companion-open! page))))
+  'modes '(ats-mode))
 
 ;; M-O: the top rows of the list, each worked by its page's own chat, the one
 ;; M-o opens, with one orchestrator to report. The app's 'bulk plist tunes it:
@@ -2699,7 +2717,8 @@
                               'rules (plist-get bulk 'rules)
                               'report (plist-get bulk 'report)))))
             (when orch
-              (with-frame-windows (lambda () (display-buffer-other-window! orch)))))))))
+              (with-frame-windows (lambda () (display-buffer-other-window! orch))))))))
+  'modes '(ats-applications-mode))
 (catalog-meta! 'command "site-app-bulk-agents" 'domain 'chat 'effects '(write spend display))
 
 (define (site-app-list-opts name title pages list-keys doc buffer)

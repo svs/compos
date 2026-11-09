@@ -202,7 +202,8 @@
                 (let ((cmd (key-binding "q")))
                   (buffer-minor-maps! buf maps)
                   (when (and (string? cmd) (not (equal? cmd "dismiss-buffer")))
-                    (run-command cmd)))))))))
+                    (run-command cmd))))))))
+  'modes '(dismiss-mode))
 
 (define (dismiss--after-mode! &rest args) (dismiss-sync-visible!))
 (advice-add! 'set-mode! 'after 'dismiss-presentation 'dismiss--after-mode!)

@@ -219,7 +219,8 @@ or its command; #t when it went somewhere"
     (list-mode-show! "notifications-mode")))
 
 (define-command "notifications-refresh" "Redraw the notices"
-  (lambda () (when (buffer-exists? *notifications-buffer*) (list-refresh! *notifications-buffer*))))
+  (lambda () (when (buffer-exists? *notifications-buffer*) (list-refresh! *notifications-buffer*)))
+  'modes '(notifications-mode))
 
 (define-command "notifications-clear" "Take every notice off the screen"
   (lambda () (set! *notifications-shown* '()) (notifications--publish!)))
@@ -229,18 +230,21 @@ or its command; #t when it went somewhere"
     (let ((e (list-current (current-buffer))))
       (if e
           (begin (notifications-done! (plist-get e 'seq)) (notifications-visit! e))
-          (message "No notice on this line")))))
+          (message "No notice on this line"))))
+  'modes '(notifications-mode))
 
 (define-command "notifications-done" "Mark the notice at point done: it leaves the list and the bell"
   (lambda ()
     (let ((e (list-current (current-buffer))))
-      (if e (notifications-done! (plist-get e 'seq)) (message "No notice on this line")))))
+      (if e (notifications-done! (plist-get e 'seq)) (message "No notice on this line"))))
+  'modes '(notifications-mode))
 
 (define-command "notifications-toggle-all" "Show every notice that passed, or only the open ones"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'notifications-all (not (buffer-local buf 'notifications-all)))
-      (list-refresh! buf))))
+      (list-refresh! buf)))
+  'modes '(notifications-mode))
 
 (domain! 'interaction)
 (effects! '(write display))

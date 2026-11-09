@@ -442,7 +442,8 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (hit (agenda--entry-at buf (agenda--line-number buf (point)))))
-      (if hit (agenda--visit! hit) (message "no entry here")))))
+      (if hit (agenda--visit! hit) (message "no entry here"))))
+  'modes '(morg-agenda-mode))
 
 (define (agenda--step dir)
   (let* ((buf (current-buffer))
@@ -458,9 +459,11 @@
         (message "no more entries"))))
 
 (define-command "agenda-next" "Move point to the next entry"
-  (lambda () (agenda--step 1)))
+  (lambda () (agenda--step 1))
+  'modes '(morg-agenda-mode))
 (define-command "agenda-prev" "Move point to the previous entry"
-  (lambda () (agenda--step -1)))
+  (lambda () (agenda--step -1))
+  'modes '(morg-agenda-mode))
 
 (define (agenda--toggle-day! buf day)
   (let ((closed (or (buffer-local buf 'agenda-closed-days) '())))
@@ -474,10 +477,12 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (day (agenda--day-at buf (agenda--line-number buf (point)))))
-      (if day (agenda--toggle-day! buf day) (message "no day here")))))
+      (if day (agenda--toggle-day! buf day) (message "no day here"))))
+  'modes '(morg-agenda-mode))
 
 (define-command "agenda-refresh" "Re-read the agenda files"
-  (lambda () (agenda--render! (current-buffer))))
+  (lambda () (agenda--render! (current-buffer)))
+  'modes '(morg-agenda-mode))
 
 (define (agenda--set-offset! buf off)
   (buffer-set-local! buf 'agenda-start-offset off)
@@ -487,23 +492,27 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (agenda--set-offset! buf
-        (+ (or (buffer-local buf 'agenda-start-offset) 0) 7)))))
+        (+ (or (buffer-local buf 'agenda-start-offset) 0) 7))))
+  'modes '(morg-agenda-mode))
 
 (define-command "agenda-week-prev" "Show the previous week"
   (lambda ()
     (let ((buf (current-buffer)))
       (agenda--set-offset! buf
-        (- (or (buffer-local buf 'agenda-start-offset) 0) 7)))))
+        (- (or (buffer-local buf 'agenda-start-offset) 0) 7))))
+  'modes '(morg-agenda-mode))
 
 (define-command "agenda-today" "Return the agenda to the week that starts today"
-  (lambda () (agenda--set-offset! (current-buffer) 0)))
+  (lambda () (agenda--set-offset! (current-buffer) 0))
+  'modes '(morg-agenda-mode))
 
 (define-command "agenda-toggle-view" "Toggle between the cards and the plain listing"
   (lambda ()
     (let* ((buf (current-buffer))
            (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
       (buffer-set-local! buf 'render-mode (if rich? #f "blocks"))
-      (message (if rich? "plain agenda" "agenda cards")))))
+      (message (if rich? "plain agenda" "agenda cards"))))
+  'modes '(morg-agenda-mode))
 
 ;; the click registry (components.scm): a day header folds its day, an
 ;; entry row opens its file

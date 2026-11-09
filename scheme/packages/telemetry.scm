@@ -245,7 +245,8 @@
         (buffer-set-local! *telemetry-detail-buffer* 'telemetry-detail-row row)
         (display-buffer-other-window! *telemetry-detail-buffer*)
         (with-current-buffer *telemetry-detail-buffer*
-          (lambda () (set-mode! "telemetry-detail-mode")))))))
+          (lambda () (set-mode! "telemetry-detail-mode"))))))
+  'modes '(telemetry-mode))
 
 (define (telemetry--meta buf)
   (let* ((rows (list-entries buf))
@@ -290,21 +291,25 @@
            (tid (if row (telemetry--trace row) "")))
       (if (equal? tid "")
           (message "This row has no trace")
-          (telemetry--toggle-filter! buf "trace" tid)))))
+          (telemetry--toggle-filter! buf "trace" tid))))
+  'modes '(telemetry-mode))
 
 (define-command "telemetry-keys" "Keep the traced rows: keystrokes and intents"
-  (lambda () (telemetry--toggle-filter! (current-buffer) "keys" "traced")))
+  (lambda () (telemetry--toggle-filter! (current-buffer) "keys" "traced"))
+  'modes '(telemetry-mode))
 
 (define-command "telemetry-all" "Show the editor's own refresh and render rows too; again hides them"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'telemetry-all (not (buffer-local buf 'telemetry-all)))
-      (list-refresh! buf))))
+      (list-refresh! buf)))
+  'modes '(telemetry-mode))
 
 (define-command "telemetry-slow" "Keep the rows over the slow threshold"
   (lambda ()
     (telemetry--toggle-filter! (current-buffer) "slow"
-      (string-append ">=" (number->string telemetry-slow-ms) "ms"))))
+      (string-append ">=" (number->string telemetry-slow-ms) "ms")))
+  'modes '(telemetry-mode))
 
 ;;; --- following the work ------------------------------------------------------
 ;;; The collector says when rows arrive, once a second at most. The list
@@ -366,7 +371,8 @@
           (telemetry-refresh!))))))
 
 (define-command "telemetry-refresh" "Refresh the telemetry list"
-  (lambda () (telemetry-refresh!)))
+  (lambda () (telemetry-refresh!))
+  'modes '(telemetry-mode))
 
 (effects! '(write))
 
@@ -374,7 +380,8 @@
   (lambda ()
     (telemetry-clear!)
     (telemetry-refresh!)
-    (message "Telemetry cleared")))
+    (message "Telemetry cleared"))
+  'modes '(telemetry-mode))
 
 (effects! '(read))
 

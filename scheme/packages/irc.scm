@@ -656,7 +656,8 @@
            (name (irc-buf-server buf)))
       (if (and e name)
           (irc-join! name (car e) "")
-          (message "no channel on this line")))))
+          (message "no channel on this line"))))
+  'modes '(irc-channels-mode))
 
 ;; `g` asks the server again, with the pattern the /list that made this
 ;; buffer used; the rows land when 323 closes the reply
@@ -668,7 +669,8 @@
           (let ((pat (or (irc-conn-get name 'list-pattern) "")))
             (message (string-append "asking " name " for the channel list"))
             (irc-send! name (string-append "LIST" (if (equal? pat "") "" (string-append " " pat)))))
-          (message "not connected: /connect")))))
+          (message "not connected: /connect"))))
+  'modes '(irc-channels-mode))
 
 ;;; --- the servers list -------------------------------------------------------
 
@@ -733,7 +735,8 @@
       (when name
         (unless (irc-connected? name) (irc-connect! name))
         (irc-servers-refresh!)
-        (switch-to-buffer! (irc-buffer! name #f))))))
+        (switch-to-buffer! (irc-buffer! name #f)))))
+  'modes '(irc-servers-mode))
 
 (define-command "irc-servers-disconnect" "Disconnect the server on this row"
   (lambda ()
@@ -741,7 +744,8 @@
       (when name
         (irc-disconnect! name "bye")
         (irc-servers-refresh!)
-        (message (string-append name " disconnected"))))))
+        (message (string-append name " disconnected")))))
+  'modes '(irc-servers-mode))
 
 (define-command "irc-servers-add" "Add a server to the list"
   (lambda ()
@@ -756,7 +760,8 @@
                     (irc-servers-add! (string-trim name) (string-trim host)
                                       (irc-or (string-trim port) "6667")
                                       (irc-or (string-trim nick) irc-nick))
-                    (irc-servers-refresh!)))))))))))
+                    (irc-servers-refresh!))))))))))
+  'modes '(irc-servers-mode))
 
 (define (irc-or s default) (if (equal? s "") default s))
 
@@ -775,10 +780,12 @@
       (when name
         (irc-servers-remove! name)
         (irc-servers-refresh!)
-        (message (string-append name " removed"))))))
+        (message (string-append name " removed")))))
+  'modes '(irc-servers-mode))
 
 (define-command "irc-servers-refresh" "Redraw the server list"
-  (lambda () (irc-servers-refresh!)))
+  (lambda () (irc-servers-refresh!))
+  'modes '(irc-servers-mode))
 
 (define-command "irc" "List your IRC servers; RET connects"
   (lambda () (list-mode-show! "irc-servers-mode")))
@@ -976,7 +983,8 @@
     (let ((buf (current-buffer)))
       (if (irc-buffer? buf)
           (irc-send-input! buf)
-          (message "not an IRC buffer")))))
+          (message "not an IRC buffer"))))
+  'modes '(irc-mode))
 
 (define (irc-toggle-verbose! name)
   (set! irc-verbose (not irc-verbose))

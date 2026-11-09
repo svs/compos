@@ -299,10 +299,12 @@
               (navigate-url!
                 (string-append url
                   (if (string-contains? url "?") "&" "?")
-                  "daemon-switch=1"))))))))
+                  "daemon-switch=1")))))))
+  'modes '(daemons-mode))
 
 (define-command "daemons-refresh" "Refresh the daemon list"
-  (lambda () (list-refresh! *daemons-buffer*)))
+  (lambda () (list-refresh! *daemons-buffer*))
+  'modes '(daemons-mode))
 
 (define-command "daemons" "List daemons and switch this browser tab"
   (lambda ()
@@ -321,10 +323,12 @@
                                     (or (plist-get row 'project) "") " / "
                                     (or (plist-get row 'name) "")
                                     " in a new tab")))
-          (message "no workspace on this line")))))
+          (message "no workspace on this line"))))
+  'modes '(workspaces-mode))
 
 (define-command "workspaces-refresh" "Refresh the workspace list"
-  (lambda () (list-refresh! *workspaces-buffer*)))
+  (lambda () (list-refresh! *workspaces-buffer*))
+  'modes '(workspaces-mode))
 
 (define-command "workspaces" "List workspaces and open one in a new browser tab"
   (lambda ()

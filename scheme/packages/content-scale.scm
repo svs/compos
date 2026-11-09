@@ -420,12 +420,14 @@
       (when buf
         (when pos (buffer-set-local! buf 'content-scale-point pos))
         (content-scale-set! buf 0)
-        (content-scale--say buf)))))
+        (content-scale--say buf))))
+  'modes '(content-scale-view-mode))
 
 (define-command "content-scale-refresh" "Draw this content level again"
   (lambda ()
     (let ((buf (content-scale-source (current-buffer))))
-      (content-scale--apply! buf (content-scale-level buf)))))
+      (content-scale--apply! buf (content-scale-level buf))))
+  'modes '(content-scale-view-mode))
 
 (define-mode "content-scale-view-mode" (lambda () #t))
 (mode-doc! "content-scale-view-mode" "Read a buffer at one level of detail of its content scale. The page is made again when the level changes.")
@@ -783,10 +785,12 @@
               (message (string-append name ": " (anchor-scale--level-name (anchor-scale--reduction a n)))))))))))
 
 (define-command "anchor-scale-decrease" "Show less of the part at point; outside a part, of the page"
-  (lambda () (anchor-scale--step! 1)))
+  (lambda () (anchor-scale--step! 1))
+  'modes '(anchor-mode))
 
 (define-command "anchor-scale-increase" "Show more of the part at point; outside a part, of the page"
-  (lambda () (anchor-scale--step! -1)))
+  (lambda () (anchor-scale--step! -1))
+  'modes '(anchor-mode))
 
 ;; f: the part at point folded to its first line, or open again
 (define-command "anchor-fold" "Fold the part at point, or open it again"
@@ -805,7 +809,8 @@
                     (cond ((> (anchor-scale-of buf name) 0) 0)
                           ((pair? folds) (car (car folds)))
                           (else (anchor-scale--max a))))))
-          (message (string-append name (if (= n 0) ": open" ": folded")))))))))
+          (message (string-append name (if (= n 0) ": open" ": folded"))))))))
+  'modes '(anchor-mode))
 
 ;; the level most parts are at: a part whose name changes from page to page
 ;; takes it from a saved level

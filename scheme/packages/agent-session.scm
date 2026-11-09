@@ -589,7 +589,8 @@
                                    (end-of-buffer!)
                                    (message (if (equal? result 'answered)
                                                 "answered"
-                                                "sent")))))))))))))))
+                                                "sent"))))))))))))))
+  'modes '(chat-mode))
 
 ;;; Completion at the chat prompt.
 ;;
@@ -785,10 +786,12 @@
       (else (chat-history-recall! buf dir)))))
 
 (define-command "chat-history-previous" "Recall the previous thing you typed at a prompt"
-  (lambda () (chat-history-move! -1)))
+  (lambda () (chat-history-move! -1))
+  'modes '(chat-mode))
 
 (define-command "chat-history-next" "Recall the next thing you typed at a prompt"
-  (lambda () (chat-history-move! 1)))
+  (lambda () (chat-history-move! 1))
+  'modes '(chat-mode))
 
 (define-command "agent-interrupt-send" "Revive, cancel, or hard-reset the agent"
   (lambda ()
@@ -830,7 +833,8 @@
                   (when (agent-promote! slug text)
                     (buffer-set-local! buf 'chat-queued
                       (cons text (list-head q (- (length q) 1))))
-                    (message "queued first — runs when this turn ends"))))))))))
+                    (message "queued first — runs when this turn ends")))))))))
+  'modes '(chat-mode))
 
 (define-command "chat-abort" "Stop the reply in flight in this chat"
   (lambda ()
@@ -1119,7 +1123,8 @@
                       (if (equal? (string-trim draft) "")
                           text
                           (string-append text "\n" draft))))
-                  (message "unqueued — the message is back in the input"))))))))
+                  (message "unqueued — the message is back in the input")))))))
+  'modes '(chat-mode))
 
 (define (agent-claimed-slugs)
   (filter (lambda (s) s)
@@ -1154,7 +1159,8 @@
   (lambda ()
     (if (chat-marker-guard? (current-buffer) (point))
         (message "beginning of input")
-        (unless (delete-active-region!) (delete-char! -1)))))
+        (unless (delete-active-region!) (delete-char! -1))))
+  'modes '(chat-mode))
 
 (define-command "chat-delete-forward" "Delete forward, but never the input marker"
   (lambda ()
@@ -1163,7 +1169,8 @@
                (>= (point) (chat-mark buf))
                (< (point) (chat-input-start buf)))
           (message "this is the input marker")
-          (unless (delete-active-region!) (delete-char! 1))))))
+          (unless (delete-active-region!) (delete-char! 1)))))
+  'modes '(chat-mode))
 
 (effects! '(write display))
 
@@ -1204,7 +1211,8 @@
           (begin
             (with-current-buffer buf (lambda () (end-of-buffer!)))
             (chat-follow-again! buf)
-            (buffer-windows-follow-point! buf))))))
+            (buffer-windows-follow-point! buf)))))
+  'modes '(chat-mode))
 ;; The other end: the first message. The transcript draws only its newest
 ;; blocks, so the top first reveals every earlier one; then the reader's
 ;; place is the very top, and the bumped token makes the page take it.
@@ -1218,7 +1226,8 @@
             (buffer-set-local! buf 'chat-view-reveal (length (agent-blocks buf)))
             (when (boundp 'chat-view-sync!) (chat-view-sync! buf))
             (buffer-set-local! buf 'follow-place '(#t 0 #f 0))
-            (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0))))))))
+            (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))))
+  'modes '(chat-mode))
 
 ;; A chat comes back at its newest message. A browser that attaches a
 ;; frame (a page load, a reconnect after a restart) shows each chat in

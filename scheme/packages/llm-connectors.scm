@@ -752,45 +752,56 @@
 (define-command "llm-connectors-show-test" "Show the whole last test of the model on this line, or else the connector"
   (lambda ()
     (let ((model (llm-connectors--model-at-point)))
-      (llm-connectors--on-current (lambda (name) (llm-connectors-show-test! name model))))))
+      (llm-connectors--on-current (lambda (name) (llm-connectors-show-test! name model)))))
+  'modes '(llm-connectors-detail-mode))
 
 (define-command "llm-connectors-show" "Show the page of the connector on this line beside the list"
-  (lambda () (llm-connectors--on-current llm-connectors-show-detail!)))
+  (lambda () (llm-connectors--on-current llm-connectors-show-detail!))
+  'modes '(llm-connectors-mode))
 
 (define-command "llm-connectors-refresh" "Check every connector again and redraw"
-  (lambda () (llm-connectors--recheck!) (message "connectors checked again")))
+  (lambda () (llm-connectors--recheck!) (message "connectors checked again"))
+  'modes '(llm-connectors-detail-mode llm-connectors-mode))
 
 (define-command "llm-connectors-make-default" "Make the model on this line, or else the connector, the one new chats use"
   (lambda ()
     (let ((model (llm-connectors--model-at-point)))
-      (llm-connectors--on-current (lambda (name) (llm-connectors-make-default! name model))))))
+      (llm-connectors--on-current (lambda (name) (llm-connectors-make-default! name model)))))
+  'modes '(llm-connectors-detail-mode llm-connectors-mode))
 
 (effects! '(write execute external))
 
 (define-command "llm-connectors-install" "Install the agent program of the connector on this line"
-  (lambda () (llm-connectors--on-current llm-connectors-install!)))
+  (lambda () (llm-connectors--on-current llm-connectors-install!))
+  'modes '(llm-connectors-detail-mode llm-connectors-mode))
 
 (define-command "llm-connectors-sign-in" "Sign in to the connector on this line in a terminal"
-  (lambda () (llm-connectors--on-current llm-connectors-sign-in!)))
+  (lambda () (llm-connectors--on-current llm-connectors-sign-in!))
+  'modes '(llm-connectors-detail-mode llm-connectors-mode))
 
 (define-command "llm-connectors-add-key" "Add or change the API key of the connector on this line"
-  (lambda () (llm-connectors--on-current llm-connectors-add-key!)))
+  (lambda () (llm-connectors--on-current llm-connectors-add-key!))
+  'modes '(llm-connectors-detail-mode llm-connectors-mode))
 
 (define-command "llm-connectors-add-model" "Add a model id of your own to this connector, and test it"
-  (lambda () (llm-connectors--on-current llm-connectors-add-model-ask!)))
+  (lambda () (llm-connectors--on-current llm-connectors-add-model-ask!))
+  'modes '(llm-connectors-detail-mode))
 
 (define-command "llm-connectors-add-endpoint" "Add a hosted provider or a server of your own, give its key, and test it"
-  (lambda () (llm-connectors-add-endpoint-ask!)))
+  (lambda () (llm-connectors-add-endpoint-ask!))
+  'modes '(llm-connectors-mode))
 
 (effects! '(write external spend))
 
 (define-command "llm-connectors-test" "Test the model on this line, or else the connector, and time the reply"
   (lambda ()
     (let ((model (llm-connectors--model-at-point)))
-      (llm-connectors--on-current (lambda (name) (llm-connectors-test! name #f model))))))
+      (llm-connectors--on-current (lambda (name) (llm-connectors-test! name #f model)))))
+  'modes '(llm-connectors-detail-mode llm-connectors-mode))
 
 (define-command "llm-connectors-test-all" "Test every ready connector at once"
-  (lambda () (llm-connectors-test-all!)))
+  (lambda () (llm-connectors-test-all!))
+  'modes '(llm-connectors-mode))
 
 ;;; --- modes ---------------------------------------------------------------------
 

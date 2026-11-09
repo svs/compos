@@ -471,7 +471,8 @@
               (apropos-page q (if (and hit (cadr hit)) (list 'kind (cadr hit)) '()))))))))
 
 (define-command "apropos-filter" "On an apropos page, show one kind of hits: commands, keys, functions, modes"
-  (lambda () (apropos-filter!)))
+  (lambda () (apropos-filter!))
+  'modes '(help-mode))
 
 (define-key "help-mode-map" "/" "apropos-filter")
 
@@ -703,7 +704,8 @@
       (let ((name (help--symbol-at)))
         (if name
           (help--goto-source name)
-          (message "No name at point"))))))
+          (message "No name at point")))))
+  'modes '(help-mode))
 
 (public! 'help--goto-source
   "(help--goto-source NAME) — open the file that defines NAME, at the definition")

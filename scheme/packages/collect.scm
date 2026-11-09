@@ -108,13 +108,15 @@
       (begin (delete-window!) (buffer-kill! *collect-buffer*))))
 
 (define-command "collect-next" "Move down; the preview follows"
-  (lambda () (next-line!) (beginning-of-line!) (collect-preview!)))
+  (lambda () (next-line!) (beginning-of-line!) (collect-preview!))
+  'modes '(collect-mode))
 
 (define-command "collect-prev" "Move up; the preview follows"
   (lambda ()
     (previous-line!) (beginning-of-line!)
     (unless (collect-current) (next-line!) (beginning-of-line!))
-    (collect-preview!)))
+    (collect-preview!))
+  'modes '(collect-mode))
 
 (define-command "collect-accept" "Accept the candidate on this line"
   (lambda ()
@@ -128,7 +130,8 @@
                 (collect-forget!)
                 (collect-close!)
                 (when (and w (window-exists? w)) (select-window! w))
-                (fn value)))))))
+                (fn value))))))
+  'modes '(collect-mode))
 
 (define-command "collect-quit" "Close the list; put back what the preview moved"
   (lambda ()
@@ -136,7 +139,8 @@
       (collect-forget!)
       (collect-close!)
       (when (and w (window-exists? w)) (select-window! w))
-      (when fn (fn)))))
+      (when fn (fn))))
+  'modes '(collect-mode))
 
 (define-command "minibuffer-collect" "Write the prompt's candidates into a buffer"
   (lambda ()
@@ -161,7 +165,8 @@
                   (set! *collect-cancel* (cadr (assoc 'cancel d)))
                   (set! *collect-complete* (cadr (assoc 'complete d)))
                   (set! *collect-input* (cadr (assoc 'input d)))
-                  (collect-open! (cadr (assoc 'prompt d)) cands))))))))
+                  (collect-open! (cadr (assoc 'prompt d)) cands)))))))
+  'modes '(minibuffer-mode))
 
 (define-mode "collect-mode"
   (lambda ()

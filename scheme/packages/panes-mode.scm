@@ -337,7 +337,8 @@
                 (when row
                   (let ((l (panes-layout)))
                     (panes-apply! (panes-focus-window (panes-move-window l (cadr row) pid) (cadr row)))))))
-            'require-match #t)))))
+            'require-match #t))))
+  'modes '(pane-empty-mode))
 
 (define-command "pane-remove" "Hide this pane with its windows; an empty pane goes. pane-restore brings it back"
   (lambda ()
@@ -350,12 +351,14 @@
             (else
              ;; the front window leaves the screen: its point stays in the model
              (panes-apply! (panes-hide-pane (if (and front (window-exists? front)) (panes--park-points! l (list front)) l) pid))
-             (when (pair? keys) (message "Pane hidden; pane-restore brings it back")))))))
+             (when (pair? keys) (message "Pane hidden; pane-restore brings it back"))))))
+  'modes '(pane-empty-mode))
 
 (define-command "pane-restore" "Bring back the pane hidden last, with its windows; you stay where you are"
   (lambda ()
     (let ((r (panes-restore-pane (panes--ensure-layout!))))
-      (if (cadr r) (panes-apply! (car r)) (message "No hidden pane")))))
+      (if (cadr r) (panes-apply! (car r)) (message "No hidden pane"))))
+  'modes '(pane-empty-mode))
 
 (mode-keys! "pane-empty-mode"
   '(("b" "pane-take-window") ("RET" "pane-take-window")

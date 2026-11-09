@@ -463,19 +463,25 @@
         (list "M-." "code-goto-definition")))
 
 (define-command "code-browse-parent" "Move to the node that encloses this one"
-  (lambda () (code--move! 'parent)))
+  (lambda () (code--move! 'parent))
+  'modes '(code-browse-mode))
 (define-command "code-browse-child" "Move into the first block inside this node"
-  (lambda () (code--move! 'child)))
+  (lambda () (code--move! 'child))
+  'modes '(code-browse-mode))
 (define-command "code-browse-next" "Move to the next node at this level"
-  (lambda () (code--move! 'next)))
+  (lambda () (code--move! 'next))
+  'modes '(code-browse-mode))
 (define-command "code-browse-prev" "Move to the previous node at this level"
-  (lambda () (code--move! 'prev)))
+  (lambda () (code--move! 'prev))
+  'modes '(code-browse-mode))
 (define-command "code-browse-toggle-fold" "Fold or unfold the node at point"
-  (lambda () (code--toggle-fold!)))
+  (lambda () (code--toggle-fold!))
+  'modes '(code-browse-mode))
 (define-command "code-goto-definition" "Go to the definition of the symbol at point, or follow the link there"
   (lambda ()
     (unless (goto-address-follow-at-point!)
-      (code--goto-definition))))
+      (code--goto-definition)))
+  'modes '(code-browse-mode))
 
 (for-each (lambda (name) (undo-exempt! name))
           '("code-browse-parent" "code-browse-child" "code-browse-next"
@@ -562,7 +568,8 @@
 (define-command "code-browse-exit" "Leave code-browse in this buffer"
   (lambda ()
     (disable-minor-mode! (current-buffer) "code-browse-mode")
-    (message "code-browse off")))
+    (message "code-browse off"))
+  'modes '(code-browse-mode))
 
 (public! 'code-browse "Toggle structural browsing of the current buffer")
 (public! 'code-goto-definition "Go to the definition of the symbol at point")

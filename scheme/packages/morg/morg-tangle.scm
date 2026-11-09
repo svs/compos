@@ -68,7 +68,8 @@
         (if (null? paths)
             "No blocks have :tangle PATH"
             (string-append "Tangled " (number->string (length paths))
-                           (if (= (length paths) 1) " file" " files")))))))
+                           (if (= (length paths) 1) " file" " files"))))))
+  'modes '(morg-mode))
 
 (public! 'morg-tangle-specs
   "(morg-tangle-specs BUF) — return each output path and text for Morg :tangle blocks")

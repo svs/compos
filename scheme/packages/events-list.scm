@@ -170,7 +170,8 @@
     (list-mode-show! "events-mode")))
 
 (define-command "events-refresh" "Redraw the event log"
-  (lambda () (events-list--draw!)))
+  (lambda () (events-list--draw!))
+  'modes '(events-mode))
 
 (define-command "events-topic" "Show only one topic family of the event log"
   (lambda ()
@@ -178,15 +179,18 @@
                      (lambda (choice)
                        (when (and (string? choice) (> (string-length choice) 0))
                          (events-list-set-topic!
-                          (if (string-suffix? "*" choice) choice (string-append choice ":*"))))))))
+                          (if (string-suffix? "*" choice) choice (string-append choice ":*")))))))
+  'modes '(events-mode))
 
 (define-command "events-all-topics" "Show every topic of the event log again"
-  (lambda () (events-list-set-topic! #f)))
+  (lambda () (events-list-set-topic! #f))
+  'modes '(events-mode))
 
 (effects! '(read display))
 
 (define-command "events-show" "Show the whole event at point beside the list"
-  (lambda () (events-list-show-detail! (list-current *events-buffer*))))
+  (lambda () (events-list-show-detail! (list-current *events-buffer*)))
+  'modes '(events-mode))
 
 (domain! 'system)
 (effects! '(write))

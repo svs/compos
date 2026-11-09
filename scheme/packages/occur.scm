@@ -95,10 +95,12 @@
 (define-command "occur-ts-visit" "Visit the tree-sitter capture on this row"
   (lambda ()
     (let ((entry (list-current (current-buffer))))
-      (when entry (occur-ts--show entry #t)))))
+      (when entry (occur-ts--show entry #t))))
+  'modes '(occur-ts-mode))
 
 (define-command "occur-ts-refresh" "Run this tree-sitter query again"
-  (lambda () (list-refresh! (current-buffer))))
+  (lambda () (list-refresh! (current-buffer)))
+  'modes '(occur-ts-mode))
 
 (when (boundp (quote mode-icon!))
   (mode-icon! "occur-ts-mode" ""))

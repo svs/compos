@@ -280,7 +280,8 @@
       (list-mode-show! "keys-mode"))))
 
 (define-command "keys-refresh" "Read the keymaps again"
-  (lambda () (keys--redraw!)))
+  (lambda () (keys--redraw!))
+  'modes '(keys-mode))
 
 (define-command "keys-scope" "Filter all bindings by keymap"
   (lambda ()
@@ -292,7 +293,8 @@
           (list-filter-clear! *keys-buffer*)
           (keys--redraw!)
           (message (string-append "keys: " scope))))
-      'require-match #t)))
+      'require-match #t))
+  'modes '(keys-mode))
 
 (define-command "keys-describe" "Describe the key on this row"
   (lambda ()
@@ -315,7 +317,8 @@
                   "A nearer keymap answers this key first, so it never runs here.\n\n"
                   "")
               (if (keys--yours? e) "This binding is your own edit.\n\n" "")
-              "---\n\n`b` rebinds it · `d` unbinds it · `q` closes this page\n"))))))
+              "---\n\n`b` rebinds it · `d` unbinds it · `q` closes this page\n")))))
+  'modes '(keys-mode))
 
 (define-command "keys-rebind" "Give the command on this row another key"
   (lambda ()
@@ -336,7 +339,8 @@
                                   (keys--lookup (keys--map e) seq))))
                     (keys--redraw!)
                     (message (string-append seq " runs " (keys--cmd e)
-                                            " · " (keys--seq e) " is free")))))))))))
+                                            " · " (keys--seq e) " is free"))))))))))
+  'modes '(keys-mode))
 
 (define-command "keys-unbind" "Take the key on this row away"
   (lambda ()
@@ -347,7 +351,8 @@
         (else
           (keys--record! (list (list (keys--owner e) (keys--owner-seq e) #f (keys--cmd e))))
           (keys--redraw!)
-          (message (string-append (keys--seq e) " runs nothing now")))))))
+          (message (string-append (keys--seq e) " runs nothing now"))))))
+  'modes '(keys-mode))
 
 (define-command "keys-bind" "Bind a command to a key, everywhere"
   (lambda ()
@@ -365,7 +370,8 @@
                         (list (list "global" seq cmd (keys--lookup "global" seq))))
                       (keys--redraw!)
                       (message (string-append seq " runs " cmd " everywhere")))))))))
-      'require-match #t)))
+      'require-match #t))
+  'modes '(keys-mode))
 
 (define-command "keys-revert" "Take back your edit on this row"
   (lambda ()
@@ -382,7 +388,8 @@
             (message (string-append seq " is "
                                     (if (string? was)
                                         (string-append "back on " was)
-                                        "unbound again"))))))))
+                                        "unbound again")))))))
+  'modes '(keys-mode))
 
 ;;; --- the mode --------------------------------------------------------
 

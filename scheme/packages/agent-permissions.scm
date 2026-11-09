@@ -420,7 +420,8 @@
       (chat-permission-mode-set! buf next)
       (message
         (string-append "permissions: " (symbol->string next)
-                       " — " (chat-permission-mode-note next))))))
+                       " — " (chat-permission-mode-note next)))))
+  'modes '(chat-mode))
 
 (define (agent-perm-option options exact prefix)
   (let loop ((os options) (by-prefix #f))
@@ -448,7 +449,8 @@
 
 (define-command "agent-permission-allow" "Allow the pending permission request once"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
-                                       "allow_once" "allow")))
+                                       "allow_once" "allow"))
+  'modes '(chat-mode))
 
 (define-command "agent-permission-always" "Allow and stop asking for this tool"
   (lambda ()
@@ -464,8 +466,10 @@
         (let ((sig (permission-signature (car asked) (cadr asked) (nth 2 asked))))
           (permission-always-allow! buf sig)
           (message (string-append "always allowing in this chat: " sig))))
-      (agent-answer-permission! slug "allow_always" "allow"))))
+      (agent-answer-permission! slug "allow_always" "allow")))
+  'modes '(chat-mode))
 
 (define-command "agent-permission-deny" "Deny the pending permission request"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
-                                       "reject_once" "reject")))
+                                       "reject_once" "reject"))
+  'modes '(chat-mode))

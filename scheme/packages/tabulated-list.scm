@@ -304,10 +304,12 @@
 ;; by key but acts on the row itself.
 
 (define-command "list-mark" "Mark the entry at point"
-  (lambda () (list-mark-at-point! *list-mark-char*)))
+  (lambda () (list-mark-at-point! *list-mark-char*))
+  'modes '(list-mode))
 
 (define-command "list-unmark" "Unmark the entry at point"
-  (lambda () (list-mark-at-point! #f)))
+  (lambda () (list-mark-at-point! #f))
+  'modes '(list-mode))
 
 ;; one key that marks and unmarks: a marked or flagged row loses its
 ;; mark, any other row gets one
@@ -316,13 +318,15 @@
     (let* ((buf (current-buffer))
            (e (list-current buf)))
       (list-mark-at-point!
-        (if (and e (not (equal? (list-mark-of buf e) " "))) #f *list-mark-char*)))))
+        (if (and e (not (equal? (list-mark-of buf e) " "))) #f *list-mark-char*))))
+  'modes '(list-mode))
 
 (define-command "list-unmark-all" "Drop every mark and flag in this list"
   (lambda ()
     (let ((buf (current-buffer)))
       (list-clear-marks! buf)
-      (list-redraw! buf))))
+      (list-redraw! buf)))
+  'modes '(list-mode))
 
 ;; `*` marks the whole list — the rows you narrowed to, because a filter
 ;; and a mark say the same thing: these ones
@@ -356,7 +360,8 @@
                   (list-mark! buf e (if all-marked? #f *list-mark-char*)))
                 markable)
       (list-redraw! buf)
-      (when i (list-goto-index! buf i)))))
+      (when i (list-goto-index! buf i))))
+  'modes '(switch-mode list-mode))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -439,7 +444,8 @@
                                 (if (equal? ans "yes")
                                     (list-plan-run! buf plan)
                                     (message "Cancelled")))))
-            (else (list-plan-run! buf plan))))))
+            (else (list-plan-run! buf plan)))))
+  'modes '(list-mode))
 
 ;; the marking keys. Every list that shows a mark column marks the same
 ;; way — SPC marks (m as well), `u`, `U` and `*` — and a list that declares flags also gets
@@ -1330,7 +1336,8 @@
       (buffer-set-local! buf 'list-keys-expanded now)
       (let ((blocks (list-keys-bar-blocks buf)))
         (when blocks (buffer-set-local! buf 'footer-line-blocks blocks)))
-      (message (if now "all keys — ? folds them" "main keys")))))
+      (message (if now "all keys — ? folds them" "main keys"))))
+  'modes '(list-mode))
 
 ;; one entry's cells, one list per line of the row
 (define (list-row-cells buf e &optional ctx)
@@ -1767,10 +1774,12 @@
 (effects! '(read))
 
 (define-command "list-next" "Move to the next row of this list"
-  (lambda () (list-move! 1)))
+  (lambda () (list-move! 1))
+  'modes '(list-mode))
 
 (define-command "list-prev" "Move to the previous row of this list"
-  (lambda () (list-move! -1)))
+  (lambda () (list-move! -1))
+  'modes '(list-mode))
 
 ;; a screen down in a paged list: the rows the screen lands on are drawn
 ;; first, so the page never ends in the key bar with more rows to come
@@ -2081,7 +2090,8 @@
   (lambda ()
     (if (pair? (list-facets (current-buffer)))
         (list-facet-prompt! (current-buffer))
-        (list-filter-live!))))
+        (list-filter-live!)))
+  'modes '(list-mode))
 
 (define (list-cycle-declared! option absent)
   (let* ((buf (current-buffer))
@@ -2090,11 +2100,13 @@
 
 (define-command "list-cycle-grouping"
   "Cycle through the grouping mechanisms declared by this list"
-  (lambda () (list-cycle-declared! 'regroup "this list has no grouping")))
+  (lambda () (list-cycle-declared! 'regroup "this list has no grouping"))
+  'modes '(list-mode))
 
 (define-command "list-cycle-sorting"
   "Cycle through the sorting mechanisms declared by this list"
-  (lambda () (list-cycle-declared! 'resort "this list has no sorting")))
+  (lambda () (list-cycle-declared! 'resort "this list has no sorting"))
+  'modes '(list-mode))
 
 (define-command "list-filter-pop" "Drop the most recent filter on this list"
   (lambda ()
@@ -2102,7 +2114,8 @@
       (if (null? (list-filters buf))
           (message "no filter")
           (begin (list-filter-pop! buf)
-                 (list-goto-first-entry buf))))))
+                 (list-goto-first-entry buf)))))
+  'modes '(list-mode))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -2489,10 +2502,12 @@
       (when i (list-goto-index! buf i)))))
 
 (define-command "list-toggle-children" "Fold or unfold the rows under this row, or under its parent"
-  (lambda () (list-toggle-children! (current-buffer))))
+  (lambda () (list-toggle-children! (current-buffer)))
+  'modes '(todo-mode))
 
 (define-command "list-toggle-all-children" "Fold every row that has rows under it, or unfold them all"
-  (lambda () (list-toggle-all-children! (current-buffer))))
+  (lambda () (list-toggle-all-children! (current-buffer)))
+  'modes '(todo-mode))
 
 ;; the filter cache keys a row with its depth: a parent the filter drops
 ;; lifts its child, and the child's cells change with it
@@ -2822,7 +2837,8 @@
     (let ((buf (current-buffer)))
       (if (buffer-local buf 'cache-spec)
           (cache-refresh! buf)
-          (list-refresh! buf)))))
+          (list-refresh! buf))))
+  'modes '(list-mode))
 
 ;;; --- a list mode: declared once, rebuilt from its locals ------------------------
 ;; a caller that refreshes right after entering the mode (ibuffer-open!)
@@ -2982,7 +2998,8 @@
     next))
 
 (define-command "list-cycle-view" "Cycle this list's view: rendered, bare text, and the source under it"
-  (lambda () (list-cycle-view! (current-buffer))))
+  (lambda () (list-cycle-view! (current-buffer)))
+  'modes '(list-mode))
 
 (define-key "list-mode-map" "C-c C-v" "list-cycle-view")
 
@@ -2997,7 +3014,8 @@
           (let ((id (and (boundp 'app-id) (app-id buf))))
             (when id (app-hide-detail-buffers! id)))
           (list-preview! buf))
-      (message (if off "Detail off" "Detail on")))))
+      (message (if off "Detail off" "Detail on"))))
+  'modes '(list-mode))
 
 (define-key "list-mode-map" "C-c v" "list-toggle-detail")
 
@@ -3059,9 +3077,11 @@
       (list-tab-go! buf (list-cycle (car (list-tab-current buf)) labels step)))))
 
 (define-command "list-tab-next" "Show the next tab of this list"
-  (lambda () (list-tab-cycle! (current-buffer) 1)))
+  (lambda () (list-tab-cycle! (current-buffer) 1))
+  'modes '(webhooks-detail-mode watchers-mode))
 (define-command "list-tab-prev" "Show the previous tab of this list"
-  (lambda () (list-tab-cycle! (current-buffer) -1)))
+  (lambda () (list-tab-cycle! (current-buffer) -1))
+  'modes '(webhooks-detail-mode watchers-mode))
 
 (add-hook! (list 'block-click 'list-tabs)
   (lambda (buf id)

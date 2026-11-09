@@ -911,7 +911,8 @@
       ;; local reads as "never chosen" — which the setup would re-default
       (buffer-set-local! buf 'render-mode (if rich? "plain" "blocks"))
       (chat-view-sync! buf)
-      (message (if rich? "plain transcript" "rich transcript")))))
+      (message (if rich? "plain transcript" "rich transcript"))))
+  'modes '(chat-mode))
 
 ;;; (chat auto-titling died with the bare *chat* surface: a group chat is
 ;;; named for its group, and there is only one chat interface)
@@ -961,7 +962,8 @@
                       (agent-update-modeline! buf)
                       (message (string-append cname " · " m))))
                 (when (boundp (quote workspace-llm-defaults-note!))
-                  (workspace-llm-defaults-note! buf)))))))))
+                  (workspace-llm-defaults-note! buf))))))))
+  'modes '(chat-mode))
 
 ;; send the region to the chat buffer as context, then open it
 (define-command "chat-send-region" "Add the region to the chat buffer as context"
@@ -1041,7 +1043,8 @@
                       ((chat-title buf name)
                        (message (string-append "Chat title: " (buffer-name buf))))
                       (else
-                       (message "Chat title cannot be empty or is already taken"))))))))))
+                       (message "Chat title cannot be empty or is already taken")))))))))
+  'modes '(chat-mode))
 
 ;; the title names the chat, so the key that sets it lives on chat-mode's
 ;; own map beside C-c C-k and C-c C-v; M-x still reaches it from anywhere,

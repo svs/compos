@@ -659,16 +659,20 @@
           (pdf--render! buf #f)))))
 
 (define-command "pdf-next-page" "Show the next PDF page"
-  (lambda () (pdf--go! (+ (pdf--page (current-buffer)) 1))))
+  (lambda () (pdf--go! (+ (pdf--page (current-buffer)) 1)))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-previous-page" "Show the previous PDF page"
-  (lambda () (pdf--go! (- (pdf--page (current-buffer)) 1))))
+  (lambda () (pdf--go! (- (pdf--page (current-buffer)) 1)))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-first-page" "Show the first PDF page"
-  (lambda () (pdf--go! 1)))
+  (lambda () (pdf--go! 1))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-last-page" "Show the last PDF page"
-  (lambda () (pdf--go! (pdf--total (current-buffer)))))
+  (lambda () (pdf--go! (pdf--total (current-buffer))))
+  'modes '(pdf-reader-mode))
 
 (define (pdf--set-zoom! zoom)
   (let ((buf (current-buffer)))
@@ -677,27 +681,32 @@
     (pdf--render! buf #f)))
 
 (define-command "pdf-zoom-in" "Increase the PDF page size"
-  (lambda () (pdf--set-zoom! (+ (pdf--zoom (current-buffer)) pdf-zoom-step))))
+  (lambda () (pdf--set-zoom! (+ (pdf--zoom (current-buffer)) pdf-zoom-step)))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-zoom-out" "Decrease the PDF page size"
-  (lambda () (pdf--set-zoom! (- (pdf--zoom (current-buffer)) pdf-zoom-step))))
+  (lambda () (pdf--set-zoom! (- (pdf--zoom (current-buffer)) pdf-zoom-step)))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-zoom-reset" "Reset the PDF page size"
-  (lambda () (pdf--set-zoom! 100)))
+  (lambda () (pdf--set-zoom! 100))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-toggle-dark" "Change between the normal and dark PDF page"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'pdf-dark? (not (pdf--dark? buf)))
       (pdf--render! buf #f)
-      (message (if (pdf--dark? buf) "Dark PDF page" "Light PDF page")))))
+      (message (if (pdf--dark? buf) "Dark PDF page" "Light PDF page"))))
+  'modes '(pdf-reader-mode))
 
 (define-command "pdf-refresh" "Reload PDF metadata and the current page"
   (lambda ()
     (let ((path (pdf--buffer-path (current-buffer))))
       (if path
           (pdf--revert-open-buffers! path)
-          (message "This buffer has no PDF file")))))
+          (message "This buffer has no PDF file"))))
+  'modes '(pdf-reader-mode))
 
 (define (pdf--page-order total)
   (let loop ((page 1))
@@ -759,7 +768,8 @@
           (pdf--apply-page-order!
             (pdf--without-page (pdf--page-order total) page)
             (min page (- total 1))
-            "Deleted page from generated copy")))))
+            "Deleted page from generated copy"))))
+  'modes '(pdf-edit-mode))
 
 (define-command "pdf-edit-duplicate-page" "Duplicate the current page in the generated copy"
   (lambda ()
@@ -769,7 +779,8 @@
       (pdf--apply-page-order!
         (pdf--with-duplicate-page (pdf--page-order total) page)
         page
-        "Duplicated page in generated copy"))))
+        "Duplicated page in generated copy")))
+  'modes '(pdf-edit-mode))
 
 (define-command "pdf-edit-move-page-backward" "Move the current page earlier in the generated copy"
   (lambda ()
@@ -781,7 +792,8 @@
           (pdf--apply-page-order!
             (pdf--swap-page-positions (pdf--page-order total) (- page 1) page)
             (- page 1)
-            "Moved page earlier in generated copy")))))
+            "Moved page earlier in generated copy"))))
+  'modes '(pdf-edit-mode))
 
 (define-command "pdf-edit-move-page-forward" "Move the current page later in the generated copy"
   (lambda ()
@@ -793,7 +805,8 @@
           (pdf--apply-page-order!
             (pdf--swap-page-positions (pdf--page-order total) page (+ page 1))
             (+ page 1)
-            "Moved page later in generated copy")))))
+            "Moved page later in generated copy"))))
+  'modes '(pdf-edit-mode))
 
 (define-command "pdf-edit-undo" "Swap the generated copy with its one-step undo PDF"
   (lambda ()
@@ -806,7 +819,8 @@
               (begin
                 (pdf--revert-open-buffers! path)
                 (message (string-append "Swapped undo state · " path)))
-              (message "Nothing to undo yet"))))))
+              (message "Nothing to undo yet")))))
+  'modes '(pdf-edit-mode))
 
 (define-command "pdf-edit-reset" "Reset the generated copy from the unchanged original"
   (lambda ()
@@ -821,7 +835,8 @@
                 (buffer-set-local! buf 'pdf-page 1)
                 (pdf--revert-open-buffers! path)
                 (message (string-append "Reset generated copy from original · " path)))
-              (message "Could not reset the generated PDF copy"))))))
+              (message "Could not reset the generated PDF copy")))))
+  'modes '(pdf-edit-mode))
 
 (define (pdf-reader-setup! buf)
   ;; Old reader versions copied a file buffer's path into pdf-path. Keep the

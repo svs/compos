@@ -277,7 +277,8 @@
            (rev (and id (prov-plist id))))
       (if (not rev)
           (message "no revision on this line")
-          (prov-show-revision! rev #t)))))
+          (prov-show-revision! rev #t))))
+  'modes '(buffer-log-mode))
 
 (define-command "buffer-log-show" "Show this revision beside the log, keeping focus here"
   (lambda ()
@@ -288,7 +289,8 @@
 (define-command "buffer-log-refresh" "Redraw the revision list"
   (lambda ()
     (list-refresh! *buffer-log-buffer*)
-    (list-preview! *buffer-log-buffer*)))
+    (list-preview! *buffer-log-buffer*))
+  'modes '(buffer-log-mode))
 
 ;;; --- the hub -------------------------------------------------------------------
 

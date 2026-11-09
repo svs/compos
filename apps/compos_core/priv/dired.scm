@@ -803,7 +803,8 @@
            (field (dired-sort-next (dired-sort-field buf))))
       (buffer-set-local! buf 'dired-sort-field field)
       (dired-resort! buf)
-      (message (string-append "Sort: " field)))))
+      (message (string-append "Sort: " field))))
+  'modes '(google-drive-mode))
 
 (define-command "dired-sort-reverse" "Reverse the current Dired sort"
   (lambda ()
@@ -853,7 +854,8 @@
   (lambda ()
     ;; The Dired buffer's group is more specific than a frame or project
     ;; fallback. An explicit visit also replaces inherited placement.
-    (dired-visit-with-group (buffer-group (current-buffer)))))
+    (dired-visit-with-group (buffer-group (current-buffer))))
+  'modes '(google-drive-mode))
 
 (define-command "dired-quit" "Return through this window's directory history"
   (lambda ()
@@ -889,12 +891,14 @@
 
 (define-command "dired-up" "Open the parent directory in Dired, where it was"
   (lambda ()
-    (dired-open-parent! (dired-dir (current-buffer)))))
+    (dired-open-parent! (dired-dir (current-buffer))))
+  'modes '(google-drive-mode))
 
 (define-command "dired-revert" "Re-read the directory and refresh the listing"
   (lambda ()
     (dired-refresh-buffer! (current-buffer))
-    (message "Reverted")))
+    (message "Reverted"))
+  'modes '(google-drive-mode))
 
 (define (dired-action-entry)
   (let ((e (dired-entry)))
@@ -921,7 +925,8 @@
                      (moved (rename-file! source target)))
                 (when moved
                   (with-current-buffer buf (dired-refresh-buffer! buf))
-                  (message (string-append "Renamed to " target))))))))))
+                  (message (string-append "Renamed to " target)))))))))
+  'modes '(google-drive-mode))
 
 (define-command "dired-copy" "Copy the file at point, or all marked files"
   (lambda ()
@@ -950,7 +955,8 @@
                       (with-current-buffer buf (dired-refresh-buffer! buf))
                       (message (string-append "Copied "
                                               (number->string (length entries))
-                                              " file(s)")))))))))))
+                                              " file(s)"))))))))))
+  'modes '(google-drive-mode))
 
 (define-command "dired-chmod" "Set the octal mode of the file at point or marked files"
   (lambda ()
@@ -1005,7 +1011,8 @@
         (lambda (name)
           (make-directory! (dired-path buf name))
           (with-current-buffer buf (dired-refresh-buffer! buf))
-          (message "Created"))))))
+          (message "Created")))))
+  'modes '(google-drive-mode))
 
 ;; --- the rest of Emacs Dired: regexp marks, wdired, dwim target, shell ------
 
@@ -1173,12 +1180,14 @@
                                  (dired-zip olds news)))))
                 (when n
                   (wdired-leave! ed)
-                  (message (string-append "Renamed " (number->string n) " file(s)")))))))))
+                  (message (string-append "Renamed " (number->string n) " file(s)"))))))))
+  'modes '(wdired-mode))
 
 (define-command "wdired-abort-changes" "Leave the name edit and rename nothing"
   (lambda ()
     (wdired-leave! (current-buffer))
-    (message "No files renamed")))
+    (message "No files renamed"))
+  'modes '(wdired-mode))
 
 (define-mode "wdired-mode"
   (lambda () (buffer-set-read-only! (current-buffer) #f)))

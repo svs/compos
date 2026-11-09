@@ -29,7 +29,8 @@
   (lambda ()
     (if (json-pretty-print! (current-buffer))
         (message "JSON formatted")
-        (message "Invalid JSON; the buffer is unchanged"))))
+        (message "Invalid JSON; the buffer is unchanged")))
+  'modes '(json-mode))
 
 (define (json-mode-setup)
   ((ts-mode "json"))

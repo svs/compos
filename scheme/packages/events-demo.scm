@@ -345,32 +345,37 @@
   (lambda ()
     (events-demo-produce! (not events-demo-producing))
     (events-demo-refresh!)
-    (message (if events-demo-producing "the producer runs" "the producer stopped"))))
+    (message (if events-demo-producing "the producer runs" "the producer stopped")))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-faster" "Make the producer tick twice as often"
   (lambda ()
     (set! events-demo-interval (max 125 (quotient events-demo-interval 2)))
     (events-demo-refresh!)
-    (message (string-append "one tick every " (number->string events-demo-interval) "ms"))))
+    (message (string-append "one tick every " (number->string events-demo-interval) "ms")))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-slower" "Make the producer tick half as often"
   (lambda ()
     (set! events-demo-interval (min 16000 (* events-demo-interval 2)))
     (events-demo-refresh!)
-    (message (string-append "one tick every " (number->string events-demo-interval) "ms"))))
+    (message (string-append "one tick every " (number->string events-demo-interval) "ms")))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-burst" "Send three messages from one person at once"
   (lambda ()
     (let ((person (demo-any events-demo-people)))
       (events-demo-burst! person)
-      (message (string-append person " sent a burst: triage takes it in one run")))))
+      (message (string-append person " sent a burst: triage takes it in one run"))))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-next-model" "Switch triage to the next local model"
   (lambda ()
     (let ((rest (cdr (or (member events-demo-model events-demo-models) (list #f)))))
       (set! events-demo-model (if (pair? rest) (car rest) (car events-demo-models)))
       (events-demo-refresh!)
-      (message (string-append "triage now asks " (plist-get events-demo-model 'model))))))
+      (message (string-append "triage now asks " (plist-get events-demo-model 'model)))))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-toggle-failure" "Make the todos workflow fail, or heal it"
   (lambda ()
@@ -378,16 +383,19 @@
     (events-demo-refresh!)
     (message (if events-demo-failing
                  "todos now fails: its position stays, and a batch parks after three failures"
-                 "todos works again: the next run takes what waited"))))
+                 "todos works again: the next run takes what waited")))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-replay" "Rewind the todos workflow 30 events and take them again"
   (lambda ()
     (let ((at (or (plist-get (workflow-status "demo-todos") 'position) 0)))
       (workflow-rewind! "demo-todos" (max 0 (- at 30)))
-      (message "todos replays its last 30 events: once! files nothing twice"))))
+      (message "todos replays its last 30 events: once! files nothing twice")))
+  'modes '(events-demo-mode))
 
 (define-command "events-demo-refresh" "Redraw the scene"
-  (lambda () (events-demo-refresh!)))
+  (lambda () (events-demo-refresh!))
+  'modes '(events-demo-mode))
 
 (effects! '(read display))
 
@@ -410,7 +418,8 @@
                              "\n")
                             #t)
           (buffer-set-local! buf 'group (buffer-local *events-demo-buffer* 'group))
-          (display-buffer-detail! buf *events-demo-buffer*))))))
+          (display-buffer-detail! buf *events-demo-buffer*)))))
+  'modes '(events-demo-mode))
 
 ;;; --- the catalog -------------------------------------------------------
 
@@ -649,19 +658,25 @@
         (list "[" "events-demo-back-ten") (list "]" "events-demo-forward-ten")
         (list "SPC" "events-demo-play") (list "l" "events-demo-live") (list "q" "bury-buffer")))
 
-(define-command "events-demo-back" "Step the flow one event back" (lambda () (events-demo--step! -1)))
-(define-command "events-demo-forward" "Step the flow one event forward" (lambda () (events-demo--step! 1)))
-(define-command "events-demo-back-ten" "Step the flow ten events back" (lambda () (events-demo--step! -10)))
-(define-command "events-demo-forward-ten" "Step the flow ten events forward" (lambda () (events-demo--step! 10)))
+(define-command "events-demo-back" "Step the flow one event back" (lambda () (events-demo--step! -1))
+  'modes '(events-demo-flow-mode))
+(define-command "events-demo-forward" "Step the flow one event forward" (lambda () (events-demo--step! 1))
+  'modes '(events-demo-flow-mode))
+(define-command "events-demo-back-ten" "Step the flow ten events back" (lambda () (events-demo--step! -10))
+  'modes '(events-demo-flow-mode))
+(define-command "events-demo-forward-ten" "Step the flow ten events forward" (lambda () (events-demo--step! 10))
+  'modes '(events-demo-flow-mode))
 
 (define-command "events-demo-live" "Follow the head of the log again"
-  (lambda () (set! events-demo-cursor #f) (set! events-demo-playing #f) (events-demo-flow-render!)))
+  (lambda () (set! events-demo-cursor #f) (set! events-demo-playing #f) (events-demo-flow-render!))
+  'modes '(events-demo-flow-mode))
 
 (define-command "events-demo-play" "Play the log forward from the cursor, or pause"
   (lambda ()
     (set! events-demo-playing (and events-demo-cursor (not events-demo-playing)))
     (events-demo-flow-render!)
-    (when events-demo-playing (debounce! 'events-demo-play 350 events-demo--play-tick #f))))
+    (when events-demo-playing (debounce! 'events-demo-play 350 events-demo--play-tick #f)))
+  'modes '(events-demo-flow-mode))
 
 (define-command "events-demo-flow" "Show the event bus scene as a picture beside the list"
   (lambda ()

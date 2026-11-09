@@ -307,10 +307,12 @@
 (define-command "lsp-diag-visit" "Visit the diagnostic on this row"
   (lambda ()
     (let ((e (list-current (current-buffer))))
-      (when e (lsp--diag-visit e #t)))))
+      (when e (lsp--diag-visit e #t))))
+  'modes '(lsp-diagnostics-mode))
 
 (define-command "lsp-diag-refresh" "Refresh the diagnostics list"
-  (lambda () (list-refresh! *lsp-diag-buffer*)))
+  (lambda () (list-refresh! *lsp-diag-buffer*))
+  'modes '(lsp-diagnostics-mode))
 
 (define-command "lsp-diagnostics-list" "Show diagnostics as a list"
   (lambda () (list-mode-show! "lsp-diagnostics-mode")))
@@ -452,7 +454,8 @@
 (define-command "lsp-ref-visit" "Visit the reference on this row"
   (lambda ()
     (let ((loc (list-current (current-buffer))))
-      (when loc (lsp--push-marker!) (lsp--show-loc! loc #t)))))
+      (when loc (lsp--push-marker!) (lsp--show-loc! loc #t))))
+  'modes '(lsp-references-mode))
 
 (define-command "lsp-references" "List the references to the symbol at point"
   (lambda ()

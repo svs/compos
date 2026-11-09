@@ -367,7 +367,8 @@
       (when ch
         (list-set-query! buf (string-append (list-query buf) ch))
         (list-goto-first-entry buf)
-        (list-preview! buf)))))
+        (list-preview! buf))))
+  'modes '(switch-mode))
 
 (define-command "switch-del"
   "Widen the narrowing by one character"
@@ -377,7 +378,8 @@
       (unless (equal? q "")
         (list-set-query! buf (substring q 0 (- (string-length q) 1)))
         (list-goto-first-entry buf)
-        (list-preview! buf)))))
+        (list-preview! buf))))
+  'modes '(switch-mode))
 
 ;;; --- the verbs -------------------------------------------------------------------
 
@@ -469,7 +471,8 @@
               ;; current windows — put the home window back first
               (switch-restore-home! buf)
               (switch-close! buf #f)
-              (group-found-from-windows! q))))))
+              (group-found-from-windows! q)))))
+  'modes '(switch-mode))
 
 (define-command "switch-mark"
   "Mark the row at point, or unmark a marked one"
@@ -478,7 +481,8 @@
            (e (list-current buf)))
       (cond ((not (and e (list-markable? buf e))) (message "no buffer here"))
             ((equal? (list-mark-of buf e) "*") (run-command "list-unmark"))
-            (else (run-command "list-mark"))))))
+            (else (run-command "list-mark")))))
+  'modes '(switch-mode))
 
 ;; C-k kills NOW — the marked buffers, or the row at point. The home
 ;; window leaves a dying buffer before it dies.
@@ -505,7 +509,8 @@
             (message (if (= n 0)
                          "already gone"
                          (string-append "killed " (number->string n) " "
-                                        (list-noun buf n)))))))))
+                                        (list-noun buf n))))))))
+  'modes '(switch-mode))
 
 ;; group-add prompts, so it changes membership inside a
 ;; minibuffer callback and returns long before. The switcher hears about
@@ -533,7 +538,8 @@
       (list-set-query! buf "")
       (list-refresh! buf)
       (list-goto-first-entry buf)
-      (message (if groups? "buffers" "groups — RET switches, C-o goes back")))))
+      (message (if groups? "buffers" "groups — RET switches, C-o goes back"))))
+  'modes '(switch-mode))
 
 ;; TAB locks to one group's buffers: the highlighted card's, or the
 ;; highlighted buffer's own
@@ -553,13 +559,15 @@
             (list-set-query! buf "")
             (list-refresh! buf)
             (list-goto-first-entry buf)
-            (message (string-append "in " (group-label g) " — C-o widens")))))))
+            (message (string-append "in " (group-label g) " — C-o widens"))))))
+  'modes '(switch-mode))
 
 (define-command "switch-quit" "Close the switcher and put back what you were seeing"
   (lambda ()
     (let ((buf (current-buffer)))
       (switch-restore-home! buf)
-      (switch-close! buf #f))))
+      (switch-close! buf #f)))
+  'modes '(switch-mode))
 
 ;;; --- the mode --------------------------------------------------------------------
 
@@ -933,11 +941,13 @@ the next row down. STEP is kept for the callers."
 
 (define-command "window-next-child-chat"
   "Show the next of this chat's parent and child chats; hold Alt to keep walking. Without any, show the next block"
-  (lambda () (window-lineage-walk! 1 "chat-next-block")))
+  (lambda () (window-lineage-walk! 1 "chat-next-block"))
+  'modes '(chat-mode))
 
 (define-command "window-previous-child-chat"
   "Show the previous of this chat's parent and child chats; hold Alt to keep walking. Without any, show the previous block"
-  (lambda () (window-lineage-walk! -1 "chat-previous-block")))
+  (lambda () (window-lineage-walk! -1 "chat-previous-block"))
+  'modes '(chat-mode))
 
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))

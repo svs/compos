@@ -250,7 +250,8 @@
 (define-command "feeds-refresh" "Refetch every subscribed feed"
   (lambda ()
     (message "fetching feeds…")
-    (cache-refresh! *feeds-buffer*)))
+    (cache-refresh! *feeds-buffer*))
+  'modes '(feeds-mode))
 
 (define-command "feeds-open" "Read the item on this row beside the list"
   (lambda ()
@@ -261,7 +262,8 @@
         ;; the list is the place you read from: the item shows in the
         ;; other window and the list keeps the point. RET again on the
         ;; same row keeps the item and goes there.
-        (browse-other-window (feeds--item-link e))))))
+        (browse-other-window (feeds--item-link e)))))
+  'modes '(feeds-mode))
 
 (define-command "feeds-open-external" "Open the item on this row in the real browser"
   (lambda ()
@@ -269,7 +271,8 @@
       (when e
         (feeds--mark-read! (feeds--item-link e))
         (list-redraw! *feeds-buffer*)
-        (tab-open (feeds--item-link e))))))
+        (tab-open (feeds--item-link e)))))
+  'modes '(feeds-mode))
 
 (define-command "feeds-subscribe" "Subscribe to a feed — a feed URL, or a page with one"
   (lambda ()
@@ -296,7 +299,8 @@
                                 (filter (lambda (s) (not (equal? s u))) subs))
                               (message (string-append "unsubscribed " u))
                               (when (buffer-known? *feeds-buffer*)
-                                (cache-refresh! *feeds-buffer*))))))))))))
+                                (cache-refresh! *feeds-buffer*)))))))))))
+  'modes '(feeds-mode))
 
 (define-list-mode! "feeds-mode"
   (list

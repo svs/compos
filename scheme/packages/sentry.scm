@@ -676,7 +676,8 @@
                   "\nFind the causes, inspect the related source, and propose"
                   " or implement fixes. Do not resolve the Sentry issues"
                   " until I ask.")))
-          (group-chat-show! *sentry-group*))))))
+          (group-chat-show! *sentry-group*)))))
+  'modes '(sentry-mode))
 
 (define-command "sentry-list-open-web"
   "Open the marked issues, or the one at point, in Sentry"
@@ -684,7 +685,8 @@
     (for-each (lambda (i)
                 (let ((url (plist-get i 'permalink)))
                   (when url (*sentry-open-url* url))))
-              (list-targets *sentry-buffer*))))
+              (list-targets *sentry-buffer*)))
+  'modes '(sentry-mode))
 
 ;; After a resolve the list drops the row, but a window can keep showing
 ;; a dead issue's detail. That window advances to the row the highlight
@@ -728,7 +730,8 @@
                         (begin (message (sentry--error-message reply))
                                (loop (cdr is) done ok))
                         (loop (cdr is) (+ done 1) (cons id ok))))))
-            (cache-refresh! *sentry-buffer*)))))))
+            (cache-refresh! *sentry-buffer*))))))
+  'modes '(sentry-mode))
 
 (add-hook! (list 'block-click 'sentry)
   (lambda (buf id)
@@ -790,13 +793,16 @@
              ". Read that buffer for the complete payload.")))))
 
 (define-command "sentry-ask-agent" "Send this issue to the Sentry group agent"
-  (lambda () (sentry--ask-agent! (current-buffer))))
+  (lambda () (sentry--ask-agent! (current-buffer)))
+  'modes '(sentry-detail-mode))
 
 (define-command "sentry-open-web" "Open this issue in Sentry"
-  (lambda () (sentry--open-in-sentry! (current-buffer))))
+  (lambda () (sentry--open-in-sentry! (current-buffer)))
+  'modes '(sentry-detail-mode))
 
 (define-command "sentry-resolve" "Resolve this issue in Sentry after confirmation"
-  (lambda () (sentry--confirm-resolve! (current-buffer))))
+  (lambda () (sentry--confirm-resolve! (current-buffer)))
+  'modes '(sentry-detail-mode))
 
 (mode-icon! "sentry-events-mode" "")
 
@@ -833,15 +839,18 @@
               ;; TTL passes; `g` in the detail is the explicit refetch
               (if (equal? (buffer-local buf 'mode-name) "sentry-detail-mode")
                   (cache-wake! buf)
-                  (set-mode! "sentry-detail-mode")))))))))
+                  (set-mode! "sentry-detail-mode"))))))))
+  'modes '(sentry-mode))
 
 (define-command "sentry-refresh" "Refresh the Sentry issue list"
-  (lambda () (cache-refresh! *sentry-buffer*)))
+  (lambda () (cache-refresh! *sentry-buffer*))
+  'modes '(sentry-mode))
 
 (define-command "sentry-detail-refresh" "Refresh this Sentry issue detail"
   (lambda ()
     (let ((issue-id (buffer-local (current-buffer) 'sentry-issue-id)))
-      (when issue-id (cache-refresh! (current-buffer))))))
+      (when issue-id (cache-refresh! (current-buffer)))))
+  'modes '(sentry-detail-mode))
 
 (define-command "sentry-events" "List safe event identifiers for this Sentry issue"
   (lambda ()
@@ -851,12 +860,14 @@
           (buffer-create buf)
           (buffer-set-local! buf 'sentry-issue-id issue-id)
           (display-buffer-other-window! buf)
-          (with-current-buffer buf (lambda () (set-mode! "sentry-events-mode"))))))))
+          (with-current-buffer buf (lambda () (set-mode! "sentry-events-mode")))))))
+  'modes '(sentry-detail-mode))
 
 (define-command "sentry-events-refresh" "Refresh this Sentry event list"
   (lambda ()
     (let ((issue-id (buffer-local (current-buffer) 'sentry-issue-id)))
-      (when issue-id (sentry--render-events! (current-buffer) issue-id)))))
+      (when issue-id (sentry--render-events! (current-buffer) issue-id))))
+  'modes '(sentry-events-mode))
 
 (mode-icon! "sentry-mode" "")
 

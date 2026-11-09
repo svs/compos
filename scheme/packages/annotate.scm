@@ -322,7 +322,8 @@
            (path (annotate--store-file src)))
       (if path
           (visit path)
-          (message "No annotations file — this buffer is not a file on disk")))))
+          (message "No annotations file — this buffer is not a file on disk"))))
+  'modes '(annotate-margin-mode))
 
 (public! 'annotate-store-file
   "(annotate-store-file BUF) — the on-disk annotations file for a file buffer, or #f")
@@ -432,10 +433,12 @@
           (annotate--goto! buf (nth n vis) #t)))))
 
 (define-command "annotate-next" "Go to the next annotation"
-  (lambda () (annotate--step 1)))
+  (lambda () (annotate--step 1))
+  'modes '(annotate-mode))
 
 (define-command "annotate-prev" "Go to the previous annotation"
-  (lambda () (annotate--step -1)))
+  (lambda () (annotate--step -1))
+  'modes '(annotate-mode))
 
 ;;; --- the *annotations* list: a standard list buffer -------------------------
 
@@ -534,7 +537,8 @@
   (lambda ()
     (let* ((lb (current-buffer))
            (a (list-current lb)))
-      (when a (annotate--show lb a #t)))))
+      (when a (annotate--show lb a #t))))
+  'modes '(annotations-mode))
 
 ;; the verbs, shared by the list keys and the margin's action chips
 (define (annotate--toggle-resolve! source a)
@@ -629,7 +633,8 @@
                  (annotate--suggest-apply! source id span reply)))))))
 
 (define-command "annotate-suggest" "Ask an agent to suggest a fix for this row"
-  (lambda () (annotate--row-verb annotate--suggest!)))
+  (lambda () (annotate--row-verb annotate--suggest!))
+  'modes '(annotations-mode))
 
 (effects! '(write))
 
@@ -645,16 +650,20 @@
     (when pair (f (car pair) (cadr pair)))))
 
 (define-command "annotate-resolve" "Resolve or reopen the annotation on this row"
-  (lambda () (annotate--row-verb annotate--toggle-resolve!)))
+  (lambda () (annotate--row-verb annotate--toggle-resolve!))
+  'modes '(annotations-mode))
 
 (define-command "annotate-dismiss" "Dismiss the annotation on this row (this session)"
-  (lambda () (annotate--row-verb annotate--do-dismiss!)))
+  (lambda () (annotate--row-verb annotate--do-dismiss!))
+  'modes '(annotations-mode))
 
 (define-command "annotate-apply-fix" "Apply the suggested fix on this row"
-  (lambda () (annotate--row-verb annotate--do-fix!)))
+  (lambda () (annotate--row-verb annotate--do-fix!))
+  'modes '(annotations-mode))
 
 (define-command "annotate-reply" "Reply to the annotation on this row"
-  (lambda () (annotate--row-verb annotate--read-reply)))
+  (lambda () (annotate--row-verb annotate--read-reply))
+  'modes '(annotations-mode))
 
 (define (annotate--set-tab! d)
   (let* ((lb (current-buffer))
@@ -665,13 +674,16 @@
     (message (string-append "Filter: " (car (nth n *ann-tabs*))))))
 
 (define-command "annotate-tab-next" "Show the next annotation tab"
-  (lambda () (annotate--set-tab! 1)))
+  (lambda () (annotate--set-tab! 1))
+  'modes '(annotations-mode))
 
 (define-command "annotate-tab-prev" "Show the previous annotation tab"
-  (lambda () (annotate--set-tab! -1)))
+  (lambda () (annotate--set-tab! -1))
+  'modes '(annotations-mode))
 
 (define-command "annotate-list-refresh" "Recompute this annotation list"
-  (lambda () (list-refresh! (current-buffer))))
+  (lambda () (list-refresh! (current-buffer)))
+  'modes '(annotations-mode))
 
 (define *annotations-doc*
   (string-append
@@ -729,7 +741,8 @@
     (let ((source (current-buffer)))
       (buffer-create *ann-buffer*)
       (buffer-set-local! *ann-buffer* 'ann-source source)
-      (list-mode-show! "annotations-mode"))))
+      (list-mode-show! "annotations-mode")))
+  'modes '(annotate-mode))
 
 ;;; --- the margin: annotation cards beside the document ------------------------
 ;;; A blocks buffer, the diff-mode pattern. One card per visible
@@ -922,7 +935,8 @@
           (delete-window-id! win)
           (begin
             (annotate--margin-ensure! buf)
-            (display-buffer-other-window! *ann-margin*))))))
+            (display-buffer-other-window! *ann-margin*)))))
+  'modes '(annotate-mode))
 
 ;;; --- adding an annotation by hand --------------------------------------------
 
@@ -942,7 +956,8 @@
             (annotate! buf (list 'source "reader" 'severity "note"
                                  'line line 'match match
                                  'title text 'who "you" 'when "now"))
-            (message (string-append "Annotated L" (number->string line)))))))))
+            (message (string-append "Annotated L" (number->string line))))))))
+  'modes '(annotate-mode))
 
 (define-key "annotate-map" "a" "annotate-add")
 

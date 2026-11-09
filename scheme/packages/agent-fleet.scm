@@ -987,6 +987,10 @@
 (public! 'chats-row-label
   "(chats-row-label B) — the state a chat list row shows: the runtime while it works or asks, else the goal status of the newest turn")
 
+(effects! '(destroy))
+(public! 'agents-archive!
+  "(agents-archive! B) — archive the chat B: stop its runtime, release its windows and kill its buffer")
+
 
 ;;; ------------------------------------------------------------ the chat list
 ;; The chat list is the mode list of chat-mode (mode-list.scm): ibuffer

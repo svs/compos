@@ -92,7 +92,9 @@
 (define (customize-save! name value)
   (customize-set! name value)
   (set! *custom-set-vars* (alist-put *custom-set-vars* name value))
-  (custom-write!))
+  (custom-write!)
+  ;; the state the save made, so the caller needs no read to confirm it
+  (list name (symbol-value name) 'saved (custom-file)))
 
 ;; Emacs add-to-list: ELEMENT goes first, or last with APPEND, unless the
 ;; list holds it already. The value of the session only; customize-save!

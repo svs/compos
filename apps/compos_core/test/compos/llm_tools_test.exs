@@ -205,7 +205,7 @@ defmodule Compos.LLMToolsTest do
 
       # unique match sits after a multibyte char: byte offsets must line up
       out = eval!(~s{(buffer-replace! "*zz-edit*" "old world" "new wörld")})
-      assert out == ~s{"edited"}
+      assert out =~ "edited line 1"
       assert eval!(~s{(buffer-text "*zz-edit*")}) == ~s{"héllo new wörld, olde times"}
     end
   end

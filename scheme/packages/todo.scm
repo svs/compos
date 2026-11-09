@@ -373,7 +373,7 @@
                (r (if new
                       (buffer-replace! path old new)
                       (buffer-replace! path (string-append old "\n") ""))))
-          (unless (equal? r "edited") (todo--fail r))
+          (unless (string-prefix? "edited" r) (todo--fail r))
           (unless dirty (todo--save! path)))
         (write-file! path (string-join (append (list-head ls from)
                                                (if new (list new) '())
@@ -623,9 +623,16 @@
                              (todo--append! (todo--project-file (plist-get new 'project)) (todo--render new))))
                   (todo-get id))))))))
 
+;; What a log, done, wait or review call answers: the task's state after
+;; the write and the last log line, not the whole task with its notes.
+(define (todo--brief t)
+  (list 'id (plist-get t 'id) 'state (plist-get t 'state)
+        'assignee (plist-get t 'assignee)
+        'log (let ((l (plist-get t 'log))) (if (pair? l) (car (reverse l)) #f))))
+
 (define (todo-log id text &optional who)
   "(todo-log ID TEXT [WHO]) — add a line to the task's log"
-  (todo-update id (list 'log text 'by (or who todo-user))))
+  (todo--brief (todo-update id (list 'log text 'by (or who todo-user)))))
 
 (define (todo-triage id &optional props)
   "(todo-triage ID [PROPS]) — accept an inbox task: state todo, plus any PROPS"
@@ -642,7 +649,7 @@
 
 (define (todo-done id &optional result who)
   "(todo-done ID [RESULT] [WHO]) — close the task as done; RESULT goes to the log"
-  (todo-update id (list 'state "done" 'log result 'by (or who todo-user))))
+  (todo--brief (todo-update id (list 'state "done" 'log result 'by (or who todo-user)))))
 
 (define (todo-cancel id &optional reason who)
   "(todo-cancel ID [REASON] [WHO]) — close the task as cancelled"
@@ -650,11 +657,11 @@
 
 (define (todo-wait id reason &optional who)
   "(todo-wait ID REASON [WHO]) — park the task: waiting on someone or something"
-  (todo-update id (list 'state "waiting" 'log reason 'by (or who todo-user))))
+  (todo--brief (todo-update id (list 'state "waiting" 'log reason 'by (or who todo-user)))))
 
 (define (todo-review id summary &optional who)
   "(todo-review ID SUMMARY [WHO]) — hand the task to a human to approve, e.g. a draft before it is sent"
-  (todo-update id (list 'state "review" 'log summary 'by (or who todo-user))))
+  (todo--brief (todo-update id (list 'state "review" 'log summary 'by (or who todo-user)))))
 
 (define (todo-approve id &optional text who)
   "(todo-approve ID [TEXT] [WHO]) — approve a task in review: back to todo for its assignee, logged as approved"

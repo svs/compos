@@ -17,10 +17,10 @@
   "buffer-replace-all! changes them all and says how many"
   (lambda ()
     (let ((buf (t--edit-buffer "a b a b a\n")))
-      (check-equal! (buffer-replace-all! buf "a" "X") "replaced 3 occurrences"
+      (check-contains! (buffer-replace-all! buf "a" "X") "replaced 3 occurrences on lines"
                     "three hits are reported")
       (check-equal! (buffer-text buf) "X b X b X\n" "and all three changed")
-      (check-equal! (buffer-replace-all! buf "b" "Y") "replaced 2 occurrences"
+      (check-contains! (buffer-replace-all! buf "b" "Y") "replaced 2 occurrences on lines"
                     "two hits are reported")
       (check-equal! (buffer-text buf) "X Y X Y X\n" "and both changed")
       (t--drop-edit!))))
@@ -52,12 +52,12 @@
   "the anchor stays; the text lands on the side you named"
   (lambda ()
     (let ((buf (t--edit-buffer "def two do\n  2\nend\n")))
-      (check-equal! (buffer-insert-before! buf "def two" "@doc false\n") "inserted"
+      (check-contains! (buffer-insert-before! buf "def two" "@doc false\n") "inserted line"
                     "before answers inserted")
       (check-equal! (buffer-text buf) "@doc false\ndef two do\n  2\nend\n"
                     "and the text is above the anchor")
-      (check-equal! (buffer-insert-after! buf "end\n" "\ndef three do\n  3\nend\n")
-                    "inserted" "after answers inserted")
+      (check-contains! (buffer-insert-after! buf "end\n" "\ndef three do\n  3\nend\n")
+                    "inserted lines" "after answers inserted")
       (check-contains! (buffer-text buf) "def three do" "and the text is below")
       (t--drop-edit!))))
 
@@ -65,7 +65,7 @@
   "no byte arithmetic: name the text, and it goes"
   (lambda ()
     (let ((buf (t--edit-buffer "keep\ndrop this line\nkeep\n")))
-      (check-equal! (buffer-delete-text! buf "drop this line\n") "deleted"
+      (check-contains! (buffer-delete-text! buf "drop this line\n") "deleted, now line"
                     "the delete is reported")
       (check-equal! (buffer-text buf) "keep\nkeep\n" "and only that line went")
       (t--drop-edit!))))

@@ -1663,13 +1663,51 @@
 
 ;; the edit primitive the old edit-doc tool wrapped — now a public function
 ;; reached through eval-scheme. Edits the live buffer, never the file.
+;; The whole lines an edit left, as the agent's after-state: "line N:\nTEXT"
+;; or "lines N-M:\nTEXT", at most buffer-edit-echo-lines of them. An edit
+;; answers with it so the caller sees what the buffer holds now without
+;; another read.
+(define buffer-edit-echo-lines 6)
+(define (buffer--newlines s) (- (length (string-split s "\n")) 1))
+(define (buffer--after b start len)
+  (let* ((text (buffer-text b))
+         (n (string-byte-length text))
+         (s (max 0 (min start n)))
+         (e0 (max s (min (+ start len) n)))
+         ;; text that ends in a newline ends on its own last line
+         (e (if (and (> e0 s) (equal? (substring-bytes text (- e0 1) e0) "\n")) (- e0 1) e0))
+         (ls (let ((i (string-rindex (substring-bytes text 0 s) "\n"))) (if i (+ i 1) 0)))
+         (le (let ((i (string-index (substring-bytes text e n) "\n"))) (if i (+ e i) n)))
+         (first (+ 1 (buffer--newlines (substring-bytes text 0 s))))
+         (lines (split-lines (substring-bytes text ls le)))
+         (count (max 1 (length lines)))
+         (more (- count buffer-edit-echo-lines)))
+    (string-append
+      (if (= count 1)
+          (string-append "line " (number->string first))
+          (string-append "lines " (number->string first) "-" (number->string (+ first count -1))))
+      ":\n" (string-join (if (> more 0) (list-head lines buffer-edit-echo-lines) lines) "\n")
+      (cond ((= more 1) "\n... 1 more line")
+            ((> more 1) (string-append "\n... " (number->string more) " more lines"))
+            (else "")))))
+
+;; "lines 2, 5, 9": where each replacement landed, from the split old text
+(define (buffer--hit-lines pieces new)
+  (let loop ((ps (cdr pieces)) (line (+ 1 (buffer--newlines (car pieces)))) (acc '()) (n 0))
+    (cond ((null? ps)
+           (string-append (if (= n 1) "line " "lines ")
+                          (string-join (map number->string (reverse acc)) ", ")))
+          ((>= n 10) (string-append "lines " (string-join (map number->string (reverse acc)) ", ") ", ..."))
+          (else (loop (cdr ps) (+ line (buffer--newlines new) (buffer--newlines (car ps)))
+                      (cons line acc) (+ n 1))))))
+
 (define (buffer-replace! b old new)
   (let ((pos (buffer--one-hit b old "old text")))
     (if (string? pos)
         pos
         (begin
           (buffer-replace-range! b pos (string-byte-length old) new)
-          "edited"))))
+          (string-append "edited " (buffer--after b pos (string-byte-length new)))))))
 
 ;;; --- the rest of edit-file semantics ------------------------------------------
 ;;; buffer-replace! is the one-hit edit. These four are the operations an
@@ -1711,26 +1749,30 @@
                     b 0 (string-byte-length text)
                     (string-join (string-split text old) new))
                   (string-append "replaced " (number->string hits)
-                                 (if (= hits 1) " occurrence" " occurrences"))))))))
+                                 (if (= hits 1) " occurrence" " occurrences")
+                                 " on " (buffer--hit-lines (string-split text old) new))))))))
 
 (define (buffer-insert-before! b anchor text)
   (let ((pos (buffer--one-hit b anchor "anchor")))
     (if (string? pos)
         pos
-        (begin (buffer-insert! b pos text) "inserted"))))
+        (begin (buffer-insert! b pos text)
+               (string-append "inserted " (buffer--after b pos (string-byte-length text)))))))
 
 (define (buffer-insert-after! b anchor text)
   (let ((pos (buffer--one-hit b anchor "anchor")))
     (if (string? pos)
         pos
-        (begin (buffer-insert! b (+ pos (string-byte-length anchor)) text)
-               "inserted"))))
+        (let ((at (+ pos (string-byte-length anchor))))
+          (buffer-insert! b at text)
+          (string-append "inserted " (buffer--after b at (string-byte-length text)))))))
 
 (define (buffer-delete-text! b old)
   (let ((pos (buffer--one-hit b old "text")))
     (if (string? pos)
         pos
-        (begin (buffer-delete-range! b pos (string-byte-length old)) "deleted"))))
+        (begin (buffer-delete-range! b pos (string-byte-length old))
+               (string-append "deleted, now " (buffer--after b pos 0))))))
 
 (category! 'editing)
 (public! 'buffer-replace!

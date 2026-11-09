@@ -97,8 +97,8 @@
   "the file is still parseable structure after the swap"
   (lambda ()
     (let ((buf (t--code-ts! "zz-code-replace" t--code-elixir)))
-      (check-equal! (code-replace! buf 6 "def two(x) do\n    x * 2\n  end")
-                    "replaced the call at line 6" "the report")
+      (check-contains! (code-replace! buf 6 "def two(x) do\n    x * 2\n  end")
+                    "replaced the call at line 6, now lines 6-8" "the report")
       (check-equal! (buffer-text buf)
                     (string-append
                       "defmodule Zz do\n"
@@ -210,8 +210,8 @@
       (buffer-insert! buf 42 "    x + 0\n")
 
       ;; the agent still says 6, and still means `two`
-      (check-equal! (code-replace! buf 6 "def two(x) do\n    x * 2\n  end")
-                    "replaced the call at line 6" "the anchor found it")
+      (check-contains! (code-replace! buf 6 "def two(x) do\n    x * 2\n  end")
+                    "replaced the call at line 6, now lines 7-9" "the anchor found it")
       (check-contains! (buffer-text buf) "x * 2" "the new body landed")
       (check-contains! (buffer-text buf) "x + 0" "the person's line survived")
       (check-contains! (buffer-text buf) "x + 1" "one was left alone")

@@ -854,7 +854,8 @@
         ;; One buffer message: parallel readers see the old definition or
         ;; the new one, never the empty interval between delete and insert.
         (buffer-replace-range! buf start (- (code--end n) start) new)
-        (string-append "replaced the " kind " at line " (number->string line))))))
+        (string-append "replaced the " kind " at line " (number->string line)
+                       ", now " (buffer--after buf start (string-byte-length new)))))))
 
 ;;; --- sexp selection: the smallest expression around a text anchor -------------
 ;;; The definition API addresses whole definitions. These two address any
@@ -895,7 +896,8 @@
             n
             (let ((start (code--start n)))
               (buffer-replace-range! buf start (- (code--end n) start) new)
-              (string-append "replaced the " (code--kind n))))))))
+              (string-append "replaced the " (code--kind n)
+                             ", now " (buffer--after buf start (string-byte-length new)))))))))
 
 (effects! '(read))
 (public! 'code-outline

@@ -2456,6 +2456,11 @@
       (llm-bundle-named "Driver")))
 (public! 'llm-palette-bundle
   "(llm-palette-bundle) — the preset a chat the command palette starts runs on: Driver API, or Driver when no Anthropic API key is set")
+(effects! '(read))
+(public! 'llm-config-session "(llm-config-session BUF) - the chat whose LLM settings BUF uses: BUF itself when it is a chat, else its group's most recent chat")
+(public! 'llm-config-permission "(llm-config-permission BUF) - the permission mode of BUF, auto when none is set")
+(public! 'llm-config-core "(llm-config-core BUF) - the connector, model and effort of BUF's session as a plist")
+(public! 'llm-config-combination "(llm-config-combination BUF) - the whole LLM setup of BUF's session as a plist: connector, model, effort, presets, permission, agent-mode, prompt-disabled, sandbox")
 (domain! 'chat)
 (effects! '(unknown))
 

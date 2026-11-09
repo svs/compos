@@ -27,6 +27,8 @@
     (when group (buffer-add-group! buf group)))
   buf)
 (define *whatsapp-call* mcp-call!)
+(effects! '(write external))
+(public! '*whatsapp-call* "(*whatsapp-call* SERVER TOOL ARGS [CB]) — the MCP call that WhatsApp uses; tests set it to a stub")
 
 (domain! 'chat)
 (effects! '(pure))

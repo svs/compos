@@ -299,6 +299,20 @@
 ;; Run every case on every model REPS times, one run at a time, in a task,
 ;; so each time is its own. MODELS and CASES take names or whole entries;
 ;; CASES 'hard is the harness set.
+(define drive-eval-results-file (string-append (getenv "HOME") "/.compos/drive-eval/results.txt"))
+
+;; the table so far, after each run: into *drive-eval* and into
+;; drive-eval-results-file, so a buffer on that file in auto-revert shows the
+;; rows as they come. A report that throws never stops the run.
+(define (drive-eval--progress! rows ms cs)
+  (let ((text (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
+                  "drive-eval: running")))
+    (ignore-errors (lambda () (write-file! drive-eval-results-file text)))
+    (ignore-errors (lambda ()
+                     (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
+                     (buffer-set-text! "*drive-eval*" text)))
+    text))
+
 (define (drive-eval &optional models cases reps)
   (let* ((ms (map (lambda (x) (if (symbol? x) (assq x *drive-eval-models*) x)) (or models *drive-eval-models*)))
          (cs (cond ((eq? cases 'hard) *drive-eval-hard-cases*)
@@ -307,14 +321,20 @@
          (n (or reps 1)))
     (task-run!
       (lambda ()
-        (apply append
-               (map (lambda (c)
-                      (apply append
-                             (map (lambda (m)
-                                    (let loop ((i 0) (acc '()))
-                                      (if (>= i n) (reverse acc) (loop (+ i 1) (cons (drive-eval--run c m) acc)))))
-                                  ms)))
-                    cs)))
+        (let ((done '()))
+          (drive-eval--progress! '() ms cs)
+          (for-each
+            (lambda (c)
+              (for-each
+                (lambda (m)
+                  (let loop ((i 0))
+                    (when (< i n)
+                      (set! done (cons (drive-eval--run c m) done))
+                      (drive-eval--progress! (reverse done) ms cs)
+                      (loop (+ i 1)))))
+                ms))
+            cs)
+          (reverse done)))
       (lambda (ok? rows)
         (if (not ok?)
             (let ((why (string-append "drive-eval failed: " (value->string rows))))
@@ -328,6 +348,7 @@
                               "drive-eval: the report failed; the rows are in *drive-eval-rows*"))))
               (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
               (buffer-set-text! "*drive-eval*" text)
+              (ignore-errors (lambda () (write-file! drive-eval-results-file text)))
               (message (car (string-split text "\n")))
               (event-publish! "drive-eval" 'done (car (string-split text "\n"))))))
       (* 1000 (+ 60 (* drive-eval-timeout-s n (length ms) (length cs)))))))

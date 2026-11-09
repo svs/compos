@@ -179,6 +179,41 @@
           (string-append acc "\n  " (nth 2 e) " — " (cadr e)))
         "" entries))
 
+;; A near miss is the slip an agent makes most: the name without its !
+;; or ?, or a plural. The fix is never applied for the caller: chat-stable-id
+;; and chat-stable-id! differ in effects, and a call that writes must be the
+;; caller's own choice. So the hint names the one real name and says how
+;; it differs, and the caller sends the call again.
+(define (tool--near-variants name)
+  (let* ((n (string-length name))
+         (end (and (> n 1) (substring name (- n 1) n)))
+         (stem (if (member end '("!" "?")) (substring name 0 (- n 1)) name))
+         (single (and (> (string-length stem) 2) (string-suffix? "s" stem)
+                      (substring stem 0 (- (string-length stem) 1)))))
+    (fold (lambda (acc c)
+            (if (or (not c) (equal? c name) (member c acc)) acc (append acc (list c))))
+          '()
+          (list (string-append stem "!") (string-append stem "?") stem
+                (string-append stem "s") single
+                (and single (string-append single "!"))
+                (and single (string-append single "?"))))))
+
+(define (tool--near-miss name)
+  "the one bound procedure NAME misses by a ! or ? or a plural, else #f"
+  (let ((hits (filter (lambda (c)
+                        (let ((s (string->symbol c)))
+                          (and (boundp s) (procedure? (symbol-value s)))))
+                      (tool--near-variants name))))
+    (and (= (length hits) 1) (car hits))))
+
+(define (tool--near-miss-text name hit)
+  (string-append "\n" name " is not a name; " hit " is. It differs only by "
+                 (cond ((string-suffix? "!" hit) "the ! at the end")
+                       ((string-suffix? "?" hit) "the ? at the end")
+                       ((or (string-suffix? "!" name) (string-suffix? "?" name)) "the mark at the end")
+                       (else "the plural"))
+                 ". Send the call again with " hit "."))
+
 ;; the feedback that makes one-tool work: name the real API on a miss
 (define (tool--error-hint msg code)
   (cond
@@ -188,10 +223,13 @@
     ((re-match? "unbound variable: " msg)
      (let* ((name (string-trim (car (reverse (string-split msg "unbound variable: ")))))
             (hits (tool--suggest name)))
-       (if (null? hits)
-           "\nNo close public-api match — search with (apropos \"words\") before retrying."
-           (string-append "\nunbound: " name " — did you mean:"
-                          (tool--format-suggestions hits)))))
+       (string-append
+         (let ((near (tool--near-miss name)))
+           (if near (tool--near-miss-text name near) ""))
+         (if (null? hits)
+             "\nNo close public-api match — search with (apropos \"words\") before retrying."
+             (string-append "\nunbound: " name " — did you mean:"
+                            (tool--format-suggestions hits))))))
     ;; a builtin fed the wrong arguments names itself before the colon
     ((re-match? "no function clause matching" msg)
      (let* ((name (car (string-split msg ":")))
@@ -300,6 +338,33 @@
   (and (pair? effects)
        (null? (remove (lambda (f) (member f '("pure" "read" "external"))) effects))))
 
+(define (eval-read--route name)
+  "how NAME runs: here when it reads, else the eval-scheme route"
+  (let ((e (assoc name (eval-read--effects (list name)))))
+    (if (eval-read--reads? (and e (cadr e)))
+        "it reads, so send it here"
+        (string-append "it is not declared read ("
+                       (let ((s (and e (cadr e)))) (if (pair? s) (string-join s " ") "no stamp"))
+                       "), so run it with eval-scheme"))))
+
+;; The unbound refusal answers the way eval-scheme's error does: the one
+;; near miss first, then the closest public names, each with its route.
+(define (eval-read--unbound-text name)
+  (let ((near (tool--near-miss name))
+        (hits (tool--suggest name)))
+    (string-append
+      name " is unbound."
+      (if near
+          (string-append (tool--near-miss-text name near) " Note: " (eval-read--route near) ".")
+          "")
+      (if (null? hits)
+          " Find the real name with (apropos \"words\"). If it is syntax, eval-scheme-read does not allow it: run the code with eval-scheme."
+          (string-append "\nclosest names:"
+                         (fold (lambda (acc e)
+                                 (string-append acc "\n  " (nth 2 e) " — " (cadr e)
+                                                " [" (eval-read--route (car e)) "]"))
+                               "" hits))))))
+
 (define (eval-read-refusal code &optional on-unstamped)
   "#f when CODE only reads, else why not; ON-UNSTAMPED gets a name the catalog has no effects for and answers a task id"
   (let ((forms (ignore-errors (lambda () (scheme-read code)))))
@@ -321,8 +386,7 @@
                                           (and e (cadr e))))))
                                fns)))
           (cond ((pair? unbound)
-                 (string-append (symbol->string (car unbound))
-                                " is unbound, or syntax eval-scheme-read does not allow. A guessed name: find the real one with (apropos \"words\"). Syntax: run the code with eval-scheme."))
+                 (eval-read--unbound-text (symbol->string (car unbound))))
                 ((pair? writes)
                  (let* ((n (symbol->string (car writes)))
                         (e (assoc n effects))
@@ -368,7 +432,8 @@
     (let* ((code (or (plist-get args 'code) ""))
            (why (eval-read-refusal code eval-read--file-unstamped!)))
       (if why
-          (string-append "refused: " why ". Use eval-scheme for this code.")
+          (string-append "refused: " why
+                         (if (string-contains? why " is unbound.") "" ". Use eval-scheme for this code."))
           (let ((r (with-current-buffer (current-buffer)
                      (lambda () (eval-string-safe code)))))
             (if (equal? (car r) 'ok)

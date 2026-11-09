@@ -101,3 +101,15 @@
                  "a daemon fault says the caller's code is not at fault")
     (check-false! (string-contains? (tool--error-hint "zz-prim: bad value" "(zz-prim)") "daemon")
                   "an ordinary error gets no daemon hint")))
+
+(deftest 'a-near-miss-name-is-named-with-its-route
+  "an unbound name one ! or plural away from a real one is named, never run for the caller"
+  (lambda ()
+    (let ((read (eval-read-refusal "(buffer-texts \"x\")"))
+          (write (eval-read-refusal "(chat-stable-id \"x\")")))
+      (check-contains! read "buffer-text is" "the plural slip names the real name")
+      (check-contains! read "send it here" "a read stays in eval-scheme-read")
+      (check-contains! write "chat-stable-id! is" "the missing ! is named")
+      (check-contains! write "run it with eval-scheme" "a write names the eval-scheme route"))
+    (check-contains! (tool--error-hint "unbound variable: buffer-texts" "")
+                     "buffer-text is" "eval-scheme says the same")))

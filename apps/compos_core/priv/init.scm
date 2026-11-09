@@ -231,6 +231,8 @@
 (require 'switch)
 (require 'handheld)
 (require 'telemetry)
+;; the model rounds and tool calls of an ACP or Codex turn, for chat-perf
+(require 'agent-perf)
 (require 'perf)
 (require 'profile)
 (require 'racket)

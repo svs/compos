@@ -494,16 +494,27 @@
   (map cadr (sort (map (lambda (r) (list (chat-perf--start r) r)) rows))))
 
 ;; The collector answers newest first. A turn reads in the order it ran.
+;; An ACP or Codex turn stamps only its context row: the adapter runs the
+;; loop. agent-perf times its model rounds and tool calls from the events,
+;; anchored at the end of the context row. A direct turn has its own.
+(define (chat-perf--add-agent-steps slug rows)
+  (if (or (not (boundp 'agent-perf-rows))
+          (pair? (filter (lambda (r) (string-prefix? "round " (chat-perf--step r))) rows)))
+      rows
+      (let ((ctx (filter (lambda (r) (equal? (chat-perf--step r) "context")) rows)))
+        (append rows (agent-perf-rows slug (and (pair? ctx) (chat-perf--end (car ctx))))))))
+
 (define (chat-perf--rows slug)
   (if (equal? slug "")
       '()
       (let* ((events (telemetry-events 1000))
-             (mine (chat-perf--last-turn
-                     (reverse
-                       (filter (lambda (row)
-                                 (and (equal? (plist-get row 'layer) "chat")
-                                      (equal? (plist-get row 'owner) slug)))
-                               events)))))
+             (mine (chat-perf--add-agent-steps slug
+                     (chat-perf--last-turn
+                       (reverse
+                         (filter (lambda (row)
+                                   (and (equal? (plist-get row 'layer) "chat")
+                                        (equal? (plist-get row 'owner) slug)))
+                                 events))))))
         (if (null? mine)
             '()
             (let* ((win (chat-perf--window mine))

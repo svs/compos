@@ -504,6 +504,9 @@
                            " failed, the transcript may miss a piece")
             (lambda () (agent-handle-event slug e))))
         events)
+      ;; observers of the raw events (agent-perf times the steps of a turn)
+      (report-errors (string-append "agent " slug ": agent-events-hook failed")
+        (lambda () (run-hook-with-args 'agent-events-hook slug events)))
       ;; the rich view follows the batch: one tree per batch, not per event
       (chat-view-sync! (agent-buf slug))
       ;; a document's hidden chat renders its reply into the document too:

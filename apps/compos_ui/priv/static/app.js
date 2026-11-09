@@ -93,13 +93,21 @@
   // named key appears in its Emacs spelling: "<up>", not "ArrowUp".
   const CMD_KEYS = ["<left>", "<right>", "<up>", "<down>",
                     "a", "i", "p", "[", "]", "+", "=", "-", "0", "_", ")", "RET"];
+  // the Cmd keys a keymap binds now, as Scheme publishes them (cmd-keys in
+  // vscode.scm): the editor root carries them, space-separated, so a mode
+  // that binds Cmd-O or Cmd-Shift-P gets the key and the browser does not
+  function boundCmdKeys() {
+    const root = document.getElementById("editor");
+    const keys = root && root.dataset.cmdKeys;
+    return keys ? keys.split(" ") : [];
+  }
 
   function keySpec(e) {
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;
     const base = baseKey(e);
     if (base === null) return null;
     // the claim reads the base, not e.key: Cmd-Shift-= is "+"
-    if (e.metaKey && !CMD_KEYS.includes(base)) return null;
+    if (e.metaKey && !CMD_KEYS.includes(base) && !boundCmdKeys().includes(base)) return null;
     let spec = base;
     // S- only for named keys (TAB, arrows, RET...): printable chars
     // already encode shift in the character itself, Emacs-style.

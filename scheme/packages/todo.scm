@@ -1810,24 +1810,26 @@
                         (if (null? ls) '()
                             (list (part (string-append "Listening  ·  " (number->string (length ls))) "Listening"
                                         (map todo--detail-listener ls)))))))
-         ;; one row a sub-task: its state, its title, the first line of its status
+         ;; one row a sub-task: its title and its state. RET or a click
+         ;; visits it; u comes back.
          (children (lambda ()
                      (if (null? kids)
                          (list (component 'ui/empty (list 'text "No sub-tasks")))
                          (let loop ((ks kids) (i 1) (acc '()))
                            (if (null? ks) (reverse acc)
                                (let* ((k (car ks))
-                                      (s (plist-get k 'status))
-                                      (first (if (todo--blank? s) "" (car (string-split s "\n"))))
+                                      (state (or (plist-get k 'state) "inbox"))
+                                      (tone (todo--detail-tone state))
                                       (n (line! (plist-get k 'title))))
                                  (set! child-lines (cons (cons n (plist-get k 'id)) child-lines))
                                  (loop (cdr ks) (+ i 1)
                                        (cons (stop (component 'ui/row
-                                                     (list 'segs (append
-                                                                   (list (list (let ((tone (todo--detail-tone (or (plist-get k 'state) "inbox")))) (if (equal? tone "") "c-dim" (string-append "c-" tone)))
-                                                                               (string-append (or (plist-get k 'state) "inbox") "  "))
-                                                                         (list "" (or (plist-get k 'title) "")))
-                                                                   (if (equal? first "") '() (list (list "c-dim" (string-append "  ·  " first)))))))
+                                                     (list 'class "todo-child"
+                                                           'click (string-append "todo-child:" (plist-get k 'id))
+                                                           'segs (list (list "todo-child-title" (or (plist-get k 'title) ""))
+                                                                       (list (string-append "todo-child-state "
+                                                                                            (if (equal? tone "") "c-dim" (string-append "c-" tone)))
+                                                                             state))))
                                                    (string-append "Child " (number->string i)) n n)
                                              acc))))))))
          (log (lambda ()
@@ -2459,6 +2461,24 @@
                                                 (string-append (car (car vs)) " " (number->string (car cs)))
                                                 (equal? (car (car vs)) view))
                                           out)))))))))
+
+;; a click on a sub-task row of a task page visits it, as RET does
+(add-hook! (list 'block-click 'todo-child)
+  (lambda (buf id)
+    (and (string? id)
+         (string-prefix? "todo-child:" id)
+         (buffer-exists? buf)
+         (let ((t (todo-get (substring id 11 (string-length id)))))
+           (and t
+                (begin (buffer-set-local! buf 'todo-id (plist-get t 'id))
+                       (todo--detail-tab-set! buf "overview")
+                       #t))))))
+
+(define-style! 'todo-child "
+.todo-child { display: flex; gap: 12px; align-items: baseline; cursor: pointer; }
+.todo-child-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-child-state { flex: none; font-size: .85em; }
+")
 
 (add-hook! (list 'block-click 'todo-tabs)
   (lambda (buf id)

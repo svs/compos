@@ -2858,9 +2858,19 @@
   (let ((r (chat-input-region buf)))
     (substring-bytes (buffer-text buf) (car r) (car (cdr r)))))
 
-(define (chat-clear-input! buf)
-  (let ((r (chat-input-region buf)))
-    (buffer-delete-range! buf (car r) (- (car (cdr r)) (car r)))))
+(define (chat-clear-input! buf &optional read)
+  "Delete the input. READ is the input text as the caller read it: the
+input is the tail of the buffer, so those exact bytes go from the end.
+A turn-end that renders between the read and this delete moves the
+input start, and a region worked out again would cut the wrong bytes."
+  (let ((size (buffer-size buf)))
+    (if (and (string? read)
+             (not (equal? read ""))
+             (string-suffix? read (buffer-text buf)))
+        (let ((n (string-byte-length read)))
+          (buffer-delete-range! buf (- size n) n))
+        (let ((r (chat-input-region buf)))
+          (buffer-delete-range! buf (car r) (- (car (cdr r)) (car r)))))))
 
 (define (chat-replace-input! buf text)
   (chat-clear-input! buf)
@@ -2997,12 +3007,13 @@
 (define-command "chat-send-new" "Send the input to a new chat in this group; this chat keeps its conversation"
   (lambda ()
     (let* ((buf (current-buffer))
-           (typed (string-trim (chat-input-text buf)))
+           (raw (chat-input-text buf))
+           (typed (string-trim raw))
            (g (or (frame-group) (group-ensure! buf))))
       (cond ((equal? typed "") (message "Nothing to send"))
             ((not g) (message "No group for a chat"))
             (else
-             (chat-clear-input! buf)
+             (chat-clear-input! buf raw)
              (when (group-chat-new! g)
                (insert! typed)
                (run-command "agent-send"))))))

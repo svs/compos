@@ -501,7 +501,10 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (chat? (equal? (buffer-local-value 'mode-name buf) "chat-mode"))
-           (typed (string-trim (chat-input-text buf))))
+           ;; the input as RET read it: the clear deletes these bytes, so a
+           ;; turn-end that renders before the clear cannot shift the cut
+           (raw (chat-input-text buf))
+           (typed (string-trim raw)))
       (if (and chat? (or (chat-scheme-input? typed) (chat-fast-input? typed)))
           ;; the prompt is a REPL before it is a conversation, and an input
           ;; that opens with ! is prose fast-code resolves to Scheme first.
@@ -586,11 +589,11 @@
                                    ;; the text the runtime holds, so the
                                    ;; user-msg that delivers it pops this row
                                    (agent-echo-queued! slug sent)
-                                   (chat-clear-input! buf)
+                                   (chat-clear-input! buf raw)
                                    (end-of-buffer!)
                                    (message "queued — runs when this turn ends"))
                                  (begin
-                                   (chat-clear-input! buf)
+                                   (chat-clear-input! buf raw)
                                    (end-of-buffer!)
                                    (message (if (equal? result 'answered)
                                                 "answered"
@@ -1084,7 +1087,8 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
-           (input (string-trim (chat-input-text buf)))
+           (raw (chat-input-text buf))
+           (input (string-trim raw))
            (running (and slug (member (agent-status slug) '(running starting)))))
       (if (not (chat-dismiss--hide! buf))
           (message "could not hide chat: no other buffer is available")
@@ -1092,7 +1096,7 @@
             (when slug
               (buffer-set-local! buf 'chat-dismiss-pending #t)
               (cond ((not (equal? input ""))
-                     (chat-clear-input! buf)
+                     (chat-clear-input! buf raw)
                      (buffer-set-local! buf 'chat-finish-asked #t)
                      (agent-send-msg! slug (string-append input "\n\n" (chat-dismiss--ask))))
                     ((not running)

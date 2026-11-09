@@ -3,7 +3,7 @@
 ;;; The palette answers "how do I do this?" where M-x answers "what is
 ;;; the command called?". It searches commands by the words typed, their
 ;;; names, docs and the everyday words people use for them, and puts first
-;;; the past asks that match. Words no row is named for go to a model that
+;;; the commands you ran. Words no row is named for go to a model that
 ;;; picks the command, and the same words run it at once next time. Words
 ;;; no command does go to the chat of the buffer you were in.
 
@@ -137,43 +137,16 @@
 
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
-      ;; The resting palette is familiar and cheap: what you ran or asked,
+      ;; The resting palette is familiar and cheap: the commands you ran,
       ;; newest first, then the rest of the M-x command table. The search
       ;; takes over as soon as the user states intent.
-      (let* ((hist (history-items 'M-x))
-             (asks (take (filter (lambda (h) (not (command-fn h))) hist)
-                         *command-palette-past-max*))
-             (rows (map command-palette--symbol-row (command-rows)))
-             (recent (filter (lambda (h) (or (command-fn h) (member h asks))) hist))
-             (top (filter (lambda (r) r)
-                          (map (lambda (h)
-                                 (if (command-fn h) (assoc h rows) (list h "past  ask")))
-                               recent))))
-        ;; Start here, then what you ran or asked, then every other command
+      (let* ((rows (map command-palette--symbol-row (command-rows)))
+             (recent (filter command-fn (history-items 'M-x)))
+             (top (filter (lambda (r) r) (map (lambda (h) (assoc h rows)) recent))))
+        ;; Start here, then what you ran, then every other command
         (command-sections (append top (filter (lambda (r) (not (member (car r) recent))) rows))))
-      (let ((lead (command-palette--past query)))
-        (command-palette--with-ask query
-          (append lead
-                  (filter (lambda (candidate)
-                            (and candidate (not (assoc (car candidate) lead))))
-                          (map command-palette--candidate (command-palette--search query))))))))
-
-;; What you picked or asked here before, newest first: the entries of the
-;; shared M-x history that hold every word typed.
-(define *command-palette-past-max* 5)
-
-(define (command-palette--past query)
-  (let* ((words (filter (lambda (w) (not (equal? w "")))
-                        (string-split (string-downcase (string-trim query)) " ")))
-         (hits (filter (lambda (h)
-                         (let ((l (string-downcase h)))
-                           (null? (filter (lambda (w) (not (string-contains? l w))) words))))
-                       (history-items 'M-x))))
-    ;; a command you ran before is ranked with the rest, ahead of the rare
-    ;; ones (command-palette--search): leading here, llm-config-save-bundle
-    ;; once run beat save-buffer for "save". What you asked in words leads.
-    (map (lambda (h) (list h "past  ask"))
-         (take (filter (lambda (h) (not (command-fn h))) hits) *command-palette-past-max*))))
+      (command-palette--with-ask query
+        (filter (lambda (c) c) (map command-palette--candidate (command-palette--search query))))))
 
 (define *command-palette-debounce-ms* 250)
 
@@ -476,7 +449,7 @@
 (domain! 'interaction)
 (effects! '(write execute))
 
-;; DEL on an empty palette, or <delete>, removes the highlighted past row
+;; DEL on an empty palette, or <delete>, removes the highlighted command you ran
 ;; from the history. *command-palette-row-delete* is a package's function of
 ;; the removed words, or #f: fast-code forgets the answer it remembers.
 (define *command-palette-row-delete*
@@ -491,7 +464,7 @@
           (when *command-palette-row-delete* (*command-palette-row-delete* name))
           (minibuffer-set-candidates! (command-palette-candidates (minibuffer-input)))
           (message (string-append "Removed from the history: " name)))
-        (message "Only a past row can be removed"))))
+        (message "Only a command you ran can be removed"))))
 
 (define-command "command-palette"
   "Find a command by what it does"
@@ -499,8 +472,8 @@
     (set! *command-palette--from* (current-buffer))
     (command-palette--everyday-words!)
     (set! *mb-row-delete-fn* command-palette--delete-row!)
-    ;; every pick and every ask goes on 'M-x, the one history the palette
-    ;; and M-x share, so M-p in either walks them back
+    ;; every command run goes on 'M-x, the one history the palette and M-x
+    ;; share, so M-p in either walks them back
     (set! *mb-history-key* 'M-x)
     (set! *mb-history-pos* -1)
     (minibuffer-read* "Command: " (command-palette-candidates "")
@@ -508,7 +481,8 @@
               (lambda (choice)
                 (set! *mb-history-key* #f)
                 (set! *mb-row-delete-fn* #f)
-                (unless (equal? choice "") (history-push! 'M-x choice))
+                ;; only a command that runs goes on the history: the run
+                ;; pushes it, and words that found none stay out
                 (command-palette--run choice)))
             (list 'cancel (lambda () (set! *mb-history-key* #f) (set! *mb-row-delete-fn* #f)))
             (list 'change
@@ -518,7 +492,7 @@
                 (minibuffer-set-candidates!
                   (if (equal? (string-trim input) "")
                       (command-palette-candidates "")
-                      (command-palette--with-ask input (command-palette--past input))))
+                      (command-palette--with-ask input '())))
                 (debounce!
                   (string-append "command-palette:" (selected-frame))
                   *command-palette-debounce-ms*

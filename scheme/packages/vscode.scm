@@ -39,7 +39,6 @@
     ("s-F" "project-ripgrep")
     ("s-E" "project-dired")
     ;; switch between buffers and windows
-    ("C-<tab>" "ibuffer-prompt")
     ("s-{" "window-previous-buffer")
     ("s-}" "window-next-buffer")
     ("s-1" "vscode-focus-window-1") ("s-2" "vscode-focus-window-2")
@@ -59,7 +58,11 @@
     ("s-k <left>" "pane-move-left") ("s-k <right>" "pane-move-right")
     ("s-k <up>" "pane-move-up") ("s-k <down>" "pane-move-down")
     ;; Keyboard Shortcuts
-    ("s-k s-s" "keys")))
+    ("s-k s-s" "keys")
+    ;; Cmd-K is the leader: which-key lists what follows it
+    ("s-k l" "window-layout")
+    ("s-k b" "ibuffer")
+    ("s-k c" "ichat")))
 
 (define-keymap! "vscode-mode-map")
 ;; Shift with a letter arrives as the capital: s-P, never s-S-p
@@ -113,7 +116,7 @@
     (message (if vscode-mode "VSCode keys on" "VSCode keys off"))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-Shift-P or F1 opens the command palette. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Ctrl-Tab switches buffers, Cmd-Shift-[ and ] step through this window's buffers, Cmd-1 to Cmd-9 go to a window by its place, and Cmd-K Cmd-arrow goes to the window in that direction. Cmd-\\ splits to the side and Cmd-K Cmd-\\ below. Cmd-W closes the buffer and Cmd-K Cmd-W the window. Ctrl-Cmd-Left/Right move this window to the pane beside it, and Cmd-K arrow moves the pane. Cmd-K Cmd-S lists the keys. M-x vscode-mode turns it on or off, and the choice lasts.")
+  "The VSCode keys, in every buffer. Cmd-Shift-P or F1 opens the command palette. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, Cmd-1 to Cmd-9 go to a window by its place, and Cmd-K Cmd-arrow goes to the window in that direction. Cmd-\\ splits to the side and Cmd-K Cmd-\\ below. Cmd-W closes the buffer and Cmd-K Cmd-W the window. Ctrl-Cmd-Left/Right move this window to the pane beside it, and Cmd-K arrow moves the pane. Cmd-K Cmd-S lists the keys. Cmd-K is the leader: press it and wait to see what follows, such as L for layouts, B for buffers and C for chats. M-x vscode-mode turns it on or off, and the choice lasts.")
 
 (vscode--apply! vscode-mode)
 

@@ -14,9 +14,10 @@
       (check-equal! (drive-eval--count rec) '(2 2) "two replies, two tool calls, the earlier turn left out"))))
 
 (deftest 'drive-eval-table-says-each-model
-  "the first line scores each model; a row shows ok or NO, rounds, tools and seconds"
+  "the first line scores each model; a cell shows passed/runs and median rounds, tools and seconds"
   (lambda ()
-    (let* ((rows '((count haiku #t 2 1 5000 "end_turn") (count opus #f 3 2 12000 "end_turn")))
+    (let* ((rows '((count haiku #t 2 1 5000 "end_turn" () "7") (count opus #f 3 2 12000 "end_turn" (("round 1 model" 900)) "8")))
            (text (drive-eval--text rows '((haiku) (opus)) '((count)))))
       (check-true! (string-prefix? "drive-eval: haiku 1/1 ok" text) "the score line")
-      (check-true! (string-contains? text "NO 3r 2t 12.0s") "the failed run"))))
+      (check-true! (string-contains? text "0/1 3.0r 2.0t 12.0s") "the failed run")
+      (check-true! (string-contains? text "round 1 model 900") "and where its time went"))))

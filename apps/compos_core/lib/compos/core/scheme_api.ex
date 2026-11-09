@@ -2473,7 +2473,7 @@ defmodule Compos.Core.SchemeAPI do
       # select-frame!, the frame MRU and the window points stay as they are,
       # so work in one frame does not move the frame a person uses.
       {"with-selected-frame",
-       "(with-selected-frame FRAME THUNK) - run THUNK with FRAME as the current frame of this lane; no other frame or window changes."} =>
+       "(with-selected-frame FRAME THUNK) — run THUNK with FRAME as the current frame of this lane; no other frame or window changes."} =>
         fn [id, thunk], store ->
           Compos.Core.Frame.with_frame(id, fn ->
             Compos.Scheme.Eval.apply_fn(thunk, [], store)

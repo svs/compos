@@ -308,7 +308,7 @@
   (lambda ()
     (let ((result (with-stub 'llm-key (lambda (provider) #f)
                     (lambda () (apropos-rebuild-embeddings!)))))
-      (check-contains! result "no OpenAI key" "the result explains the empty cache"))))
+      (check-contains! result "has a key" "the result explains the empty cache"))))
 
 (deftest 'literal-results-rank-before-semantic-results
   "a direct vocabulary match stays ahead of a vector result"
@@ -321,13 +321,13 @@
                     "the literal hit is first"))))
 
 (deftest 'semantic-ranking-weights-the-name-above-the-description
-  "a task word in the API name beats the same word in prose"
+  "meaning ranks; in a near tie a task word in the API name beats the same word in prose"
   (lambda ()
     (let* ((named (list 'kind "function" 'name "read-csv-file"
-                        'doc "load tabular data" 'semantic-score 0.40
+                        'doc "load tabular data" 'semantic-score 0.50
                         'note "semantic match"))
            (described (list 'kind "function" 'name "other-operation"
-                            'doc "read csv file" 'semantic-score 0.55
+                            'doc "read csv file" 'semantic-score 0.52
                             'note "semantic match"))
            (ranked (apropos--rank (list described named) "read csv file")))
       (check-equal! (plist-get (car ranked) 'name) "read-csv-file"
@@ -350,10 +350,13 @@
     (check-true! (member "split-window!" (t--ap-names (apropos "how do I split a window")))
                  "filler words do not block the splitter")))
 
-(deftest 'every-word-must-appear
-  "one word that matches nothing answers nothing"
+(deftest 'a-word-that-matches-nothing-does-not-empty-the-answer
+  "the rows that hold the words that do match answer, not nothing"
   (lambda ()
-    (check-equal! (apropos "buffer zzzznotaword") '() "no hits")))
+    (let ((hits (apropos "buffer zzzznotaword" 'lexical #t)))
+      (check-true! (pair? hits) "some hits")
+      (check-true! (every (lambda (h) (string-contains? (plist-get h 'name) "buffer")) hits)
+                   "each one holds the word that matched"))))
 
 (deftest 'commands-keys-and-settings-are-all-in-one-answer
   "four registries, one search"

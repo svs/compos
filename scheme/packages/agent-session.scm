@@ -169,7 +169,8 @@
 
 ;; The chat-context brief rides the first message, so the agent spends no
 ;; tool round to ask. It rides again when the chat changes group, directory
-;; or companions; a new group member alone does not send it again.
+;; or companions. Every buffer of the group that is not a chat is a
+;; companion, so a new file in the group sends it again.
 (define (agent-chat-context-once buf &optional force)
   (if (not (boundp 'chat-context-brief))
       ""

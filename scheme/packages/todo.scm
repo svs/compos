@@ -2014,6 +2014,8 @@
         (let ((id (todo-create s (list 'state "todo" 'group (todo--origin-group todo-user)))))
           (todo--refresh-all!)
           (message (string-append "Filed " id)))))))
+;; filing a task is for every buffer, not just the todo list
+(app-entry! "todo-new")
 
 ;; a chat files its own card: the task is the chat's, in doing, so the
 ;; board can tell a chat that finished from one that stopped halfway

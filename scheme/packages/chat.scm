@@ -45,6 +45,8 @@
 ;;; was sent.
 
 (define (chat-record buf) (or (buffer-local buf 'chat-wire-turns) '()))
+(public! 'chat-record
+  "(chat-record BUF) -> the chat's recorded turns, newest first, as plists with role and blocks")
 
 (define (chat-conversation-turn? turn)
   (and (member (plist-get turn 'role) (list "user" "assistant")) #t))

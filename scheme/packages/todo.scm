@@ -55,6 +55,17 @@
   "The project of a task created without one.")
 
 (define *todo-states* '("inbox" "todo" "doing" "waiting" "review" "done" "cancelled"))
+
+;; The state machine: each state and the states a task may move to from it.
+;; done and cancelled are closed; the one way out is back to todo, a reopen.
+(define *todo-moves*
+  '(("inbox" "todo" "doing" "waiting" "done" "cancelled")
+    ("todo" "inbox" "doing" "waiting" "review" "done" "cancelled")
+    ("doing" "todo" "waiting" "review" "done" "cancelled")
+    ("waiting" "todo" "doing" "review" "done" "cancelled")
+    ("review" "todo" "doing" "waiting" "done" "cancelled")
+    ("done" "todo")
+    ("cancelled" "todo")))
 (define *todo-closed* '("done" "cancelled"))
 ;; the #+ lines, in the order they are written
 (define *todo-fields* '(id state assignee chats priority urgent source parent depends created by group))
@@ -116,6 +127,29 @@
 (define (todo--state s)
   (if (member s *todo-states*) s
       (todo--fail "state is one of " (string-join *todo-states* ", ") ", not " (if (string? s) s "?"))))
+
+(effects! '(pure))
+
+(define (todo-moves state)
+  "(todo-moves STATE) — the states a task in STATE may move to"
+  (let ((row (assoc state *todo-moves*))) (if row (cdr row) '())))
+
+(define (todo-can-move? from to)
+  "(todo-can-move? FROM TO) — whether a task may go from state FROM to state TO; staying put is always fine"
+  (or (equal? from to) (and (member to (todo-moves from)) #t)))
+
+(define (todo--check-move! t to)
+  (let ((from (plist-get t 'state)))
+    (unless (todo-can-move? from to)
+      (todo--fail (plist-get t 'id) " is " from " and cannot go to " to
+                  (let ((ok (todo-moves from)))
+                    (if (pair? ok) (string-append "; it can go to " (string-join ok ", ")) ""))
+                  (if (member from *todo-closed*) " (todo-reopen opens it again)" "")))))
+
+(define (todo--has-key? props k)
+  (and (pair? props) (or (equal? (car props) k) (and (pair? (cdr props)) (todo--has-key? (cddr props) k)))))
+
+(effects! '(read))
 
 (define (todo--new-id)
   (string-append "t-" (format-time (current-time) "%y%m%d-%H%M%S")
@@ -622,6 +656,8 @@
   (let* ((t (todo--must id))
          (who (or (plist-get props 'by) todo-user))
          (props (todo--split-log props)))
+    (when (todo--has-key? props 'state)
+      (todo--check-move! t (todo--norm 'state (plist-get props 'state))))
     (let loop ((ps props) (new t) (changes '()))
       (if (pair? ps)
           (let ((k (car ps)) (v (cadr ps)))
@@ -704,6 +740,16 @@
   (todo-update id (list 'state "todo"
                         'log (if (todo--blank? text) "approved" (string-append "approved: " text))
                         'by (or who todo-user))))
+
+(define (todo-reopen id &optional reason who)
+  "(todo-reopen ID [REASON] [WHO]) — open a done or cancelled task again: back to todo, logged as reopened"
+  (let ((t (todo--must id)))
+    (unless (member (plist-get t 'state) *todo-closed*)
+      (todo--fail id " is " (plist-get t 'state) ", not closed; only a done or cancelled task reopens"))
+    (todo--answer
+      (todo-update id (list 'state "todo"
+                            'log (if (todo--blank? reason) "reopened" (string-append "reopened: " reason))
+                            'by (or who todo-user))))))
 
 ;;; --- the list ----------------------------------------------------------------
 
@@ -1141,7 +1187,16 @@
 
 (define (todo--set-at! k v)
   (todo--with-tasks (string-append "Set the " (symbol->string k) " to " v " for")
-    (lambda (t) (todo-update (plist-get t 'id) (list k v)))))
+    (lambda (t) (todo--set-one! t k v todo-user))))
+
+(define (todo--set-one! t k v who)
+  ;; a state move the machine refuses skips this task with a word, so a
+  ;; batch of marked tasks still moves the ones that can
+  (cond ((and (equal? k 'state) (not (todo-can-move? (plist-get t 'state) v)))
+         (message (string-append (plist-get t 'title) ": " (plist-get t 'state) " cannot go to " v)) #f)
+        ((and (equal? k 'state) (equal? v "todo") (member (plist-get t 'state) *todo-closed*))
+         (todo-reopen (plist-get t 'id) #f who) #t)
+        (else (todo-update (plist-get t 'id) (list k v 'by who)) #t)))
 
 (define (todo--ask-at! prompt k)
   (if (or (todo--at) (pair? (todo--marked-tasks)))
@@ -1159,7 +1214,7 @@
           (message "No task at point"))))
   'modes '(todo-mode))
 
-(define-command "todo-accept" "Mark the task todo: triage it, or approve it from review"
+(define-command "todo-accept" "Mark the task todo: triage it, approve it from review, or reopen it"
   (lambda () (todo--set-at! 'state "todo"))
   'modes '(todo-mode))
 (define-command "todo-mark-done" "Mark the task done"
@@ -1731,7 +1786,7 @@
                    (stop (component 'ui/group (list 'title title 'body body)) name first (length lines)))))
          (head (let ((n (line! (plist-get t 'title))))
                  (stop (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state))) "Title" n n)))
-         (actions (component 'ui/actions (list 'actions (todo--detail-actions tab))))
+         (actions (component 'ui/actions (list 'actions (todo--detail-actions tab state))))
          ;; where the task stands: what is done and what is left
          (status-part (lambda ()
                         (let ((s (plist-get t 'status)))
@@ -1839,17 +1894,34 @@
                              (equal? (car e) tab)))
            *todo-detail-tabs*))))
 
-(define (todo--detail-actions tab)
-  ;; the page's actions, each with its key; on Children they act on the sub-task at point
-  (append
-    (if (equal? tab "children") (list (list "todo-detail-open-child" "Open" "RET")) '())
-    (list (list "todo-detail-accept" "Accept" "t")
-          (list "todo-detail-done" "Done" "d" "good")
-          (list "todo-detail-cancel" "Cancel" "X" "bad")
-          (list "todo-detail-wait" "Wait" "W")
-          (list "todo-detail-agent" "Agent" "M-o")
-          (list "todo-detail-goto-chat" "Chat" "w")
-          (list "todo-detail-visit" "File" "e"))))
+(define (todo--detail-actions tab &optional state)
+  ;; the page's actions, each with its key. The state buttons follow the
+  ;; state machine: only the moves STATE allows show, named for what they
+  ;; do from there. On Children they act on the sub-task at point, whose
+  ;; state the bar cannot know, so every move shows.
+  (let* ((kids? (equal? tab "children"))
+         (can? (lambda (to) (or kids? (not state) (todo-can-move? state to))))
+         (move (lambda (to cmd label key . tone)
+                 (if (and (can? to) (or kids? (not (equal? state to))))
+                     (list (append (list cmd label key) tone))
+                     '())))
+         (todo-label (cond (kids? "Accept")
+                           ((member state *todo-closed*) "Reopen")
+                           ((equal? state "review") "Approve")
+                           ((equal? state "doing") "Stop")
+                           ((equal? state "waiting") "Resume")
+                           (else "Accept")))
+         (doing-label (if (equal? state "review") "Rework" "Start")))
+    (append
+      (if kids? (list (list "todo-detail-open-child" "Open" "RET")) '())
+      (move "todo" "todo-detail-accept" todo-label "t")
+      (move "doing" "todo-detail-start" doing-label "s")
+      (move "done" "todo-detail-done" "Done" "d" "good")
+      (move "waiting" "todo-detail-wait" "Wait" "W")
+      (move "cancelled" "todo-detail-cancel" "Cancel" "X" "bad")
+      (list (list "todo-detail-agent" "Agent" "M-o")
+            (list "todo-detail-goto-chat" "Chat" "w")
+            (list "todo-detail-visit" "File" "e")))))
 
 (define (todo--detail-render! buf)
   (let* ((t (todo--detail-task buf))
@@ -1904,9 +1976,9 @@
 (define (todo--detail-set! k v)
   (let* ((buf (current-buffer)) (t (todo--detail-target buf)))
     (if t
-        (begin (todo-update (plist-get t 'id) (list k v 'by todo-user))
-               (todo--detail-render! buf)
-               (message (string-append (plist-get t 'title) ": " v)))
+        (when (todo--set-one! t k v todo-user)
+          (todo--detail-render! buf)
+          (message (string-append (plist-get t 'title) ": " v)))
         (message "No sub-task at point"))))
 
 ;; the page wears its task's title; when a buffer already has that name, such
@@ -2013,7 +2085,7 @@
           (message "This task has no parent"))))
   'modes '(todo-detail-mode))
 
-(define-command "todo-detail-accept" "Mark the task todo: triage it, or approve it from review; on Children, the sub-task at point"
+(define-command "todo-detail-accept" "Mark the task todo: triage it, approve it from review, or reopen it; on Children, the sub-task at point"
   (lambda () (todo--detail-set! 'state "todo"))
   'modes '(todo-detail-mode))
 
@@ -2027,6 +2099,10 @@
 
 (define-command "todo-detail-wait" "Park the task as waiting; on Children, the sub-task at point"
   (lambda () (todo--detail-set! 'state "waiting"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-start" "Start the task: in progress; on Children, the sub-task at point"
+  (lambda () (todo--detail-set! 'state "doing"))
   'modes '(todo-detail-mode))
 
 (define (todo--detail-setup!)
@@ -2065,6 +2141,7 @@
     ("d" "todo-detail-done")
     ("X" "todo-detail-cancel")
     ("W" "todo-detail-wait")
+    ("s" "todo-detail-start")
     ("q" "quit-window")))
 
 ;; the tabs: 6, 7 and 8 take one, as on every detail page
@@ -2072,7 +2149,7 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, `d` closes, `X` cancels and `W` parks the task; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `s` starts, `d` closes, `X` cancels and `W` parks the task; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
@@ -2466,7 +2543,7 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

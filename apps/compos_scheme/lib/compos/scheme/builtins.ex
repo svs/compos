@@ -184,6 +184,148 @@ defmodule Compos.Scheme.Builtins do
                                                                                              ) ->
         Enum.all?(rest, &(&1 == a))
       end,
+      # R7RS-small over the two shapes this Scheme has: a character is a
+      # one-character string (the reader makes a character literal one), and
+      # a vector is a list. Agents reach for these names first.
+      {"string<?", "(string<? S ...) — return true if each string sorts before the next."} =>
+        cmp(fn a, b -> a < b end),
+      {"string>?", "(string>? S ...) — return true if each string sorts after the next."} =>
+        cmp(fn a, b -> a > b end),
+      {"string<=?", "(string<=? S ...) — return true if no string sorts after the next."} =>
+        cmp(fn a, b -> a <= b end),
+      {"string>=?", "(string>=? S ...) — return true if no string sorts before the next."} =>
+        cmp(fn a, b -> a >= b end),
+      {"string-ci=?", "(string-ci=? S ...) — string=? with case ignored."} =>
+        ci_cmp(fn a, b -> a == b end),
+      {"string-ci<?", "(string-ci<? S ...) — string<? with case ignored."} =>
+        ci_cmp(fn a, b -> a < b end),
+      {"string-ci>?", "(string-ci>? S ...) — string>? with case ignored."} =>
+        ci_cmp(fn a, b -> a > b end),
+      {"string-ci<=?", "(string-ci<=? S ...) — string<=? with case ignored."} =>
+        ci_cmp(fn a, b -> a <= b end),
+      {"string-ci>=?", "(string-ci>=? S ...) — string>=? with case ignored."} =>
+        ci_cmp(fn a, b -> a >= b end),
+      {"char=?", "(char=? C ...) — return true if every character is the same."} =>
+        cmp(fn a, b -> a == b end),
+      {"char<?", "(char<? C ...) — return true if each character comes before the next."} =>
+        cmp(fn a, b -> a < b end),
+      {"char>?", "(char>? C ...) — return true if each character comes after the next."} =>
+        cmp(fn a, b -> a > b end),
+      {"char<=?", "(char<=? C ...) — return true if no character comes after the next."} =>
+        cmp(fn a, b -> a <= b end),
+      {"char>=?", "(char>=? C ...) — return true if no character comes before the next."} =>
+        cmp(fn a, b -> a >= b end),
+      {"char-ci=?", "(char-ci=? C ...) — char=? with case ignored."} =>
+        ci_cmp(fn a, b -> a == b end),
+      {"char-ci<?", "(char-ci<? C ...) — char<? with case ignored."} =>
+        ci_cmp(fn a, b -> a < b end),
+      {"char-ci>?", "(char-ci>? C ...) — char>? with case ignored."} =>
+        ci_cmp(fn a, b -> a > b end),
+      {"char?", "(char? X) — return true if X is a character: a string of one character."} =>
+        fn [x] -> is_binary(x) and String.length(x) == 1 end,
+      {"char->integer", "(char->integer C) — return the Unicode code point of C."} =>
+        fn [<<c::utf8, _::binary>>] -> c end,
+      {"integer->char", "(integer->char N) — return the character with the code point N."} =>
+        fn [n] when is_integer(n) and n >= 0 -> <<n::utf8>> end,
+      {"char-upcase", "(char-upcase C) — return C in upper case."} => fn [c] -> String.upcase(c) end,
+      {"char-downcase", "(char-downcase C) — return C in lower case."} =>
+        fn [c] -> String.downcase(c) end,
+      {"char-foldcase", "(char-foldcase C) — return C folded for a comparison without case."} =>
+        fn [c] -> String.downcase(c) end,
+      {"char-alphabetic?", "(char-alphabetic? C) — return true if C is a letter."} =>
+        fn [c] -> char_class?(c, ~r/^[[:alpha:]]$/u) end,
+      {"char-numeric?", "(char-numeric? C) — return true if C is a digit."} =>
+        fn [c] -> char_class?(c, ~r/^[[:digit:]]$/u) end,
+      {"char-whitespace?", "(char-whitespace? C) — return true if C is whitespace."} =>
+        fn [c] -> char_class?(c, ~r/^[[:space:]]$/u) end,
+      {"char-upper-case?", "(char-upper-case? C) — return true if C is an upper-case letter."} =>
+        fn [c] -> char_class?(c, ~r/^[[:upper:]]$/u) end,
+      {"char-lower-case?", "(char-lower-case? C) — return true if C is a lower-case letter."} =>
+        fn [c] -> char_class?(c, ~r/^[[:lower:]]$/u) end,
+      {"digit-value", "(digit-value C) — return the value 0-9 of the digit C, or false."} => fn
+        [<<d>>] when d in ?0..?9 -> d - ?0
+        [_] -> false
+      end,
+      {"string->list", "(string->list S [START [END]]) — return the characters of S as a list."} =>
+        fn [s | range] when is_binary(s) -> slice(String.graphemes(s), range) end,
+      {"list->string", "(list->string LST) — return the characters of LST joined as one string."} =>
+        fn [l] when is_list(l) -> Enum.join(l) end,
+      {"string-copy", "(string-copy S [START [END]]) — return S, or its characters START..END."} =>
+        fn [s | range] when is_binary(s) -> s |> String.graphemes() |> slice(range) |> Enum.join() end,
+      {"string-ref", "(string-ref S K) — return the character at index K of S."} =>
+        fn [s, k] when is_binary(s) and is_integer(k) ->
+          (k >= 0 and String.at(s, k)) ||
+            raise(Eval.Error, message: "string-ref: index out of range")
+        end,
+      {"make-string", "(make-string N [C]) — return a string of N copies of C, a space by default."} =>
+        fn
+          [n] -> String.duplicate(" ", n)
+          [n, c] -> String.duplicate(c, n)
+        end,
+      {"string-foldcase", "(string-foldcase S) — return S folded for a comparison without case."} =>
+        fn [s] -> String.downcase(s) end,
+      {"string->vector", "(string->vector S [START [END]]) — return the characters of S as a vector (a list)."} =>
+        fn [s | range] when is_binary(s) -> slice(String.graphemes(s), range) end,
+      {"vector->string", "(vector->string V [START [END]]) — return the characters of V joined as one string."} =>
+        fn [l | range] when is_list(l) -> l |> slice(range) |> Enum.join() end,
+      {"string-map", "(string-map F S) — return the string of F applied to each character of S."} =>
+        fn [f, s], store when is_binary(s) ->
+          {out, store} = Enum.map_reduce(String.graphemes(s), store, &Eval.apply_fn(f, [&1], &2))
+          {Enum.join(out), store}
+        end,
+      {"string-for-each", "(string-for-each F S) — call F on each character of S in order; return true."} =>
+        fn [f, s], store when is_binary(s) ->
+          {true, Enum.reduce(String.graphemes(s), store, &elem(Eval.apply_fn(f, [&1], &2), 1))}
+        end,
+      {"vector", "(vector X ...) — return a vector (a list) of the arguments."} => fn args -> args end,
+      {"vector?", "(vector? X) — return true if X is a vector: a proper list."} =>
+        fn [x] -> is_list(x) and not List.improper?(x) end,
+      {"make-vector", "(make-vector N [X]) — return a vector of N copies of X, false by default."} =>
+        fn
+          [n] -> List.duplicate(false, n)
+          [n, x] -> List.duplicate(x, n)
+        end,
+      {"list->vector", "(list->vector LST) — return LST as a vector; a vector is a list."} =>
+        fn [l] when is_list(l) -> l end,
+      {"vector->list", "(vector->list V [START [END]]) — return the elements of V as a list."} =>
+        fn [l | range] when is_list(l) -> slice(l, range) end,
+      {"vector-copy", "(vector-copy V [START [END]]) — return V, or its elements START..END."} =>
+        fn [l | range] when is_list(l) -> slice(l, range) end,
+      {"list-copy", "(list-copy LST) — return LST; a list is never changed in place."} =>
+        fn [l] -> l end,
+      {"vector-ref", "(vector-ref V K) — return the element at index K of V."} =>
+        fn [l, k] when is_list(l) and is_integer(k) ->
+          if k < 0 or k >= length(l),
+            do: raise(Eval.Error, message: "vector-ref: index out of range"),
+            else: Enum.at(l, k)
+        end,
+      {"vector-length", "(vector-length V) — return the number of elements in V."} =>
+        fn [l] when is_list(l) -> length(l) end,
+      {"vector-append", "(vector-append V ...) — concatenate the vectors into one vector."} =>
+        fn ls -> Enum.concat(ls) end,
+      {"vector-map", "(vector-map F V ...) — return the vector of F applied to each element of V, or to the elements side by side."} =>
+        fn
+          [f, l], store when is_list(l) ->
+            Enum.map_reduce(l, store, &Eval.apply_fn(f, [&1], &2))
+
+          [f | ls], store when ls != [] ->
+            Enum.map_reduce(Enum.zip_with(ls, & &1), store, &Eval.apply_fn(f, &1, &2))
+        end,
+      {"vector-for-each", "(vector-for-each F V ...) — call F on each element of V in order, or on the elements side by side; return true."} =>
+        fn [f | ls], store when ls != [] ->
+          {true, Enum.reduce(Enum.zip_with(ls, & &1), store, &elem(Eval.apply_fn(f, &1, &2), 1))}
+        end,
+      {"boolean?", "(boolean? X) — return true if X is true or false."} =>
+        fn [x] -> is_boolean(x) end,
+      {"boolean=?", "(boolean=? A B ...) — return true if every boolean is the same."} =>
+        fn [a | rest] when is_boolean(a) -> Enum.all?(rest, &(&1 === a)) end,
+      {"symbol=?", "(symbol=? A B ...) — return true if every symbol is the same."} =>
+        fn [{:sym, _} = a | rest] -> Enum.all?(rest, &(&1 == a)) end,
+      {"exact", "(exact N) — return N as an integer; an error when N has a fraction."} => &exact/1,
+      {"inexact->exact", "(inexact->exact N) — return N as an integer, as exact does."} => &exact/1,
+      {"inexact", "(inexact N) — return N as a float."} => fn [n] when is_number(n) -> n / 1 end,
+      {"exact->inexact", "(exact->inexact N) — return N as a float, as inexact does."} =>
+        fn [n] when is_number(n) -> n / 1 end,
       # every Scheme has format and this one did not, so a caller building a
       # message reached for string-append and value->string, or guessed a name
       # that is not here and lost the guess inside a callback
@@ -446,8 +588,16 @@ defmodule Compos.Scheme.Builtins do
       {"string->symbol", "(string->symbol S) — return the symbol with the name S."} => fn [s] ->
         {:sym, s}
       end,
-      {"apply", "(apply F ARGS) — call F with the elements of the list ARGS as arguments."} =>
-        fn [f, args], store -> Eval.apply_fn(f, args, store) end,
+      {"apply",
+       "(apply F A ... ARGS) — call F with the arguments A ... followed by the elements of the list ARGS."} =>
+        fn [f | rest], store when rest != [] ->
+          {lead, [args]} = Enum.split(rest, -1)
+
+          unless is_list(args),
+            do: raise(Eval.Error, message: "apply: the last argument must be a list")
+
+          Eval.apply_fn(f, lead ++ args, store)
+        end,
       # List traversal applies a Scheme callable per element and threads the
       # store through. The interpreted loops these replace paid one frame
       # and a dozen evals per element, and a catalog walk at load time ran
@@ -789,6 +939,30 @@ defmodule Compos.Scheme.Builtins do
   # such call reached 368 MB of heap and passed the 1024 MB
   # limit, which killed the reactor rule that made it. This allocates
   # nothing and stops at the first pair that fails.
+  defp ci_cmp(op) do
+    fn args -> cmp_pairs(Enum.map(args, &String.downcase/1), op) end
+  end
+
+  defp char_class?(c, re), do: is_binary(c) and Regex.match?(re, c)
+
+  # the optional START and END of the R7RS copy procedures
+  defp slice(l, []), do: l
+  defp slice(l, [start]) when is_integer(start), do: slice(l, [start, length(l)])
+
+  defp slice(l, [start, stop]) when is_integer(start) and is_integer(stop) do
+    if start < 0 or stop < start or stop > length(l),
+      do: raise(Eval.Error, message: "index range out of bounds"),
+      else: Enum.slice(l, start, stop - start)
+  end
+
+  defp exact([n]) when is_integer(n), do: n
+
+  defp exact([n]) when is_float(n) do
+    if n == Float.round(n),
+      do: trunc(n),
+      else: raise(Eval.Error, message: "exact: " <> Float.to_string(n) <> " has no exact integer form")
+  end
+
   defp cmp(op) do
     fn args -> cmp_pairs(args, op) end
   end

@@ -48,6 +48,13 @@ defmodule Compos.Scheme.Reader do
     tok(rest, [{:str, str} | acc])
   end
 
+  # #\a, #\space, #\( : a character literal. The first character after #\
+  # is taken whatever it is, so #\( and #\; are characters, not syntax.
+  defp tok(<<"#\\", c::utf8, rest::binary>>, acc) do
+    {name, rest} = tok_atom(rest, [<<c::utf8>>])
+    tok(rest, [{:char, name} | acc])
+  end
+
   defp tok(bin, acc) do
     {atom, rest} = tok_atom(bin, [])
     tok(rest, [{:atom, atom} | acc])
@@ -108,6 +115,7 @@ defmodule Compos.Scheme.Reader do
 
   defp read_expr([{:str, s} | rest]), do: {s, rest}
   defp read_expr([{:atom, a} | rest]), do: {parse_atom(a), rest}
+  defp read_expr([{:char, name} | rest]), do: {char_value(name), rest}
 
   defp read_list([:rparen | rest], acc), do: {Enum.reverse(acc), rest}
   defp read_list([], _), do: raise(Error, message: "unterminated list")
@@ -127,6 +135,47 @@ defmodule Compos.Scheme.Reader do
   defp read_list(tokens, acc) do
     {form, rest} = read_expr(tokens)
     read_list(rest, [form | acc])
+  end
+
+  # A character is a one-character string: there is no separate char type,
+  # so (string #\a) and (string-append "x" #\a) just work.
+  @char_names %{
+    "space" => " ",
+    "newline" => "\n",
+    "linefeed" => "\n",
+    "tab" => "\t",
+    "return" => "\r",
+    "null" => <<0>>,
+    "nul" => <<0>>,
+    "alarm" => <<7>>,
+    "backspace" => <<8>>,
+    "escape" => <<27>>,
+    "altmode" => <<27>>,
+    "delete" => <<127>>,
+    "rubout" => <<127>>
+  }
+
+  defp char_value(name) do
+    cond do
+      String.length(name) == 1 ->
+        name
+
+      Map.has_key?(@char_names, name) ->
+        @char_names[name]
+
+      match?("x" <> _, name) and hex_char(name) != :error ->
+        hex_char(name)
+
+      true ->
+        raise(Error, message: "unknown character #\\" <> name)
+    end
+  end
+
+  defp hex_char("x" <> hex) do
+    case Integer.parse(hex, 16) do
+      {n, ""} when n >= 0 and n <= 0x10FFFF and n not in 0xD800..0xDFFF -> <<n::utf8>>
+      _ -> :error
+    end
   end
 
   defp parse_atom("#t"), do: true

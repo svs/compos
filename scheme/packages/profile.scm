@@ -195,7 +195,7 @@
 
 (define (profile--sep label) (list 'kind "sep" 'what label))
 
-(define (profile--report buf) (buffer-local buf 'profile-report))
+(define (profile--report buf) (buffer-local-value 'profile-report buf))
 
 (define (profile--function-rows r)
   (let ((total (plist-get r 'calls))
@@ -497,7 +497,7 @@
 (define-command "profile-flamegraph" "Show the last profile's Scheme call stacks as a flamegraph"
   (lambda ()
     (let ((report (and (buffer-exists? *profile-buffer*)
-                       (buffer-local *profile-buffer* 'profile-report))))
+                       (buffer-local-value 'profile-report *profile-buffer*))))
       (if (not report)
           (message "No profile yet: M-x profile, then run a command.")
           (display-buffer-other-window! (profile-flamegraph! report))))))

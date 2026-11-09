@@ -27,7 +27,7 @@
 (define *orchestrate-passed* '("review" "done"))
 
 (define (orchestrate-root chat)
-  (and (string? chat) (buffer-exists? chat) (buffer-local chat 'orchestrate-root)))
+  (and (string? chat) (buffer-exists? chat) (buffer-local-value 'orchestrate-root chat)))
 
 (define (orchestrate-on? chat)
   (and (string? (orchestrate-root chat))
@@ -127,7 +127,7 @@
     (buffer-set-local! c 'subagent-notify #t)
     (buffer-set-local! c 'inhibit-retitle #t)
     (buffer-set-local! chat 'orchestrate-chats
-      (append (remove (lambda (e) (equal? (car e) id)) (or (buffer-local chat 'orchestrate-chats) '()))
+      (append (remove (lambda (e) (equal? (car e) id)) (or (buffer-local-value 'orchestrate-chats chat) '()))
               (list (list id (chat-stable-id! c)))))
     (todo-log id (string-append "orchestrate-mode started it in " c) me)
     c))
@@ -140,7 +140,7 @@
              (started (filter (lambda (c) c)
                               (map (lambda (t) (report-errors "orchestrate: start a child" (lambda () (orchestrate--start! chat t))))
                                    (filter orchestrate--startable? (orchestrate-children root)))))
-             (woke (or (buffer-local chat 'orchestrate-woke) '()))
+             (woke (or (buffer-local-value 'orchestrate-woke chat) '()))
              (new (remove (lambda (j) (member (car j) woke))
                           (orchestrate--judgments root (orchestrate-children root))))
              (texts (map cadr new)))

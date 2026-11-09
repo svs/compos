@@ -21,13 +21,13 @@
       ;; the compact line carries the facts the expanded segments carry:
       ;; mode, group, model, lane. Neither rendering names the read-only
       ;; state today.
-      (check-contains! (buffer-local buf 'dashboard-line) "mode "
+      (check-contains! (buffer-local-value 'dashboard-line buf) "mode "
                        "the compact line names the mode")
-      (check-contains! (buffer-local buf 'dashboard-line) "groups "
+      (check-contains! (buffer-local-value 'dashboard-line buf) "groups "
                        "the compact line names the groups")
-      (check-contains! (buffer-local buf 'dashboard-line) "llm "
+      (check-contains! (buffer-local-value 'dashboard-line buf) "llm "
                        "the compact line names the model")
-      (check-contains! (buffer-local buf 'dashboard-line) "lane api"
+      (check-contains! (buffer-local-value 'dashboard-line buf) "lane api"
                        "the compact line names the lane")
       (buffer-kill! buf))))
 
@@ -41,10 +41,10 @@
       (test-buffer! buf "hello\n")
       (switch-to-buffer! buf)
       (dashboard--sync! buf)
-      (check-true! (string? (buffer-local buf 'dashboard-line)) "the compact line landed")
-      (check-true! (pair? (buffer-local buf 'dashboard-line-blocks)) "the blocks landed")
+      (check-true! (string? (buffer-local-value 'dashboard-line buf)) "the compact line landed")
+      (check-true! (pair? (buffer-local-value 'dashboard-line-blocks buf)) "the blocks landed")
       (check-equal! (modeline-cache-get buf 'name) buf "the modeline name landed")
-      (check-true! (member 'dashboard-line (buffer-local buf 'desktop-skip-locals))
+      (check-true! (member 'dashboard-line (buffer-local-value 'desktop-skip-locals buf))
                    "the line is runtime state the desktop skips")
       (buffer-kill! buf))))
 

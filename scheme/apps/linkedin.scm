@@ -403,7 +403,7 @@ a{color:var(--accent);text-decoration:none}
 (define (linkedin-detail-buffer row)
   (let* ((base (string-append "*" (li-page-title row) "*"))
          (mine (li-key row))
-         (held (let ((r (and (buffer-exists? base) (buffer-local base 'linkedin-row))))
+         (held (let ((r (and (buffer-exists? base) (buffer-local-value 'linkedin-row base))))
                  (and r (li-key r)))))
     (if (or (not held) (equal? held mine))
         base
@@ -504,15 +504,15 @@ a{color:var(--accent);text-decoration:none}
 ;; a key, from a row or from a button, over both tabs: a page opened from
 ;; the projects tab still answers o and w after the reader moves to messages
 (define (linkedin-row-by-id id)
-  (let loop ((rs (append (or (buffer-local *linkedin-buffer* 'linkedin-rows) '())
-                         (or (buffer-local *linkedin-buffer* 'linkedin-threads) '()))))
+  (let loop ((rs (append (or (buffer-local-value 'linkedin-rows *linkedin-buffer*) '())
+                         (or (buffer-local-value 'linkedin-threads *linkedin-buffer*) '()))))
     (cond ((null? rs) #f)
           ((equal? (li-key (car rs)) id) (car rs))
           ((equal? (plist-get (car rs) 'id) id) (car rs))
           (else (loop (cdr rs))))))
 
 (define (linkedin-row-here)
-  (or (buffer-local (current-buffer) 'linkedin-row)
+  (or (buffer-local-value 'linkedin-row (current-buffer))
       (list-current *linkedin-buffer*)))
 
 (define (linkedin-open-external! id)
@@ -550,12 +550,12 @@ a{color:var(--accent);text-decoration:none}
 (define *linkedin-tabs* (list 'projects 'messages))
 
 (define (linkedin-tab buf)
-  (or (buffer-local buf 'linkedin-tab) 'projects))
+  (or (buffer-local-value 'linkedin-tab buf) 'projects))
 
 (define (linkedin-messages? buf) (equal? (linkedin-tab buf) 'messages))
 
 (define (linkedin--rows buf)
-  (or (buffer-local buf (if (linkedin-messages? buf) 'linkedin-threads 'linkedin-rows))
+  (or (buffer-local-value (if (linkedin-messages? buf) 'linkedin-threads 'linkedin-rows) buf)
       '()))
 
 ;; the tab bar, drawn in the listing's meta line: the reading each tab
@@ -565,9 +565,9 @@ a{color:var(--accent);text-decoration:none}
     (string-append
       (string-join
         (map (lambda (tab)
-               (let* ((rs (or (buffer-local buf (if (equal? tab 'messages)
+               (let* ((rs (or (buffer-local-value (if (equal? tab 'messages)
                                                     'linkedin-threads
-                                                    'linkedin-rows))
+                                                    'linkedin-rows) buf)
                               '()))
                       (cell (string-append (symbol->string tab)
                                            (if (null? rs)
@@ -654,7 +654,7 @@ a{color:var(--accent);text-decoration:none}
 ;; pill shape and its colours are the component's, so the tab bar here
 ;; looks like every other tab bar in the editor.
 (define (li--tab-entry buf tab at)
-  (let* ((rs (or (buffer-local buf (if (equal? tab 'messages) 'linkedin-threads 'linkedin-rows))
+  (let* ((rs (or (buffer-local-value (if (equal? tab 'messages) 'linkedin-threads 'linkedin-rows) buf)
                  '()))
          (name (symbol->string tab))
          (label (if (null? rs)
@@ -787,7 +787,7 @@ a{color:var(--accent);text-decoration:none}
 
 ;; a kept page takes the project's or the person's name, not a number
 (detail-name! "linkedin-detail-mode"
-  (lambda (buf) (string-append "*" (or (buffer-local buf 'linkedin-title) "linkedin") "*")))
+  (lambda (buf) (string-append "*" (or (buffer-local-value 'linkedin-title buf) "linkedin") "*")))
 
 ;; 1-5 take the listing's tabs from either pane, / any of them by name
 (tab-bars-declare! "linkedin-mode" (lambda (buf) (list (list "Tabs" (linkedin--tabs buf)))))
@@ -896,7 +896,7 @@ a{color:var(--accent);text-decoration:none}
     (buffer-set-local! buf 'linkedin-tab tab)
     (list-refresh! buf)
     (if (and (equal? tab 'messages)
-             (null? (or (buffer-local buf 'linkedin-threads) '())))
+             (null? (or (buffer-local-value 'linkedin-threads buf) '())))
         (linkedin-threads-open!)
         (begin (linkedin-show-detail! (list-current buf))
                (linkedin-layout!)))

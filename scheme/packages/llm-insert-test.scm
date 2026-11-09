@@ -38,7 +38,7 @@
     (buffer-set-local! t--li-buf 'agent-saved-mark 21)
     (llm-mode--aim! t--li-buf
       (llm-mode--insert-at t--li-buf (buffer-size t--li-buf)))
-    (check-equal! (buffer-local t--li-buf 'agent-saved-mark)
+    (check-equal! (buffer-local-value 'agent-saved-mark t--li-buf)
                   (buffer-size t--li-buf)
                   "below the new prompt, not below the old reply")
     (t--li-done!)))
@@ -65,7 +65,7 @@
     (buffer-set-local! t--li-buf 'mode-name "chat-mode")
     (buffer-set-local! t--li-buf 'agent-saved-mark 10)
     (llm-mode--aim! t--li-buf (buffer-size t--li-buf))
-    (check-equal! (buffer-local t--li-buf 'agent-saved-mark) 10
+    (check-equal! (buffer-local-value 'agent-saved-mark t--li-buf) 10
                   "the chat's own mark is untouched")
     (t--li-done!)))
 
@@ -227,7 +227,7 @@
       (check-equal! (map (lambda (record) (plist-get record 'state)) records)
                     '(complete cancelled deleted cancelled)
                     "prompt/result cancel and transient thinking is retired")
-      (check-false! (buffer-local t--li-buf 'llm-active-prompt)
+      (check-false! (buffer-local-value 'llm-active-prompt t--li-buf)
                     "no prompt remains active")
       (check-false!
         (let loop ((ovs (buffer-overlays t--li-buf)))
@@ -271,15 +271,15 @@
         (check-equal! c "*chat:zz-doc-companion.md*" "named after the document")
         (check-true! (buffer-exists? c) "it exists")
         (check-false! (window-showing c) "and stays hidden")
-        (check-equal! (buffer-local c 'mode-name) "chat-mode" "it is a chat")
+        (check-equal! (buffer-local-value 'mode-name c) "chat-mode" "it is a chat")
         (check-equal! (buffer-children doc 'inline) (list c) "the document knows its chat")
         (check-equal! (buffer-relation c 'inline) doc "the chat knows its document")
         (check-equal! (buffer-relation c 'companion) doc "as identity")
-        (check-equal! (buffer-local doc 'llm-session-id) (buffer-local c 'agent-slug)
+        (check-equal! (buffer-local-value 'llm-session-id doc) (buffer-local-value 'agent-slug c)
                       "the document's session is the chat's")
-        (check-true! (and (member (buffer-local c 'agent-slug) (agent-list)) #t) "and it is live")
+        (check-true! (and (member (buffer-local-value 'agent-slug c) (agent-list)) #t) "and it is live")
         (check-equal! (llm-mode--companion! doc) c "asked again, the same chat")
-        (llm-session-close! (buffer-local c 'agent-slug))
+        (llm-session-close! (buffer-local-value 'agent-slug c))
         (buffer-kill! c)
         (buffer-kill! doc)))))
 
@@ -297,11 +297,11 @@
       (buffer-set-local! doc 'llm-companion-opts '(backend "stub" script ()))
       (let* ((c (llm-mode--companion! doc))
              (parts (map car (prompt-buffer-parts c))))
-        (check-equal! (buffer-local c 'mode-name) "chat-mode" "it stays a chat, with a chat's keys")
-        (check-equal! (buffer-local c 'chat-facets) '("zz-facet-base-mode" "zz-facet-mode") "the parent first")
+        (check-equal! (buffer-local-value 'mode-name c) "chat-mode" "it stays a chat, with a chat's keys")
+        (check-equal! (buffer-local-value 'chat-facets c) '("zz-facet-base-mode" "zz-facet-mode") "the parent first")
         (check-true! (and (member "chat-source" parts) #t) "it knows its source")
         (check-true! (and (member "zz-base" parts) (member "zz-own" parts) #t) "and takes each mode's part")
-        (llm-session-close! (buffer-local c 'agent-slug))
+        (llm-session-close! (buffer-local-value 'agent-slug c))
         (buffer-kill! c)
         (buffer-kill! doc)))))
 
@@ -341,7 +341,7 @@
         (wait-until (lambda () (string-contains? (buffer-text c) "hi there.")) 3000)
         (check-true! (string-contains? (buffer-text c) "hi there.")
                      "and the chat holds the reply too, for when it is shown")
-        (llm-session-close! (buffer-local c 'agent-slug))
+        (llm-session-close! (buffer-local-value 'agent-slug c))
         (buffer-kill! c)
         (buffer-kill! doc)))))
 
@@ -382,7 +382,7 @@
         (check-true! (string-contains? (buffer-text c) "hi there.")
                      "the reply landed in the chat")
         (check-equal! (buffer-text doc) "Say hi.\n" "and the document is untouched")
-        (llm-session-close! (buffer-local c 'agent-slug))
+        (llm-session-close! (buffer-local-value 'agent-slug c))
         (buffer-kill! c)
         (buffer-kill! doc)))))
 
@@ -405,7 +405,7 @@
         (check-true! (null? (buffer-children doc 'inline)) "and has no chat of its own from this")
         (let ((c (car (buffer-children new 'inline))))
           (check-equal! c "*chat:*llm:zz-doc-new-target.md**" "the new document has its own chat")
-          (llm-session-close! (buffer-local c 'agent-slug))
+          (llm-session-close! (buffer-local-value 'agent-slug c))
           (buffer-kill! c))
         (buffer-kill! new)
         (buffer-kill! doc)))))

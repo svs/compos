@@ -86,7 +86,7 @@
     ;; instead of silently turning the buffer into a login shell.
     (start-terminal! buf
       (string-append (term--export-prefix buf)
-                     (or (buffer-local buf 'terminal-command) *terminal-command*)))))
+                     (or (buffer-local-value 'terminal-command buf) *terminal-command*)))))
 
 (define-mode "term-mode"
   (lambda () (terminal-mode-init! (current-buffer))))
@@ -256,9 +256,9 @@
 (define (term--title-changed! buf title)
   (when (and term-session-titles (term-status buf))
     (let ((name (term--session-title title))
-          (home (buffer-local buf 'term-home-name)))
+          (home (buffer-local-value 'term-home-name buf)))
       (cond
-        ((and name (not (equal? name buf)) (not (equal? (buffer-local buf 'chat-title) name)))
+        ((and name (not (equal? name buf)) (not (equal? (buffer-local-value 'chat-title buf) name)))
          ;; chat-title answers the name it took, TITLE<2> when TITLE is taken
          (let ((new (chat-title buf name)))
            (when new
@@ -282,7 +282,7 @@
 
 (define (term-var-local name) (string->symbol (string-append "term-" name)))
 
-(define (term-var buf name) (buffer-local buf (term-var-local name)))
+(define (term-var buf name) (buffer-local-value (term-var-local name) buf))
 
 (define (term--var-changed! buf name value)
   (when term-user-vars
@@ -317,7 +317,7 @@
            (fresh (current-prefix-arg))
            (buf (shell--buffer "shell" 'shell group fresh)))
       (buffer-create buf)
-      (unless (buffer-local buf 'terminal-command)
+      (unless (buffer-local-value 'terminal-command buf)
         (buffer-set-local! buf 'terminal-command
           (shell--command group *terminal-command*)))
       (buffer-set-local! buf 'mode-name "term-mode")
@@ -348,7 +348,7 @@
     (buffer-create buf)
     ;; A stopped or restored app keeps the directory and exact command it was
     ;; born with.  Re-running M-x opencode therefore resumes the same session.
-    (unless (buffer-local buf 'terminal-command)
+    (unless (buffer-local-value 'terminal-command buf)
       (buffer-set-local! buf 'default-directory dir)
       (buffer-set-local! buf 'terminal-command
         (string-append "cd -- " (sh-quote dir) " && " *opencode-command*)))
@@ -438,7 +438,7 @@
 (define-mode "tail-mode"
   (lambda ()
     (let ((buf (current-buffer)))
-      (let ((path (buffer-local buf 'tail-path)))
+      (let ((path (buffer-local-value 'tail-path buf)))
         (buffer-set-read-only! buf #t)
         (when (and path (not (process-running? buf)))
           (start-process! buf (tail-command path)))))))

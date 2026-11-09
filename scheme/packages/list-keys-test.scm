@@ -35,7 +35,7 @@
   (lambda ()
     (list-mode-show! "zz-keybar-mode")
     (let ((buf "*zz-keybar*"))
-      (let ((blocks (buffer-local buf 'footer-line-blocks)))
+      (let ((blocks (buffer-local-value 'footer-line-blocks buf)))
         (check-true! (pair? blocks) "the footer arrives as blocks")
         (check-equal! (plist-get (car blocks) 'tag) "c-keys-bar"
                       "and those blocks are the keys bar")))

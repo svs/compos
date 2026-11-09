@@ -130,13 +130,13 @@
       (anchor-set! buf (list (list "b" 4 13)))
       (buffer-goto! buf 5)
       (anchor-sync! buf)
-      (let ((blocks (buffer-local buf 'render-blocks)))
+      (let ((blocks (buffer-local-value 'render-blocks buf)))
         (check-equal! (plist-get (car blocks) 'class) "a" "the other block")
         (check-equal! (plist-get (cadr blocks) 'class) "b anchor-current anchor-top" "the outermost, and the page's top part")
         (check-equal! (plist-get (car (plist-get (cadr blocks) 'children)) 'class) "c" "not the inner one"))
       (buffer-goto! buf 0)
       (anchor-sync! buf)
-      (check-equal! (plist-get (cadr (buffer-local buf 'render-blocks)) 'class) "b" "off when point leaves")
+      (check-equal! (plist-get (cadr (buffer-local-value 'render-blocks buf)) 'class) "b" "off when point leaves")
       (buffer-kill! buf))))
 
 (deftest 'anchor-mode-gives-imenu-its-parts
@@ -149,5 +149,5 @@
       (anchor-set! buf (list (list "two" 4 7) (list "three" 8 13)))
       (check-equal! (imenu-rows buf) '((2 "" "two" "") (3 "" "three" "")) "the parts")
       (disable-minor-mode! buf "anchor-mode")
-      (check-equal! (buffer-local buf 'imenu-index-function) #f "off again")
+      (check-equal! (buffer-local-value 'imenu-index-function buf) #f "off again")
       (buffer-kill! buf))))

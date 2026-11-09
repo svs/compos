@@ -34,7 +34,7 @@
       (switch-to-buffer! buf)
       (run-command "predict-mode")
       (check-true! (minor-mode-on? buf "predict-mode") "the command turns it on")
-      (check-equal! (buffer-local buf 'predict-mode) #t "the local says so")
+      (check-equal! (buffer-local-value 'predict-mode buf) #t "the local says so")
       (run-command "predict-mode")
       (check-false! (minor-mode-on? buf "predict-mode") "the command turns it off")
       (buffer-kill! buf))))

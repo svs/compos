@@ -27,7 +27,7 @@
 (define *relations-unlink-on-kill* '(owner))
 
 (define (relations--of buf)
-  (or (and (string? buf) (buffer-known? buf) (buffer-local buf 'relations)) '()))
+  (or (and (string? buf) (buffer-known? buf) (buffer-local-value 'relations buf)) '()))
 
 (define (relations--entry buf kind)
   (or (assoc kind (relations--of buf)) (list kind #f '())))

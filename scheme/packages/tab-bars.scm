@@ -48,8 +48,8 @@
 ;; the bars function of BUF: its own, else its mode's or a parent mode's
 (define (tab-bars-provider buf)
   (and buf (buffer-known? buf)
-       (or (buffer-local buf 'tab-bars)
-           (let ((mode (buffer-local buf 'mode-name)))
+       (or (buffer-local-value 'tab-bars buf)
+           (let ((mode (buffer-local-value 'mode-name buf)))
              (and mode (mode-inherited mode 'tab-bars))))))
 
 (define (tab-bars buf)
@@ -165,7 +165,7 @@
 (define (tab-bars--light! buf entry)
   (for-each (lambda (b)
               (when b
-                (let ((blocks (buffer-local b 'render-blocks)))
+                (let ((blocks (buffer-local-value 'render-blocks b)))
                   (when (pair? blocks)
                     (buffer-set-local! b 'render-blocks
                       (tab-bars--lit blocks (and entry (equal? (car entry) b) (car (caddr entry)))))))))

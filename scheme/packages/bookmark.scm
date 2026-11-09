@@ -246,7 +246,7 @@
           'filename (buffer-path (current-buffer)))))
 
 (define (bookmark--make-record)
-  (let* ((mode (or (buffer-local (current-buffer) 'mode-name) "Fundamental"))
+  (let* ((mode (or (buffer-local-value 'mode-name (current-buffer)) "Fundamental"))
          (kind (bookmark--mode-handler mode))
          (handler (and kind (bookmark--handler kind))))
     (if handler
@@ -457,7 +457,7 @@
         (minibuffer-read prompt (bookmark--candidates) callback))))
 
 (define (bookmark--default-name)
-  (or (buffer-local (current-buffer) 'bookmark-current)
+  (or (buffer-local-value 'bookmark-current (current-buffer))
       (buffer-short-label (current-buffer))))
 
 (define (bookmark--set-command overwrite?)
@@ -659,7 +659,7 @@
 
 (define-command "bookmark-annotation-save" "Save this bookmark annotation"
   (lambda ()
-    (let ((name (buffer-local (current-buffer) 'bookmark-name))
+    (let ((name (buffer-local-value 'bookmark-name (current-buffer)))
           (text (buffer-text (current-buffer))))
       (if (not name)
           (message "This buffer does not name a bookmark")
@@ -679,7 +679,7 @@
 
 (define-command "bookmark-annotation-edit-current" "Edit the displayed bookmark annotation"
   (lambda ()
-    (let ((name (buffer-local (current-buffer) 'bookmark-name)))
+    (let ((name (buffer-local-value 'bookmark-name (current-buffer))))
       (if name (bookmark-edit-annotation-name! name)
           (message "This view does not name one bookmark"))))
   'modes '(bookmark-annotation-view-mode))

@@ -123,7 +123,7 @@
     'key (lambda (buf s) (plist-get s 'id))
     'title (lambda (buf) "Google Workspace")
     'meta (lambda (buf)
-      (let ((id (buffer-local buf 'google-account)))
+      (let ((id (buffer-local-value 'google-account buf)))
         (if id (google--email id) "Connect your first account with c")))
     'keys '(("RET" "google-service-open") ("a" "google-account") ("c" "google-connect") ("x" "google-operation"))
     'footer (lambda (buf) '(("RET" "open") ("a" "account") ("c" "connect") ("x" "operation") ("q" "quit")))))
@@ -134,16 +134,16 @@
       (buffer-set-local! "*Google*" 'google-account id) (list-refresh! "*Google*")))))
 (define-command "google-service-open" "Open the selected Google application"
   (lambda ()
-    (let ((s (list-current (current-buffer))) (id (buffer-local (current-buffer) 'google-account)))
+    (let ((s (list-current (current-buffer))) (id (buffer-local-value 'google-account (current-buffer))))
       (when (and s id) (google-open id (plist-get s 'id)))))
   'modes '(google-mode))
 
 ;;; Lists keep their account, query, parent, and page. Each fetch has a generation.
 (define (google--list-spec buf)
-  (let* ((service (buffer-local buf 'google-service))
+  (let* ((service (buffer-local-value 'google-service buf))
          (spec (google--service service))
-         (query (or (buffer-local buf 'google-query) ""))
-         (parent (buffer-local buf 'google-parent))
+         (query (or (buffer-local-value 'google-query buf) ""))
+         (parent (buffer-local-value 'google-parent buf))
          (mime (plist-get spec 'mime))
          (limit (max 1 (min 100 google-page-size))))
     (cond
@@ -159,7 +159,7 @@
       ((or mime (equal? service "drive"))
        (list 'service "drive" 'path "/files" 'key 'files
          'params (list 'pageSize limit 'fields "nextPageToken,files(id,name,mimeType,size,modifiedTime,parents,webViewLink)"
-           'supportsAllDrives #t 'includeItemsFromAllDrives #t 'orderBy (or (buffer-local buf 'google-drive-sort) "folder,name")
+           'supportsAllDrives #t 'includeItemsFromAllDrives #t 'orderBy (or (buffer-local-value 'google-drive-sort buf) "folder,name")
            'q (string-append "trashed = false"
                 (if mime (string-append " and mimeType = '" mime "'") "")
                 (if (or parent (equal? service "drive")) (string-append " and '" (google--query-escape (or parent "root")) "' in parents") "")
@@ -209,9 +209,9 @@
 (define (google--fetch buf k)
   (set! *google-request-sequence* (+ 1 *google-request-sequence*))
   (let* ((spec (google--list-spec buf))
-         (account (buffer-local buf 'google-account))
+         (account (buffer-local-value 'google-account buf))
          (generation *google-request-sequence*)
-         (page (buffer-local buf 'google-page)))
+         (page (buffer-local-value 'google-page buf)))
     (buffer-set-local! buf 'google-generation generation)
     (if (not spec)
         (begin (buffer-set-local! buf 'google-status "Use x to choose an API operation for this service.") (k '()))
@@ -220,19 +220,19 @@
           (google-request account (plist-get spec 'service) "GET" (plist-get spec 'path)
             (append (plist-get spec 'params) (if page (list 'pageToken page) '())) #f
             (lambda (r)
-              (when (and (buffer-exists? buf) (= generation (buffer-local buf 'google-generation)))
+              (when (and (buffer-exists? buf) (= generation (buffer-local-value 'google-generation buf)))
                 (if (not (plist-get r 'ok))
                     (begin (buffer-set-local! buf 'google-status (plist-get r 'error))
                            (message (plist-get r 'error)) (k #f) (list-render! buf #f))
                     (let* ((data (plist-get r 'data))
                            (rows (or (plist-get data (plist-get spec 'key)) '()))
                            (finish (lambda (rows)
-                             (when (and (buffer-exists? buf) (= generation (buffer-local buf 'google-generation)))
+                             (when (and (buffer-exists? buf) (= generation (buffer-local-value 'google-generation buf)))
                                (buffer-set-local! buf 'google-next-page (plist-get data 'nextPageToken))
                                (buffer-set-local! buf 'google-status (if (null? rows) "No results" ""))
-                               (k (if (google--file-service? (buffer-local buf 'google-service))
+                               (k (if (google--file-service? (buffer-local-value 'google-service buf))
                                       (cons google--up-row rows) rows))))))
-                      (if (equal? (buffer-local buf 'google-service) "gmail")
+                      (if (equal? (buffer-local-value 'google-service buf) "gmail")
                           (google--mail-rows account rows finish) (finish rows)))))))))))
 
 (define-list-mode! "google-service-mode"
@@ -242,9 +242,9 @@
     'columns (lambda (buf) '(("Name" #f) ("Details" 40)))
     'cells (lambda (buf row) (list (google--line (google--row-title row)) (google--line (google--row-detail row))))
     'key (lambda (buf row) (google--row-id row))
-    'title (lambda (buf) (string-append "Google " (or (buffer-local buf 'google-service) "")))
-    'meta (lambda (buf) (string-append (google--email (or (buffer-local buf 'google-account) "")) "  "
-                        (or (buffer-local buf 'google-query) "") "  " (or (buffer-local buf 'google-status) "")))
+    'title (lambda (buf) (string-append "Google " (or (buffer-local-value 'google-service buf) "")))
+    'meta (lambda (buf) (string-append (google--email (or (buffer-local-value 'google-account buf) "")) "  "
+                        (or (buffer-local-value 'google-query buf) "") "  " (or (buffer-local-value 'google-status buf) "")))
     'keys '(("RET" "google-read") ("s" "google-search") ("]" "google-next-page") ("[" "google-first-page")
             ("g" "google-refresh") ("x" "google-operation") ("c" "google-compose"))
     'footer (lambda (buf) '(("RET" "read") ("s" "search") ("]" "next page") ("g" "refresh") ("x" "operation") ("c" "compose")))))
@@ -267,9 +267,9 @@
             (or (plist-get row 'size) "—") (or (plist-get row 'modifiedTime) "")
             (string-replace (or (plist-get row 'mimeType) "") "application/vnd.google-apps." "")))
     'key (lambda (buf row) (google--row-id row))
-    'title (lambda (buf) (string-append (plist-get (google--service (buffer-local buf 'google-service)) 'title) " / " (or (buffer-local buf 'google-drive-path) (if (equal? (buffer-local buf 'google-service) "drive") "My Drive" "All files"))))
-    'meta (lambda (buf) (string-append (google--email (buffer-local buf 'google-account)) "  "
-                         (or (buffer-local buf 'google-status) "")))
+    'title (lambda (buf) (string-append (plist-get (google--service (buffer-local-value 'google-service buf)) 'title) " / " (or (buffer-local-value 'google-drive-path buf) (if (equal? (buffer-local-value 'google-service buf) "drive") "My Drive" "All files"))))
+    'meta (lambda (buf) (string-append (google--email (buffer-local-value 'google-account buf)) "  "
+                         (or (buffer-local-value 'google-status buf) "")))
     'keys '(("RET" "dired-visit") ("^" "dired-up") ("R" "dired-rename")
             ("C" "dired-copy") ("d" "google-drive-flag") ("+" "dired-mkdir") ("SPC" "list-mark") ("x" "google-drive-trash")
             ("g" "dired-revert") ("]" "google-next-page") ("[" "google-first-page")
@@ -281,17 +281,17 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'google-drive-sort
-        (if (equal? (buffer-local buf 'google-drive-sort) "folder,modifiedTime desc")
+        (if (equal? (buffer-local-value 'google-drive-sort buf) "folder,modifiedTime desc")
             "folder,name" "folder,modifiedTime desc"))
       (buffer-set-local! buf 'google-page #f)
       (google--refresh buf))))
 
 (define-command "google-drive-up" "Open the parent Google Drive directory"
   (lambda ()
-    (let* ((buf (current-buffer)) (account (buffer-local buf 'google-account))
-           (folder (buffer-local buf 'google-parent)) (up (buffer-local buf 'google-drive-up)))
+    (let* ((buf (current-buffer)) (account (buffer-local-value 'google-account buf))
+           (folder (buffer-local-value 'google-parent buf)) (up (buffer-local-value 'google-drive-up buf)))
       (cond ((or (not folder) (equal? folder "root"))
-             (if (equal? (buffer-local buf 'google-service) "drive") (message "Already at My Drive.")
+             (if (equal? (buffer-local-value 'google-service buf) "drive") (message "Already at My Drive.")
                  (google-open account "drive")))
             (up (google-open account "drive" (if (equal? up "root") #f up)))
             (else (google-request account "drive" "GET" (string-append "/files/" (google--id folder))
@@ -310,13 +310,13 @@
 ;; Capture account and targets before prompting. Batch mutations run once, in order;
 ;; only successful rows lose their marks, so failed files remain easy to retry.
 (define (google--file-apply buf label ops)
-  (let ((account (buffer-local buf 'google-account)))
-    (if (buffer-local buf 'google-file-busy) (message "A file operation is already running.")
+  (let ((account (buffer-local-value 'google-account buf)))
+    (if (buffer-local-value 'google-file-busy buf) (message "A file operation is already running.")
       (when (pair? ops)
         (y-or-n? (string-append label " " (number->string (length ops)) " file(s) as "
                       (google--email account) ": " (string-join (map (lambda (op) (plist-get op 'name)) ops) ", ") "? ")
           (lambda (yes)
-            (when (and yes (buffer-exists? buf) (not (buffer-local buf 'google-file-busy)))
+            (when (and yes (buffer-exists? buf) (not (buffer-local-value 'google-file-busy buf)))
               (buffer-set-local! buf 'google-file-busy #t)
               (desktop-skip! buf 'google-file-busy)
               (let loop ((remaining ops) (failed '()))
@@ -367,7 +367,7 @@
                               (choose (cdr rs) (cdr ls)))))))))))))))
 
 (define (google--file-transfer buf rows copy?)
-  (let ((account (buffer-local buf 'google-account)))
+  (let ((account (buffer-local-value 'google-account buf)))
     (if (and copy? (pair? (filter (lambda (row) (equal? (plist-get row 'mimeType) "application/vnd.google-apps.folder")) rows)))
         (message "Folder copying is not supported yet. Select files to copy, or R to move folders.")
         (google--folder-pick account
@@ -400,7 +400,7 @@
 
 (define-command "google-drive-mkdir" "Create a folder in this Drive directory"
   (lambda ()
-    (let* ((buf (current-buffer)) (parent (or (buffer-local buf 'google-parent) "root")))
+    (let* ((buf (current-buffer)) (parent (or (buffer-local-value 'google-parent buf) "root")))
       (read-string "Folder name: "
         (lambda (name) (unless (equal? (string-trim name) "")
           (google--file-apply buf "Create folder"
@@ -441,15 +441,15 @@
   'modes '(google-drive-mode google-service-mode))
 (define-command "google-next-page" "Fetch the next Google page"
   (lambda ()
-    (let* ((buf (current-buffer)) (page (buffer-local buf 'google-next-page)))
+    (let* ((buf (current-buffer)) (page (buffer-local-value 'google-next-page buf)))
       (if page (begin (buffer-set-local! buf 'google-page page) (google--refresh buf))
           (message "No next page."))))
   'modes '(google-drive-mode google-service-mode))
 (define-command "google-search" "Search mail, events, or Drive files"
   (lambda ()
-    (let* ((buf (current-buffer)) (service (buffer-local buf 'google-service)))
+    (let* ((buf (current-buffer)) (service (buffer-local-value 'google-service buf)))
       (if (or (member service '("gmail" "drive" "docs" "sheets" "slides" "forms" "script"))
-              (and (equal? service "calendar") (buffer-local buf 'google-parent)))
+              (and (equal? service "calendar") (buffer-local-value 'google-parent buf)))
           (minibuffer-read "Google search: " '()
             (lambda (q) (buffer-set-local! buf 'google-query q)
                         (buffer-set-local! buf 'google-page #f) (google--refresh buf)))
@@ -511,8 +511,8 @@
 (define-command "google-read" "Read the selected Google item in compos"
   (lambda ()
     (let* ((buf (current-buffer)) (row (list-current buf))
-           (account (buffer-local buf 'google-account)) (service (buffer-local buf 'google-service))
-           (parent (buffer-local buf 'google-parent)))
+           (account (buffer-local-value 'google-account buf)) (service (buffer-local-value 'google-service buf))
+           (parent (buffer-local-value 'google-parent buf)))
       (when row
         (if (plist-get row 'google-up) (run-command "google-drive-up")
         (let* ((id (google--row-id row))
@@ -525,7 +525,7 @@
                 (when (equal? service "drive")
                   (buffer-set-local! child 'google-drive-up (or parent "root"))
                   (buffer-set-local! child 'google-drive-path
-                    (string-append (or (buffer-local buf 'google-drive-path) "My Drive") "/" (google--row-title row)))
+                    (string-append (or (buffer-local-value 'google-drive-path buf) "My Drive") "/" (google--row-title row)))
                   (list-redraw! child)))
               (google-request account target "GET" (google--item-path target id parent)
                 (if (equal? service "contacts") '(personFields "names,emailAddresses,phoneNumbers") '()) #f
@@ -570,13 +570,13 @@
     (name "Meet: create space" service "meet" method "POST" path "/spaces")
     (name "Apps Script: create" service "script" method "POST" path "/projects" body (title "New project"))))
 (define (google--context-operation op buf)
-  (let* ((row (if (member (buffer-local buf 'mode-name) '("google-service-mode" "google-drive-mode" "Dired")) (list-current buf)
-                 (buffer-local buf 'google-data)))
+  (let* ((row (if (member (buffer-local-value 'mode-name buf) '("google-service-mode" "google-drive-mode" "Dired")) (list-current buf)
+                 (buffer-local-value 'google-data buf)))
          (id (or (plist-get row 'documentId) (plist-get row 'spreadsheetId)
                  (plist-get row 'presentationId) (and row (google--row-id row))))
-         (parent (buffer-local buf 'google-parent))
+         (parent (buffer-local-value 'google-parent buf))
          (path (plist-get op 'path)))
-    (when (and id (equal? (plist-get op 'service) (buffer-local buf 'google-service)))
+    (when (and id (equal? (plist-get op 'service) (buffer-local-value 'google-service buf)))
       (for-each (lambda (placeholder) (set! path (string-replace path placeholder (google--id id))))
                 '("DOCUMENT_ID" "PRESENTATION_ID" "SPREADSHEET_ID" "MESSAGE_ID" "EVENT_ID" "FILE_ID" "TASK_ID" "FORM_ID"))
       (when parent (set! path (string-replace path "TASKLIST_ID" (google--id parent))))
@@ -613,7 +613,7 @@
 (mode-keys! "google-request-mode" '(("C-c C-c" "google-submit") ("C-c C-k" "quit-window")))
 (define-command "google-operation" "Choose a Google API operation and prepare an editable request"
   (lambda ()
-    (let ((account (buffer-local (current-buffer) 'google-account)) (source (current-buffer)))
+    (let ((account (buffer-local-value 'google-account (current-buffer))) (source (current-buffer)))
       (if (not account) (message "Open a Google account workspace first.")
           (completing-read "Google operation: " (map (lambda (op) (plist-get op 'name)) google--operations)
             (lambda (name)
@@ -622,11 +622,11 @@
   'modes '(google-drive-mode google-service-mode google-mode google-detail-mode))
 (define-command "google-submit" "Submit the reviewed Google request for its original account"
   (lambda ()
-    (let* ((buf (current-buffer)) (account (buffer-local buf 'google-account))
+    (let* ((buf (current-buffer)) (account (buffer-local-value 'google-account buf))
            (request-text (buffer-text buf))
            (request (json-parse request-text)))
-      (cond ((buffer-local buf 'google-submitting) (message "This request is already running."))
-            ((equal? (buffer-local buf 'google-submitted-request) (buffer-text buf))
+      (cond ((buffer-local-value 'google-submitting buf) (message "This request is already running."))
+            ((equal? (buffer-local-value 'google-submitted-request buf) (buffer-text buf))
              (message "This exact request already succeeded. Edit it or prepare a new request."))
             ((not (and request (plist-get request 'service) (plist-get request 'method) (plist-get request 'path)))
              (message "A request needs service, method, path, params, and body JSON fields."))
@@ -634,7 +634,7 @@
               (y-or-n? (string-append (plist-get request 'method) " " (plist-get request 'path)
                         " as " (google--email account) "? ")
                 (lambda (yes)
-                  (when (and yes (not (buffer-local buf 'google-submitting)))
+                  (when (and yes (not (buffer-local-value 'google-submitting buf)))
                     (buffer-set-local! buf 'google-submitting #t)
                     (*google-submit-transport* account request request-text
                       (lambda (r)
@@ -661,7 +661,7 @@
 (define-command "google-compose" "Compose a mail draft for this Google account"
   (lambda ()
     (set! *google-draft-sequence* (+ 1 *google-draft-sequence*))
-    (let ((account (buffer-local (current-buffer) 'google-account)))
+    (let ((account (buffer-local-value 'google-account (current-buffer))))
       (if (not account) (message "Open a Google account workspace first.")
           (let ((buf (string-append "*Google compose " account " " (number->string (current-time)) "-" (number->string *google-draft-sequence*) "*")))
             (buffer-create buf) (buffer-set-local! buf 'google-account account)
@@ -673,7 +673,7 @@
 (mode-keys! "google-compose-mode" '(("C-c C-d" "google-save-mail-draft") ("C-c C-c" "google-send-mail")))
 (define (google--compose-operation send?)
   (let* ((buf (current-buffer)) (lines (string-split (buffer-text buf) "\n"))
-         (account (buffer-local buf 'google-account)))
+         (account (buffer-local-value 'google-account buf)))
     (if (not (and (>= (length lines) 3) (string-prefix? "To: " (car lines))
                   (string-prefix? "Subject: " (cadr lines)) (equal? (nth 2 lines) "")))
         (message "Use To: and Subject: headers, then a blank line and the message.")

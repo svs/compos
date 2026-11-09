@@ -44,7 +44,7 @@
 (define (t--feeds-teardown!)
   (for-each (lambda (b)
               (when (or (equal? b *feeds-buffer*)
-                        (equal? (buffer-local b 'mode-name) "browse-mode"))
+                        (equal? (buffer-local-value 'mode-name b) "browse-mode"))
                 (buffer-kill! b)))
             (buffer-list))
   (set! *feeds-file* (nth 0 t--feeds-held))
@@ -103,7 +103,7 @@
                                       (string-contains? (buffer-text buf) "An article")))
                                5000 25)
                    "the reader shows the item")
-      (check-equal! (buffer-local buf 'browse-url) "https://site.test/b" "under its own url")
+      (check-equal! (buffer-local-value 'browse-url buf) "https://site.test/b" "under its own url")
       ;; the item shows beside the list, and the list keeps the point
       (check-equal! (current-buffer) *feeds-buffer* "the reader stays in the list")
       (check-true! (and (window-showing buf) #t) "the item has a window")

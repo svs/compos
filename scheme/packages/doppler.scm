@@ -262,10 +262,10 @@
 ;;; --- list app ----------------------------------------------------------------
 
 (define (doppler--project buf)
-  (or (buffer-local buf 'doppler-project) key-doppler-project))
+  (or (buffer-local-value 'doppler-project buf) key-doppler-project))
 
 (define (doppler--config buf)
-  (or (buffer-local buf 'doppler-config) key-doppler-config))
+  (or (buffer-local-value 'doppler-config buf) key-doppler-config))
 
 (define doppler--actions
   '(("doppler:project" "Project" "P")
@@ -474,7 +474,7 @@
 ;; A row click selects it. The action bar runs the same commands as the keys.
 (add-hook! (list 'block-click 'doppler)
   (lambda (buf id)
-    (and (equal? (buffer-local buf 'mode-name) "doppler-mode")
+    (and (equal? (buffer-local-value 'mode-name buf) "doppler-mode")
          (cond
            ((string-prefix? "doppler:row:" id)
             (let ((i (string->number
@@ -520,7 +520,7 @@
     'title (lambda (buf)
              (string-append "Doppler  " (doppler--project buf) "/" (doppler--config buf)
                             "  " (number->string (length (list-entries buf))) " secrets"))
-    'total (lambda (buf) (or (buffer-local buf 'doppler-total) 0))
+    'total (lambda (buf) (or (buffer-local-value 'doppler-total buf) 0))
     'footer (lambda (buf)
               '(("RET" "copy") ("+" "add") ("e" "set") ("P" "project")
                 ("C" "config") ("d" "flag") ("x" "delete")
@@ -541,9 +541,9 @@
     (buffer-set-local! *doppler-buffer* 'window-class #f)
     (buffer-set-local! *doppler-buffer* 'window-style #f)
     (buffer-set-local! *doppler-buffer* 'group *doppler-group*)
-    (unless (buffer-local *doppler-buffer* 'doppler-project)
+    (unless (buffer-local-value 'doppler-project *doppler-buffer*)
       (buffer-set-local! *doppler-buffer* 'doppler-project key-doppler-project))
-    (unless (buffer-local *doppler-buffer* 'doppler-config)
+    (unless (buffer-local-value 'doppler-config *doppler-buffer*)
       (buffer-set-local! *doppler-buffer* 'doppler-config key-doppler-config))
     (list-mode-show! "doppler-mode")))
 

@@ -11,7 +11,7 @@
     buf))
 
 (define (t--cam-on? buf)
-  (let ((ms (buffer-local buf 'minor-modes)))
+  (let ((ms (buffer-local-value 'minor-modes buf)))
     (if (and (pair? ms) (member "code-agent-mode" ms)) #t #f)))
 
 (define (t--cam-edit! buf)
@@ -50,11 +50,11 @@
     (let ((chat (t--cam-chat "keep")))
       (with-current-buffer chat (lambda () (set-mode! "chat-mode")))
       (check-true! (t--cam-on? chat) "the mode is on")
-      (check-false! (buffer-local chat 'agent-connector)
+      (check-false! (buffer-local-value 'agent-connector chat)
                     "the chat names no connector, so it uses the default")
-      (check-false! (buffer-local chat 'agent-model) "and no model")
+      (check-false! (buffer-local-value 'agent-model chat) "and no model")
       (t--cam-edit! chat)
-      (check-false! (buffer-local chat 'agent-connector)
+      (check-false! (buffer-local-value 'agent-connector chat)
                     "a code edit does not move it either")
       (t--cam-reset! chat))))
 
@@ -67,9 +67,9 @@
       (check-true! (t--cam-on? chat) "the mode is on")
       ;; no live runtime here: only the identity locals change, and the
       ;; next send is what attaches
-      (check-equal! (buffer-local chat 'agent-connector) "codex-app-server" "connector")
-      (check-equal! (buffer-local chat 'agent-model) "gpt-5.6-sol" "model")
-      (check-equal! (buffer-local chat 'agent-effort) "medium" "effort")
+      (check-equal! (buffer-local-value 'agent-connector chat) "codex-app-server" "connector")
+      (check-equal! (buffer-local-value 'agent-model chat) "gpt-5.6-sol" "model")
+      (check-equal! (buffer-local-value 'agent-effort chat) "medium" "effort")
       (t--cam-reset! chat))))
 
 (deftest 'an-acp-edit-tool-call-triggers-too
@@ -100,7 +100,7 @@
       (customize-set! 'code-agent-auto #f)
       (t--cam-edit! chat)
       (check-false! (t--cam-on? chat) "the mode stayed off")
-      (check-false! (buffer-local chat 'agent-connector) "and the connector is untouched")
+      (check-false! (buffer-local-value 'agent-connector chat) "and the connector is untouched")
       (t--cam-reset! chat))))
 
 (deftest 'chat-mode-always-enables-code-agent-mode
@@ -128,21 +128,21 @@
       (buffer-set-local! chat 'chat-turn-active #t)
       (t--cam-edit! chat)
       (check-true! (t--cam-on? chat) "the mode is on")
-      (check-equal! (buffer-local chat 'code-agent-switch-pending) #t "the switch is pending")
-      (check-false! (buffer-local chat 'agent-connector)
+      (check-equal! (buffer-local-value 'code-agent-switch-pending chat) #t "the switch is pending")
+      (check-false! (buffer-local-value 'agent-connector chat)
                     "and the connector has not moved mid-turn")
       (buffer-set-local! chat 'chat-turn-active #f)
       (code-agent-apply-pending! chat)
-      (check-equal! (buffer-local chat 'code-agent-switch-pending) #f "the pending clears")
-      (check-equal! (buffer-local chat 'agent-connector) "codex-app-server" "connector moved")
-      (check-equal! (buffer-local chat 'agent-model) "gpt-5.6-sol" "model moved")
+      (check-equal! (buffer-local-value 'code-agent-switch-pending chat) #f "the pending clears")
+      (check-equal! (buffer-local-value 'agent-connector chat) "codex-app-server" "connector moved")
+      (check-equal! (buffer-local-value 'agent-model chat) "gpt-5.6-sol" "model moved")
       (t--cam-reset! chat))))
 
 (deftest 'the-mode-adds-one-code-editing-instruction
   "one load instruction per system prompt, and asking twice does not add a second"
   (lambda ()
     (let ((chat (t--cam-chat "skill")))
-      (check-false! (buffer-local chat 'chat-note-once) "nothing noted yet")
+      (check-false! (buffer-local-value 'chat-note-once chat) "nothing noted yet")
       (enable-minor-mode! chat "code-agent-mode")
       (let ((first (chat-tool-system chat))
             (second (chat-tool-system chat))
@@ -171,7 +171,7 @@
                          (chat-preamble chat)
                          "the general preamble is in the wire text")
         (check-equal! second first "asking twice answers the same prompt")
-        (check-false! (buffer-local chat 'chat-note-once) "and notes nothing once"))
+        (check-false! (buffer-local-value 'chat-note-once chat) "and notes nothing once"))
       (t--cam-reset! chat))))
 
 (deftest 'disabling-the-mode-restores-what-it-replaced
@@ -184,13 +184,13 @@
       (buffer-set-local! chat 'agent-effort "high")
       (buffer-set-local! chat 'chat-presets '(project))
       (enable-minor-mode! chat "code-agent-mode")
-      (check-equal! (buffer-local chat 'agent-connector) "codex-app-server" "connector pinned")
-      (check-equal! (buffer-local chat 'agent-model) "gpt-5.6-sol" "model pinned")
+      (check-equal! (buffer-local-value 'agent-connector chat) "codex-app-server" "connector pinned")
+      (check-equal! (buffer-local-value 'agent-model chat) "gpt-5.6-sol" "model pinned")
       (disable-minor-mode! chat "code-agent-mode")
-      (check-equal! (buffer-local chat 'agent-connector) "api" "connector restored")
-      (check-equal! (buffer-local chat 'agent-model) "claude-sonnet-5" "model restored")
-      (check-equal! (buffer-local chat 'agent-effort) "high" "effort restored")
-      (check-equal! (buffer-local chat 'code-agent-saved) #f "the saved set is cleared")
+      (check-equal! (buffer-local-value 'agent-connector chat) "api" "connector restored")
+      (check-equal! (buffer-local-value 'agent-model chat) "claude-sonnet-5" "model restored")
+      (check-equal! (buffer-local-value 'agent-effort chat) "high" "effort restored")
+      (check-equal! (buffer-local-value 'code-agent-saved chat) #f "the saved set is cleared")
       (check-false! (string-contains? (chat-tool-system chat) "CODE-EDITING SKILL")
                     "and the prompt drops the instruction")
       (t--cam-reset! chat))))
@@ -203,6 +203,6 @@
       (t--cam-edit! chat)
       (buffer-set-local! chat 'agent-model "gpt-5.6-terra")
       (t--cam-edit! chat)
-      (check-equal! (buffer-local chat 'agent-model) "gpt-5.6-terra"
+      (check-equal! (buffer-local-value 'agent-model chat) "gpt-5.6-terra"
                     "the second edit left the model alone")
       (t--cam-reset! chat))))

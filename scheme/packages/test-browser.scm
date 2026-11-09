@@ -197,9 +197,9 @@ loads once, before its first test"
 
 ;;; ---------------------------------------------------------------- state
 
-(define (tb--root buf) (buffer-local buf 'test-browser-root))
+(define (tb--root buf) (buffer-local-value 'test-browser-root buf))
 (define (tb--backend name) (cdr (assq name *test-browser-backends*)))
-(define (tb--all-rows buf) (or (buffer-local buf 'test-browser-tree) '()))
+(define (tb--all-rows buf) (or (buffer-local-value 'test-browser-tree buf) '()))
 ;; results live on the rows
 
 (define (tb--row buf id)
@@ -275,7 +275,7 @@ loads once, before its first test"
 ;; A project holds thousands of tests and a list draws a few hundred rows
 ;; a second, so files start folded. A filter reads every row.
 
-(define (tb--opened buf) (or (buffer-local buf 'test-browser-open) '()))
+(define (tb--opened buf) (or (buffer-local-value 'test-browser-open buf) '()))
 
 (define (tb--open! buf ids)
   (let ((open (tb--opened buf)))
@@ -305,7 +305,7 @@ loads once, before its first test"
 
 (define (tb--discover! buf)
   "read the tree off the UI lane, then draw it"
-  (let ((root (tb--root buf)) (names (buffer-local buf 'test-browser-backends)) (t0 (monotonic-ms)))
+  (let ((root (tb--root buf)) (names (buffer-local-value 'test-browser-backends buf)) (t0 (monotonic-ms)))
     (message "test-browser: reading tests…")
     (task-run!
       (lambda ()
@@ -334,11 +334,11 @@ loads once, before its first test"
   (let ((names (tb--backends-for root)) (buf (tb--listing-name root)))
     (when (null? names) (error (string-append "test-browser: no backend knows " root)))
     (buffer-create buf)
-    (unless (buffer-local buf 'group) (buffer-set-local! buf 'group (frame-group)))
+    (unless (buffer-local-value 'group buf) (buffer-set-local! buf 'group (frame-group)))
     (buffer-set-local! buf 'test-browser-root root)
     (buffer-set-local! buf 'test-browser-backends names)
     (with-current-buffer buf (lambda () (set-mode! "test-browser-mode")))
-    (unless (buffer-local buf 'test-browser-tree) (tb--discover! buf))
+    (unless (buffer-local-value 'test-browser-tree buf) (tb--discover! buf))
     buf))
 
 ;;; ---------------------------------------------------------------- detail
@@ -381,17 +381,17 @@ loads once, before its first test"
   (let ((d (tb--detail-name buf row)))
     (buffer-create d)
     (buffer-set-text! d (tb--detail-text buf row) #t)
-    (buffer-set-local! d 'group (buffer-local buf 'group))
+    (buffer-set-local! d 'group (buffer-local-value 'group buf))
     (buffer-set-local! d 'test-browser-listing buf)
     (buffer-set-local! d 'test-browser-row row)
-    (unless (equal? (buffer-local d 'mode-name) "test-browser-detail-mode")
+    (unless (equal? (buffer-local-value 'mode-name d) "test-browser-detail-mode")
       (with-current-buffer d (lambda () (set-mode! "test-browser-detail-mode"))))
     d))
 
 (define (tb--redraw-details! buf)
   (for-each (lambda (d)
-              (when (equal? (buffer-local d 'test-browser-listing) buf)
-                (buffer-set-text! d (tb--detail-text buf (buffer-local d 'test-browser-row)) #t)))
+              (when (equal? (buffer-local-value 'test-browser-listing d) buf)
+                (buffer-set-text! d (tb--detail-text buf (buffer-local-value 'test-browser-row d)) #t)))
             (buffer-list)))
 
 (effects! '(write display))
@@ -450,13 +450,13 @@ each backend runs its own share"
             (lambda (name)
               (let ((mine (filter (lambda (t) (eq? (plist-get t 'backend) name)) tests)))
                 (unless (null? mine) (tb--run-backend! buf name scope mine t0))))
-            (buffer-local buf 'test-browser-backends))))))
+            (buffer-local-value 'test-browser-backends buf))))))
 
 (define (tb--here)
   "the listing and the row at point, from the listing or a detail"
-  (let* ((cur (current-buffer)) (listing (buffer-local cur 'test-browser-listing)))
+  (let* ((cur (current-buffer)) (listing (buffer-local-value 'test-browser-listing cur)))
     (if listing
-        (cons listing (buffer-local cur 'test-browser-row))
+        (cons listing (buffer-local-value 'test-browser-row cur))
         (cons cur (list-current cur)))))
 
 (define-command "test-browser-run" "Run the test, group or file at point"

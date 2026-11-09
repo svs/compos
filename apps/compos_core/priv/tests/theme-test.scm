@@ -54,12 +54,12 @@
     (let ((buf "*tt-empty-size*"))
       (buffer-create buf)
       (face-remap-in! buf 'default (list 'family "Spectral" 'size "" 'line-height "1.7"))
-      (let ((style (buffer-local buf 'style)))
+      (let ((style (buffer-local-value 'style buf)))
         (check-contains! style "--default-family:Spectral;" "the family still emits")
         (check-contains! style "--default-line-height:1.7;" "the line height still emits")
         (check-false! (string-contains? style "--default-size") "the empty size emits nothing"))
       (face-remap-in! buf 'default (list 'size "20px"))
-      (check-contains! (buffer-local buf 'style) "--default-size:20px;" "a named size emits")
+      (check-contains! (buffer-local-value 'style buf) "--default-size:20px;" "a named size emits")
       (buffer-kill! buf))))
 
 (deftest 'every-bundled-theme-colours-the-headings

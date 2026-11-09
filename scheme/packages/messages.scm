@@ -26,7 +26,7 @@
 ;; it has one: a reader who resized this list keeps their size, including
 ;; the 0 that text-scale-reset writes.
 (define (messages--scale! name)
-  (when (not (number? (buffer-local name 'text-scale)))
+  (when (not (number? (buffer-local-value 'text-scale name)))
     (buffer-set-local! name 'text-scale messages-text-scale)
     (text-scale-sync! name)))
 
@@ -39,7 +39,7 @@
 ;; time the name is created again, so no path shows the raw buffer.
 (define (messages--adopt! name)
   (when (equal? name *messages-buffer*)
-    (unless (equal? (buffer-local name 'mode-name) "messages-mode")
+    (unless (equal? (buffer-local-value 'mode-name name) "messages-mode")
       (buffer-set-local! name 'mode-name "messages-mode")
       (list-mode-init! name "messages-mode")
       (list-refresh! name))
@@ -150,7 +150,7 @@
   (if (or (= n 0) (null? xs)) '() (cons (car xs) (messages--first (- n 1) (cdr xs)))))
 
 (define (messages--note-mode! source)
-  (let ((mode (and (buffer-known? source) (buffer-local source 'mode-name))))
+  (let ((mode (and (buffer-known? source) (buffer-local-value 'mode-name source))))
     (when mode
       (set! *messages-modes*
             (messages--first *messages-modes-limit*

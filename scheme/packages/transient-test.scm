@@ -175,7 +175,7 @@
           (check-equal! (llm-config--subtitle buf) "selected: zz-base · ESC gives it to the chat"
                         "the status line names the selection")
           (llm-config--box-set! 'model "m9")
-          (check-equal! (buffer-local buf 'llm-model) "m1"
+          (check-equal! (buffer-local-value 'llm-model buf) "m1"
                         "the chat keeps its model while the menu is open")
           (check-equal! (llm-config--field-value 'model) "m1 → m9"
                         "the row shows the saved value and the new one")
@@ -201,14 +201,14 @@
               (transient-setup "llm-configure" buf)
               (llm-config--box-set! 'model "m2")
               (run-command "transient-cancel-one")))
-          (check-equal! (buffer-local buf 'llm-model) "m2" "C-g applies the selection")
+          (check-equal! (buffer-local-value 'llm-model buf) "m2" "C-g applies the selection")
           (check-false! (transient--active) "and closes the menu")
           (with-current-buffer buf
             (lambda ()
               (transient-setup "llm-configure" buf)
               (llm-config--box-set! 'model "m3")
               (run-command "transient-quit-one")))
-          (check-equal! (buffer-local buf 'llm-model) "m3" "ESC applies it too")
+          (check-equal! (buffer-local-value 'llm-model buf) "m3" "ESC applies it too")
           (check-false! (frame-local 'llm-config-box) "and the box is gone")
           (buffer-kill! buf))))))
 
@@ -257,7 +257,7 @@
                             "and the row says selected")
               (llm-config--on-select buf (llm-config-test--named "zz-b" buf))
               (run-command "transient-quit-one")))
-          (check-equal! (buffer-local buf 'llm-model) "ma"
+          (check-equal! (buffer-local-value 'llm-model buf) "ma"
                         "ESC applies the selected preset, not the one under the cursor")
           (buffer-kill! buf))))))
 
@@ -302,11 +302,11 @@
           (llm-bundle-save! "zz-coding" '(connector "api" model "m9" effort "high"))
           (check-true! (and (llm-default-bundle-apply! buf) #t)
                        "the named default applies")
-          (check-equal! (buffer-local buf 'agent-connector) "api"
+          (check-equal! (buffer-local-value 'agent-connector buf) "api"
                         "the connector comes from the bundle")
-          (check-equal! (buffer-local buf 'agent-model) "m9"
+          (check-equal! (buffer-local-value 'agent-model buf) "m9"
                         "the model comes from the bundle")
-          (check-equal! (buffer-local buf 'agent-effort) "high"
+          (check-equal! (buffer-local-value 'agent-effort buf) "high"
                         "the effort comes from the bundle")
           (check-equal! (plist-get (car (llm-config--preset-items)) 'description)
                         "zz-coding · default"
@@ -325,7 +325,7 @@
         (let ((buf (test-buffer! "zz-llm-default-config" "")))
           (check-true! (and (llm-default-bundle-apply! buf) #t)
                        "the saved config applies")
-          (check-equal! (buffer-local buf 'agent-model) "m7"
+          (check-equal! (buffer-local-value 'agent-model buf) "m7"
                         "the model comes from the config")
           (llm-bundle-save! "zz-same" '(connector "api" model "m7" effort "low"))
           (check-equal! (plist-get (car (llm-config--preset-items)) 'description)

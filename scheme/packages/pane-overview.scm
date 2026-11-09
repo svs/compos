@@ -100,8 +100,8 @@
 (define (pane-overview--render! buf)
   "Writes BUF from its tiles: the blocks, and for a client that draws
    text one line for each window, the selected one marked."
-  (let* ((tiles (or (buffer-local buf 'pane-overview-tiles) '()))
-         (sel (or (buffer-local buf 'pane-overview-sel) 0))
+  (let* ((tiles (or (buffer-local-value 'pane-overview-tiles buf) '()))
+         (sel (or (buffer-local-value 'pane-overview-sel buf) 0))
          (rows (let loop ((ts tiles) (i 0) (acc '()))
                  (if (null? ts)
                      (reverse acc)
@@ -132,22 +132,22 @@
 
 (define (pane-overview--pick! i)
   (let* ((buf (pane-overview--here))
-         (tiles (and buf (buffer-local buf 'pane-overview-tiles))))
+         (tiles (and buf (buffer-local-value 'pane-overview-tiles buf))))
     (when (and tiles (>= i 0) (< i (length tiles)))
       (pane-overview--leave! buf (car (list-ref tiles i))))))
 
 (define (pane-overview--step! d)
   (let* ((buf (pane-overview--here))
-         (n (if buf (length (or (buffer-local buf 'pane-overview-tiles) '())) 0)))
+         (n (if buf (length (or (buffer-local-value 'pane-overview-tiles buf) '())) 0)))
     (when (> n 0)
       (buffer-set-local! buf 'pane-overview-sel
-                         (modulo (+ (or (buffer-local buf 'pane-overview-sel) 0) d) n))
+                         (modulo (+ (or (buffer-local-value 'pane-overview-sel buf) 0) d) n))
       (pane-overview--render! buf))))
 
 (define (pane-overview--row)
   "The tiles in a row of the overview at hand."
   (let ((buf (pane-overview--here)))
-    (pane-overview--columns (if buf (length (or (buffer-local buf 'pane-overview-tiles) '())) 1))))
+    (pane-overview--columns (if buf (length (or (buffer-local-value 'pane-overview-tiles buf) '())) 1))))
 
 (define-mode "pane-overview-mode"
   (lambda () #t))
@@ -167,7 +167,7 @@
                      (tiles (map (lambda (k) (pane-overview--tile l k)) keys))
                      (old (find (lambda (k) (equal? (panes-window-buffer l k) buf)) all)))
                 (unless (buffer-exists? buf) (buffer-create buf))
-                (unless (equal? (buffer-local buf 'mode-name) "pane-overview-mode")
+                (unless (equal? (buffer-local-value 'mode-name buf) "pane-overview-mode")
                   (with-current-buffer buf (lambda () (set-mode! "pane-overview-mode"))))
                 (buffer-set-local! buf 'pane-overview-tiles tiles)
                 (buffer-set-local! buf 'pane-overview-sel 0)
@@ -182,13 +182,13 @@
 (define-command "pane-overview-pick" "Bring the window of the selected tile to the front"
   (lambda ()
     (let ((buf (pane-overview--here)))
-      (when buf (pane-overview--pick! (or (buffer-local buf 'pane-overview-sel) 0)))))
+      (when buf (pane-overview--pick! (or (buffer-local-value 'pane-overview-sel buf) 0)))))
   'modes '(pane-overview-mode))
 
 (define-command "pane-overview-quit" "Leave the overview; the pane shows what it showed before"
   (lambda ()
     (let* ((buf (pane-overview--here))
-           (tiles (and buf (buffer-local buf 'pane-overview-tiles))))
+           (tiles (and buf (buffer-local-value 'pane-overview-tiles buf))))
       (when buf (pane-overview--leave! buf (and (pair? tiles) (car (car tiles)))))))
   'modes '(pane-overview-mode))
 

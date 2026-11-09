@@ -361,8 +361,8 @@
 (define (irc-buffer-name name target)
   (if target (irc-target-buffer name target) (irc-server-buffer name)))
 
-(define (irc-buf-server buf) (buffer-local buf 'irc-server))
-(define (irc-buf-target buf) (buffer-local buf 'irc-target))
+(define (irc-buf-server buf) (buffer-local-value 'irc-server buf))
+(define (irc-buf-target buf) (buffer-local-value 'irc-target buf))
 
 (define (irc-buffer? buf) (if (irc-buf-server buf) #t #f))
 
@@ -386,7 +386,7 @@
   (filter (lambda (b) (equal? (irc-buf-server b) name)) (buffer-list)))
 
 (define (irc-mark buf)
-  (min (or (buffer-local buf 'irc-mark) 0) (buffer-size buf)))
+  (min (or (buffer-local-value 'irc-mark buf) 0) (buffer-size buf)))
 
 (define (irc-input-text buf)
   (substring-bytes (buffer-text buf) (irc-mark buf) (buffer-size buf)))
@@ -405,7 +405,7 @@
 
 ;; 'irc-paint is ((CHUNK ROWS SPANS) ...), the current chunk first
 (define (irc-paint! buf base spans)
-  (let* ((paint (or (buffer-local buf 'irc-paint) '()))
+  (let* ((paint (or (buffer-local-value 'irc-paint buf) '()))
          (head (if (pair? paint) (car paint) (list 0 0 '())))
          (rest (if (pair? paint) (cdr paint) '()))
          (n (car head))
@@ -420,7 +420,7 @@
 
 (define (irc-repaint! buf)
   (for-each (lambda (c) (overlay-set! buf (irc-tag (car c)) (caddr c)))
-            (or (buffer-local buf 'irc-paint) '())))
+            (or (buffer-local-value 'irc-paint buf) '())))
 
 ;; append one row to the transcript of BUF, when its kind shows
 (define (irc-display buf row)
@@ -453,7 +453,7 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-marker-local! buf 'irc-mark 'stay)
-      (unless (buffer-local buf 'irc-mark)
+      (unless (buffer-local-value 'irc-mark buf)
         (buffer-set-local! buf 'irc-mark (buffer-size buf)))
       (buffer-set-read-only! buf #f)
       ;; a restored transcript gets its colours back from the locals
@@ -634,7 +634,7 @@
 (define-list-mode! "irc-channels-mode"
   (list
     'doc "The channels a server listed for /list, most users first. RET joins the row's channel. `/` filters."
-    'rows (lambda (buf) (or (buffer-local buf 'irc-channel-rows) '()))
+    'rows (lambda (buf) (or (buffer-local-value 'irc-channel-rows buf) '()))
     'columns (lambda (buf) (list (list "channel" 24) (list "users" 6) (list "topic" #f)))
     'cells (lambda (buf e)
              (list (list (car e) "irc-channel")

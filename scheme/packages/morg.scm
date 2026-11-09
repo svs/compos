@@ -363,7 +363,7 @@
 (define (morg-folds buf) (fold-keys buf 'morg-folds))
 
 (define (morg-outline? buf)
-  (equal? (buffer-local buf 'morg-outline) #t))
+  (equal? (buffer-local-value 'morg-outline buf) #t))
 
 ;; End of this heading's own body. A child heading starts a new visible line.
 (define (morg-heading-body-end scan buf hstart)
@@ -415,7 +415,7 @@
 ;;; small focus hint. The agent reads the outline and selected sections.
 
 (define (morg-narrow-anchor buf)
-  (buffer-local buf 'morg-narrow-anchor))
+  (buffer-local-value 'morg-narrow-anchor buf))
 
 (define (morg-clear-narrow! buf)
   (buffer-set-local! buf 'morg-narrow-anchor #f)
@@ -617,7 +617,7 @@
 
 (define (morg--todo-line! buf start line new)
   (morg-replace-line! buf start line new)
-  (when (equal? (buffer-local buf 'mode-name) "morg-mode")
+  (when (equal? (buffer-local-value 'mode-name buf) "morg-mode")
     (morg-refontify! buf)))
 
 ;; the heading cycle: none, TODO, DONE
@@ -896,7 +896,7 @@
 (define (morg-refontify! buf)
   ;; preview-mode's painter (drawn in place) has its own hook when it is on
   (when (and (buffer-exists? buf)
-             (not (equal? (buffer-local buf 'markdown-paint) #t)))
+             (not (equal? (buffer-local-value 'markdown-paint buf) #t)))
     (let* ((both (morg-scan-markup buf))
            (scan (car both))
            ;; each body line sees its open fence's arguments, so a kind

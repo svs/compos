@@ -606,8 +606,8 @@ budget runs out at the bottom, where the furniture is not."
 (define-command "browse-learn-parser" "Learn this page's site parser again, replacing the one on disk"
   (lambda ()
     (let* ((buf (current-buffer))
-           (url (buffer-local buf 'browse-url))
-           (html (buffer-local buf 'browse-html)))
+           (url (buffer-local-value 'browse-url buf))
+           (html (buffer-local-value 'browse-html buf)))
       (cond ((not url) (message "no page here"))
             ((not (string? html)) (message "no source held for this page; g refetches it"))
             (else

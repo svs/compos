@@ -86,7 +86,7 @@
     (let ((buf (string-append "*events:" (number->string (plist-get e 'seq)) "*")))
       (buffer-create buf)
       (buffer-set-text! buf (events-list--detail-text e) #t)
-      (buffer-set-local! buf 'group (buffer-local *events-buffer* 'group))
+      (buffer-set-local! buf 'group (buffer-local-value 'group *events-buffer*))
       (events-list--claim! buf 'detail)
       (display-buffer-detail! buf *events-buffer*))))
 
@@ -141,7 +141,7 @@
 (define (events-list-open!)
   (event-subscribe! "events-list" "*" 'events-list--saw)
   (buffer-create *events-buffer*)
-  (unless (buffer-local *events-buffer* 'group)
+  (unless (buffer-local-value 'group *events-buffer*)
     (buffer-set-local! *events-buffer* 'group (frame-group)))
   (events-list--claim! *events-buffer* 'list)
   *events-buffer*)

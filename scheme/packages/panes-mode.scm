@@ -178,7 +178,7 @@
 (define (panes--buffer-mode b)
   "The mode of buffer B, fundamental-mode when it names none; #f when B
    is not the name of a known buffer."
-  (and (string? b) (buffer-known? b) (or (buffer-local b 'mode-name) "fundamental-mode")))
+  (and (string? b) (buffer-known? b) (or (buffer-local-value 'mode-name b) "fundamental-mode")))
 
 (define (panes--live-handle? h)
   "#t when H is a frame window on screen, else #f. A window off the
@@ -368,7 +368,7 @@
   "Makes the blank buffer in pane-empty-mode, unless it is there in that
    mode already."
   (unless (and (buffer-exists? panes-empty-buffer)
-               (equal? (buffer-local panes-empty-buffer 'mode-name) "pane-empty-mode"))
+               (equal? (buffer-local-value 'mode-name panes-empty-buffer) "pane-empty-mode"))
     (buffer-create panes-empty-buffer)
     (with-current-buffer panes-empty-buffer (lambda () (set-mode! "pane-empty-mode")))))
 
@@ -1087,7 +1087,7 @@
          (layout--ensure (car (cdr pane))
                          (and (pair? (cdr (cdr pane))) (car (cdr (cdr pane))))))
         ((symbol? pane)
-         (let ((v (buffer-local anchor pane)))
+         (let ((v (buffer-local-value pane anchor)))
            (and (string? v) (buffer-known? v) v)))
         (else #f)))
 

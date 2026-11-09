@@ -28,13 +28,13 @@
   'group 'chat 'type 'number)
 
 (define (recall--driver? buf)
-  (let ((ps (or (buffer-local buf 'chat-presets) '())))
+  (let ((ps (or (buffer-local-value 'chat-presets buf) '())))
     (and (list? ps)
          (any (lambda (p) (equal? (if (symbol? p) (symbol->string p) p) "driver")) ps))))
 
 (define (recall-on? buf)
   "does BUF get recipes: its own 'agent-recall (on or off) wins, else the setting"
-  (let ((own (buffer-local buf 'agent-recall)))
+  (let ((own (buffer-local-value 'agent-recall buf)))
     (cond ((eq? own 'on) #t)
           ((eq? own 'off) #f)
           ((eq? agent-recall 'all) #t)

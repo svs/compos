@@ -148,14 +148,14 @@
                 (rec--field "ideal experience" (plist-get job 'ideal_experience))
                 (rec--field "custom prompt" (plist-get job 'custom_prompt)))))))
 
-(define (rec-tab buf) (or (buffer-local buf 'recruiting-tab) 'suggestions))
-(define (rec-job buf) (buffer-local buf 'recruiting-job))
+(define (rec-tab buf) (or (buffer-local-value 'recruiting-tab buf) 'suggestions))
+(define (rec-job buf) (buffer-local-value 'recruiting-job buf))
 (define (rec-job-id buf) (rec-str (plist-get (or (rec-job buf) '()) 'id)))
 
 (define (rec--rows buf)
   (let ((tab (rec-tab buf)))
-    (cond ((equal? tab 'suggestions) (or (buffer-local buf 'recruiting-suggestions) '()))
-          ((equal? tab 'applications) (or (buffer-local buf 'recruiting-applications) '()))
+    (cond ((equal? tab 'suggestions) (or (buffer-local-value 'recruiting-suggestions buf) '()))
+          ((equal? tab 'applications) (or (buffer-local-value 'recruiting-applications buf) '()))
           ((equal? tab 'jd) (rec--jd-rows (rec-job buf)))
           ((equal? tab 'config) (rec--config-rows (rec-job buf)))
           (else (rec--job-rows (rec-job buf))))))
@@ -215,8 +215,8 @@
 ;;; --------------------------------------------------------------- the tabs
 
 (define (rec--tab-count buf tab)
-  (cond ((equal? tab 'suggestions) (length (or (buffer-local buf 'recruiting-suggestions) '())))
-        ((equal? tab 'applications) (length (or (buffer-local buf 'recruiting-applications) '())))
+  (cond ((equal? tab 'suggestions) (length (or (buffer-local-value 'recruiting-suggestions buf) '())))
+        ((equal? tab 'applications) (length (or (buffer-local-value 'recruiting-applications buf) '())))
         ((equal? tab 'jd) (length (rec--jd-rows (rec-job buf))))
         ((equal? tab 'config) (length (rec--config-rows (rec-job buf))))
         (else (length (rec--job-rows (rec-job buf))))))
@@ -502,7 +502,7 @@
 
 ;; a kept page takes the name of who it is about, not a number
 (detail-name! "recruiting-detail-mode"
-  (lambda (buf) (string-append "*" (or (buffer-local buf 'recruiting-title) buf) "*")))
+  (lambda (buf) (string-append "*" (or (buffer-local-value 'recruiting-title buf) buf) "*")))
 
 ;;; --------------------------------------------------------------- the panes
 
@@ -541,7 +541,7 @@
     (cond
       ((member tab (list 'job 'jd 'config)) (rec--ready! buf first?))
       ((equal? tab 'suggestions)
-       (if (buffer-local buf 'recruiting-suggestions)
+       (if (buffer-local-value 'recruiting-suggestions buf)
            (rec--ready! buf first?)
            (begin
              (message "Recruiting: reading the suggestions board...")
@@ -552,7 +552,7 @@
                  (message (string-append (number->string (length (or recs '())))
                                          " suggestions")))))))
       (else
-       (if (buffer-local buf 'recruiting-applications)
+       (if (buffer-local-value 'recruiting-applications buf)
            (rec--ready! buf first?)
            (begin
              (message "Recruiting: reading the applications...")

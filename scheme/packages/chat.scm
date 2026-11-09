@@ -44,7 +44,7 @@
 ;;; record: it drops the blocks, and no reconstruction of it matches what
 ;;; was sent.
 
-(define (chat-record buf) (or (buffer-local buf 'chat-wire-turns) '()))
+(define (chat-record buf) (or (buffer-local-value 'chat-wire-turns buf) '()))
 (public! 'chat-record
   "(chat-record BUF) -> the chat's recorded turns, newest first, as plists with role and blocks")
 
@@ -135,7 +135,7 @@
 ;; does this chat's backend hold the conversation, or do we?
 (define (chat-stateless? buf)
   (and (boundp (quote connector-can?))
-       (connector-can? (or (buffer-local buf 'agent-connector) *default-connector*) 'stateless)))
+       (connector-can? (or (buffer-local-value 'agent-connector buf) *default-connector*) 'stateless)))
 
 ;;; --- compaction ------------------------------------------------------------------
 ;;; A conversation that never ends grows without bound, and every turn
@@ -216,7 +216,7 @@
         "" turns))
 
 (define (chat-model-flatten buf)
-  (and (buffer-local buf 'agent-saved-mark)
+  (and (buffer-local-value 'agent-saved-mark buf)
        (pair? (chat-model-record buf))
        (let loop ((turns (reverse (chat-record-turns (chat-model-record buf))))
                   (text ""))
@@ -232,13 +232,13 @@
 ;; is there a head to summarize at all? A chat shorter than its own keep
 ;; window has nothing to compact, and neither has one already compacting.
 (define (chat-can-compact? buf)
-  (and (not (buffer-local buf 'chat-compacting))
+  (and (not (buffer-local-value 'chat-compacting buf))
        (let ((all (chat-model-record buf)))
          (> (length all) (chat-compact-keep-count all)))))
 
 ;; the model this chat sends to — its own, or the editor's default
 (define (chat-model buf)
-  (or (buffer-local buf 'agent-model) (llm-model)))
+  (or (buffer-local-value 'agent-model buf) (llm-model)))
 
 ;; The record size at which the editor mentions compaction, or #f when it
 ;; stays quiet. A flat count set by the user wins. Otherwise it is a share
@@ -379,9 +379,9 @@
 (define-command "chat-compact" "Summarize this chat's older turns, keeping the recent ones"
   (lambda ()
     (let ((buf (current-buffer)))
-      (cond ((not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+      (cond ((not (or (chat-buffer? buf) (buffer-local-value 'agent-saved-mark buf)))
              (message "not a chat buffer"))
-            ((buffer-local buf 'chat-compacting)
+            ((buffer-local-value 'chat-compacting buf)
              (message "a compaction is already in flight"))
             ((not (chat-can-compact? buf))
              (message (string-append "nothing to compact: this chat is "
@@ -394,7 +394,7 @@
              ;; says so; only the summary call leaves something to wait for
              (let* ((all (chat-model-record buf))
                     (n (- (length all) (chat-compact-keep-count all))))
-               (when (equal? (chat-compact! buf (buffer-local buf 'agent-slug)) 'pending)
+               (when (equal? (chat-compact! buf (buffer-local-value 'agent-slug buf)) 'pending)
                  (message (string-append "compacting " (number->string n)
                                          " earlier turns...")))))))))
 
@@ -469,7 +469,7 @@
 (define-command "chat-heal" "Repair this chat's record: drop tool calls and results that lost their other half"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+      (if (not (or (chat-buffer? buf) (buffer-local-value 'agent-saved-mark buf)))
           (message "not a chat buffer")
           (let ((n (chat-heal! buf)))
             (message (if (= n 0)
@@ -507,7 +507,7 @@
 ;;; that. ('() is truthy in this dialect, so the test is `pair?`.)
 
 (define (chat-tools buf)
-  (let ((frozen (buffer-local buf 'chat-tool-specs)))
+  (let ((frozen (buffer-local-value 'chat-tool-specs buf)))
     (if (pair? frozen)
         frozen
         (let ((specs (chat-live-tool-specs buf)))
@@ -519,7 +519,7 @@
 
 ;; has the editor's tool surface moved since this chat froze its own?
 (define (chat-tools-stale? buf)
-  (let ((frozen (buffer-local buf 'chat-tool-specs)))
+  (let ((frozen (buffer-local-value 'chat-tool-specs buf)))
     (and (pair? frozen)
          (not (equal? (chat-tool-names frozen)
                       (chat-tool-names (chat-live-tool-specs buf))))
@@ -538,7 +538,7 @@
 (define-command "chat-refresh-tools" "Adopt the editor's current tool list in this chat"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (not (buffer-local buf 'agent-saved-mark))
+      (if (not (buffer-local-value 'agent-saved-mark buf))
           (message "not a chat buffer")
           (let ((n (chat-adopt-live-tools! buf)))
             (message (string-append "tools refreshed: " (number->string n)
@@ -547,19 +547,19 @@
 ;; the chat's running totals, so C-c $ can state a hit rate over the whole
 ;; conversation rather than the last turn alone
 (define (chat-usage-total buf)
-  (or (plist-get (buffer-local buf 'chat-usage) 'total)
+  (or (plist-get (buffer-local-value 'chat-usage buf) 'total)
       '(input 0 output 0 cache-read 0 cache-write 0)))
 
 ;; the usage the backend reported for the last turn, or #f
 (define (chat-last-usage buf)
-  (plist-get (buffer-local buf 'chat-usage) 'last))
+  (plist-get (buffer-local-value 'chat-usage buf) 'last))
 
 ;; One record holds what the backend reports: the last turn (last), the sum
 ;; of every turn (total) and what the context holds now (context, as
 ;; (used U size S)). A reset drops it with the conversation.
 (define (chat-usage-put! buf key val)
   (buffer-set-local! buf 'chat-usage
-    (plist-put (or (buffer-local buf 'chat-usage) '()) key val)))
+    (plist-put (or (buffer-local-value 'chat-usage buf) '()) key val)))
 
 (define (chat-usage-add total u key)
   (+ (or (plist-get total key) 0) (or (plist-get u key) 0)))
@@ -575,7 +575,7 @@
             'cache-write (chat-usage-add total u 'cache-write)))
     (when cost
       (buffer-set-local! buf 'chat-cost
-        (+ (or (buffer-local buf 'chat-cost) 0) cost)))
+        (+ (or (buffer-local-value 'chat-cost buf) 0) cost)))
     ;; every turn, priced or not: the modeline also carries the tool-drift
     ;; hint, and an unpriced model must not hide it
     (agent-update-modeline! buf)))
@@ -590,7 +590,7 @@
       (list 'used used
             'size (if (and (number? size) (> size 0))
                       size
-                      (plist-get (plist-get (buffer-local buf 'chat-usage) 'context) 'size))))
+                      (plist-get (plist-get (buffer-local-value 'chat-usage buf) 'context) 'size))))
     (agent-update-modeline! buf)))
 
 ;; 247773 of 1000000 reads as 248k/1M. The modeline has room for the shape
@@ -617,7 +617,7 @@
 
 ;; (used U size S), or #f when no backend has reported one
 (define (chat-context-tokens buf)
-  (let ((ctx (plist-get (buffer-local buf 'chat-usage) 'context)))
+  (let ((ctx (plist-get (buffer-local-value 'chat-usage buf) 'context)))
     (and (number? (plist-get ctx 'used)) ctx)))
 
 ;; the share of billed input that came from the cache, as a percentage
@@ -659,10 +659,10 @@
 ;; over the totals, else #f. Only the chat's own model is priced: the
 ;; editor's default model is not what an ACP chat ran on.
 (define (chat-spend buf)
-  (let ((billed (buffer-local buf 'chat-cost)))
+  (let ((billed (buffer-local-value 'chat-cost buf)))
     (if (number? billed)
         (list billed #f)
-        (let ((est (chat-usage-price (buffer-local buf 'agent-model)
+        (let ((est (chat-usage-price (buffer-local-value 'agent-model buf)
                                      (chat-usage-total buf))))
           (and est (> est 0) (list est #t))))))
 
@@ -743,9 +743,9 @@
          (companions (if group (group-docs group) '())))
     (list
       'chat chat
-      'agent (or (buffer-local chat 'agent-slug) #f)
-      'connector (or (buffer-local chat 'agent-connector) *default-connector*)
-      'model (or (buffer-local chat 'agent-model) (llm-model))
+      'agent (or (buffer-local-value 'agent-slug chat) #f)
+      'connector (or (buffer-local-value 'agent-connector chat) *default-connector*)
+      'model (or (buffer-local-value 'agent-model chat) (llm-model))
       'group (or group #f)
       'group-name (if group (group-display-name group) #f)
       'group-members members
@@ -755,7 +755,7 @@
                         (list name (or (buffer-group-role name group) #f)))
                       companions)
                  '())
-      'directory (or (buffer-local chat 'default-directory) (default-directory))
+      'directory (or (buffer-local-value 'default-directory chat) (default-directory))
       'visible-context (let ((ctx (editor-context chat)))
                          (string-append (if (equal? ctx "") "" (string-append ctx "\n"))
                                         (editor-context-this-chat chat)))
@@ -906,7 +906,7 @@
 (define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()
     (let* ((buf (current-buffer))
-           (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
+           (rich? (equal? (buffer-local-value 'render-mode buf) "blocks")))
       ;; "plain", not #f: the chosen view is identity (S11), and a cleared
       ;; local reads as "never chosen" — which the setup would re-default
       (buffer-set-local! buf 'render-mode (if rich? "plain" "blocks"))
@@ -936,13 +936,13 @@
 (define-command "chat-set-model" "Choose this chat's model"
   (lambda ()
     (let* ((buf (current-buffer))
-           (slug (buffer-local buf 'agent-slug))
-           (cname (or (buffer-local buf 'agent-connector) *default-connector*)))
-      (if (not (or slug (buffer-local buf 'agent-saved-mark)))
+           (slug (buffer-local-value 'agent-slug buf))
+           (cname (or (buffer-local-value 'agent-connector buf) *default-connector*)))
+      (if (not (or slug (buffer-local-value 'agent-saved-mark buf)))
           (message "not a chat buffer")
           (minibuffer-read
             (string-append "Model (now "
-                           (or (buffer-local buf 'agent-model)
+                           (or (buffer-local-value 'agent-model buf)
                                (if (connector-can? cname 'stateless)
                                    (llm-model)
                                    "connector default"))
@@ -984,7 +984,7 @@
   (let ((base (string-trim title)))
     (if (or (equal? base "")
             ;; a chat born with its name keeps it
-            (buffer-local buf 'inhibit-retitle))
+            (buffer-local-value 'inhibit-retitle buf))
         #f
         ;; a name another buffer wears takes the next free <N>: a retitle
         ;; that fails quietly leaves the chat under its default name
@@ -1009,10 +1009,10 @@
   ;; the label the chat wore first: chat-summary-log is newest-first, so
   ;; its last entry is the opening sentence. A chat that has one summary
   ;; and no log yet answers with that.
-  (let ((log (buffer-local buf 'chat-summary-log)))
+  (let ((log (buffer-local-value 'chat-summary-log buf)))
     (if (pair? log)
         (cadr (car (reverse log)))
-        (buffer-local buf 'chat-summary))))
+        (buffer-local-value 'chat-summary buf))))
 
 ;; A chat's title is the first label its running summary wrote, and a
 ;; title does not move: the summary keeps saying what the work is doing
@@ -1021,7 +1021,7 @@
 (public! 'chat-title-of
   "(chat-title-of BUF) — the chat's fixed title: the first label its running summary wrote")
 (define (chat-title-of buf)
-  (let ((t (buffer-local buf 'chat-title)))
+  (let ((t (buffer-local-value 'chat-title buf)))
     (if (and (string? t) (not (equal? t "")))
         t
         (chat-title--first-summary buf))))
@@ -1082,7 +1082,7 @@
   (let ((record (chat-record buf)))
     (if (pair? record)
         (length (filter (lambda (t) (equal? (plist-get t 'role) "user")) record))
-        (length (or (buffer-local buf 'llm-responses) '())))))
+        (length (or (buffer-local-value 'llm-responses buf) '())))))
 
 (category! 'chat)
 (public! 'chat-turn-count
@@ -1174,7 +1174,7 @@
                   (let ((path (chat-log-path-by-leaf leaf paths)))
                     (if path
                         (let* ((buf (visit-in-group path g))
-                               (title (and buf (buffer-local buf 'chat-title))))
+                               (title (and buf (buffer-local-value 'chat-title buf))))
                           ;; chat-file-init! restores the title local from the
                           ;; archive header. Give the revived chat that name
                           ;; again instead of leaving it named after its file.
@@ -1196,11 +1196,11 @@
 ;; the directory by age; the suffix loop keeps two same-second chats with
 ;; the same title in two files.
 (define (chat-log-id! buf)
-  (or (buffer-local buf 'chat-log-id)
+  (or (buffer-local-value 'chat-log-id buf)
       (let ((base (string-append
                     (number->string (current-time)) "-"
                     (chat-log-name (or (buffer-group buf)
-                                       (buffer-local buf 'agent-slug)
+                                       (buffer-local-value 'agent-slug buf)
                                        "chat")))))
         (let loop ((n 0))
           (let ((id (if (= n 0)
@@ -1574,7 +1574,7 @@
 ;; the ask that opened the chat. The latest ask alone cannot say whether
 ;; the work is done -- "go on" is not a goal.
 (define (chat-summary--goal buf)
-  (let* ((who (buffer-local buf 'chat-id))
+  (let* ((who (buffer-local-value 'chat-id buf))
          (held (and (string? who) (boundp 'todo-list)
                     (report-errors "chat summary: read the assigned todos" (lambda () (todo-list (list 'assignee who))))))
          (t (and (pair? held) (car held))))
@@ -1686,7 +1686,7 @@
   (title-card ask
     (lambda (card)
       (when (and (pair? card) (buffer-known? buf)
-                 (or force? (not (string? (buffer-local buf 'chat-title)))))
+                 (or force? (not (string? (buffer-local-value 'chat-title buf)))))
         (chat-title buf (chat-title--short
                           (chat-summary--clip
                             (chat-summary--flatten (car card))
@@ -1694,7 +1694,7 @@
 
 (define (chat-title-first-prompt! buf &optional force?)
   (and (buffer-known? buf)
-       (or force? (not (string? (buffer-local buf 'chat-title))))
+       (or force? (not (string? (buffer-local-value 'chat-title buf))))
        (chat-title--card-ready?)
        ;; the passage is every ask the chat has made, which at the first
        ;; prompt is that prompt and nothing else -- so this is one door,
@@ -1738,7 +1738,7 @@
                              ;; an untitled chat takes its name here, and the
                              ;; buffer wears it: a title only in the local
                              ;; leaves the switcher showing *chat:N*
-                             (name (and (not (string? (buffer-local buf 'chat-title)))
+                             (name (and (not (string? (buffer-local-value 'chat-title buf)))
                                         (chat-title--short
                                           (chat-summary--clip
                                             (chat-summary--flatten (car card))
@@ -1751,7 +1751,7 @@
 
 (define (chat-summary-refresh! buf &optional force?)
   (when (buffer-known? buf)
-    (let* ((titled (string? (buffer-local buf 'chat-title)))
+    (let* ((titled (string? (buffer-local-value 'chat-title buf)))
            ;; the name is a label: one clipped line, and only for a chat
            ;; that has none -- unless the user asked for a fresh one
            (retitle
@@ -1769,7 +1769,7 @@
                (when (and (string? text) (not (equal? text "")) (buffer-known? b))
                  (let ((flat (chat-summary--flatten
                                (chat-summary--first-sentence text))))
-                   (unless (equal? flat (buffer-local b 'chat-summary))
+                   (unless (equal? flat (buffer-local-value 'chat-summary b))
                      (chat-summary-land! b flat))))))
            ;; The on-device card writer can be missing, still loading, or
            ;; answer nothing for a passage it could not parse. Every one of
@@ -1785,7 +1785,7 @@
                    " taken, findings, or status. Rewrite the label only when the task"
                    " changed. One sentence, plain text, no markdown, five or six words."
                    " Answer with the sentence only.\n\nCurrent label:\n"
-                   (or (buffer-local buf 'chat-summary) "(none yet)")
+                   (or (buffer-local-value 'chat-summary buf) "(none yet)")
                    "\n\nWhat the person has asked for, oldest first:\n"
                    (chat-summary--brief buf))
                  chat-summary-model
@@ -1827,8 +1827,8 @@
 (public! 'chat-goal-status
   "(chat-goal-status BUF) — the newest turn's judgement of BUF's goal: (STATUS WHY), or #f before the first")
 (define (chat-goal-status buf)
-  (let ((s (buffer-local buf 'chat-goal-status)))
-    (and (symbol? s) (list s (or (buffer-local buf 'chat-goal-why) "")))))
+  (let ((s (buffer-local-value 'chat-goal-status buf)))
+    (and (symbol? s) (list s (or (buffer-local-value 'chat-goal-why buf) "")))))
 (effects! '(write external spend))
 
 ;; a fresh paragraph: the bar shows it, the log keeps it, the archive
@@ -1843,13 +1843,13 @@
   ;; the first label a chat writes is its title, and it is fixed from
   ;; here on. A chat whose log predates the title takes the oldest entry
   ;; the log holds, so the title is still the label it wore first.
-  (let ((titled (string? (buffer-local buf 'chat-title))))
+  (let ((titled (string? (buffer-local-value 'chat-title buf))))
     (unless titled
       (buffer-set-local! buf 'chat-title
         (chat-title--short (or (chat-title--first-summary buf) text)))
-      (run-hook-with-args 'chat-summary-hook buf 'title (buffer-local buf 'chat-title))))
+      (run-hook-with-args 'chat-summary-hook buf 'title (buffer-local-value 'chat-title buf))))
   (run-hook-with-args 'chat-summary-hook buf 'summary text)
-  (let ((log (or (buffer-local buf 'chat-summary-log) '())))
+  (let ((log (or (buffer-local-value 'chat-summary-log buf) '())))
     (buffer-set-local! buf 'chat-summary-log
       (take (cons (append (list (current-time) text)
                           (if status (list status (or why "")) '()))
@@ -1864,7 +1864,7 @@
       (buffer-set-local! buf 'chat-wire-turns
         (cons (append (car r) (list 'goal (symbol->string status) 'goal-why (or why "")))
               (cdr r)))))
-  (when (buffer-local buf 'agent-saved-mark)
+  (when (buffer-local-value 'agent-saved-mark buf)
     (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
     ;; the line wears its kind, as an ask wears >>> you:, so the chat's
     ;; outline names every summary; the block starts after the word
@@ -1878,7 +1878,7 @@
   (dashboard--sync! buf)
   ;; between turns no save is coming -- the archive takes the fresh
   ;; paragraph now; mid-turn the turn-end save carries it
-  (unless (buffer-local buf 'chat-turn-active)
+  (unless (buffer-local-value 'chat-turn-active buf)
     (chat-log-save! buf))
   (when status
     (run-hook-with-args 'chat-status-hook buf status (or why ""))))
@@ -1889,8 +1889,8 @@
   "(buffer-summary-log-entries BUF) -- ((SECS KIND TEXT) ...) oldest first; KIND is summary or jj")
 (define (buffer-summary-log-entries buf)
   (let ((summaries (map (lambda (e) (list (car e) 'summary (cadr e)))
-                        (let ((log (buffer-local buf 'chat-summary-log))
-                              (now (buffer-local buf 'chat-summary)))
+                        (let ((log (buffer-local-value 'chat-summary-log buf))
+                              (now (buffer-local-value 'chat-summary buf)))
                           ;; a chat from before the log has one undated
                           ;; paragraph: the one the bar shows
                           (cond ((pair? log) log)
@@ -1986,7 +1986,7 @@
 (define-command "chat-retitle" "Title this chat again; a blank title asks the model"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+      (if (not (or (chat-buffer? buf) (buffer-local-value 'agent-saved-mark buf)))
           (message "not a chat buffer")
           (chat-retitle! buf)))))
 
@@ -2002,7 +2002,7 @@
 ;;; a turn in flight is left alone and the move happens at its end, because
 ;;; killing a running session to change a directory throws the reply away.
 
-(define (chat-cwd-of buf) (buffer-local buf 'chat-directory))
+(define (chat-cwd-of buf) (buffer-local-value 'chat-directory buf))
 
 (define (chat-cwd-set! buf dir)
   (let ((slash (if (string-suffix? dir "/") dir (string-append dir "/"))))
@@ -2013,11 +2013,11 @@
     slash))
 
 (define (chat-cwd-move-runtime! buf)
-  (let ((slug (buffer-local buf 'agent-slug)))
+  (let ((slug (buffer-local-value 'agent-slug buf)))
     (cond
       ;; an isolated thread's cwd is its worktree and wins over the chat's
       ;; directory — say so rather than pretend the agent moved
-      ((buffer-local buf 'workspace-root) 'workspace)
+      ((buffer-local-value 'workspace-root buf) 'workspace)
       ((not (and slug (member slug (agent-list)))) 'none)
       ((member (agent-status slug) '(running starting needs_attention))
        (buffer-set-local! buf 'chat-cwd-pending #t)
@@ -2027,8 +2027,8 @@
         ;; a fresh session in the new directory; chat-attach! replays the
         ;; transcript, so the conversation continues
         (agent-reconnect! slug
-          (or (buffer-local buf 'agent-connector) *default-connector*)
-          (or (buffer-local buf 'agent-model) ""))
+          (or (buffer-local-value 'agent-connector buf) *default-connector*)
+          (or (buffer-local-value 'agent-model buf) ""))
         'moved))))
 
 (define (chat-cwd-note what dir)
@@ -2043,7 +2043,7 @@
                  (else " — no agent attached"))))))
 
 (define (chat-cwd-target? buf)
-  (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+  (or (chat-buffer? buf) (buffer-local-value 'agent-saved-mark buf)))
 
 (define (chat-cwd-move! buf dir)
   (if (not (chat-cwd-target? buf))
@@ -2061,7 +2061,7 @@
   (lambda (slug stop-reason ok?)
     (let ((buf (agent-buf slug)))
       (when (and (string? buf) (buffer-exists? buf)
-                 (buffer-local buf 'chat-cwd-pending))
+                 (buffer-local-value 'chat-cwd-pending buf))
         (message (chat-cwd-note (chat-cwd-move-runtime! buf)
                                 (or (chat-cwd-of buf) (buffer-directory buf))))))))
 

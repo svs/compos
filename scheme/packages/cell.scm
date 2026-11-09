@@ -74,7 +74,7 @@
 
 (define (cell-part-redraw! buf id render)
   (when (buffer-exists? buf)
-    (let ((tree (buffer-local buf 'render-blocks)))
+    (let ((tree (buffer-local-value 'render-blocks buf)))
       (when (pair? tree)
         (buffer-set-local! buf 'render-blocks (cell--swap tree id (cell-part id (render))))))))
 

@@ -314,8 +314,8 @@
     (dashboard-panel-open! buf)))
 
 (define (dash--add-mode! buf)
-  (let ((major (or (buffer-local buf 'mode-name) "Fundamental"))
-        (minors (or (buffer-local buf 'minor-modes) '())))
+  (let ((major (or (buffer-local-value 'mode-name buf) "Fundamental"))
+        (minors (or (buffer-local-value 'minor-modes buf) '())))
     (completing-read "Toggle mode: "
       (filter (lambda (m) (not (equal? m major))) (mode-names))
       (lambda (m)
@@ -337,8 +337,8 @@
 ;; the hidden ones. The state is the last fact: the movement state gives
 ;; the Cmd-arrows to the window focus, the editing state to the caret.
 (define (dash--modes buf)
-  (let* ((major (or (buffer-local buf 'mode-name) "Fundamental"))
-         (minors (or (buffer-local buf 'minor-modes) '()))
+  (let* ((major (or (buffer-local-value 'mode-name buf) "Fundamental"))
+         (minors (or (buffer-local-value 'minor-modes buf) '()))
          (shown (cons major minors))
          (maps (append (or (buffer-minor-maps buf) '())
                        (or (buffer-keymaps buf) '())
@@ -427,29 +427,29 @@
 
 ;; what HERE cost: the buffer's own chat, or its group's chat
 (define (dash--here-cost buf)
-  (or (buffer-local buf 'chat-cost)
+  (or (buffer-local-value 'chat-cost buf)
       (let ((c (dash--here-chat buf)))
-        (and c (buffer-local c 'chat-cost)))))
+        (and c (buffer-local-value 'chat-cost c)))))
 
 ;; the model HERE would talk to, and through which lane: a chat's own
 ;; agent-model, a writing buffer's llm-model, else the global default.
 ;; The lane is acp when a connector is attached, api otherwise.
 (define (dash--model buf)
-  (or (buffer-local buf 'agent-model)
-      (buffer-local buf 'llm-model)
+  (or (buffer-local-value 'agent-model buf)
+      (buffer-local-value 'llm-model buf)
       (llm-model)))
 
 (define (dash--lane buf)
-  (let ((c (buffer-local buf 'agent-connector)))
+  (let ((c (buffer-local-value 'agent-connector buf)))
     (if (and c (not (equal? c "api")))
         (string-append "acp · " c)
         "api")))
 
 ;; the tool presets in force here: the buffer's own, or its group chat's
 (define (dash--presets buf)
-  (let ((p (or (buffer-local buf 'chat-presets)
+  (let ((p (or (buffer-local-value 'chat-presets buf)
                (let ((c (dash--here-chat buf)))
-                 (and c (buffer-local c 'chat-presets))))))
+                 (and c (buffer-local-value 'chat-presets c))))))
     (and (pair? p)
          (string-join (map (lambda (x) (value->string x)) p) " · "))))
 
@@ -465,9 +465,9 @@
 
 ;; the presets as (GLYPHS TONE): compos leads as the logo, the rest follow
 (define (dash--preset-icons buf)
-  (let ((p (or (buffer-local buf 'chat-presets)
+  (let ((p (or (buffer-local-value 'chat-presets buf)
                (let ((c (dash--here-chat buf)))
-                 (and c (buffer-local c 'chat-presets))))))
+                 (and c (buffer-local-value 'chat-presets c))))))
     (and (pair? p)
          (let ((rest (remove (lambda (x) (equal? x 'compos)) p)))
            (list (string-join (map dash--preset-icon rest) " ")
@@ -484,12 +484,12 @@
 ;;; the question costs the same as the modeline already costs per turn.
 
 (define (dash--tool-state chat)
-  (cond ((pair? (buffer-local chat 'chat-tool-specs))
+  (cond ((pair? (buffer-local-value 'chat-tool-specs chat))
          (list (if (and (boundp (quote chat-tools-stale?))
                         (chat-tools-stale? chat))
                    "stale"
                    "frozen")
-               (buffer-local chat 'chat-tool-specs)))
+               (buffer-local-value 'chat-tool-specs chat)))
         ((boundp (quote chat-live-tool-specs))
          (list "live" (chat-live-tool-specs chat)))
         (else (list "none" '()))))
@@ -544,7 +544,7 @@
                                              (string-append "dash-preset:" (value->string p))
                                              "dash-chip dash-chip-on"
                                              (string-append "turn off " (value->string p))))
-                             (or (buffer-local chat 'chat-presets) '()))
+                             (or (buffer-local-value 'chat-presets chat) '()))
                         (list (dash--action "+ preset…" "dash-add-preset" #f
                                             "turn a tool preset or server on or off"))))
                     (dash--row "list" state
@@ -686,8 +686,8 @@
 ;; saved bundles against the live setup
 (define (dashboard-one-line buf &optional preset-cell)
   (let* ((id (dashboard--group buf))
-         (modes (cons (or (buffer-local buf 'mode-name) "Fundamental")
-                      (or (buffer-local buf 'minor-modes) '())))
+         (modes (cons (or (buffer-local-value 'mode-name buf) "Fundamental")
+                      (or (buffer-local-value 'minor-modes buf) '())))
          (mode-text (string-join (map dashboard--mode-name modes) " · "))
          (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          (groups (if id (group-label id) "none")))
@@ -722,7 +722,7 @@
 
 ;; The header names the major mode. The expanded modes card lists minors.
 (define (dash--mode-segs buf)
-  (let* ((mode (buffer-local buf 'mode-name))
+  (let* ((mode (buffer-local-value 'mode-name buf))
          (icon (mode-own-icon mode)))
     ;; A mode that gave itself a glyph shows the glyph alone. The key above
     ;; it already says MODE, so the word underneath was saying it twice, and
@@ -818,7 +818,7 @@
 ;; Each fact is (KEY VALUE TONE RANK); the client draws one c-fact each.
 (define (dash--modeline-facts buf preset-cell)
   (let* ((preset (if preset-cell (car preset-cell) (dash--preset buf)))
-         (mode (or (buffer-local buf 'mode-name) "Fundamental"))
+         (mode (or (buffer-local-value 'mode-name buf) "Fundamental"))
          (icon (mode-own-icon mode))
          (mode-text (dashboard--mode-name mode)))
     (append
@@ -878,7 +878,7 @@
   (and (chat-buffer? buf)
        (let ((s (if (boundp (quote chat-title-of))
                     (chat-title-of buf)
-                    (buffer-local buf 'chat-title))))
+                    (buffer-local-value 'chat-title buf))))
          (and (string? s) (not (equal? s "")) s))))
 
 ;;; What a mode's headline keeps when its window is narrow. Where narrow
@@ -897,8 +897,8 @@
 ;; of the window showing BUF; a wide window keeps everything and answers #f.
 (define (dash--headline-keep buf width)
   (and (< width narrow-cols)
-       (let loop ((names (append (or (buffer-local buf 'minor-modes) '())
-                                 (let ((m (buffer-local buf 'mode-name)))
+       (let loop ((names (append (or (buffer-local-value 'minor-modes buf) '())
+                                 (let ((m (buffer-local-value 'mode-name buf)))
                                    (if m (list m) '())))))
          (if (null? names)
              #f
@@ -978,7 +978,7 @@
                                (if (dash--summary buf)
                                    "dseg-chat-title"
                                    "dseg-chat-title dseg-title-mono")
-                               (mode-own-icon (buffer-local buf 'mode-name))
+                               (mode-own-icon (buffer-local-value 'mode-name buf))
                                (cadr file))))
                      (if (and vcs (not (dash--summary buf)))
                          (list (list 'wide (dash--wide-seg "jj" vcs))) '()))))
@@ -1017,7 +1017,7 @@
 ;; Any other buffer has no such switch and draws nothing here.
 (define (dash--verbosity buf)
   (and (chat-rich-view? buf)
-       (let ((now (or (buffer-local buf 'agent-verbosity) "info")))
+       (let ((now (or (buffer-local-value 'agent-verbosity buf) "info")))
          (list 'tag "div" 'class "dseg-verbosity"
                'children
                (map (lambda (level)
@@ -1031,7 +1031,7 @@
 ;; what the buffer asks its header line to carry: a list's tabs. They sit
 ;; at the tail, where a chat keeps its verbosity switch.
 (define (dash--header-blocks buf)
-  (let ((blocks (buffer-local buf 'header-line-blocks)))
+  (let ((blocks (buffer-local-value 'header-line-blocks buf)))
     (and (pair? blocks) (list 'tag "div" 'class "dseg-tabs" 'children blocks))))
 
 ;; the hairline that carries the eye from the title to the tail
@@ -1272,10 +1272,10 @@
 (define (buffer-name-segments buf)
   (name-segments
     (name-format-expand
-      (or (buffer-local buf 'name-format) buffer-name-format)
+      (or (buffer-local-value 'name-format buf) buffer-name-format)
       (list (list "n" (buffer-modeline-name buf))
             (list "N" buf)
-            (list "m" (or (buffer-local buf 'mode-name) "Fundamental"))
+            (list "m" (or (buffer-local-value 'mode-name buf) "Fundamental"))
             (list "p" (buffer-modeline-context buf))))
     (list (list "mode" (buffer-icon buf)))))
 
@@ -1342,18 +1342,18 @@
 ;; state that moves the tools card, and both are locals.
 (define (dash--fingerprint buf)
   (let ((chat (dash--here-chat buf)))
-    (list (buffer-local buf 'mode-name)
-          (buffer-local buf 'minor-modes)
+    (list (buffer-local-value 'mode-name buf)
+          (buffer-local-value 'minor-modes buf)
           ;; the modes card names every map that answers here, and the
           ;; editing state adds and drops maps as you type
           (buffer-minor-maps buf)
           (dashboard--group buf)
           (frame-local 'current-group)
-          (buffer-local buf 'agent-model)
-          (buffer-local buf 'agent-connector)
-          (buffer-local buf 'llm-model)
-          (and chat (buffer-local chat 'chat-presets))
-          (and chat (map car (or (buffer-local chat 'chat-tool-specs) '()))))))
+          (buffer-local-value 'agent-model buf)
+          (buffer-local-value 'agent-connector buf)
+          (buffer-local-value 'llm-model buf)
+          (and chat (buffer-local-value 'chat-presets chat))
+          (and chat (map car (or (buffer-local-value 'chat-tool-specs chat) '()))))))
 
 (define (dashboard-panel-open! buf)
   (modeline-cache-set! buf
@@ -1434,7 +1434,7 @@
           (else (loop (cdr xs) (cons (car xs) seen) (cons (car xs) out))))))
 
 (define (chat-buffer? b)
-  (equal? (buffer-local b 'mode-name) "chat-mode"))
+  (equal? (buffer-local-value 'mode-name b) "chat-mode"))
 
 ;;; --- the public API of this file ----------------------------------------------
 ;;; The catalog scope of each entry is the one it had in editor.scm.

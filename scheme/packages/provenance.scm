@@ -236,7 +236,7 @@
     (buffer-set-read-only! buf #t)))
 
 (define (prov-revision-setup! buf)
-  (let ((rev (buffer-local buf 'revision)))
+  (let ((rev (buffer-local-value 'revision buf)))
     (when rev (prov-render-revision! buf rev))))
 
 ;; Moving in the log keeps focus in the list and updates the other window.

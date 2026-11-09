@@ -28,7 +28,7 @@
 
 (define (herdr-buffer-name group) (string-append "*herdr:" (group-name group) "*"))
 
-(define (herdr--group buf) (buffer-local buf 'herdr-group))
+(define (herdr--group buf) (buffer-local-value 'herdr-group buf))
 
 ;; Claude Code's native build is named after its version:
 ;; ~/.local/share/claude/versions/2.1.318 is claude
@@ -61,7 +61,7 @@
     (and (pair? agents) (car agents))))
 
 (define (herdr--shells group)
-  (filter (lambda (b) (and (equal? (buffer-local b 'render-mode) "terminal") (process-running? b)))
+  (filter (lambda (b) (and (equal? (buffer-local-value 'render-mode b) "terminal") (process-running? b)))
           (group-buffers group)))
 
 ;; a row: (shell S agent A model MO state ST kind K msg M), one per shell with
@@ -171,7 +171,7 @@
   (for-each (lambda (b)
               (when (and (buffer-exists? b) (or (not group) (equal? (herdr--group b) group)))
                 (list-refresh! b)))
-            (filter (lambda (b) (buffer-local b 'herdr-group)) (buffer-list))))
+            (filter (lambda (b) (buffer-local-value 'herdr-group b)) (buffer-list))))
 
 ;; a status, a variable or a session title redraws the listing of the shell's group
 (add-hook! 'terminal-status-hook

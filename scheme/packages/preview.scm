@@ -25,7 +25,7 @@
 (define (preview--repaint-rows!)
   (for-each
     (lambda (buf)
-      (when (buffer-local buf 'preview-rows)
+      (when (buffer-local-value 'preview-rows buf)
         (preview--rows-look! buf)))
     (buffer-list)))
 
@@ -107,13 +107,13 @@
   ;; Migrate buffers that marked the source look as runtime state.
   (buffer-set-local! buf 'desktop-skip-locals
     (remove (lambda (key) (equal? key 'preview-rows-saved))
-            (or (buffer-local buf 'desktop-skip-locals) '())))
+            (or (buffer-local-value 'desktop-skip-locals buf) '())))
   (buffer-set-local! buf 'render-mode #f)
   ;; the look the rows replace comes back exactly when they go
-  (unless (buffer-local buf 'preview-rows-saved)
+  (unless (buffer-local-value 'preview-rows-saved buf)
     (buffer-set-local! buf 'preview-rows-saved
-      (list (or (buffer-local buf 'face-remap) '())
-            (or (buffer-local buf 'style) #f))))
+      (list (or (buffer-local-value 'face-remap buf) '())
+            (or (buffer-local-value 'style buf) #f))))
   (buffer-set-local! buf 'preview-rows #t)
   (buffer-set-local! buf 'plain-source #f)
   (markdown-paint-on! buf)
@@ -146,7 +146,7 @@
   ;; the plain faces come back: morg skipped its paint while the rows drew
   (when (buffer-derived-mode? buf "morg-mode")
     (morg-refontify! buf))
-  (let ((saved (buffer-local buf 'preview-rows-saved)))
+  (let ((saved (buffer-local-value 'preview-rows-saved buf)))
     (when saved
       (let ((source (preview--source-remap (car saved))))
         (buffer-set-local! buf 'face-remap source)
@@ -167,7 +167,7 @@
 ;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
 ;; between the source and the rendered page.
 (define (preview-renderer-for name)
-  (let ((r (or (buffer-local name 'preview-renderer)
+  (let ((r (or (buffer-local-value 'preview-renderer name)
                (let loop ((rs *preview-renderers*))
                  (if (null? rs)
                      #f
@@ -186,16 +186,16 @@
 ;; the rows were runtime-only is the case.
 (define (preview-heal! buf)
   ;; "rows" is a renderer, never a render mode
-  (when (equal? (buffer-local buf 'render-mode) "rows")
+  (when (equal? (buffer-local-value 'render-mode buf) "rows")
     (buffer-set-local! buf 'render-mode #f))
   (when (buffer-derived-mode? buf "morg-mode")
     (buffer-set-local! buf 'plain-source (not (minor-mode-on? buf "preview-mode"))))
   (let ((on (minor-mode-on? buf "preview-mode"))
-        (rows (equal? (buffer-local buf 'preview-rows) #t)))
+        (rows (equal? (buffer-local-value 'preview-rows buf) #t)))
     (cond ((and rows (not on)) (preview--rows-off! buf))
           ((and on (not rows) (equal? (preview-renderer-for buf) "rows"))
            (preview--rows-on! buf))
-          ((and (not rows) (equal? (buffer-local buf 'markdown-paint) #t))
+          ((and (not rows) (equal? (buffer-local-value 'markdown-paint buf) #t))
            (markdown-paint-off! buf)
            (when (buffer-derived-mode? buf "morg-mode")
              (morg-refontify! buf)))
@@ -218,7 +218,7 @@
         ((buffer-path buf)
          (expand-path (string-append (car (path-split (buffer-path buf))) target)))
         (else
-         (expand-path (string-append (or (buffer-local buf 'default-directory) ".")
+         (expand-path (string-append (or (buffer-local-value 'default-directory buf) ".")
                                      "/" target)))))
 
 (define (preview-csv-files buf)
@@ -264,9 +264,9 @@
           (if (equal? renderer "rows")
               (preview--rows-on! buf)
               (begin
-                (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
+                (when (buffer-local-value 'preview-rows buf) (preview--rows-off! buf))
                 ;; a browse tab showing the page itself keeps the page
-                (unless (equal? (buffer-local buf 'render-mode) "web")
+                (unless (equal? (buffer-local-value 'render-mode buf) "web")
                   (buffer-set-local! buf 'render-mode renderer))))
           (if (equal? renderer "markdown") (preview--csv-on! buf) (preview--csv-off! buf))
           (preview-tabs-sync! buf #t))
@@ -276,11 +276,11 @@
         (begin
           (buffer-set-local! buf 'minor-modes
             (remove (lambda (name) (equal? name "preview-mode"))
-                    (or (buffer-local buf 'minor-modes) '())))
+                    (or (buffer-local-value 'minor-modes buf) '())))
           (buffer-set-local! buf 'render-mode #f)))))
 
 (define (preview-mode--teardown! buf)
-  (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
+  (when (buffer-local-value 'preview-rows buf) (preview--rows-off! buf))
   (preview--csv-off! buf)
   (buffer-set-local! buf 'preview-csv-files #f)
   (buffer-set-local! buf 'render-mode #f)
@@ -291,7 +291,7 @@
 (define-command "preview-mode" "Toggle rendered preview of the current buffer"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (equal? (buffer-local buf 'mode-name) "chat-mode")
+      (if (equal? (buffer-local-value 'mode-name buf) "chat-mode")
           ;; A chat's rendered view is the rich transcript. Its own command
           ;; owns that view and its durable state.
           (run-command "chat-toggle-view")
@@ -327,10 +327,10 @@
 
 (define (preview-tabs-sync! buf on)
   (when (buffer-derived-mode? buf "morg-mode")
-    (unless (buffer-local buf 'arrow-keys) (buffer-set-local! buf 'arrow-keys #t))
+    (unless (buffer-local-value 'arrow-keys buf) (buffer-set-local! buf 'arrow-keys #t))
     (desktop-skip! buf 'header-line-blocks)
     (let ((blocks (preview-tab-blocks on)))
-      (unless (equal? blocks (buffer-local buf 'header-line-blocks))
+      (unless (equal? blocks (buffer-local-value 'header-line-blocks buf))
         (buffer-set-local! buf 'header-line-blocks blocks)
         (dashboard--sync! buf)))))
 
@@ -415,7 +415,7 @@
 ;; renderer that is not Markdown.
 (define (preview--markdown-edit?)
   (let ((buf (current-buffer)))
-    (and (equal? (buffer-local buf 'render-mode) "markdown")
+    (and (equal? (buffer-local-value 'render-mode buf) "markdown")
          (not (buffer-read-only? buf)))))
 
 (define (preview-newline!)
@@ -576,14 +576,14 @@
              (message (string-append "No handler for " href)))))
       ;; A rendered browse page keeps web navigation in its own tab.
       ;; Relative targets resolve against the current page, not local files.
-      ((and (equal? (buffer-local source 'mode-name) "browse-mode")
+      ((and (equal? (buffer-local-value 'mode-name source) "browse-mode")
             (boundp 'browse)
             (boundp 'url-resolve)
-            (buffer-local source 'browse-url)
+            (buffer-local-value 'browse-url source)
             (or (string-prefix? "http://" href)
                 (string-prefix? "https://" href)
                 (not (re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href))))
-       (let ((url (url-resolve href (buffer-local source 'browse-url))))
+       (let ((url (url-resolve href (buffer-local-value 'browse-url source))))
          ;; an index keeps its place: the link opens beside it, as its child
          (cond ((and (boundp 'browse-goto-fragment!) (browse-goto-fragment! source url)) #t)
                ((and (minor-mode-on? source "index-mode") (boundp 'browse-beside!))
@@ -619,19 +619,19 @@
 ;;; open to read must not run anything; `C-c C-v` reads it, `C-c C-a` runs
 ;;; it, and the difference is a key you press.
 
-(define (app-buffer? buf) (equal? (buffer-local buf 'render-mode) "app"))
+(define (app-buffer? buf) (equal? (buffer-local-value 'render-mode buf) "app"))
 
 ;; the client reloads an app when this number changes, and at no other time:
 ;; a keystroke must not restart the app you are typing at
 (define (app-reload! buf)
   (buffer-set-local! buf 'app-generation
-                     (+ 1 (or (buffer-local buf 'app-generation) 0))))
+                     (+ 1 (or (buffer-local-value 'app-generation buf) 0))))
 
 ;; DATA goes into the running app with no reload: the page gets a message
 ;; event whose data is (compos "message" data DATA). A page that loads
 ;; later reads the buffer as it is then, so it is not sent the message.
 (define (app-post! buf data)
-  (let ((n (+ 1 (or (buffer-local buf 'app-message-count) 0))))
+  (let ((n (+ 1 (or (buffer-local-value 'app-message-count buf) 0))))
     (buffer-set-local! buf 'app-message-count n)
     (buffer-set-local! buf 'app-message (json-encode (list 'n n 'data data)))))
 
@@ -674,7 +674,7 @@
 ;; sibling file shows on the next reload too. An app that writes its own
 ;; source (html-edit) keeps its page.
 (define (preview--after-save-hook!)
-  (for-each (lambda (b) (unless (buffer-local b 'app-keep-on-save) (app-reload! b)))
+  (for-each (lambda (b) (unless (buffer-local-value 'app-keep-on-save b) (app-reload! b)))
             (preview-app-buffers)))
 
 (add-hook! 'after-save-hook 'preview--after-save-hook!)
@@ -689,7 +689,7 @@
 (define (preview--visit-default! buf)
   (when (and (string? buf)
              (preview--markdown-file? buf)
-             (not (buffer-local buf 'preview-defaulted))
+             (not (buffer-local-value 'preview-defaulted buf))
              (not (agent-edit-author? (current-edit-author))))
     (buffer-set-local! buf 'preview-defaulted #t)
     (when (and (not (minor-mode-on? buf "preview-mode"))

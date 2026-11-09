@@ -757,7 +757,7 @@
          (m (and w (plist-get w 'mode))))
     (if (and w (or (not m) (equal? m "fundamental-mode")))
         (let* ((top (let ((bs (plist-get w 'buffers))) (and (pair? bs) (panes--name (car bs)))))
-               (tm (and top (buffer-known? top) (buffer-local top 'mode-name))))
+               (tm (and top (buffer-known? top) (buffer-local-value 'mode-name top))))
           (or tm m))
         m)))
 

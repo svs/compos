@@ -26,10 +26,10 @@
   (or (plist-get (or pl '()) key) def))
 
 (define (buffer-annotations buf)
-  (or (buffer-local buf 'annotations) '()))
+  (or (buffer-local-value 'annotations buf) '()))
 
 (define (annotate--dismissed buf)
-  (or (buffer-local buf 'ann-dismissed) '()))
+  (or (buffer-local-value 'ann-dismissed buf) '()))
 
 ;; the annotations a view shows: not dismissed, sorted by line then severity
 (define *ann-severities* '("error" "warning" "suggestion" "question" "note"))
@@ -126,7 +126,7 @@
   (when (buffer-exists? buf)
     (let* ((text (buffer-text buf))
            (bounds (annotate--line-bounds text))
-           (sel (buffer-local buf 'ann-selected))
+           (sel (buffer-local-value 'ann-selected buf))
            (spans
              (fold
                (lambda (acc a)
@@ -189,7 +189,7 @@
 (define (annotate--list-refresh buf)
   (let ((lb "*annotations*"))
     (when (and (buffer-exists? lb)
-               (equal? (buffer-local lb 'ann-source) buf))
+               (equal? (buffer-local-value 'ann-source lb) buf))
       (list-refresh! lb))))
 
 (define (annotate--touch! buf)
@@ -199,7 +199,7 @@
   (annotate--margin-refresh buf))
 
 (define (annotate! buf spec)
-  (let* ((n (+ 1 (or (buffer-local buf 'ann-next-id) 0)))
+  (let* ((n (+ 1 (or (buffer-local-value 'ann-next-id buf) 0)))
          (id (string-append "a" (number->string n)))
          (a (annotate--put (annotate--put spec 'id id) 'state
                            (annotate--get spec 'state "open"))))
@@ -318,7 +318,7 @@
 (define-command "annotate-store-visit" "Visit this buffer's annotations file"
   (lambda ()
     (let* ((buf (current-buffer))
-           (src (or (buffer-local buf 'ann-source) buf))
+           (src (or (buffer-local-value 'ann-source buf) buf))
            (path (annotate--store-file src)))
       (if path
           (visit path)
@@ -331,7 +331,7 @@
 ;;; --- the check source: tree-sitter ERROR nodes ----------------------------
 
 (define (annotate--check! buf)
-  (let ((lang (buffer-local buf 'ts-lang)))
+  (let ((lang (buffer-local-value 'ts-lang buf)))
     (when (and lang (member lang (ts-langs)))
       (let* ((text (buffer-text buf))
              (bounds (annotate--line-bounds text))
@@ -345,7 +345,7 @@
                           (line (annotate--line-of text s))
                           (lb (nth (- line 1) bounds))
                           (stop (min (caddr e) (cadr lb)))
-                          (n (or (buffer-local buf 'ann-next-id) 0)))
+                          (n (or (buffer-local-value 'ann-next-id buf) 0)))
                      (buffer-set-local! buf 'ann-next-id (+ n 1))
                      (list 'id (string-append "a" (number->string (+ n 1)))
                            'source "check" 'severity "error"
@@ -423,7 +423,7 @@
     (if (null? vis)
         (message "No annotations in this buffer")
         (let* ((ids (map (lambda (a) (annotate--get a 'id "")) vis))
-               (sel (buffer-local buf 'ann-selected))
+               (sel (buffer-local-value 'ann-selected buf))
                (i (let loop ((xs ids) (n 0))
                     (cond ((null? xs) #f)
                           ((equal? (car xs) sel) n)
@@ -455,10 +455,10 @@
     (list "flymake" (lambda (a) (equal? (annotate--get a 'source "") "check")))))
 
 (define (annotate--tab buf)
-  (min (or (buffer-local buf 'ann-tab) 0) (- (length *ann-tabs*) 1)))
+  (min (or (buffer-local-value 'ann-tab buf) 0) (- (length *ann-tabs*) 1)))
 
 (define (annotate--list-source buf)
-  (or (buffer-local buf 'ann-source) ""))
+  (or (buffer-local-value 'ann-source buf) ""))
 
 (define (annotate--rows buf)
   (let* ((source (annotate--list-source buf))
@@ -837,9 +837,9 @@
                             'text (annotate--get a 'body ""))))))))
 
 (define (annotate--margin-blocks mbuf)
-  (let* ((src (buffer-local mbuf 'ann-source))
+  (let* ((src (buffer-local-value 'ann-source mbuf))
          (vis (if (and src (buffer-exists? src)) (annotate-visible src) '()))
-         (sel (and src (buffer-local src 'ann-selected))))
+         (sel (and src (buffer-local-value 'ann-selected src))))
     (append
       (list (list 'tag "div" 'class "ann-mhead"
                   'segs (list (list "" (string-append
@@ -865,7 +865,7 @@
 
 (define (annotate--margin-refresh src)
   (when (and (buffer-exists? *ann-margin*)
-             (equal? (buffer-local *ann-margin* 'ann-source) src))
+             (equal? (buffer-local-value 'ann-source *ann-margin*) src))
     (annotate--margin-render! *ann-margin*)))
 
 ;; ONE init for the margin, fresh or restored: cards are a view, so the
@@ -886,7 +886,7 @@
 (define-mode "annotate-margin-mode"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (buffer-local buf 'ann-source)
+      (if (buffer-local-value 'ann-source buf)
           (annotate--margin-init! buf)
           (message "annotate-margin-mode is the margin's internal mode — C-c ! m (annotate-margin) toggles the margin")))))
 
@@ -921,7 +921,7 @@
                 (verb (and colon (substring-bytes rest 0 colon)))
                 (aid (and colon (substring-bytes rest (+ colon 1)
                                                  (string-byte-length rest))))
-                (src (buffer-local mbuf 'ann-source)))
+                (src (buffer-local-value 'ann-source mbuf)))
            (when (and verb src (buffer-exists? src))
              (let ((a (annotate--find src aid)))
                (when a (annotate--click! src verb a))))
@@ -988,7 +988,7 @@
     ;; the margin belongs to the mode: turning the mode off takes the
     ;; margin window with it
     (when (and (buffer-exists? *ann-margin*)
-               (equal? (buffer-local *ann-margin* 'ann-source) buf))
+               (equal? (buffer-local-value 'ann-source *ann-margin*) buf))
       (let ((win (window-showing *ann-margin*)))
         (when win (delete-window-id! win))))))
 

@@ -24,5 +24,5 @@
       (check-equal! (car (key-context)) buf "the frame shows the owed buffer")
       (key-binding-dispatch "C-f")
       (check-false! (runtime-owed? buf) "the lookup ran the restore")
-      (check-equal! (buffer-local buf 'zz-owed-setup-ran) #t "and the mode setup ran")
+      (check-equal! (buffer-local-value 'zz-owed-setup-ran buf) #t "and the mode setup ran")
       (buffer-kill! buf))))

@@ -35,7 +35,7 @@
 ;; annotate-mode opens a margin window. Put the buffer and the window back.
 (define (t--ann-done!)
   (when (buffer-known? t--ann-buf)
-    (when (member "annotate-mode" (or (buffer-local t--ann-buf 'minor-modes) '()))
+    (when (member "annotate-mode" (or (buffer-local-value 'minor-modes t--ann-buf) '()))
       (disable-minor-mode! t--ann-buf "annotate-mode"))
     (buffer-kill! t--ann-buf))
   (when (buffer-known? "*margin*") (buffer-kill! "*margin*")))
@@ -202,7 +202,7 @@
     (t--ann-llm-warning!)
     (with-current-buffer t--ann-buf (lambda () (run-command "annotate-next")))
     (check-equal! (buffer-point t--ann-buf) 17 "point sits on the span")
-    (check-true! (buffer-local t--ann-buf 'ann-selected) "and it is the selected one")
+    (check-true! (buffer-local-value 'ann-selected t--ann-buf) "and it is the selected one")
     (check-true! (member '(17 22 "ann-selected") (buffer-overlays t--ann-buf))
                  "with the selected face")
     (t--ann-done!)))
@@ -326,7 +326,7 @@
   (lambda ()
     (t--ann-fresh!)
     (with-current-buffer t--ann-buf (lambda () (run-command "annotate-margin-mode")))
-    (check-false! (buffer-local t--ann-buf 'render-mode) "the document is not made a margin")
+    (check-false! (buffer-local-value 'render-mode t--ann-buf) "the document is not made a margin")
     (t--ann-done!)))
 
 ;;; --- the store ------------------------------------------------------------------

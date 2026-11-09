@@ -251,11 +251,11 @@
       (check-equal! (buffer-group scratch) id "the group owns the scratch")
       (check-equal! (buffer-group-role scratch id) "scratch"
                     "the membership carries the scratch role")
-      (check-false! (buffer-local scratch 'scratch-owner)
+      (check-false! (buffer-local-value 'scratch-owner scratch)
                     "the chat does not own the scratch")
-      (check-equal! (buffer-local scratch 'scratch-from) chat
+      (check-equal! (buffer-local-value 'scratch-from scratch) chat
                     "navigation remembers where the user came from")
-      (check-equal! (buffer-local t--sw-first 'scratch-buffer) scratch
+      (check-equal! (buffer-local-value 'scratch-buffer t--sw-first) scratch
                     "the work buffer points to the shared scratch")
       (check-true! (member t--sw-first (buffer-family scratch))
                    "the scratch resolves through the group to its work buffer")
@@ -361,9 +361,9 @@
                    "the second selected buffer joins")
       (check-false! (buffer-in-group? t--sw-third destination)
                     "the unselected current buffer stays out")
-      (check-false! (buffer-local t--sw-first 'buffer-selected)
+      (check-false! (buffer-local-value 'buffer-selected t--sw-first)
                     "the first selection is consumed")
-      (check-false! (buffer-local t--sw-second 'buffer-selected)
+      (check-false! (buffer-local-value 'buffer-selected t--sw-second)
                     "the second selection is consumed"))
     (t--sw-done!)))
 
@@ -594,20 +594,20 @@
   "the active buffer becomes selected without opening a selector"
   (lambda ()
     (t--sw-setup!)
-    (check-false! (buffer-local t--sw-first 'buffer-selected)
+    (check-false! (buffer-local-value 'buffer-selected t--sw-first)
                   "the current buffer starts unselected")
     (run-command "buffer-select")
-    (check-true! (buffer-local t--sw-first 'buffer-selected)
+    (check-true! (buffer-local-value 'buffer-selected t--sw-first)
                  "the active buffer is selected")
     (run-command "buffer-unselect")
-    (check-false! (buffer-local t--sw-first 'buffer-selected)
+    (check-false! (buffer-local-value 'buffer-selected t--sw-first)
                   "the active buffer is deselected")
     (run-command "buffer-select")
     (buffer-set-local! t--sw-second 'buffer-selected #t)
     (run-command "buffer-unselect-all")
-    (check-false! (buffer-local t--sw-first 'buffer-selected)
+    (check-false! (buffer-local-value 'buffer-selected t--sw-first)
                   "unselect all clears the active buffer")
-    (check-false! (buffer-local t--sw-second 'buffer-selected)
+    (check-false! (buffer-local-value 'buffer-selected t--sw-second)
                   "unselect all clears other buffers")
     (t--sw-done!)))
 

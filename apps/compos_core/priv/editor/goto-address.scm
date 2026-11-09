@@ -242,7 +242,7 @@
 ;; a listing draws rows, and the row is the action: Dired and every
 ;; list mode take no link paint (docs/LISTS.md, quiet popups)
 (define (goto-address--listing? buf)
-  (let ((mode (buffer-local buf 'mode-name)))
+  (let ((mode (buffer-local-value 'mode-name buf)))
     (and (string? mode)
          (or (equal? mode "Dired")
              (equal? mode "dired-mode")
@@ -400,7 +400,7 @@
 ;; relative path, or the relative path alone
 (define (file-link-text buf target label)
   (let ((relative (file-relative-name target (buffer-directory buf)))
-        (syntax (mode-link-syntax (buffer-local buf 'mode-name))))
+        (syntax (mode-link-syntax (buffer-local-value 'mode-name buf))))
     (if syntax (syntax relative label) relative)))
 
 (define (insert-file-link--write! buf start end text)
@@ -421,7 +421,7 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (dir (buffer-directory buf))
-           (syntax (mode-link-syntax (buffer-local buf 'mode-name)))
+           (syntax (mode-link-syntax (buffer-local-value 'mode-name buf)))
            (selected? (and syntax (mark) (< (region-beginning) (region-end))))
            (start (if selected? (region-beginning) (point)))
            (end (if selected? (region-end) (point)))

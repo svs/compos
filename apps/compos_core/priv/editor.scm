@@ -525,7 +525,7 @@
 
 ;; a local the desktop must not save: derived state a wake rebuilds
 (define (desktop-skip! buf key)
-  (let ((cur (or (buffer-local buf 'desktop-skip-locals) '())))
+  (let ((cur (or (buffer-local-value 'desktop-skip-locals buf) '())))
     (unless (member key cur)
       (buffer-set-local! buf 'desktop-skip-locals (cons key cur)))))
 
@@ -534,7 +534,7 @@
 ;; dash-blocks, dash-fp. Everything in it is rebuilt from the buffer, so the
 ;; desktop skips it. What a mode writes for the modeline itself
 ;; (modeline-info, modeline-info-command, modeline-preset) stays its own local.
-(define (modeline-cache buf) (or (buffer-local buf 'modeline-cache) '()))
+(define (modeline-cache buf) (or (buffer-local-value 'modeline-cache buf) '()))
 
 (define (modeline-cache-get buf key) (plist-get (modeline-cache buf) key))
 
@@ -563,7 +563,7 @@
 ;; KEY names the watch, so a mode that runs again keeps the one it has. The
 ;; ids die with the daemon, so the desktop does not save the table.
 (define (buffer-watch-change! buf key cb)
-  (let* ((cur (or (buffer-local buf 'change-watches) '()))
+  (let* ((cur (or (buffer-local-value 'change-watches buf) '()))
          (hit (assoc key cur)))
     (if hit
         (cadr hit)
@@ -573,7 +573,7 @@
           id))))
 
 (define (buffer-unwatch-change! buf key)
-  (let* ((cur (or (buffer-local buf 'change-watches) '()))
+  (let* ((cur (or (buffer-local-value 'change-watches buf) '()))
          (hit (assoc key cur)))
     (when hit
       (remove-on-change! (cadr hit))
@@ -605,14 +605,14 @@
 
 ;; seconds since the last successful render, or #f before the first
 (define (cache-age buf)
-  (let ((t (buffer-local buf 'cache-time)))
+  (let ((t (buffer-local-value 'cache-time buf)))
     (and t (- (current-time) t))))
 
 ;; #t when the buffer never rendered, or its TTL has passed. A declared
 ;; TTL of #f means the data never goes stale by age: only an explicit
 ;; cache-refresh! fetches again.
 (define (cache-stale? buf)
-  (let ((spec (buffer-local buf 'cache-spec)))
+  (let ((spec (buffer-local-value 'cache-spec buf)))
     (and spec
          (let ((age (cache-age buf))
                (ttl (plist-get spec 'ttl)))
@@ -633,8 +633,8 @@
 ;; lands; a fetch already in flight is not doubled. A #f from the fetch
 ;; leaves the cache as it was — the stale rows beat an empty view.
 (define (cache-refresh! buf)
-  (let ((spec (buffer-local buf 'cache-spec)))
-    (when (and spec (not (buffer-local buf 'cache-inflight)))
+  (let ((spec (buffer-local-value 'cache-spec buf)))
+    (when (and spec (not (buffer-local-value 'cache-inflight buf)))
       (buffer-set-local! buf 'cache-inflight #t)
       ((plist-get spec 'fetch) buf
        (lambda (data)
@@ -662,7 +662,7 @@
 
 ;; note that KEY's work is pending on BUF until a window shows it
 (define (buffer-mark-dirty! buf key)
-  (let ((keys (or (buffer-local buf 'dirty?) '())))
+  (let ((keys (or (buffer-local-value 'dirty? buf) '())))
     (unless (memq key keys)
       (desktop-skip! buf 'dirty?)
       (buffer-set-local! buf 'dirty? (cons key keys)))))
@@ -670,20 +670,20 @@
 (effects! '(read))
 ;; #t when BUF has pending work: KEY's, or any key without KEY
 (define (buffer-dirty? buf &optional key)
-  (let ((keys (buffer-local buf 'dirty?)))
+  (let ((keys (buffer-local-value 'dirty? buf)))
     (and (pair? keys) (or (not key) (and (memq key keys) #t)))))
 
 (effects! '(write))
 ;; drop KEY's pending work: the package did it some other way
 (define (buffer-clear-dirty! buf key)
-  (let ((keys (buffer-local buf 'dirty?)))
+  (let ((keys (buffer-local-value 'dirty? buf)))
     (when (and (pair? keys) (memq key keys))
       (buffer-set-local! buf 'dirty? (filter (lambda (k) (not (eq? k key))) keys)))))
 
 ;; run buffer-refresh-hook for BUF when it has pending work; the keys go
 ;; first, so a handler that marks again stays pending
 (define (buffer-refresh-pending! buf)
-  (let ((keys (and (buffer-exists? buf) (buffer-local buf 'dirty?))))
+  (let ((keys (and (buffer-exists? buf) (buffer-local-value 'dirty? buf))))
     (when (pair? keys)
       (buffer-set-local! buf 'dirty? '())
       (run-hook-with-args 'buffer-refresh-hook buf keys))))
@@ -705,14 +705,14 @@
         ;; code that works in BUF is about to use it
         ((or now? (equal? (current-buffer) buf) (buffer-shown? buf))
          (buffer-set-local! buf 'shown-thunks
-           (filter (lambda (e) (not (eq? (car e) key))) (or (buffer-local buf 'shown-thunks) '())))
+           (filter (lambda (e) (not (eq? (car e) key))) (or (buffer-local-value 'shown-thunks buf) '())))
          (buffer-clear-dirty! buf key)
          (thunk)
          #t)
         (else
          (desktop-skip! buf 'shown-thunks)
          (buffer-set-local! buf 'shown-thunks
-           (alist-put (or (buffer-local buf 'shown-thunks) '()) key thunk))
+           (alist-put (or (buffer-local-value 'shown-thunks buf) '()) key thunk))
          (buffer-mark-dirty! buf key)
          #f)))
 
@@ -720,22 +720,22 @@
   ;; Sources request a reload; a 500 ms tick consumes the latest request.
   ;; Hidden buffers retain their request until shown. No source data is copied.
   (when (buffer-exists? buf)
-    (let ((pending (memq key (or (buffer-local buf 'dirty?) '()))))
+    (let ((pending (memq key (or (buffer-local-value 'dirty? buf) '()))))
       (desktop-skip! buf 'shown-thunks)
       (buffer-set-local! buf 'shown-thunks
-        (alist-put (or (buffer-local buf 'shown-thunks) '()) key thunk))
+        (alist-put (or (buffer-local-value 'shown-thunks buf) '()) key thunk))
       (buffer-mark-dirty! buf key)
       (when (and (not pending) (buffer-shown? buf))
         (debounce! "buffer-refresh-visible" 500
           (lambda (_) (buffer-refresh-visible!)) #f)))))
 
 (define (buffer-when-shown--run! buf keys)
-  (let ((waiting (or (buffer-local buf 'shown-thunks) '())))
+  (let ((waiting (or (buffer-local-value 'shown-thunks buf) '())))
     (for-each (lambda (key)
                 (let ((thunk (alist-get waiting key)))
                   (when thunk
                     (buffer-set-local! buf 'shown-thunks
-                      (filter (lambda (e) (not (eq? (car e) key))) (or (buffer-local buf 'shown-thunks) '())))
+                      (filter (lambda (e) (not (eq? (car e) key))) (or (buffer-local-value 'shown-thunks buf) '())))
                     (thunk))))
               keys)))
 
@@ -772,7 +772,7 @@
 ;; pages instead of moving an invisible source point. A writable HTML preview
 ;; takes edits, so its motion keys must move through the source.
 (define (preview-buffer? buf)
-  (let ((rm (buffer-local buf 'render-mode)))
+  (let ((rm (buffer-local-value 'render-mode buf)))
     (or (equal? rm "app")
         (and (equal? rm "html") (buffer-read-only? buf)))))
 
@@ -1339,19 +1339,19 @@
   (let ((e (assoc name (buffer-locals (or buf (current-buffer))))))
     (and e (cadr e) #t)))
 
-(define (buffer-local-value name &optional buf)
-  ;; the buffer first and the name second is the same question asked the
-  ;; other way round: a string and a symbol cannot be mistaken, so it gets
-  ;; the same answer. A buffer that does not exist is an error, not the
-  ;; default: the default would read as the buffer's own value.
+;; The one accessor for a buffer-local, in the Emacs order: the variable
+;; first, then the buffer. BUF is a buffer name or a buffer ref. #f and a
+;; buffer that does not exist hold no locals, so the answer is #f. A local
+;; set to #f reads as absent. The default stands in only for a variable
+;; that is automatically buffer-local (defvar-local), as in Emacs. Any
+;; other name answers the buffer's own value or #f: in this Lisp-1 a
+;; function shares the name of a local, and its procedure is no default.
+;; The primitive buffer-local is the same read in the old order.
+(define (buffer-local-value name buf)
   (if (and (string? name) (symbol? buf))
       (buffer-local-value buf name)
-      (let ((b (or buf (current-buffer))))
-        (when (and (string? b) (not (buffer-known? b)))
-          (error (string-append "buffer-local-value: no buffer is named " b
-                                "; call (buffer-local-value 'NAME BUF) with a name from (buffer-list)")))
-        (let ((v (buffer-local b name)))
-          (if v v (default-value name))))))
+      (or (buffer-local buf name)
+          (and buf (automatically-local? name) (default-value name)))))
 
 (define (setq-local! name value)
   ;; the answer says the buffer now holds its own value, and the default
@@ -1367,7 +1367,8 @@
   name)
 
 ;; the Emacs variable reference and assignment
-(define (variable-value name) (buffer-local-value name))
+(define (variable-value name)
+  (or (buffer-local (current-buffer) name) (default-value name)))
 
 (define (variable-set! name value)
   (if (automatically-local? name)
@@ -1397,7 +1398,7 @@
 ;;; calls are the only readers and writers of it. A set of OPEN parts, as
 ;;; the agent's cards keep, is the same set read the other way.
 
-(define (fold-keys buf local) (or (buffer-local buf local) '()))
+(define (fold-keys buf local) (or (buffer-local-value local buf) '()))
 
 (define (fold-key? buf local key) (if (member key (fold-keys buf local)) #t #f))
 
@@ -1717,8 +1718,8 @@
 
 ;; Does B wear one of MODES, as its major mode or as a minor mode?
 (define (buffer-wears-mode? b modes)
-  (let loop ((names (cons (buffer-local b 'mode-name)
-                          (or (buffer-local b 'minor-modes) '()))))
+  (let loop ((names (cons (buffer-local-value 'mode-name b)
+                          (or (buffer-local-value 'minor-modes b) '()))))
     (cond ((null? names) #f)
           ((and (car names) (member (car names) modes)) #t)
           (else (loop (cdr names))))))
@@ -2034,7 +2035,7 @@
          (over (cadr ctx))
          (cmd (and (not (and (pair? over) (pair? (cdr over)) (cadr over)))
                    (car ctx)
-                   (buffer-local (car ctx) 'undefined-key-command))))
+                   (buffer-local-value 'undefined-key-command (car ctx)))))
     (if (string? cmd) (list "command" cmd) (list "none"))))
 
 (public! 'key-binding
@@ -2103,8 +2104,8 @@
           (cons (list 'phase phase 'name name 'buffer buf
                       'point (if alive (buffer-point buf) 0)
                       'size (if alive (buffer-size buf) 0)
-                      'mark (and alive (buffer-local buf 'agent-saved-mark))
-                      'marker-bytes (and alive (buffer-local buf 'agent-marker-bytes)))
+                      'mark (and alive (buffer-local-value 'agent-saved-mark buf))
+                      'marker-bytes (and alive (buffer-local-value 'agent-marker-bytes buf)))
                 rows))))))
 
 (define (key-loop--printable? key)
@@ -2365,7 +2366,7 @@
   "(which-key-off? BUF) — #t when BUF shows no which-key panel: its buffer-local which-key-off, or a mode given to which-key-off-in-mode!")
 (define (which-key-off? buf)
   (and buf
-       (or (and (buffer-local buf 'which-key-off) #t)
+       (or (and (buffer-local-value 'which-key-off buf) #t)
            (let loop ((ms which-key--off-modes))
              (and (pair? ms) (or (buffer-derived-mode? buf (car ms)) (loop (cdr ms))))))))
 
@@ -2725,7 +2726,7 @@
           (else (loop (mode-parent m) (cons m seen))))))
 
 (define (buffer-derived-mode? buf name)
-  (derived-mode? (buffer-local buf 'mode-name) name))
+  (derived-mode? (buffer-local-value 'mode-name buf) name))
 
 ;; Run a major mode's setup. A derived mode inherits the behavior instead
 ;; of copying it, so the two cannot drift apart.
@@ -2792,7 +2793,7 @@
 
 ;; the icon a buffer wears is its mode's
 (define (buffer-icon b)
-  (mode-icon (buffer-local b 'mode-name)))
+  (mode-icon (buffer-local-value 'mode-name b)))
 
 ;; the icon a file NAME wears is the icon of the mode it would open in. A
 ;; directory opens in Dired, and a listing marks one with a trailing "/".
@@ -2846,7 +2847,7 @@
 
 (define (runtime-owed? buf)
   (and (string? buf)
-       (buffer-local buf 'mode-name)
+       (buffer-local-value 'mode-name buf)
        (not (member buf *runtime-restored*))))
 
 (add-hook! 'buffer-renamed-hook
@@ -2857,7 +2858,7 @@
 
 (define (set-mode! name)
   (let* ((buf (current-buffer))
-         (old (buffer-local buf 'mode-name))
+         (old (buffer-local-value 'mode-name buf))
          (changed (and old (not (equal? old name)))))
     (runtime--mark! buf)
     (when changed (run-hooks 'change-major-mode-hook))
@@ -3123,11 +3124,11 @@
         (remove (lambda (m) (equal? m map)) (buffer-minor-maps buf))))))
 
 (define (minor-mode-on? buf name)
-  (let ((ms (buffer-local buf 'minor-modes)))
+  (let ((ms (buffer-local-value 'minor-modes buf)))
     (if (and ms (member name ms)) #t #f)))
 
 (define (enable-minor-mode! buf name)
-  (let ((cur (or (buffer-local buf 'minor-modes) '())))
+  (let ((cur (or (buffer-local-value 'minor-modes buf) '())))
     (unless (member name cur)
       (buffer-set-local! buf 'minor-modes (cons name cur))))
   (minor-mode--attach-map! buf name)
@@ -3142,7 +3143,7 @@
 (define (disable-minor-mode! buf name)
   (buffer-set-local! buf 'minor-modes
     (remove (lambda (n) (equal? n name))
-            (or (buffer-local buf 'minor-modes) '())))
+            (or (buffer-local-value 'minor-modes buf) '())))
   (minor-mode--detach-map! buf name)
   (let ((teardown (mode-get name 'teardown)))
     (when teardown (teardown buf))))
@@ -3271,7 +3272,7 @@
 
 (define (modeline-toggle-mode! name)
   (let* ((buf (current-buffer))
-         (major (or (buffer-local buf 'mode-name) "Fundamental")))
+         (major (or (buffer-local-value 'mode-name buf) "Fundamental")))
     (cond
       ;; a minor mode toggles in place
       ((equal? (mode-get name 'kind) 'minor)
@@ -3302,7 +3303,7 @@
       (minor-mode--attach-map! buf name)
       (let ((setup (mode-get name 'setup)))
         (when setup (setup buf))))
-    (reverse (or (buffer-local buf 'minor-modes) '()))))
+    (reverse (or (buffer-local-value 'minor-modes buf) '()))))
 
 ;; Every mode the editor knows, sorted: (mode-names) names them all,
 ;; (mode-names 'major) or (mode-names 'minor) one kind. A name with facts
@@ -3357,7 +3358,7 @@
               ;; the one-shot migrations run first: a mode setup reads the
               ;; shape they write (migrations.scm)
               (run-hook-with-args 'buffer-restore-hook buf)
-              (let ((mode (buffer-local buf 'mode-name)))
+              (let ((mode (buffer-local-value 'mode-name buf)))
                 (when mode (set-mode! mode)))
               (restore-minor-modes! buf))))))
   ;; The modeline is derived state. Rebuild it here so a restored desktop
@@ -3605,7 +3606,7 @@
 ;; calls set-mode! by name; auto-mode only decides a new buffer's mode.
 (define (auto-mode path)
   (let ((m (auto-mode-for-buffer (current-buffer) path)))
-    (when (and m (not (equal? m (buffer-local (current-buffer) 'mode-name))))
+    (when (and m (not (equal? m (buffer-local-value 'mode-name (current-buffer)))))
       (set-mode! m))))
 
 ;; The directory the file candidates come from. A candidate is a bare
@@ -3701,7 +3702,7 @@
 
 (define (buffer-context buf)
   (run-hook-with-args-until-success
-    (list 'context-provider (or (buffer-local buf 'mode-name) "")) buf))
+    (list 'context-provider (or (buffer-local-value 'mode-name buf) "")) buf))
 
 ;; the snapshot is on unless editor-context-snapshot is #f; then only the
 ;; providers speak. agent-session defines the setting, which loads later.
@@ -3722,7 +3723,7 @@
         ctx
         (let ((line (and pos (with-current-buffer buf (lambda () (line-number-at-pos pos)))))
               (sel (editor-context-selection buf)))
-          (string-append "- " buf " (" (or (buffer-local buf 'mode-name) "fundamental-mode") ")"
+          (string-append "- " buf " (" (or (buffer-local-value 'mode-name buf) "fundamental-mode") ")"
                          (if line (string-append ", line " (number->string line)) "")
                          (if ctx (string-append ": " ctx) "")
                          (or sel ""))))))
@@ -3755,7 +3756,7 @@
 
 (define (target-at buf)
   (run-hook-with-args-until-success
-    (list 'target-provider (or (buffer-local buf 'mode-name) "")) buf))
+    (list 'target-provider (or (buffer-local-value 'mode-name buf) "")) buf))
 
 (define *embark-actions* '())     ; ((type ((name fn) ...)) ...)
 
@@ -3794,7 +3795,7 @@
 ;; EXCLUDE from another buffer (C-c RET) leaves (BUF POS) in its local
 ;; editor-context-source; that buffer goes first, for this one send.
 (define (editor-context-preamble exclude)
-  (let* ((src (and (buffer-exists? exclude) (buffer-local exclude 'editor-context-source)))
+  (let* ((src (and (buffer-exists? exclude) (buffer-local-value 'editor-context-source exclude)))
          (src (and src (buffer-exists? (car src)) src))
          (asked (and src (editor-context-line (car src) (cadr src))))
          (rest (editor-context exclude (and src (car src))))
@@ -3910,7 +3911,7 @@
   (let* ((buf (current-buffer))
          (start (region-beginning))
          (end (region-end))
-         (hit (assoc (buffer-local buf 'mode-name) *region-lifters*)))
+         (hit (assoc (buffer-local-value 'mode-name buf) *region-lifters*)))
     (if (and hit (procedure? (cadr hit)))
         ((cadr hit) buf start end)
         (list start end))))
@@ -4014,7 +4015,7 @@
 
 (define-command "display-line-numbers-mode" "Toggle line numbers in the current buffer"
   (lambda ()
-    (let ((cur (buffer-local (current-buffer) 'line-numbers)))
+    (let ((cur (buffer-local-value 'line-numbers (current-buffer))))
       (if (equal? cur "off")
           (begin
             (buffer-set-local! (current-buffer) 'line-numbers "on")
@@ -4072,7 +4073,7 @@
 (define *global-mark-ring* '())    ; ((BUF POS) ...), newest first
 
 (define (mark-ring &optional buf)
-  (or (buffer-local (or buf (current-buffer)) 'mark-ring) '()))
+  (or (buffer-local-value 'mark-ring (or buf (current-buffer))) '()))
 
 (define (global-mark-ring) *global-mark-ring*)
 
@@ -4149,8 +4150,8 @@
 ;; make an explicit context restriction follow edits without making ordinary
 ;; C-x n n change what the model sees.
 (define (llm-context-range buf)
-  (let ((start (buffer-local buf 'llm-context-start))
-        (end (buffer-local buf 'llm-context-end)))
+  (let ((start (buffer-local-value 'llm-context-start buf))
+        (end (buffer-local-value 'llm-context-end buf)))
     (and (number? start) (number? end) (<= start end) (list start end))))
 
 (define (llm-context-text buf text)
@@ -4244,7 +4245,7 @@
 
 (define (font-lock-refontify! buf)
   (when (buffer-exists? buf)
-    (let ((kws (font-lock-keywords (buffer-local buf 'mode-name))))
+    (let ((kws (font-lock-keywords (buffer-local-value 'mode-name buf))))
       (overlay-set! buf 'font-lock
         (if (null? kws) '() (font-lock--spans (buffer-text buf) kws))))))
 
@@ -4320,7 +4321,7 @@
   (let ((memo (buffer-seen-memo b)))
     (or memo
         (and (buffer-known? b)
-             (let ((t (buffer-local b 'last-seen)))
+             (let ((t (buffer-local-value 'last-seen b)))
                (when (number? t) (buffer-seen-memo! b t))
                (and (number? t) t))))))
 
@@ -4853,7 +4854,7 @@
   "a chat buffer writes only a .chat or a .md file" #f
   (lambda (path source)
     (and source
-         (buffer-local source 'agent-slug)
+         (buffer-local-value 'agent-slug source)
          (not (string-suffix? ".chat" path))
          (not (string-suffix? ".md" path)))))
 
@@ -4927,7 +4928,7 @@
         ;; that target in this path and adopts it as the buffer's file path.
         (path
          (let ((p (buffer-save! path)))
-           (unless (buffer-local buf 'mode-name)
+           (unless (buffer-local-value 'mode-name buf)
              (auto-mode p))
            (save-done! p)))
         ;; no file name at all: C-x C-s falls through to write-file
@@ -4968,8 +4969,8 @@
             (buffer-save! p)
             (save-done! p))
           (let ((g (buffer-group old))
-                (record (buffer-local old 'chat-wire-turns))
-                (chat? (buffer-local old 'agent-slug)))
+                (record (buffer-local-value 'chat-wire-turns old))
+                (chat? (buffer-local-value 'agent-slug old)))
             (when chat?
               (buffer-set-local! old 'chat-directory (path-directory p)))
             (write-file! p (or (chat-file-text old) (buffer-text old)) old)
@@ -5004,7 +5005,7 @@
 
 (define (write-file-default-name buf)
   (let* ((stem (write-file-buffer-stem buf))
-         (mode (buffer-local buf 'mode-name))
+         (mode (buffer-local-value 'mode-name buf))
          (ext (if (auto-mode-for stem)
                   ""
                   (write-file-mode-extension mode))))
@@ -5261,7 +5262,7 @@
 ;; file would read the bytes the viewer exists to avoid.
 (define (buffer-unread-file? buf)
   (and (buffer-known? buf)
-       (buffer-local buf 'unread-file)
+       (buffer-local-value 'unread-file buf)
        #t))
 
 ;; #t when opening PATH would cost more than a file should. A path with a
@@ -5420,7 +5421,7 @@
 ;; (match-hint), so a group or project name finds every member.
 (marginalia! 'buffer
   (lambda (b)
-    (let ((mode (or (buffer-local b 'mode-name) "Fundamental"))
+    (let ((mode (or (buffer-local-value 'mode-name b) "Fundamental"))
           (path (buffer-path b)))
       (list (buffer-icon b)
             mode
@@ -5869,7 +5870,7 @@
                (keymap--ladder buf ro)))
         (keymap--facts buf)
         (length (keymap-names))
-        (buffer-local buf 'mode-name)
+        (buffer-local-value 'mode-name buf)
         ro
         *command-generation*
         (if (boundp '*app-entries*) (length *app-entries*) 0)
@@ -6339,17 +6340,17 @@
   (let ((was (editing-state? buf)))
     (unless was
       (buffer-minor-maps! buf (append (editing--maps-for buf) (buffer-minor-maps buf))))
-    (unless (equal? (buffer-local buf 'editing-state) #t)
+    (unless (equal? (buffer-local-value 'editing-state buf) #t)
       (buffer-set-local! buf 'editing-state #t)
       (desktop-skip! buf 'editing-state))
     (unless was (editing--state-changed! buf))))
 
 (define (editing-state-off! buf)
-  (let ((was (or (editing-state? buf) (and (buffer-local buf 'editing-state) #t))))
+  (let ((was (or (editing-state? buf) (and (buffer-local-value 'editing-state buf) #t))))
     (when (editing-state? buf)
       (buffer-minor-maps! buf
         (remove (lambda (m) (member m *editing-state-maps*)) (buffer-minor-maps buf))))
-    (when (buffer-local buf 'editing-state)
+    (when (buffer-local-value 'editing-state buf)
       (buffer-set-local! buf 'editing-state #f))
     (when was (editing--state-changed! buf))))
 
@@ -6440,7 +6441,7 @@
     (cond ((not (and buf (buffer-exists? buf))) #t)
           ;; a terminal is read-only text, yet it is a place you type: its
           ;; editing state hands the keyboard to the terminal itself
-          ((and (buffer-read-only? buf) (not (buffer-local buf 'takes-keyboard)))
+          ((and (buffer-read-only? buf) (not (buffer-local-value 'takes-keyboard buf)))
            (editing-state-off! buf))
           ((or quit (equal? cmd "keyboard-quit")) (editing-state-off! buf))
           ((editing-neutral-command? cmd) #t)
@@ -6526,7 +6527,7 @@
 (define-command "buffer-select" "Toggle selection on the active buffer"
   (lambda ()
     (let* ((buf (current-buffer))
-           (selected (not (buffer-local buf 'buffer-selected))))
+           (selected (not (buffer-local-value 'buffer-selected buf))))
       (buffer-set-local! buf 'buffer-selected selected)
       (message (string-append buf (if selected " selected" " deselected"))))))
 
@@ -6541,7 +6542,7 @@
     (let ((cleared 0))
       (for-each
         (lambda (buf)
-          (when (buffer-local buf 'buffer-selected)
+          (when (buffer-local-value 'buffer-selected buf)
             (buffer-set-local! buf 'buffer-selected #f)
             (set! cleared (+ cleared 1))))
         (buffer-list))
@@ -6632,7 +6633,7 @@
         ((and (string? cmd) (string-prefix? "mode:" cmd))
          (modeline-toggle-mode! (string-join (cdr (string-split cmd ":")) ":")))
         ((string? buf)
-         (let ((c (buffer-local buf 'modeline-info-command)))
+         (let ((c (buffer-local-value 'modeline-info-command buf)))
            (when (string? c) (run-command c))))
         (else #f)))
 
@@ -6998,7 +6999,7 @@
 (effects! '(read))
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
-(public! 'buffer-local "(buffer-local NAME KEY) -> buffer-local value or #f")
+(public! 'buffer-local "(buffer-local BUF KEY) -> BUF's own value or #f; the old order of buffer-local-value, which new code uses")
 (public! 'buffer-locals "(buffer-locals BUF) -> ((KEY VALUE) ...) for every buffer-local, sorted by name")
 (effects! '(write))
 (public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
@@ -7285,7 +7286,7 @@
 (public! 'defvar-local "(defvar-local NAME DEFAULT [DOC]) — defvar, and variable-set! writes the current buffer's own value")
 (public! 'default-value "(default-value NAME) — the global value, or #f")
 (public! 'set-default! "(set-default! NAME VALUE) — the global value")
-(public! 'buffer-local-value "(buffer-local-value NAME [BUF]) — BUF's own value, else the default")
+(public! 'buffer-local-value "(buffer-local-value NAME BUF) -- BUF's own value of NAME, the default for a defvar-local, else #f")
 (catalog-meta! 'function "buffer-local-value" 'effects '(read))
 (public! 'setq-local! "(setq-local! NAME VALUE) — the current buffer's own value; answers (own VALUE default D global unchanged)")
 (public! 'kill-local-variable! "(kill-local-variable! NAME [BUF]) — forget the buffer's own value")

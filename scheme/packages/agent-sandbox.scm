@@ -54,7 +54,7 @@
 (define (agent-sandbox-of chat)
   "(agent-sandbox-of CHAT) — on or off for the chat CHAT: its llm-config, else its group, else agent-sandbox"
   (or (and chat (buffer-exists? chat)
-           (agent-sandbox--word (buffer-local (llm-config-session chat) 'sandbox)))
+           (agent-sandbox--word (buffer-local-value 'sandbox (llm-config-session chat))))
       (let ((g (and chat (buffer-exists? chat) (buffer-group chat))))
         (and g (agent-sandbox--word (group-setting g 'sandbox))))
       (if agent-sandbox 'on 'off)))

@@ -104,7 +104,7 @@
 ;;; --- the listing -----------------------------------------------------------
 
 (effects! '(write external display))
-(define (insta--rows buf) (or (buffer-local buf 'insta-rows) '()))
+(define (insta--rows buf) (or (buffer-local-value 'insta-rows buf) '()))
 (define (insta--set-rows! rows)
   (buffer-set-local! *insta-buffer* 'insta-rows rows)
   (list-refresh! *insta-buffer*)
@@ -121,7 +121,7 @@
 
 (define (insta-fetch! more? k)
   "Read the feed; with MORE? the next page after the rows already here."
-  (let ((next (and more? (buffer-local *insta-buffer* 'insta-next))))
+  (let ((next (and more? (buffer-local-value 'insta-next *insta-buffer*))))
     (if (and more? (not next))
         (begin (message "No more posts in the feed") (k #f))
         (insta--call (insta--feed-js next)
@@ -147,7 +147,7 @@ until the listing holds a dozen."
             (lambda ()
               (unless more? (insta-show-detail! (list-current *insta-buffer*)))
               (if (and (< (length (insta--rows *insta-buffer*)) 12) (< (or pages 0) 5)
-                       (buffer-local *insta-buffer* 'insta-next))
+                       (buffer-local-value 'insta-next *insta-buffer*))
                   (insta-sync! #t (+ 1 (or pages 0)))
                   (message (string-append (number->string (length (insta--rows *insta-buffer*)))
                                           " posts in the feed"))))))))))
@@ -175,7 +175,7 @@ until the listing holds a dozen."
 
 (define (insta-render-detail! buf row)
   "Draw ROW's page into BUF, with its anchors: the post, the caption, the comments."
-  (let* ((comments (or (buffer-local buf 'insta-comments) 'loading))
+  (let* ((comments (or (buffer-local-value 'insta-comments buf) 'loading))
          (head (string-append
                  insta-detail-css
                  "<div class='h'><b>" (html-escape (plist-get row 'user)) "</b> "
@@ -207,13 +207,13 @@ until the listing holds a dozen."
     buf))
 
 (define (insta--fetch-comments! buf)
-  (let ((row (buffer-local buf 'insta-post)))
+  (let ((row (buffer-local-value 'insta-post buf)))
     (when row
       (insta--call (insta--comments-js (plist-get row 'pk))
         (lambda (comments)
           (when (and (buffer-exists? buf) (list? comments))
             (buffer-set-local! buf 'insta-comments comments)
-            (insta-render-detail! buf (buffer-local buf 'insta-post))))))))
+            (insta-render-detail! buf (buffer-local-value 'insta-post buf))))))))
 
 (define (insta-show-detail! row)
   "Show ROW in its own page beside the listing."
@@ -234,7 +234,7 @@ until the listing holds a dozen."
 (define (insta--row-here)
   (if (buffer-derived-mode? (current-buffer) "insta-mode")
       (list-current (current-buffer))
-      (let ((post (buffer-local (current-buffer) 'insta-post)))
+      (let ((post (buffer-local-value 'insta-post (current-buffer))))
         (and post (or (insta--row-by-id (plist-get post 'id)) post)))))
 
 (define (insta-like! row)
@@ -325,7 +325,7 @@ until the listing holds a dozen."
     ("g" "insta-refresh") ("q" "quit-window")))
 (detail-name! "insta-detail-mode"
   (lambda (buf)
-    (let ((row (buffer-local buf 'insta-post)))
+    (let ((row (buffer-local-value 'insta-post buf)))
       (string-append "*" (if row (plist-get row 'user) "insta") " post*"))))
 
 ;;; --- entry -----------------------------------------------------------------

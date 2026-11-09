@@ -56,7 +56,7 @@
   "diff-show! renders the hunk rows with f-ts-* classes and the message on top"
   (lambda ()
     (let ((buf (diff-show! "*zz-diff-show*" t--diff-text)))
-      (check-true! (t--diff-ts-class? (buffer-local buf 'render-blocks)) "a row wears a ts face")
+      (check-true! (t--diff-ts-class? (buffer-local-value 'render-blocks buf)) "a row wears a ts face")
       (check-true! (string-contains? (diff--preamble buf) "a message") "the message is the preamble")
       (check-false! (string-contains? (diff--preamble buf) "diff --git") "and stops at the first file")
       (buffer-kill! buf))))

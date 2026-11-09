@@ -35,7 +35,7 @@
 ;; group ids whose card can appear: every group and every pseudo group,
 ;; except the one you are in
 (define (switch--group-names buf)
-  (filter (lambda (g) (not (equal? g (buffer-local buf 'switch-group))))
+  (filter (lambda (g) (not (equal? g (buffer-local-value 'switch-group buf))))
           (group-names-all)))
 
 ;; every project the editor knows that is not a group yet: the
@@ -118,10 +118,10 @@
 ;; the buffer's group as its locals hold it: 'group-id, else the list or the
 ;; name from before it. No resolve per row, but the legacy name
 (define (switch-group name)
-  (let ((held (buffer-local name 'group-id)))
+  (let ((held (buffer-local-value 'group-id name)))
     (if (string? held)
         held
-        (let ((legacy (buffer-local name 'group)))
+        (let ((legacy (buffer-local-value 'group name)))
           (and (string? legacy) (group-resolve-id legacy))))))
 
 ;; the pool in sections, the ibuffer way: this group's buffers, then
@@ -143,8 +143,8 @@
 
 ;; the buffers view of the modal: the rows are for the home window
 (define (switch-buffer-rows buf)
-  (switch-sectioned-rows (buffer-local buf 'switch-here)
-                         (buffer-local buf 'switch-group)
+  (switch-sectioned-rows (buffer-local-value 'switch-here buf)
+                         (buffer-local-value 'switch-group buf)
                          (switch-home-window buf)))
 
 ;; the locked view: ONE group, whole. The card leads as the default —
@@ -191,7 +191,7 @@
     (switch-locked-file-rows g)))
 
 (define (switch-rows buf)
-  (let ((view (or (buffer-local buf 'switch-view) 'buffers)))
+  (let ((view (or (buffer-local-value 'switch-view buf) 'buffers)))
     (cond ((equal? view 'groups) (switch-group-rows buf))
           ((and (pair? view) (equal? (car view) 'locked))
            (switch-locked-rows (nth 1 view)))
@@ -234,7 +234,7 @@
 
 (define (switch-buffer-detail name)
   (let* ((path (buffer-path name))
-         (mode (or (buffer-local name 'mode-name) "Fundamental"))
+         (mode (or (buffer-local-value 'mode-name name) "Fundamental"))
          (parent (if (and (string? path) (not (equal? path "")))
                      (switch-parent-label path)
                      "")))
@@ -292,7 +292,7 @@
     (completion-match? text input 'substring)))
 
 (define (switch-meta buf)
-  (let* ((view (or (buffer-local buf 'switch-view) 'buffers))
+  (let* ((view (or (buffer-local-value 'switch-view buf) 'buffers))
          ;; headings are not candidates; list-count asks markable? per
          ;; row and costs a wide list 200ms per draw
          (n (length (filter (lambda (e) (not (switch-separator? buf e)))
@@ -309,18 +309,18 @@
 ;;; --- the home window: preview and dormancy --------------------------------------
 
 (define (switch-home-window buf)
-  (let ((w (buffer-local buf 'switch-home-window)))
+  (let ((w (buffer-local-value 'switch-home-window buf)))
     (and w (window-exists? w) w)))
 
 (define (switch-note-woken! buf b)
   (buffer-set-local! buf 'switch-woken
-    (cons b (or (buffer-local buf 'switch-woken) '()))))
+    (cons b (or (buffer-local-value 'switch-woken buf) '()))))
 
 ;; the other side of the wake: closing sleeps every woken buffer nobody
 ;; picked (the consult contract)
 (define (switch-sleep-woken! buf keep)
   (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b)))
-            (or (buffer-local buf 'switch-woken) '()))
+            (or (buffer-local-value 'switch-woken buf) '()))
   (buffer-set-local! buf 'switch-woken '()))
 
 (define (switch-preview! buf e)
@@ -455,7 +455,7 @@
       (else (message "no buffer here")))))
 
 (define (switch-pick! buf e)
-  (switch-act! e (buffer-local buf 'switch-view)
+  (switch-act! e (buffer-local-value 'switch-view buf)
                (lambda (keep) (switch-close! buf keep))))
 
 (define-command "switch-visit"
@@ -500,7 +500,7 @@
                           (list-unmark-key! buf b)
                           (buffer-set-local! buf 'switch-woken
                             (remove (lambda (x) (equal? x b))
-                                    (or (buffer-local buf 'switch-woken) '())))
+                                    (or (buffer-local-value 'switch-woken buf) '())))
                           (if (process-running? b) (process-kill! b))
                           (buffer-kill! b)
                           (set! n (+ n 1))))
@@ -533,7 +533,7 @@
 (define-command "switch-toggle-groups" "Show groups and projects; again shows buffers"
   (lambda ()
     (let* ((buf (current-buffer))
-           (groups? (equal? (buffer-local buf 'switch-view) 'groups)))
+           (groups? (equal? (buffer-local-value 'switch-view buf) 'groups)))
       (buffer-set-local! buf 'switch-view (if groups? 'buffers 'groups))
       (list-set-query! buf "")
       (list-refresh! buf)
@@ -635,7 +635,7 @@
                      (list "details" 24)))
     'cells switch-cells
     'title (lambda (buf)
-             (let ((view (or (buffer-local buf 'switch-view) 'buffers)))
+             (let ((view (or (buffer-local-value 'switch-view buf) 'buffers)))
                (cond ((equal? view 'groups) "Groups")
                      ((pair? view) (group-label (nth 1 view)))
                      (else "Switch to"))))
@@ -668,7 +668,7 @@
          ;; C-x b from inside the switcher: keep the home it already has
          (again? (equal? here *switch-buffer*))
          (my-group (if again?
-                       (buffer-local *switch-buffer* 'switch-group)
+                       (buffer-local-value 'switch-group *switch-buffer*)
                        (or (buffer-group here) (frame-local 'current-group)))))
     (buffer-create *switch-buffer*)
     (unless again?
@@ -789,7 +789,7 @@
 (define (switch-window-buffers &optional mode-only)
   (let* ((win (active-window))
          (here (window-buffer win))
-         (mode (and mode-only (buffer-local here 'mode-name))))
+         (mode (and mode-only (buffer-local-value 'mode-name here))))
     (filter (lambda (name)
               (and (string? name)
                    (not (equal? name here))
@@ -800,7 +800,7 @@
                    (or (not mode-only)
                        (if mode
                            (buffer-derived-mode? name mode)
-                           (not (buffer-local name 'mode-name))))))
+                           (not (buffer-local-value 'mode-name name))))))
             (switch-pane-buffers win))))
 
 (define (switch-window-buffer-pick! step &optional mode-only)
@@ -1043,11 +1043,11 @@ the next row down. STEP is kept for the callers."
 
 ;; the slug of the chat that spawned chat NAME, and NAME's own slug
 (define (switch-chat-parent name)
-  (let ((p (and (buffer-known? name) (buffer-local name 'subagent-parent))))
+  (let ((p (and (buffer-known? name) (buffer-local-value 'subagent-parent name))))
     (and (string? p) p)))
 
 (define (switch-chat-slug name)
-  (let ((s (and (buffer-known? name) (buffer-local name 'agent-slug))))
+  (let ((s (and (buffer-known? name) (buffer-local-value 'agent-slug name))))
     (and (string? s) s)))
 
 ;; the Family tab: the group's chats that spawned a chat or were spawned,

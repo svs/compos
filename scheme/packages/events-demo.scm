@@ -329,7 +329,7 @@
   (event-subscribe! "events-demo-scene:demo" "demo:*" 'events-demo--saw)
   (event-subscribe! "events-demo-scene:obs" "obs:*" 'events-demo--saw)
   (buffer-create *events-demo-buffer*)
-  (unless (buffer-local *events-demo-buffer* 'group)
+  (unless (buffer-local-value 'group *events-demo-buffer*)
     (buffer-set-local! *events-demo-buffer* 'group (frame-group)))
   (with-current-buffer *events-demo-buffer* (lambda () (set-mode! "events-demo-mode")))
   (events-demo-refresh!)
@@ -417,7 +417,7 @@
                                   (events-demo-trace trace))
                              "\n")
                             #t)
-          (buffer-set-local! buf 'group (buffer-local *events-demo-buffer* 'group))
+          (buffer-set-local! buf 'group (buffer-local-value 'group *events-demo-buffer*))
           (display-buffer-detail! buf *events-demo-buffer*)))))
   'modes '(events-demo-mode))
 

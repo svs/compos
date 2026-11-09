@@ -179,7 +179,7 @@
 ;;; window happened to be selected, which is a sub-pane, not a dock.
 
 (define (window-docked buf)
-  (and (buffer-known? buf) (buffer-local buf 'window-dock)))
+  (and (buffer-known? buf) (buffer-local-value 'window-dock buf)))
 
 ;; A dock is not a work window. Every rule that keeps the float out of
 ;; the layout keeps a dock out too: the tiler must not count it, fill it,
@@ -384,7 +384,7 @@
 
 (define (minibuffer--record)
   (let ((buf (minibuffer-buffer)))
-    (or (and (buffer-exists? buf) (buffer-local buf 'minibuffer-prompt)) '())))
+    (or (and (buffer-exists? buf) (buffer-local-value 'minibuffer-prompt buf)) '())))
 
 (define (minibuffer--handler key)
   (let ((h (plist-get (minibuffer--record) key)))

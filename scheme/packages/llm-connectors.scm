@@ -294,7 +294,7 @@
 
 ;; a page row: (section TITLE), (fact ID LABEL VALUE) or (model ID LABEL)
 (define (llm-connectors--page-rows buf)
-  (let* ((name (buffer-local buf 'llm-connector))
+  (let* ((name (buffer-local-value 'llm-connector buf))
          (c (and name (connector-config (llm-connectors--connector name))))
          (r (and name (llm-connectors-test-result name)))
          (fact (lambda (id label value) (list 'fact id label value))))
@@ -376,7 +376,7 @@
         (else (cadr r))))
 
 (define (llm-connectors--page-cells buf r)
-  (let ((name (buffer-local buf 'llm-connector)))
+  (let ((name (buffer-local-value 'llm-connector buf)))
     (cond
       ((eq? (car r) 'section) (list (list (cadr r) "list-section-name")))
       ((eq? (car r) 'model)
@@ -404,7 +404,7 @@
                            (else #f)))))))))
 
 (define (llm-connectors--page-meta buf)
-  (let ((name (buffer-local buf 'llm-connector)))
+  (let ((name (buffer-local-value 'llm-connector buf)))
     (if name
         (string-append (llm-connectors-kind name) " · " (llm-connectors-state name)
                        " · " (number->string (length (llm-connectors-models name))) " models"
@@ -426,13 +426,13 @@
   "(llm-connectors-refresh!) -- redraw the connector list and every connector page"
   (when (buffer-exists? *llm-connectors-buffer*) (list-refresh! *llm-connectors-buffer*))
   ;; list-refresh! reads the rows again; list-render! would draw the old ones
-  (for-each (lambda (b) (when (buffer-local b 'llm-connector) (list-refresh! b)))
+  (for-each (lambda (b) (when (buffer-local-value 'llm-connector b) (list-refresh! b)))
             (mode-group-buffers "llm-connectors-detail-mode")))
 
 (define (llm-connectors--list)
-  (if (equal? (buffer-local (current-buffer) 'mode-name) "llm-connectors-mode")
+  (if (equal? (buffer-local-value 'mode-name (current-buffer)) "llm-connectors-mode")
       (current-buffer)
-      (or (buffer-local (current-buffer) 'llm-connectors-list) *llm-connectors-buffer*)))
+      (or (buffer-local-value 'llm-connectors-list (current-buffer)) *llm-connectors-buffer*)))
 
 (define (llm-connectors--join! buf)
   (let ((g (buffer-group (llm-connectors--list))))
@@ -453,7 +453,7 @@
       (display-buffer-detail! buf list-buf))))
 
 (define (llm-connectors--on-current fn)
-  (let ((name (or (buffer-local (current-buffer) 'llm-connector)
+  (let ((name (or (buffer-local-value 'llm-connector (current-buffer))
                   (let ((l (llm-connectors--list))) (and (buffer-exists? l) (list-current l))))))
     (if (string? name) (fn name) (message "no connector on this line"))))
 
@@ -465,7 +465,7 @@
 
 ;; the model of the row at point on a connector page, or #f
 (define (llm-connectors--model-at-point)
-  (let ((r (and (buffer-local (current-buffer) 'llm-connector) (list-current (current-buffer)))))
+  (let ((r (and (buffer-local-value 'llm-connector (current-buffer)) (list-current (current-buffer)))))
     (and (pair? r) (eq? (car r) 'model) (cadr r))))
 
 ;; a terminal beside the list that runs SCRIPT, then stays as a login shell
@@ -741,7 +741,7 @@
                            "\nt on the row tests it again.\n")
             #t)
           (buffer-set-read-only! buf #t)
-          (with-current-buffer buf (lambda () (unless (equal? (buffer-local buf 'mode-name) "help-mode") (set-mode! "help-mode"))))
+          (with-current-buffer buf (lambda () (unless (equal? (buffer-local-value 'mode-name buf) "help-mode") (set-mode! "help-mode"))))
           (display-buffer-other-window! buf)
           buf))))
 
@@ -878,7 +878,7 @@
     'section? (lambda (buf r) (eq? (car r) 'section))
     'columns (lambda (buf) (llm-connectors--page-columns buf))
     'cells (lambda (buf r) (llm-connectors--page-cells buf r))
-    'title (lambda (buf) (llm-connectors--title (or (buffer-local buf 'llm-connector) "")))
+    'title (lambda (buf) (llm-connectors--title (or (buffer-local-value 'llm-connector buf) "")))
     'meta (lambda (buf) (llm-connectors--page-meta buf))
     'noun "model"
     'no-marks #t
@@ -898,7 +898,7 @@
 ;; M-o on a connector's page: a chat that finds why the connector or its
 ;; models fail, with what the page knows and the calls that test again
 (define (llm-connectors--debug-brief src)
-  (let* ((name (buffer-local src 'llm-connector))
+  (let* ((name (buffer-local-value 'llm-connector src))
          (r (and name (llm-connectors-test-result name)))
          (failed (filter (lambda (m) (let ((t (llm-connectors-test-result name (car m))))
                                        (and t (eq? (plist-get t 'status) 'failed))))

@@ -27,8 +27,8 @@
   "a component with a broken example is a component nobody can use"
   (lambda ()
     (run-command "component-gallery")
-    (check-equal! (buffer-local "*Components*" 'render-mode) "blocks" "the gallery renders blocks")
-    (let ((blocks (value->string (buffer-local "*Components*" 'render-blocks))))
+    (check-equal! (buffer-local-value 'render-mode "*Components*") "blocks" "the gallery renders blocks")
+    (let ((blocks (value->string (buffer-local-value 'render-blocks "*Components*"))))
       (check-contains! blocks "ui/card" "a component")
       (check-contains! blocks "c-badge" "and another")
       (check-false! (string-contains? blocks "error") "and none of them failed"))

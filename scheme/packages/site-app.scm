@@ -31,16 +31,16 @@
           (else (loop (cdr rest))))))
 
 ;; a buffer's site-app state is one plist in its local 'site-app
-(define (site-app-get buf key) (plist-get (or (buffer-local buf 'site-app) '()) key))
+(define (site-app-get buf key) (plist-get (or (buffer-local-value 'site-app buf) '()) key))
 
 (effects! '(write))
 (define (site-app-set! buf key val)
-  (buffer-set-local! buf 'site-app (plist-put (or (buffer-local buf 'site-app) '()) key val))
+  (buffer-set-local! buf 'site-app (plist-put (or (buffer-local-value 'site-app buf) '()) key val))
   val)
 
 (define (site-app-merge! buf plist)
   ;; set several keys in one change, so the frame refreshes once
-  (let loop ((st (or (buffer-local buf 'site-app) '())) (rest plist))
+  (let loop ((st (or (buffer-local-value 'site-app buf) '())) (rest plist))
     (if (null? rest)
         (buffer-set-local! buf 'site-app st)
         (loop (plist-put st (car rest) (cadr rest)) (cddr rest)))))
@@ -1896,14 +1896,14 @@
       (when old
         (site-app-set! buf 'detail-kind old)
         (site-app-set! buf 'detail-minor #f)))
-    (let ((minors (buffer-local buf 'minor-modes)))
+    (let ((minors (buffer-local-value 'minor-modes buf)))
       (when (pair? minors)
         (buffer-set-local! buf 'minor-modes (filter (lambda (m) (not (equal? (mode-get m 'kind) 'major))) minors))))
     ;; The page's kind is its major mode, derived from the app's detail mode. The
     ;; app's details are one family, so the next row of any list takes their pane.
     (let ((mode (site-app-detail-major buf)))
       (buffer-set-local! buf 'detail-family (or (site-app-get buf 'detail-mode) "site-app-detail-mode"))
-      (unless (equal? (buffer-local buf 'mode-name) mode)
+      (unless (equal? (buffer-local-value 'mode-name buf) mode)
         (with-current-buffer buf (lambda () (set-mode! mode)))))
     (site-app-draw! buf)
     (site-app-join-group! buf)

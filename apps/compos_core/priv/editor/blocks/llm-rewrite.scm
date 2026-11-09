@@ -29,7 +29,7 @@
     "Document this: a docstring for what it is, comments only for what the code cannot say."))
 
 (define (llm-rewrite--prose? buf)
-  (let ((mode (buffer-local buf 'mode-name)))
+  (let ((mode (buffer-local-value 'mode-name buf)))
     (or (not mode) (member mode *llm-rewrite-prose-modes*))))
 
 (define (llm-rewrite-directives buf)
@@ -40,7 +40,7 @@
 (define (llm-rewrite-prompt buf directive passage)
   (string-append
     "You rewrite one passage of a document open in a text editor"
-    (let ((mode (buffer-local buf 'mode-name)))
+    (let ((mode (buffer-local-value 'mode-name buf)))
       (if mode (string-append " (" mode ")") ""))
     ".\n\nInstruction: " directive
     "\n\nWords in single square brackets or angle brackets, such as [a word for X] "
@@ -79,9 +79,9 @@
 ;; Each passage owns its options and conversation. These document locals
 ;; survive checkpoints; tracking overlays follow edits above the passage.
 (define (llm-rewrite--session buf)
-  (let ((id (buffer-local buf 'rewrite-active)))
+  (let ((id (buffer-local-value 'rewrite-active buf)))
     (find (lambda (s) (equal? (plist-get s 'id) id))
-          (or (buffer-local buf 'rewrite-sessions) '()))))
+          (or (buffer-local-value 'rewrite-sessions buf) '()))))
 
 (define (llm-rewrite--save-session! buf s)
   (let* ((source (block-overlay-span buf (llm-rewrite--face s "source")))
@@ -91,7 +91,7 @@
     (buffer-set-local! buf 'rewrite-sessions
       (cons s (filter (lambda (old)
                         (not (equal? (plist-get old 'id) (plist-get s 'id))))
-                      (or (buffer-local buf 'rewrite-sessions) '()))))
+                      (or (buffer-local-value 'rewrite-sessions buf) '()))))
     s))
 
 (define (llm-rewrite--face s part)
@@ -150,14 +150,14 @@
         (map (lambda (s)
                (let ((span (llm-rewrite--range buf s "block")))
                  (and span (list (car span) (cadr span) "rewrite-options"))))
-             (or (buffer-local buf 'rewrite-sessions) '()))))
+             (or (buffer-local-value 'rewrite-sessions buf) '()))))
     (for-each
       (lambda (s)
         (let ((ranges (llm-rewrite--option-face-ranges buf s)))
           (when ranges
             (set! prompt-ranges (append prompt-ranges (car ranges)))
             (set! draft-ranges (append draft-ranges (cadr ranges))))))
-      (or (buffer-local buf 'rewrite-sessions) '()))
+      (or (buffer-local-value 'rewrite-sessions buf) '()))
     (overlay-set! buf 'rewrite-option-prompt prompt-ranges)
     (overlay-set! buf 'rewrite-option-draft draft-ranges)))
 
@@ -171,7 +171,7 @@
 ;; clears, while the rewrite, its blocks and its keys stay.
 (define (llm-rewrite--release-on-mark!)
   (let ((buf (current-buffer)))
-    (when (and (buffer-local buf 'rewrite-active) (mark))
+    (when (and (buffer-local-value 'rewrite-active buf) (mark))
       (let ((s (llm-rewrite--session buf)))
         (when (and s (not (plist-get s 'released)))
           (llm-rewrite--save-session! buf (plist-put s 'released #t))
@@ -190,7 +190,7 @@
 
 (define (llm-rewrite--new-session! buf start end original)
   (let* ((id (string-append (number->string (monotonic-ms)) "-"
-                            (number->string (length (or (buffer-local buf 'rewrite-sessions) '())))))
+                            (number->string (length (or (buffer-local-value 'rewrite-sessions buf) '())))))
          (s (list 'id id 'source (list start end) 'current original
                   'options (list (list "Original" original))
                   'history "" 'chat (string-append "*rewrite-chat:" id "*"))))
@@ -409,7 +409,7 @@
                        (block (llm-rewrite--range buf s "block")))
                    (or (and src (<= (car src) pt) (<= pt (cadr src)))
                        (and block (<= (car block) pt) (<= pt (cadr block))))))
-               (or (buffer-local buf 'rewrite-sessions) '()))))
+               (or (buffer-local-value 'rewrite-sessions buf) '()))))
       (when s (buffer-set-local! buf 'rewrite-active (plist-get s 'id)))
       s)))
 
@@ -473,7 +473,7 @@
 (define (llm-rewrite--notes-prompt buf passage notes)
   (string-append
     "You fill the author's notes in one passage of a document open in a text editor"
-    (let ((mode (buffer-local buf 'mode-name)))
+    (let ((mode (buffer-local-value 'mode-name buf)))
       (if mode (string-append " (" mode ")") ""))
     ". Each note, in [square] or <angle> brackets, asks for the words that go in its place."
     "\n\nPassage:\n" passage
@@ -629,10 +629,10 @@
       (fold-set! buf (llm-rewrite--face s "fold") '())
       (buffer-set-local! buf 'rewrite-sessions
         (filter (lambda (o) (not (equal? (plist-get o 'id) (plist-get s 'id))))
-                (or (buffer-local buf 'rewrite-sessions) '()))))
+                (or (buffer-local-value 'rewrite-sessions buf) '()))))
     (buffer-set-local! buf 'rewrite-active #f)
     (llm-rewrite--paint-options-face! buf)
-    (when (null? (or (buffer-local buf 'rewrite-sessions) '()))
+    (when (null? (or (buffer-local-value 'rewrite-sessions buf) '()))
       (block-unbind-keys! buf (llm-rewrite--option-key-pairs)))
     (message "Rewrite cancelled; the text stays")))
 
@@ -706,7 +706,7 @@
          (rendered (plist-get s 'rendered))
          (actual (and span (block-text-at buf (car span) (cadr span))))
          (edited (and actual rendered (llm-rewrite--options-prompt-edits s actual))))
-    (when (and span rendered (not (buffer-local buf 'rewrite-writing))
+    (when (and span rendered (not (buffer-local-value 'rewrite-writing buf))
                (not (equal? actual rendered)))
       (if edited
           (let ((next (llm-rewrite--save-session! buf
@@ -728,15 +728,15 @@
         (llm-rewrite--guard-options! buf s)
         (let ((saved (llm-rewrite--save-session! buf
                        (or (find (lambda (o) (equal? (plist-get o 'id) (plist-get s 'id)))
-                                 (or (buffer-local buf 'rewrite-sessions) '()))
+                                 (or (buffer-local-value 'rewrite-sessions buf) '()))
                            s))))
           (llm-rewrite--paint-options! buf saved)))
-      (or (buffer-local buf 'rewrite-sessions) '()))
+      (or (buffer-local-value 'rewrite-sessions buf) '()))
     (llm-rewrite--paint-selection! buf)))
 
 (define (llm-rewrite--restore! &optional named)
   (let* ((buf (or named (current-buffer)))
-         (sessions (or (buffer-local buf 'rewrite-sessions) '())))
+         (sessions (or (buffer-local-value 'rewrite-sessions buf) '())))
     (when (pair? sessions)
       (for-each
         (lambda (s)
@@ -754,7 +754,7 @@
           (when (plist-get s 'block) (llm-rewrite--bind-option-keys! buf)))
         sessions)
       (llm-rewrite--paint-selection! buf)
-      (let ((old (buffer-local buf 'rewrite-change-handler)))
+      (let ((old (buffer-local-value 'rewrite-change-handler buf)))
         (when old (remove-on-change! old)))
       (buffer-set-local! buf 'rewrite-change-handler
         (on-change! buf (lambda (pos inserted deleted source)

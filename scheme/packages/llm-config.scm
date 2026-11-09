@@ -152,7 +152,7 @@
   ;; two presets can hold the same setup (Coding and Smartbrew); the one
   ;; picked in the box names the chat while its setup still matches
   (let* ((cur (llm-config--current buf))
-         (chosen (llm-bundle-named (buffer-local buf 'llm-preset))))
+         (chosen (llm-bundle-named (buffer-local-value 'llm-preset buf))))
     (if (and chosen (llm-config--same? cur (llm-config--fill chosen cur)))
         chosen
         (llm-config--matching cur cur))))
@@ -277,7 +277,7 @@
 ;; frozen one — that list, not the live surface, is what the model sees.
 (define (llm-config--tools-label buf)
   (let* ((session (llm-config--session buf))
-         (frozen (buffer-local session 'chat-tool-specs)))
+         (frozen (buffer-local-value 'chat-tool-specs session)))
     (cond
       ((pair? frozen)
        (string-append (number->string (length frozen)) " tools · frozen"))
@@ -562,7 +562,7 @@
       (map (lambda (m) (list (car m) (or (nth 2 m) "")))
            (chat-mode-options (llm-config--session buf)
                               (or (llm-config--box-get 'connector)
-                                  (buffer-local (llm-config--session buf) 'agent-connector))))
+                                  (buffer-local-value 'agent-connector (llm-config--session buf)))))
       '()))
 
 (define (llm-config--filesystem)
@@ -702,7 +702,7 @@
 ;; same scope, not a buffer covering the chat. A digit echoes one
 ;; server's tools; l is the full text list for actual reading.
 (define (llm-config--chat-servers session)
-  (let ((frozen (buffer-local session 'chat-tool-specs)))
+  (let ((frozen (buffer-local-value 'chat-tool-specs session)))
     (if (pair? frozen)
         (let loop ((specs frozen) (acc '()))
           (if (null? specs) (reverse acc)
@@ -714,14 +714,14 @@
 (define (llm-config--server-row-count session server)
   ;; never connects: the frozen list counts itself, a live server is
   ;; only read through the registry's detail
-  (let ((frozen (buffer-local session 'chat-tool-specs)))
+  (let ((frozen (buffer-local-value 'chat-tool-specs session)))
     (if (pair? frozen)
         (length (filter (lambda (s) (equal? (chat-tool-server (car s)) server))
                         frozen))
         (llm-config--server-tools (string->symbol server)))))
 
 (define (llm-config--server-tool-names session server)
-  (let ((frozen (buffer-local session 'chat-tool-specs)))
+  (let ((frozen (buffer-local-value 'chat-tool-specs session)))
     (cond
       ((pair? frozen)
        (map car (filter (lambda (s) (equal? (chat-tool-server (car s)) server))
@@ -994,7 +994,7 @@
     (with-edit-author "group-default"
       (lambda ()
         (cond ((not b) #f)
-              ((buffer-local buf 'agent-slug) (llm-bundle-apply! buf b))
+              ((buffer-local-value 'agent-slug buf) (llm-bundle-apply! buf b))
               (else (llm-default--seed! buf b)))))))
 
 (public! 'llm-chat-bundle

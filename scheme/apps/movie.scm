@@ -58,7 +58,7 @@
                       out))))))
 
 (define (movie-frame movie index)
-  (let ((frames (or (buffer-local movie 'movie-frames) '())))
+  (let ((frames (or (buffer-local-value 'movie-frames movie) '())))
     (and (>= index 0) (< index (length frames)) (nth index frames))))
 
 (define (movie-current-buffer)
@@ -80,8 +80,8 @@
       (buffer-set-local! movie 'movie-index index)
       (modeline-cache-set! movie 'name
         (string-append "MOVIE " (number->string (+ index 1)) "/"
-                       (number->string (length (buffer-local movie 'movie-frames)))
-                       " · " (buffer-local movie 'movie-source)))
+                       (number->string (length (buffer-local-value 'movie-frames movie)))
+                       " · " (buffer-local-value 'movie-source movie)))
       (buffer-set-read-only! movie #t)
       (movie-select-stream-row! index)
       frame)))
@@ -99,14 +99,14 @@
         80)))
 
 (define (movie-schedule! movie)
-  (when (and (buffer-known? movie) (buffer-local movie 'movie-playing))
-    (let ((index (or (buffer-local movie 'movie-index) 0)))
+  (when (and (buffer-known? movie) (buffer-local-value 'movie-playing movie))
+    (let ((index (or (buffer-local-value 'movie-index movie) 0)))
       (debounce! (string-append "movie:" movie) (movie-delay movie index)
         movie-tick! movie))))
 
 (define (movie-tick! movie)
-  (when (and (buffer-known? movie) (buffer-local movie 'movie-playing))
-    (let* ((index (or (buffer-local movie 'movie-index) 0))
+  (when (and (buffer-known? movie) (buffer-local-value 'movie-playing movie))
+    (let* ((index (or (buffer-local-value 'movie-index movie) 0))
            (next (+ index 1)))
       (if (movie-frame movie next)
           (begin (movie-show! movie next) (movie-schedule! movie))
@@ -119,7 +119,7 @@
   (lambda ()
     (let ((movie (movie-current-buffer)))
       (when movie
-        (let ((playing (not (buffer-local movie 'movie-playing))))
+        (let ((playing (not (buffer-local-value 'movie-playing movie))))
           (buffer-set-local! movie 'movie-playing playing)
           (when playing (movie-schedule! movie)))))))
 
@@ -128,8 +128,8 @@
     (when movie
       (movie-pause! movie)
       (movie-show! movie
-        (movie-clamp (+ (or (buffer-local movie 'movie-index) 0) amount)
-                     0 (- (length (buffer-local movie 'movie-frames)) 1))))))
+        (movie-clamp (+ (or (buffer-local-value 'movie-index movie) 0) amount)
+                     0 (- (length (buffer-local-value 'movie-frames movie)) 1))))))
 
 (define-command "movie-next" "Pause and show the next Provenance state"
   (lambda () (movie-step! 1)))
@@ -140,7 +140,7 @@
 (define (movie-stream-rows buf)
   (let ((movie (movie-current-buffer)))
     (if (not movie) '()
-        (let loop ((frames (buffer-local movie 'movie-frames)) (index 0) (out '()))
+        (let loop ((frames (buffer-local-value 'movie-frames movie)) (index 0) (out '()))
           (if (null? frames) (reverse out)
               (loop (cdr frames) (+ index 1) (cons index out)))))))
 
@@ -208,7 +208,7 @@
 (define (movie-copy-presentation! source movie)
   (for-each
     (lambda (key)
-      (buffer-set-local! movie key (buffer-local source key)))
+      (buffer-set-local! movie key (buffer-local-value key source)))
     '(default-directory render-mode preview-renderer ts-lang text-scale)))
 
 ;; the playback keys are a minor mode's map over the source's own mode:
@@ -240,7 +240,7 @@
       (if (null? frames)
           (message "This buffer has no Provenance states")
           (let ((movie (string-append "*movie: " source "*"))
-                (source-mode (buffer-local source 'mode-name)))
+                (source-mode (buffer-local-value 'mode-name source)))
             (arrangement-push! 'movie)
             (buffer-create movie)
             (buffer-provenance-stop! movie "mode:movie" "derived playback" "mode")

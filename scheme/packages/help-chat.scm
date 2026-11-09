@@ -44,7 +44,7 @@
   help-chat--origin)
 
 (define (help-chat--live)
-  (find (lambda (b) (equal? (buffer-local b 'chat-for-key) help-chat-key)) (buffer-list)))
+  (find (lambda (b) (equal? (buffer-local-value 'chat-for-key b) help-chat-key)) (buffer-list)))
 
 (effects! '(write))
 
@@ -117,7 +117,7 @@
 (define-command "help-chat" "Pull the help chat into this group and show it; in it, go back"
   (lambda ()
     (let ((here (current-buffer)))
-      (if (equal? (buffer-local here 'chat-for-key) help-chat-key)
+      (if (equal? (buffer-local-value 'chat-for-key here) help-chat-key)
           (help-chat--back)
           (let ((g (group-here)))
             (if (not g)

@@ -429,7 +429,7 @@
                     "the source build left the count behind")
       (check-equal! (length (ibuffer-source-facts "*ibuffer*")) 2
                     "and nothing else: the header counts rows, it does not weigh them")
-      (check-false! (buffer-local "*ibuffer*" 'ibuffer-source-facts)
+      (check-false! (buffer-local-value 'ibuffer-source-facts "*ibuffer*")
                     "and none of it sits in the locals every draw reads")
       (list-set-filters! "*ibuffer*" (list (list "match" "zz-ib-c")))
       (check-equal! (ibuffer-total "*ibuffer*") all

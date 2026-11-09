@@ -102,10 +102,10 @@
           (with-stub 'anon--visible (lambda () '())
             (lambda ()
               (buffer-set-local! buf 'render-blocks tree)
-              (let ((hidden (buffer-local buf 'render-blocks)))
+              (let ((hidden (buffer-local-value 'render-blocks buf)))
                 (set! anon--visible (lambda () (list buf)))
                 (run-hook-with-args 'buffer-shown-hook buf)
-                (let ((seen (buffer-local buf 'render-blocks)))
+                (let ((seen (buffer-local-value 'render-blocks buf)))
                   (disable-minor-mode! buf "anon-local-mode")
                   (check-equal! hidden tree "the hidden view is the tree its mode wrote")
                   (check-equal! (string-contains? (anon--tree-text seen) "Zelda") #f

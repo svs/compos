@@ -24,7 +24,7 @@
   (buffer-set-local! t--heal-buf 'chat-wire-turns turns)
   t--heal-buf)
 
-(define (t--heal-record) (buffer-local t--heal-buf 'chat-wire-turns))
+(define (t--heal-record) (buffer-local-value 'chat-wire-turns t--heal-buf))
 
 (deftest 'a-result-whose-call-is-gone-loses-the-result
   "the compacted summary swallowed the turn that made the call"

@@ -42,7 +42,7 @@
 (public! 'buffer-migrations-done
   "(buffer-migrations-done BUF) - the names of the migrations that ran on BUF")
 (define (buffer-migrations-done buf)
-  (or (buffer-local buf 'migrations) '()))
+  (or (buffer-local-value 'migrations buf) '()))
 
 ;; one migration that throws does not stop the restore or the others
 (define (migration--run! m buf)
@@ -117,7 +117,7 @@
 ;; them once, as text turns, and drop the old local
 (define-buffer-migration! 'chat-record "2026-08-20"
   (lambda (buf)
-    (let ((old (buffer-local buf 'chat-turns)))
+    (let ((old (buffer-local-value 'chat-turns buf)))
       (when (and old (null? (chat-record buf)))
         (buffer-set-local! buf 'chat-wire-turns
           (map (lambda (t) (list 'role (car t) 'blocks (list (list "text" (car (cdr t))))))
@@ -128,13 +128,13 @@
 ;; 'group tag, which groups.scm folds into a record on its first read
 (define-buffer-migration! 'chat-companion-group "2026-08-20"
   (lambda (buf)
-    (let ((doc (buffer-local buf 'companion-of)))
-      (when (and doc (not (buffer-local buf 'group)))
-        (let ((g (or (and (buffer-exists? doc) (buffer-local doc 'group))
+    (let ((doc (buffer-local-value 'companion-of buf)))
+      (when (and doc (not (buffer-local-value 'group buf)))
+        (let ((g (or (and (buffer-exists? doc) (buffer-local-value 'group doc))
                      doc)))
           (buffer-set-local! buf 'group g)
           (when (and (buffer-exists? doc)
-                     (not (buffer-local doc 'group)))
+                     (not (buffer-local-value 'group doc)))
             (buffer-set-local! doc 'group g)))))))
 
 ;; a transcript from before the mark was a buffer-local: the mark sits at
@@ -152,10 +152,10 @@
 (define-buffer-migration! 'chat-input-marker "2026-09-05"
   (lambda (buf)
     (let ((mb (string-byte-length *chat-input-marker*)))
-      (when (and (not (buffer-local buf 'agent-saved-mark))
+      (when (and (not (buffer-local-value 'agent-saved-mark buf))
                  (pair? (re-find* *chat-input-marker* (buffer-text buf))))
         (buffer-set-local! buf 'agent-saved-mark (migration--chat-marker-mark buf)))
-      (when (buffer-local buf 'agent-saved-mark)
+      (when (buffer-local-value 'agent-saved-mark buf)
         (let ((size (buffer-size buf))
               (m (chat-mark buf)))
           (when (and (<= (+ m mb) size)
@@ -182,9 +182,9 @@
   (lambda (buf)
     (for-each
       (lambda (m)
-        (let ((old (buffer-local buf (car m))) (kind (car (cdr m))) (side (car (cdr (cdr m)))))
+        (let ((old (buffer-local-value (car m) buf)) (kind (car (cdr m))) (side (car (cdr (cdr m)))))
           (when (pair? (if (string? old) (list old) old))
-            (let* ((rs (or (buffer-local buf 'relations) '()))
+            (let* ((rs (or (buffer-local-value 'relations buf) '()))
                    (e (or (assoc kind rs) (list kind #f '())))
                    (parent (if (equal? side 'parent) old (car (cdr e))))
                    (kids (cond ((equal? side 'children) old)
@@ -202,19 +202,19 @@
 ;; (last U total T context (used N size S))
 (define-buffer-migration! 'chat-usage-record "2026-10-28"
   (lambda (buf)
-    (let ((last (buffer-local buf 'chat-last-usage))
-          (total (buffer-local buf 'chat-usage-total))
-          (used (buffer-local buf 'chat-context-used))
-          (size (buffer-local buf 'chat-context-size)))
+    (let ((last (buffer-local-value 'chat-last-usage buf))
+          (total (buffer-local-value 'chat-usage-total buf))
+          (used (buffer-local-value 'chat-context-used buf))
+          (size (buffer-local-value 'chat-context-size buf)))
       (when (or last total used)
-        (let* ((u (or (buffer-local buf 'chat-usage) '()))
+        (let* ((u (or (buffer-local-value 'chat-usage buf) '()))
                (u (if (and last (not (plist-get u 'last))) (plist-put u 'last last) u))
                (u (if (and total (not (plist-get u 'total))) (plist-put u 'total total) u))
                (u (if (and (number? used) (not (plist-get u 'context)))
                       (plist-put u 'context (list 'used used 'size size))
                       u)))
           (buffer-set-local! buf 'chat-usage u)))
-      (for-each (lambda (k) (when (buffer-local buf k) (buffer-set-local! buf k #f)))
+      (for-each (lambda (k) (when (buffer-local-value k buf) (buffer-set-local! buf k #f)))
                 '(chat-last-usage chat-usage-total chat-context-used chat-context-size)))))
 
 ;; a site app buffer kept each piece of its state in a 'site-app-KEY local;
@@ -227,20 +227,20 @@
 
 (define-buffer-migration! 'site-app-plist "2026-10-28"
   (lambda (buf)
-    (let ((p (or (buffer-local buf 'site-app) '())) (moved #f))
+    (let ((p (or (buffer-local-value 'site-app buf) '())) (moved #f))
       (for-each
         (lambda (k)
           (let* ((old (string->symbol (string-append "site-app-" (symbol->string k))))
-                 (v (buffer-local buf old)))
+                 (v (buffer-local-value old buf)))
             (when v
               (unless (plist-get p k) (set! p (plist-put p k v)))
               (buffer-set-local! buf old #f)
               (set! moved #t))))
         *migration-site-app-keys*)
       (when moved (buffer-set-local! buf 'site-app p))
-      (let ((tab (buffer-local buf 'site-app-filter)))
+      (let ((tab (buffer-local-value 'site-app-filter buf)))
         (when tab
-          (unless (buffer-local buf 'list-tab) (buffer-set-local! buf 'list-tab tab))
+          (unless (buffer-local-value 'list-tab buf) (buffer-set-local! buf 'list-tab tab))
           (buffer-set-local! buf 'site-app-filter #f))))))
 
 ;; ibuffer and the todo list kept their tab and sort under their own names;
@@ -249,9 +249,9 @@
   (lambda (buf)
     (for-each
       (lambda (m)
-        (let ((v (buffer-local buf (car m))))
+        (let ((v (buffer-local-value (car m) buf)))
           (when v
-            (unless (buffer-local buf (cadr m)) (buffer-set-local! buf (cadr m) v))
+            (unless (buffer-local-value (cadr m) buf) (buffer-set-local! buf (cadr m) v))
             (buffer-set-local! buf (car m) #f))))
       '((ibuffer-tab list-tab) (todo-view list-tab) (ibuffer-sort list-sort) (todo-sort list-sort)))))
 
@@ -261,7 +261,7 @@
 ;; the one name
 (define-buffer-migration! 'shell-mode-name "2026-09-01"
   (lambda (buf)
-    (when (equal? (buffer-local buf 'mode-name) "shell-mode")
+    (when (equal? (buffer-local-value 'mode-name buf) "shell-mode")
       (buffer-set-local! buf 'mode-name "term-mode"))))
 
 ;;; --- the groups --------------------------------------------------------------------
@@ -270,18 +270,18 @@
 ;; 'group-ids list: its first id becomes the buffer's one group
 (define-buffer-migration! 'group-ids-to-group-id "2026-10-16"
   (lambda (buf)
-    (let ((ids (buffer-local buf 'group-ids)))
+    (let ((ids (buffer-local-value 'group-ids buf)))
       (when (pair? ids)
-        (unless (buffer-local buf 'group-id)
+        (unless (buffer-local-value 'group-id buf)
           (buffer-set-local! buf 'group-id (car ids)))
         (buffer-set-local! buf 'group-ids #f)))))
 ;; the group directory and the chat hooks were two marks; group-config-loaded
 ;; holds both now, so a buffer that took the directory keeps it taken
 (define-buffer-migration! 'group-cwd-loaded-to-config-loaded "2026-10-28"
   (lambda (buf)
-    (let ((id (buffer-local buf 'group-cwd-loaded)))
+    (let ((id (buffer-local-value 'group-cwd-loaded buf)))
       (when id
-        (unless (buffer-local buf 'group-config-loaded)
+        (unless (buffer-local-value 'group-config-loaded buf)
           (buffer-set-local! buf 'group-config-loaded id))
         (buffer-set-local! buf 'group-cwd-loaded #f)))))
 
@@ -293,14 +293,14 @@
 ;; locals take over, and the mode takes its current name
 (define-buffer-migration! 'git-diff-backend "2026-10-16"
   (lambda (buf)
-    (let ((mode (buffer-local buf 'mode-name)))
+    (let ((mode (buffer-local-value 'mode-name buf)))
       (when (member mode '("git-diff" "git-show"))
-        (unless (buffer-local buf 'diff-backend)
+        (unless (buffer-local-value 'diff-backend buf)
           (buffer-set-local! buf 'diff-backend "git")
-          (when (buffer-local buf 'git-root)
-            (buffer-set-local! buf 'diff-root (buffer-local buf 'git-root)))
-          (buffer-set-local! buf 'diff-scope (or (buffer-local buf 'git-prefix) ""))
-          (when (buffer-local buf 'git-watch)
+          (when (buffer-local-value 'git-root buf)
+            (buffer-set-local! buf 'diff-root (buffer-local-value 'git-root buf)))
+          (buffer-set-local! buf 'diff-scope (or (buffer-local-value 'git-prefix buf) ""))
+          (when (buffer-local-value 'git-watch buf)
             (buffer-set-local! buf 'diff-watch #t)))
         (buffer-set-local! buf 'git-root #f)
         (buffer-set-local! buf 'git-prefix #f)
@@ -314,9 +314,9 @@
 ;; 'notmuch-query: it becomes the base with no filters
 (define-buffer-migration! 'notmuch-query-stack "2026-10-16"
   (lambda (buf)
-    (let ((old (buffer-local buf 'notmuch-query)))
+    (let ((old (buffer-local-value 'notmuch-query buf)))
       (when old
-        (unless (buffer-local buf 'notmuch-query-base)
+        (unless (buffer-local-value 'notmuch-query-base buf)
           (buffer-set-local! buf 'notmuch-query-base old)
           (buffer-set-local! buf 'notmuch-query-filters '()))
         (buffer-set-local! buf 'notmuch-query #f)))))
@@ -334,8 +334,8 @@
   (lambda (buf)
     (let* ((blocks (llm-mode--addressable-kind buf 'llm-response))
            (turns (llm-mode--addressable-turn-ranges buf))
-           (ranges (or (buffer-local buf 'llm-legacy-responses)
-                       (if (null? blocks) (buffer-local buf 'llm-responses) '())))
+           (ranges (or (buffer-local-value 'llm-legacy-responses buf)
+                       (if (null? blocks) (buffer-local-value 'llm-responses buf) '())))
            (size (buffer-size buf)))
       (when (pair? ranges)
         (for-each
@@ -363,18 +363,18 @@
 ;; Either side completes the pair, whichever restores second.
 (define-buffer-migration! 'writing-scratch "2026-10-16"
   (lambda (buf)
-    (let* ((saved (buffer-local buf 'writing-scratch))
+    (let* ((saved (buffer-local-value 'writing-scratch buf))
            (derived (string-append "*writing:" buf "*"))
            (scratch (cond ((and saved (buffer-exists? saved)) saved)
                           ((buffer-exists? derived) derived)
                           (else #f))))
-      (when (and scratch (not (buffer-local buf 'scratch-buffer)))
+      (when (and scratch (not (buffer-local-value 'scratch-buffer buf)))
         (buffer-set-local! buf 'scratch-buffer scratch))
       (when saved (buffer-set-local! buf 'writing-scratch #f)))
     (when (and (string-prefix? "*writing:" buf) (string-suffix? "*" buf))
       (let ((owner (substring-bytes buf 9 (- (string-byte-length buf) 1))))
         (when (and (buffer-exists? owner)
-                   (not (buffer-local owner 'scratch-buffer)))
+                   (not (buffer-local-value 'scratch-buffer owner)))
           (buffer-set-local! owner 'scratch-buffer buf)))
       (when (minor-mode-on? buf "writing-mode")
         (disable-minor-mode! buf "writing-mode"))

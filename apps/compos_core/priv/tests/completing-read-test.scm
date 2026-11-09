@@ -159,9 +159,9 @@
       (let ((id (capf-auto-watch! buf)))
         (check-true! (number? id) "the watch left its rule id")
         (check-equal! (capf-auto-watch! buf) id "re-entry kept the same rule")
-        (check-equal! (length (buffer-local buf 'change-watches)) 1 "one row in the table"))
+        (check-equal! (length (buffer-local-value 'change-watches buf)) 1 "one row in the table"))
       (buffer-unwatch-change! buf 'capf-auto)
-      (check-equal! (buffer-local buf 'change-watches) '() "the row left with its rule")
+      (check-equal! (buffer-local-value 'change-watches buf) '() "the row left with its rule")
       (buffer-kill! buf))))
 
 (deftest 'keyboard-quit-cancels-the-prompt

@@ -31,12 +31,12 @@
              (and b (buffer-exists? b) b)))
       (let loop ((bs (buffer-list)))
         (cond ((null? bs) (agent-buffer slug))
-              ((equal? (buffer-local (car bs) 'agent-slug) slug) (car bs))
+              ((equal? (buffer-local-value 'agent-slug (car bs)) slug) (car bs))
               ;; an agent in a terminal: the terminal stands where its chat would
-              ((equal? (buffer-local (car bs) 'herdr-agent-slug) slug) (car bs))
+              ((equal? (buffer-local-value 'herdr-agent-slug (car bs)) slug) (car bs))
               (else (loop (cdr bs)))))))
 
-(define (agent-slug-of buf) (buffer-local buf 'agent-slug))
+(define (agent-slug-of buf) (buffer-local-value 'agent-slug buf))
 
 (define (agent-status slug)
   ;; a runtime whose buffer was killed is dead too: a revive rebuilt the
@@ -70,13 +70,13 @@
 
 (define (agent-add-overlay! buf s e face)
   (let ((ranges (agent--overlay-join (list s e face)
-                                     (or (buffer-local buf 'agent-overlays) '()))))
+                                     (or (buffer-local-value 'agent-overlays buf) '()))))
     (buffer-set-local! buf 'agent-overlays ranges)
     (overlay-set! buf 'agent ranges)))
 
 (define (agent-apply-folds! buf)
   (fold-set! buf 'agent
-    (let loop ((fs (or (buffer-local buf 'agent-folds) '())) (acc '()))
+    (let loop ((fs (or (buffer-local-value 'agent-folds buf) '())) (acc '()))
       (cond ((null? fs) acc)
             ((car (cdr (cdr (car fs)))) (loop (cdr fs) acc)) ; open — not hidden
             (else (loop (cdr fs)
@@ -84,7 +84,7 @@
 
 (define (agent-add-fold! buf s e)
   (buffer-set-local! buf 'agent-folds
-    (cons (list s e #f) (or (buffer-local buf 'agent-folds) '())))
+    (cons (list s e #f) (or (buffer-local-value 'agent-folds buf) '())))
   (agent-apply-folds! buf))
 
 (define (agent-open-cards buf) (fold-keys buf 'agent-open-cards))
@@ -94,13 +94,13 @@
 (define (agent-card-set-open! buf id open?)
   (fold-key-set! buf 'agent-open-cards id open?)
   ;; the plain view's fold over the tool body follows, when one exists
-  (let ((entry (assoc id (or (buffer-local buf 'agent-tool-bodies) '()))))
+  (let ((entry (assoc id (or (buffer-local-value 'agent-tool-bodies buf) '()))))
     (when entry
       (let ((s (car (cdr entry))))
         (buffer-set-local! buf 'agent-folds
           (map (lambda (f)
                  (if (= (car f) s) (list (car f) (car (cdr f)) open?) f))
-               (or (buffer-local buf 'agent-folds) '())))
+               (or (buffer-local-value 'agent-folds buf) '())))
         (agent-apply-folds! buf)))))
 
 (define (agent-card-toggle! buf id)
@@ -123,7 +123,7 @@
   (lambda () (agent-set-verbosity! "summary")))
 
 (define (agent-card-at-fold buf s)
-  (let loop ((es (or (buffer-local buf 'agent-tool-bodies) '())))
+  (let loop ((es (or (buffer-local-value 'agent-tool-bodies buf) '())))
     (cond ((null? es) #f)
           ((= (car (cdr (car es))) s) (car (car es)))
           (else (loop (cdr es))))))
@@ -133,7 +133,7 @@
     (let* ((buf (current-buffer))
            (p (point))
            ;; the fold point is on: header line just above, or inside
-           (hit (let loop ((fs (or (buffer-local buf 'agent-folds) '())))
+           (hit (let loop ((fs (or (buffer-local-value 'agent-folds buf) '())))
                   (cond ((null? fs) #f)
                         ((and (>= p (- (car (car fs)) 120))
                               (< p (car (cdr (car fs)))))
@@ -149,11 +149,11 @@
                       (if (= (car f) (car hit))
                           (list (car f) (car (cdr f)) (not (car (cdr (cdr f)))))
                           f))
-                    (buffer-local buf 'agent-folds)))
+                    (buffer-local-value 'agent-folds buf)))
              (agent-apply-folds! buf)))))
   'modes '(chat-mode))
 
-(define (agent-blocks buf) (or (buffer-local buf 'agent-blocks) '()))
+(define (agent-blocks buf) (or (buffer-local-value 'agent-blocks buf) '()))
 (public! 'agent-blocks "(agent-blocks BUF) — the transcript blocks of chat BUF, newest first, as (START END KIND META...)")
 (catalog-meta! 'function "agent-blocks" 'effects '(read))
 
@@ -221,20 +221,20 @@
       (buffer-set-local! buf 'agent-blocks
         (agent--excise-blocks (agent-blocks buf) start end))
       (let ((ovs (agent--excise-ranges
-                   (or (buffer-local buf 'agent-overlays) '()) start end)))
+                   (or (buffer-local-value 'agent-overlays buf) '()) start end)))
         (buffer-set-local! buf 'agent-overlays ovs)
         (overlay-set! buf 'agent ovs))
       (buffer-set-local! buf 'agent-folds
-        (agent--excise-ranges (or (buffer-local buf 'agent-folds) '()) start end))
+        (agent--excise-ranges (or (buffer-local-value 'agent-folds buf) '()) start end))
       (agent-apply-folds! buf)
-      (let ((w (buffer-local buf 'agent-waiting)))
+      (let ((w (buffer-local-value 'agent-waiting buf)))
         (when w
           (cond ((>= (car w) end)
                  (buffer-set-local! buf 'agent-waiting
                    (list (- (car w) len) (- (nth 1 w) len))))
                 ((and (>= (car w) start) (<= (nth 1 w) end))
                  (buffer-set-local! buf 'agent-waiting #f)))))
-      (let ((p (buffer-local buf 'agent-prose-from)))
+      (let ((p (buffer-local-value 'agent-prose-from buf)))
         (when p
           (cond ((>= p end) (buffer-set-local! buf 'agent-prose-from (- p len)))
                 ((> p start) (buffer-set-local! buf 'agent-prose-from start)))))
@@ -431,7 +431,7 @@
                    (<= (nth 1 entry) (nth 7 entry)))
           ;; the update names no tool: the call that opened it did
           (let* ((known (assoc (plist-get e 'id)
-                               (or (buffer-local buf 'chat-tool-pending) '())))
+                               (or (buffer-local-value 'chat-tool-pending buf) '())))
                  (e (if (and (not (string? (plist-get e 'name)))
                              known (string? (nth 1 known)))
                         (append (list 'name (nth 1 known)) e)
@@ -477,7 +477,7 @@
 
 (define (chat-activity! buf label)
   (when (and buf (buffer-exists? buf))
-    (unless (equal? (buffer-local buf 'chat-activity) label)
+    (unless (equal? (buffer-local-value 'chat-activity buf) label)
       ;; Tool activity lives in the chat UI alone. It never overwrites the
       ;; user's echo area and never adds a line to *Messages*.
       (buffer-set-local! buf 'chat-activity label))))
@@ -569,7 +569,7 @@
   (let ((buf (agent-buf slug)))
     ;; idempotent: a queued echo re-shows it, and the turn start shows it
     ;; again — one line, not two
-    (unless (buffer-local buf 'agent-waiting)
+    (unless (buffer-local-value 'agent-waiting buf)
       (let* ((text "⋯ thinking\n")
              (start (agent-render! slug text "agent-thought"))
              (end (+ start (string-byte-length text))))
@@ -579,7 +579,7 @@
         (agent-block-push! buf start end "waiting" '())))))
 
 (define (agent-clear-waiting! buf)
-  (let ((w (buffer-local buf 'agent-waiting)))
+  (let ((w (buffer-local-value 'agent-waiting buf)))
     (when w
       (let* ((start (car w))
              (end (car (cdr w)))
@@ -619,12 +619,12 @@
 (defface! 'chat 'family chat-font-family)
 
 (define (agent-prose-note! buf start)
-  (unless (buffer-local buf 'agent-prose-from)
+  (unless (buffer-local-value 'agent-prose-from buf)
     (buffer-set-local! buf 'agent-prose-from start)))
 
 (define (agent-flush-prose! slug partial?)
   (let* ((buf (agent-buf slug))
-         (raw (buffer-local buf 'agent-prose-from))
+         (raw (buffer-local-value 'agent-prose-from buf))
          ;; a stale local — restored from an older, longer incarnation of
          ;; the buffer — can point past the text. It can only throw below,
          ;; and the throw kills the event that carried it: drop it instead.
@@ -642,7 +642,7 @@
                        (string-byte-length tail))))
         (when (and keep (> keep 0))
           (agent-clear-waiting! buf)
-          (let* ((from (buffer-local buf 'agent-prose-from))
+          (let* ((from (buffer-local-value 'agent-prose-from buf))
                  (cut (+ from keep)))
             (agent-block-extend-or-push! buf from cut "prose")
             (buffer-set-local! buf 'agent-prose-from
@@ -660,9 +660,9 @@
   (agent-block-drop-kind! buf "waiting"))
 
 (define (agent-adopt-prose-tail! buf)
-  (let ((from (buffer-local buf 'agent-prose-from)))
+  (let ((from (buffer-local-value 'agent-prose-from buf)))
     (when from
-      (let ((m (min (or (buffer-local buf 'agent-saved-mark) 0)
+      (let ((m (min (or (buffer-local-value 'agent-saved-mark buf) 0)
                     (buffer-size buf))))
         (when (< from m)
           (agent-block-extend-or-push! buf from m "prose")))
@@ -671,12 +671,12 @@
 (define (agent-echo-queued! slug text)
   (let ((buf (agent-buf slug)))
     (buffer-set-local! buf 'chat-queued
-      (append (or (buffer-local buf 'chat-queued) '()) (list text)))))
+      (append (or (buffer-local-value 'chat-queued buf) '()) (list text)))))
 
 (define (agent-pop-queued! buf text)
   ;; the first row that matches, not only the oldest: one row that never
   ;; matches must not hold every younger one in the queue
-  (let* ((texts (or (buffer-local buf 'chat-queued) '()))
+  (let* ((texts (or (buffer-local-value 'chat-queued buf) '()))
          (kept (let loop ((ts texts) (acc '()))
                  (cond ((null? ts) texts)
                        ((equal? (car ts) text) (append (reverse acc) (cdr ts)))
@@ -692,7 +692,7 @@
 (define (agent-unqueue-renders-to-input! buf)
   (let* ((qs (filter (lambda (b) (equal? (nth 2 b) "queued")) (agent-blocks buf)))
          (texts (append (map (lambda (b) (nth 3 b)) (reverse qs))
-                        (or (buffer-local buf 'chat-queued) '()))))
+                        (or (buffer-local-value 'chat-queued buf) '()))))
     (buffer-set-local! buf 'chat-queued #f)
     (unless (null? texts)
       (let ((draft (chat-input-text buf)))
@@ -718,8 +718,8 @@
 
 ;; a rich chat: a transcript with a mark, and a view that is not plain
 (define (chat-rich-view? buf)
-  (and (number? (buffer-local buf 'agent-saved-mark))
-       (equal? (buffer-local buf 'render-mode) "blocks")))
+  (and (number? (buffer-local-value 'agent-saved-mark buf))
+       (equal? (buffer-local-value 'render-mode buf) "blocks")))
 
 (define (chat-view--label text) (list 'tag "c-label" 'class "ag-label" 'text text))
 
@@ -1165,7 +1165,7 @@
 ;; the fence M-RET and C-c C-o act on: the first in the block M-up/M-down
 ;; stepped to, else the newest in the chat
 (define (chat-component--target buf)
-  (let ((stepped (chat-view--block-at-index buf (buffer-local buf 'chat-view-nav))))
+  (let ((stepped (chat-view--block-at-index buf (buffer-local-value 'chat-view-nav buf))))
     (if stepped
         (let ((ps (chat-component--in-block buf stepped))) (and (pair? ps) (car ps)))
         (let loop ((bs (agent-blocks buf)))
@@ -1196,7 +1196,7 @@
                                             (if (null? ps) '() (list (list (nth 1 p) (string-join ps "; "))))))
                                         (chat-component--in-block buf b))))
                           reply)))
-         (seen (or (buffer-local buf 'chat-component-reported) '()))
+         (seen (or (buffer-local-value 'chat-component-reported buf) '()))
          (fresh (filter (lambda (x) (not (member (car x) seen))) bad)))
     (if (null? fresh)
         ""
@@ -1265,7 +1265,7 @@
 ;; the drawn views and the count of hidden views, both from newest-first lists
 (define (chat-view--window buf raw views)
   (let* ((per (or chat-view-window-bytes 0))
-         (reveal (or (buffer-local buf 'chat-view-reveal) 0)))
+         (reveal (or (buffer-local-value 'chat-view-reveal buf) 0)))
     (if (<= per 0)
         (list views 0)
         (let ((n (chat-view--window-count raw per reveal)))
@@ -1321,7 +1321,7 @@
         '())
     ;; the images pasted since the last send, above the input they ride
     ;; with; each one's x drops it before the send
-    (let ((pending (or (buffer-local buf 'chat-pending-images) '())))
+    (let ((pending (or (buffer-local-value 'chat-pending-images buf) '())))
       (if (null? pending)
           '()
           (list (list 'tag "c-group" 'class "ag-pending"
@@ -1367,8 +1367,8 @@
 
 (define (chat-activity-live buf)
   (chat-activity-shown
-    (buffer-local buf 'chat-activity)
-    (let ((slug (buffer-local buf 'agent-slug)))
+    (buffer-local-value 'chat-activity buf)
+    (let ((slug (buffer-local-value 'agent-slug buf)))
       (and (string? slug) (agent-status slug)))))
 
 ;; Write BUF's block tree when its model changed. Cheap when it did not:
@@ -1377,17 +1377,17 @@
   (when (and (buffer-exists? buf) (chat-rich-view? buf))
     (let* ((raw (agent-blocks buf))
            (open (agent-open-cards buf))
-           (verbosity (or (buffer-local buf 'agent-verbosity) "info"))
-           (queued (or (buffer-local buf 'chat-queued) '()))
+           (verbosity (or (buffer-local-value 'agent-verbosity buf) "info"))
+           (queued (or (buffer-local-value 'chat-queued buf) '()))
            (activity (chat-activity-live buf))
            (sig (list raw open verbosity queued activity
-                      (buffer-local buf 'chat-pending-images)
-                      (buffer-local buf 'chat-view-reveal)
-                      (buffer-local buf 'chat-view-nav)
+                      (buffer-local-value 'chat-pending-images buf)
+                      (buffer-local-value 'chat-view-reveal buf)
+                      (buffer-local-value 'chat-view-nav buf)
                       chat-view-window-bytes))
            (m (chat-view--memo buf)))
       (unless (and m (equal? (nth 3 m) sig)
-                   (buffer-local buf 'render-blocks))
+                   (buffer-local-value 'render-blocks buf))
         (let* ((views (chat-view--views buf raw open m))
                (win (chat-view--window buf raw views))
                ;; the drawn cards shaped; the memo keeps them, so a sync
@@ -1400,7 +1400,7 @@
                   'render-input "agent-saved-mark"
                   'render-blocks (chat-view-tree buf (chat-view--mark-selected
                                                    (reverse (filter (lambda (v) v) drawn))
-                                                   (let ((nav (buffer-local buf 'chat-view-nav)))
+                                                   (let ((nav (buffer-local-value 'chat-view-nav buf)))
                                                      (and (integer? nav) (- nav (cadr win)))))
                                                  verbosity queued activity (cadr win)))))))))
 
@@ -1414,7 +1414,7 @@
        #t)
       ((equal? id "chat-earlier")
        (buffer-set-local! buf 'chat-view-reveal
-         (+ 1 (or (buffer-local buf 'chat-view-reveal) 0)))
+         (+ 1 (or (buffer-local-value 'chat-view-reveal buf) 0)))
        (chat-view-sync! buf)
        #t)
       ((string-prefix? "chat-cmd:" id)
@@ -1453,7 +1453,7 @@
 ;; the bottom again has no step to go on from.
 (define (chat-view--counts buf)
   ;; (HIDDEN TOTAL): the views behind the earlier row, and all of them
-  (let* ((rb (buffer-local buf 'render-blocks))
+  (let* ((rb (buffer-local-value 'render-blocks buf))
          (root (and (pair? rb) (car rb)))
          (kids (or (and root (plist-get root 'children)) '()))
          (row? (and (pair? kids) (equal? (plist-get (car kids) 'class) "ag-earlier")))
@@ -1464,8 +1464,8 @@
   (when (chat-rich-view? buf)
     (chat-view-sync! buf)
     (let* ((total (cadr (chat-view--counts buf)))
-           (fp (buffer-local buf 'follow-place))
-           (cur (and (pair? fp) (car fp) (buffer-local buf 'chat-view-nav)))
+           (fp (buffer-local-value 'follow-place buf))
+           (cur (and (pair? fp) (car fp) (buffer-local-value 'chat-view-nav buf)))
            (target (+ (if (integer? cur) cur total) delta)))
       (if (>= target total)
           (begin
@@ -1475,12 +1475,12 @@
             (let loop ((n (length (agent-blocks buf))))
               (when (and (> n 0) (< target (car (chat-view--counts buf))))
                 (buffer-set-local! buf 'chat-view-reveal
-                  (+ 1 (or (buffer-local buf 'chat-view-reveal) 0)))
+                  (+ 1 (or (buffer-local-value 'chat-view-reveal buf) 0)))
                 (chat-view-sync! buf)
                 (loop (- n 1))))
             (buffer-set-local! buf 'chat-view-nav target)
             (buffer-set-local! buf 'follow-place (list #t 0 target 0))
-            (let ((seq (buffer-local buf 'follow-seq)))
+            (let ((seq (buffer-local-value 'follow-seq buf)))
               (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0))))
             (chat-view-sync! buf))))))
 
@@ -1631,7 +1631,7 @@
   (let ((buf (current-buffer)))
     (when (and (chat-rich-view? buf)
                (member (editing--command-name) chat-view-input-commands)
-               (let ((fp (buffer-local buf 'follow-place))) (and (pair? fp) (car fp))))
+               (let ((fp (buffer-local-value 'follow-place buf))) (and (pair? fp) (car fp))))
       (buffer-set-local! buf 'chat-view-nav #f)
       (chat-follow-again! buf))))
 

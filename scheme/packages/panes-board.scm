@@ -91,8 +91,8 @@
                    pid))))
           (else #f))))
 
-(define (panes-board-view buf) (or (buffer-local buf 'panes-board-view) 'all))
-(define (panes-board-root buf) (buffer-local buf 'panes-board-root))
+(define (panes-board-view buf) (or (buffer-local-value 'panes-board-view buf) 'all))
+(define (panes-board-root buf) (buffer-local-value 'panes-board-root buf))
 
 ;; every group, as ibuffer lists them: this one first, then the rest most
 ;; recent first; a group with no model yet is a heading with nothing under it
@@ -102,11 +102,11 @@
                       (filter (lambda (g) (panes-layout-of g)) (map car (panes--store))))))
     (cons here (reverse (fold (lambda (acc g) (if (or (equal? g here) (member g acc)) acc (cons g acc))) '() all)))))
 
-(define (panes-board--open? buf id) (and (member id (or (buffer-local buf 'panes-board-open) '())) #t))
-(define (panes-board--shut? buf id) (and (member id (or (buffer-local buf 'panes-board-shut) '())) #t))
+(define (panes-board--open? buf id) (and (member id (or (buffer-local-value 'panes-board-open buf) '())) #t))
+(define (panes-board--shut? buf id) (and (member id (or (buffer-local-value 'panes-board-shut buf) '())) #t))
 
 (define (panes-board--toggle! buf var x)
-  (let ((xs (or (buffer-local buf var) '())))
+  (let ((xs (or (buffer-local-value var buf) '())))
     (buffer-set-local! buf var (if (member x xs) (filter (lambda (y) (not (equal? y x))) xs) (cons x xs)))))
 
 (define (panes-board--window-rows buf g l k force)

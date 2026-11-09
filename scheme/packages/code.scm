@@ -44,12 +44,12 @@
   ;; A buffer loaded headlessly — (find-file) with no display — has no
   ;; mode and so no ts-lang. Apply the mode its file name says, the same
   ;; mode a visit applies, or a file with a grammar parses by indentation.
-  (when (and (not (buffer-local buf 'ts-lang))
-             (not (buffer-local buf 'mode-name))
+  (when (and (not (buffer-local-value 'ts-lang buf))
+             (not (buffer-local-value 'mode-name buf))
              (buffer-path buf))
     (auto-mode (buffer-path buf)))
   (buffer-set-local! buf 'code-backend
-    (if (and (buffer-local buf 'ts-lang) (ts-node "" 0 0 'at)) "ts" "indent")))
+    (if (and (buffer-local-value 'ts-lang buf) (ts-node "" 0 0 'at)) "ts" "indent")))
 
 ;; Desktop restore re-arms the mode for a buffer that is not on screen,
 ;; and the node questions read the CURRENT buffer, so the backend cannot
@@ -61,16 +61,16 @@
 ;; decision — it is a restored checkpoint or a headless load from before
 ;; the mode ran. Re-pick, so the grammar gets its chance.
 (define (code--backend buf)
-  (let ((cached (buffer-local buf 'code-backend)))
+  (let ((cached (buffer-local-value 'code-backend buf)))
     (if (or (not cached)
             ;; "indent" is a fallback, not a verdict: the mode may come
             ;; late, or the tree may parse after the first look
             (and (equal? cached "indent")
-                 (or (buffer-local buf 'ts-lang)
-                     (and (not (buffer-local buf 'mode-name))
+                 (or (buffer-local-value 'ts-lang buf)
+                     (and (not (buffer-local-value 'mode-name buf))
                           (buffer-path buf)))))
         (begin (code--pick-backend! buf)
-               (buffer-local buf 'code-backend))
+               (buffer-local-value 'code-backend buf))
         cached)))
 
 ;; ONE node question, answered by the backend the mode picked. KIND names
@@ -116,7 +116,7 @@
           ((> depth 30) n)
           ;; an outline line is a node in its own right; a tree-sitter
           ;; identifier is not — it is a word inside one
-          ((equal? (buffer-local buf 'code-backend) "indent") n)
+          ((equal? (buffer-local-value 'code-backend buf) "indent") n)
           ((code--multiline? buf n) n)
           (else
             (let ((up (code--ask-node buf n 'parent)))
@@ -126,7 +126,7 @@
 ;; not the keyword before it. With no such child, take the first child.
 (define (code--descend buf n)
   (let ((first (code--ask-node buf n 'child)))
-    (if (or (not first) (equal? (buffer-local buf 'code-backend) "indent"))
+    (if (or (not first) (equal? (buffer-local-value 'code-backend buf) "indent"))
         first
         (let loop ((cur first) (steps 0))
           (cond ((code--multiline? buf cur) cur)
@@ -142,7 +142,7 @@
 ;; node still holds; any other point means the reader moved another way,
 ;; so the node comes from point again.
 (define (code--node buf)
-  (let ((n (buffer-local buf 'code-node)))
+  (let ((n (buffer-local-value 'code-node buf)))
     (if (and n (= (point) (code--start n)))
         n
         (code--enclosing buf (point)))))
@@ -213,13 +213,13 @@
 ;; One level in ONE call. The fold pass reads whole levels, and a file
 ;; with 300 top-level forms costs 300 round trips the other way.
 (define (code--children buf n)
-  (if (equal? (buffer-local buf 'code-backend) "ts")
+  (if (equal? (buffer-local-value 'code-backend buf) "ts")
       (ts-children (code--kind n) (code--start n) (code--end n))
       (code--indent-children buf n)))
 
 ;; the children of the root: the range that covers the file names it
 (define (code--top-nodes buf)
-  (if (equal? (buffer-local buf 'code-backend) "ts")
+  (if (equal? (buffer-local-value 'code-backend buf) "ts")
       (ts-children "" 0 (string-byte-length (buffer-text buf)))
       ;; "file", not "block": this pseudo node has no header line, and
       ;; code--indent-children reads that from the kind
@@ -428,7 +428,7 @@
       ((not sym) (message "No symbol at point"))
       ;; only a buffer with an attached server asks LSP; the fallback
       ;; below keeps answering everywhere else
-      ((buffer-local (current-buffer) 'lsp-server)
+      ((buffer-local-value 'lsp-server (current-buffer))
        (lsp-definition sym))
       (else
         (let* ((buf (current-buffer))
@@ -491,16 +491,16 @@
 ;; everything it needs from the locals it finds, and saves what it
 ;; clobbers exactly once.
 (define (code--setup! buf)
-  (unless (buffer-local buf 'code-saved)
+  (unless (buffer-local-value 'code-saved buf)
     (buffer-set-local! buf 'code-saved
       (list (list 'read-only (buffer-read-only? buf))
-            (list 'modeline-info (buffer-local buf 'modeline-info)))))
+            (list 'modeline-info (buffer-local-value 'modeline-info buf)))))
   (buffer-set-read-only! buf #t)
   ;; the node questions read the CURRENT buffer, so a restore of a buffer
   ;; that is not on screen rebuilds from the locals alone
   (let ((here (equal? buf (current-buffer)))
-        (stored (buffer-local buf 'code-node))
-        (folds (buffer-local buf 'code-folds)))
+        (stored (buffer-local-value 'code-node buf))
+        (folds (buffer-local-value 'code-folds buf)))
     (when here (code--pick-backend! buf))
     (cond (folds (fold-set! buf 'code folds))
           (here (code--fold-defaults! buf)))
@@ -519,7 +519,7 @@
           (else (buffer-set-local! buf 'modeline-info "browse")))))
 
 (define (code--saved buf key)
-  (let ((hit (assoc key (or (buffer-local buf 'code-saved) '()))))
+  (let ((hit (assoc key (or (buffer-local-value 'code-saved buf) '()))))
     (and hit (cadr hit))))
 
 (define (code--teardown! buf)
@@ -549,7 +549,7 @@
   (and (not (string-prefix? " " buf))
        (not (process-running? buf))
        (or (buffer-path buf) (equal? buf "*scratch*"))
-       (not (member (or (buffer-local buf 'mode-name) "") code--reader-modes))))
+       (not (member (or (buffer-local-value 'mode-name buf) "") code--reader-modes))))
 
 (define-command "code-browse" "Toggle structural browsing in this buffer"
   (lambda ()
@@ -746,7 +746,7 @@
 
 ;; buffer-local answers #f when the outline has never run here.
 (define (code--anchor-row buf line)
-  (let ((anchors (buffer-local buf 'code-anchors)))
+  (let ((anchors (buffer-local-value 'code-anchors buf)))
     (and anchors (assoc line anchors))))
 
 (define (code--outline-rows buf)
@@ -1068,9 +1068,9 @@
             (begin (buffer-set-local! buf 'group root) root)))))
 
 (define (code-mode--label buf)
-  (let ((presets (or (buffer-local buf 'chat-presets) '()))
-        (workspace (or (buffer-local buf 'workspace-name)
-                       (buffer-local buf 'workspace-id))))
+  (let ((presets (or (buffer-local-value 'chat-presets buf) '()))
+        (workspace (or (buffer-local-value 'workspace-name buf)
+                       (buffer-local-value 'workspace-id buf))))
     (string-append
       "code"
       (if workspace (string-append " · " workspace) "")
@@ -1229,11 +1229,11 @@
 
 ;; is the chat already on the coding preset?
 (define (code-agent--on-target? buf)
-  (and (equal? (or (buffer-local buf 'agent-connector) "") code-agent-connector)
+  (and (equal? (or (buffer-local-value 'agent-connector buf) "") code-agent-connector)
        (or (equal? code-agent-model "")
-           (equal? (or (buffer-local buf 'agent-model) "") code-agent-model))
+           (equal? (or (buffer-local-value 'agent-model buf) "") code-agent-model))
        (or (equal? code-agent-effort "")
-           (equal? (or (buffer-local buf 'agent-effort) "") code-agent-effort))))
+           (equal? (or (buffer-local-value 'agent-effort buf) "") code-agent-effort))))
 
 ;; Does the mode name a backend of its own? Empty means no: the chat keeps
 ;; the connector it already has, which is the current default.
@@ -1246,7 +1246,7 @@
 ;; spawn a backend.
 (define (code-agent--switch-now! buf)
   (unless (or (not (code-agent--pins?)) (code-agent--on-target? buf))
-    (let ((slug (buffer-local buf 'agent-slug)))
+    (let ((slug (buffer-local-value 'agent-slug buf)))
       (if (and slug (not (equal? (agent-status slug) 'dead)))
           (chat-switch! buf code-agent-connector code-agent-model
                         (if (equal? code-agent-effort "") #f code-agent-effort))
@@ -1270,7 +1270,7 @@
 (define (code-agent--effective-presets buf)
   (if (boundp (quote chat-presets-of))
       (chat-presets-of buf)
-      (or (buffer-local buf 'chat-presets) '())))
+      (or (buffer-local-value 'chat-presets buf) '())))
 
 ;; Only the FIRST enable moves the chat. The setup re-runs on desktop
 ;; restore, and a re-run must not undo a model the user chose while the
@@ -1288,11 +1288,11 @@
                            code-presets)))
       (when (pair? missing)
         (buffer-set-local! buf 'chat-presets
-          (append missing (or (buffer-local buf 'chat-presets) '())))
+          (append missing (or (buffer-local-value 'chat-presets buf) '())))
         ;; only a live session can hold a stale tool list
-        (when (buffer-local buf 'agent-slug)
+        (when (buffer-local-value 'agent-slug buf)
           (buffer-set-local! buf 'chat-mcp-dirty #t))))
-    (if (buffer-local buf 'chat-turn-active)
+    (if (buffer-local-value 'chat-turn-active buf)
         (buffer-set-local! buf 'code-agent-switch-pending #t)
         (code-agent--switch-now! buf))))
 
@@ -1323,7 +1323,7 @@
 ;; changed nothing never restarts a session on the way out.
 (define (code-agent--unpin! buf saved)
   (when (saved 'pinned)
-    (let ((slug (buffer-local buf 'agent-slug)))
+    (let ((slug (buffer-local-value 'agent-slug buf)))
       (if (and slug (not (equal? (agent-status slug) 'dead)))
           (chat-switch! buf
                         (or (saved 'agent-connector) *default-connector*)
@@ -1370,14 +1370,14 @@
 ;; agent.scm calls this at turn-end: a switch requested mid-turn applies
 ;; between turns.
 (define (code-agent-apply-pending! buf)
-  (when (buffer-local buf 'code-agent-switch-pending)
+  (when (buffer-local-value 'code-agent-switch-pending buf)
     (buffer-set-local! buf 'code-agent-switch-pending #f)
     (code-agent--switch-now! buf)))
 
 (define-command "code-agent-mode" "Toggle the coding preset and prompts for this chat"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+      (if (not (or (chat-buffer? buf) (buffer-local-value 'agent-saved-mark buf)))
           (message "not a chat buffer")
           (if (toggle-minor-mode! "code-agent-mode")
               (message "code-agent-mode enabled")
@@ -1406,8 +1406,8 @@
 (define (imenu-rows buf)
   ;; a mode can own the index: the buffer-local imenu-index-function names a
   ;; function from BUF to rows, the way Emacs's imenu-create-index-function does
-  (cond ((symbol? (buffer-local buf 'imenu-index-function))
-         ((eval (buffer-local buf 'imenu-index-function)) buf))
+  (cond ((symbol? (buffer-local-value 'imenu-index-function buf))
+         ((eval (buffer-local-value 'imenu-index-function buf)) buf))
         ;; a buffer with anchors is indexed by them
         ((pair? (anchor-list buf)) (anchor-imenu-rows buf))
         ;; a list is indexed by its rows, one entry each
@@ -1521,13 +1521,13 @@
            (source (current-buffer))
            (orig (point))
            ;; a page whose rows reach past what it shows (another tab) says how to put it back
-           (restore (let ((f (buffer-local source 'imenu-snapshot))) (and (symbol? f) ((eval f) source))))
+           (restore (let ((f (buffer-local-value 'imenu-snapshot source))) (and (symbol? f) ((eval f) source))))
            ;; tracks and albums, functions and modules: each kind is a tab, the arrows of the tab row step
            (kinds (imenu--kinds all))
            (tabbed? (> (length kinds) 1))
            ;; a page names the tab imenu opens on, its own, in 'imenu-tab
            (tab (mb-tab-recall (string-append "imenu:" source) kinds
-                  (let ((want (buffer-local source 'imenu-tab)))
+                  (let ((want (buffer-local-value 'imenu-tab source)))
                     (let loop ((ks kinds) (i 0))
                       (cond ((null? ks) 0) ((equal? (car ks) want) i) (else (loop (cdr ks) (+ i 1))))))))
            ;; TAB folds a row with rows under it, and unfolds it. It opens all

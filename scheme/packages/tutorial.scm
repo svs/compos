@@ -51,7 +51,7 @@
 (define (training--format! buf)
   ;; Rendered, and still editable: morg draws it in place. A live copy that
   ;; lost its mode gets it back, so C-h t always shows the tutorial as made.
-  (unless (equal? (buffer-local buf 'mode-name) "morg-mode")
+  (unless (equal? (buffer-local-value 'mode-name buf) "morg-mode")
     (with-current-buffer buf (lambda () (set-mode! "morg-mode"))))
   (unless (minor-mode-on? buf "preview-mode")
     (enable-minor-mode! buf "preview-mode"))
@@ -999,7 +999,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
     ;; the reader sees the lesson as a page, in preview
     (unless (minor-mode-on? buf "preview-mode") (enable-minor-mode! buf "preview-mode"))
     ;; eager: the slide follows an edit even while the pane is hidden
-    (unless (buffer-local buf 'tutorial-master-watch)
+    (unless (buffer-local-value 'tutorial-master-watch buf)
       (desktop-skip! buf 'tutorial-master-watch)
       (buffer-set-local! buf 'tutorial-master-watch
         (on-change! buf (lambda (pos inserted deleted source)
@@ -1044,7 +1044,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
   ;; the practice page holds the lesson's own prose, and a new lesson gives
   ;; it a fresh page
   (let ((buf *tutorial-buffer*))
-    (unless (equal? (buffer-local buf 'tutorial-lesson) (plist-get l 'slug))
+    (unless (equal? (buffer-local-value 'tutorial-lesson buf) (plist-get l 'slug))
       (tutorial--fill! buf (string-append "Practise here. This page is yours: move, type, kill and undo as you like.\n\n"
                                           (tutorial--practice-text l))
                        "tutorial-practice-mode")
@@ -1078,7 +1078,7 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 
 (define (tutorial--mark-pane! buf)
   ;; tutorial-pane keeps the keys bar in a narrow window
-  (let ((cs (string-split (or (buffer-local buf 'window-class) "") " ")))
+  (let ((cs (string-split (or (buffer-local-value 'window-class buf) "") " ")))
     (unless (member "tutorial-pane" cs)
       (buffer-set-local! buf 'window-class
         (string-join (filter (lambda (c) (not (equal? c ""))) (append cs (list "tutorial-pane"))) " "))))

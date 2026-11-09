@@ -690,11 +690,11 @@
 
 (define (todo--buffers)
   "every live todo list; a group keeps its own"
-  (filter (lambda (b) (equal? (buffer-local b 'list-mode) "todo-mode")) (buffer-list-mru)))
+  (filter (lambda (b) (equal? (buffer-local-value 'list-mode b) "todo-mode")) (buffer-list-mru)))
 
 (define (todo--list-buffer)
   "the todo list a command acts on: this one, else the one used last"
-  (if (equal? (buffer-local (current-buffer) 'list-mode) "todo-mode")
+  (if (equal? (buffer-local-value 'list-mode (current-buffer)) "todo-mode")
       (current-buffer)
       (let ((bs (todo--buffers))) (and (pair? bs) (car bs)))))
 
@@ -709,7 +709,7 @@
 
 (define (todo--group-buffer mode base group)
   "the MODE buffer GROUP keeps, like chat-menu and ibuffer; made from BASE when it has none"
-  (let ((buf (or (find (lambda (b) (and (equal? (buffer-local b 'mode-name) mode) (equal? (buffer-group b) group)))
+  (let ((buf (or (find (lambda (b) (and (equal? (buffer-local-value 'mode-name b) mode) (equal? (buffer-group b) group)))
                        (buffer-list-mru))
                  (let loop ((n 1))
                    (let ((name (if (= n 1) base (string-append base "<" (number->string n) ">"))))
@@ -790,7 +790,7 @@
 ;;; `<` cycles what a section is; a section heading is a row of kind sep
 (define *todo-groupings* '("none" "group" "project" "status"))
 
-(define (todo--grouping buf) (or (buffer-local buf 'todo-grouping) "none"))
+(define (todo--grouping buf) (or (buffer-local-value 'todo-grouping buf) "none"))
 
 (define (todo--sep? t) (equal? (plist-get t 'kind) "sep"))
 
@@ -1222,7 +1222,7 @@
             (if (chat-title chat (plist-get t 'title))
                 ;; chat-title may have settled on "Title<2>"; find the renamed
                 ;; buffer by its stable id
-                (or (find (lambda (b) (and (string? (buffer-local b 'chat-title))
+                (or (find (lambda (b) (and (string? (buffer-local-value 'chat-title b))
                                            (equal? (chat-stable-id! b) sid)))
                           (group-buffers g))
                     chat)
@@ -1251,8 +1251,8 @@
         (cdr *todo-chat-index*)
         (let ((ix (reverse (fold (lambda (acc b)
                                    ;; a chat read back from its file keeps only its slug
-                                   (let* ((slug (buffer-local b 'agent-slug))
-                                          (id (or (buffer-local b 'chat-id)
+                                   (let* ((slug (buffer-local-value 'agent-slug b))
+                                          (id (or (buffer-local-value 'chat-id b)
                                                   (and (string? slug) (string-prefix? "chat-" slug)
                                                        (string-append "chat:" (string-join (cdr (string-split slug "-")) ":"))))))
                                      (if (string? id) (cons (list id b) acc) acc)))
@@ -1343,12 +1343,12 @@
 (define (todo--chat-current? chat g)
   ;; a chat goes on with a task only when its backend still runs and it
   ;; speaks through the connector the group starts its chats with now
-  (let* ((slug (buffer-local chat 'agent-slug))
+  (let* ((slug (buffer-local-value 'agent-slug chat))
          (b (llm-group-bundle g))
          (want (or (and b (plist-get b 'connector)) *default-connector*)))
     (and (string? slug)
          (not (eq? (agent-status slug) 'dead))
-         (equal? (or (buffer-local chat 'agent-connector) *default-connector*) want))))
+         (equal? (or (buffer-local-value 'agent-connector chat) *default-connector*) want))))
 
 (define (todo--revive-chat t)
   ;; the task's chat: live, else the chat kept for it, else its archived
@@ -1448,7 +1448,7 @@
 (define-command "todo-attach-this-chat" "Attach the chat you are in to an open task"
   (lambda ()
     (let* ((chat (current-buffer))
-           (c (and (buffer-local chat 'agent-slug) (todo--chat-ref chat)))
+           (c (and (buffer-local-value 'agent-slug chat) (todo--chat-ref chat)))
            (rows (map (lambda (t) (list (string-append (plist-get t 'title) "  ·  " (plist-get t 'id)) (plist-get t 'id)))
                       (todo-list))))
       (if (not c)
@@ -1536,11 +1536,11 @@
 (define (todo--detail-buffer)
   "the task page of the group you are in, or #f; a group keeps its own"
   (let ((group (todo--detail-group)))
-    (find (lambda (b) (and (equal? (buffer-local b 'mode-name) "todo-detail-mode") (equal? (buffer-group b) group)))
+    (find (lambda (b) (and (equal? (buffer-local-value 'mode-name b) "todo-detail-mode") (equal? (buffer-group b) group)))
           (buffer-list-mru))))
 
 (define (todo--detail-task buf)
-  (let ((id (buffer-local buf 'todo-id)))
+  (let ((id (buffer-local-value 'todo-id buf)))
     (and id (todo-get id))))
 
 (define (todo--detail-tone state)
@@ -1586,7 +1586,7 @@
 (define (todo--listeners t)
   (if (not (boundp 'agent-listeners))
       '()
-      (let ((chat (let ((b (todo--chat-of t))) (and b (buffer-local b 'chat-id)))))
+      (let ((chat (let ((b (todo--chat-of t))) (and b (buffer-local-value 'chat-id b)))))
         (filter (lambda (l)
                   (if (todo--blank? (plist-get l 'task))
                       (and chat (equal? (plist-get l 'chat) chat))
@@ -1926,7 +1926,7 @@
                (lambda (s)
                  (let* ((blank? (todo--blank? s))
                         (title (if blank? (chat-title-of chat) s))
-                        (summary (buffer-local chat 'chat-summary))
+                        (summary (buffer-local-value 'chat-summary chat))
                         (g (buffer-group chat))
                         (name (and g (group-name g)))
                         (id (todo-create title (append (list 'project (if (member name (todo-projects)) name todo-default-project)

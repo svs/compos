@@ -19,7 +19,7 @@
     (t--sm!)
     (buffer-set-local! t--sm-buf 'mode-name #f)
     (scratch--set-mode! t--sm-buf)
-    (check-equal! (buffer-local t--sm-buf 'mode-name) "scratch-mode" "the default")
+    (check-equal! (buffer-local-value 'mode-name t--sm-buf) "scratch-mode" "the default")
     (t--sm-done!)))
 
 (deftest 'the-mode-a-user-chose-is-never-taken-back
@@ -28,7 +28,7 @@
     (t--sm!)
     (with-current-buffer t--sm-buf (lambda () (set-mode! "morg-mode")))
     (scratch--set-mode! t--sm-buf)
-    (check-equal! (buffer-local t--sm-buf 'mode-name) "morg-mode"
+    (check-equal! (buffer-local-value 'mode-name t--sm-buf) "morg-mode"
                   "plain morg survives the next scratch preparation")
     (t--sm-done!)))
 
@@ -49,7 +49,7 @@
   (lambda ()
     (t--sm!)
     (with-current-buffer t--sm-buf (lambda () (set-mode! "scratch-mode")))
-    (check-true! (member "visual-line-mode" (buffer-local t--sm-buf 'minor-modes))
+    (check-true! (member "visual-line-mode" (buffer-local-value 'minor-modes t--sm-buf))
                  "morg's setup ran")
     (let ((keys (local-keys t--sm-buf)))
       (check-true! (member '("TAB" "morg-cycle") keys) "morg's folding key")
@@ -64,8 +64,8 @@
            (scratch "*scratch:zz-scratch-owner-new*"))
       (when (buffer-known? scratch) (buffer-kill! scratch))
       (scratch--prepare! owner scratch)
-      (check-equal! (buffer-local scratch 'mode-name) "scratch-mode" "the new scratch's mode")
-      (check-true! (member "visual-line-mode" (buffer-local scratch 'minor-modes))
+      (check-equal! (buffer-local-value 'mode-name scratch) "scratch-mode" "the new scratch's mode")
+      (check-true! (member "visual-line-mode" (buffer-local-value 'minor-modes scratch))
                    "morg's setup stays on")
       (buffer-kill! scratch)
       (buffer-kill! owner))))

@@ -29,7 +29,7 @@
 (define diff-block--format 'diff-block-1)
 
 (define (diff-block-pending buf)
-  (let ((p (buffer-local buf 'diff-block)))
+  (let ((p (buffer-local-value 'diff-block buf)))
     (and (pair? p) (= (length p) 10)
          (equal? (nth 9 p) diff-block--format)
          p)))
@@ -230,7 +230,7 @@
 ;; LABEL) in the buffer local diff-block-verbs: they bind with the block's
 ;; keys and show on its fence line.
 (define (diff-block--verbs buf)
-  (or (buffer-local buf 'diff-block-verbs) '()))
+  (or (buffer-local-value 'diff-block-verbs buf) '()))
 
 (define (diff-block--bind-keys! buf)
   (block-bind-keys! buf (append diff-block--keys

@@ -36,7 +36,7 @@
           slug)))
     (set-symbol-value! 'chat-live-runtime?
       (lambda (buf)
-        (let ((slug (buffer-local buf 'agent-slug)))
+        (let ((slug (buffer-local-value 'agent-slug buf)))
           (and (string? slug) (string-prefix? "zz-sub:" slug) #t))))
     (let ((slug (with-edit-author (and author (string-append "agent:" author))
                   (lambda () (execute* "" '())))))
@@ -71,7 +71,7 @@
       (check-equal! (group-setting group 'subagents)
                     (list (list "zz-sub-parent-a" "live" child))
                     "the edge is one slot in the parent's group record")
-      (check-equal! (buffer-local cbuf 'subagent-parent) "zz-sub-parent-a"
+      (check-equal! (buffer-local-value 'subagent-parent cbuf) "zz-sub-parent-a"
                     "the buffer-local cache follows the store")
       (t--sub-clean! group parent cbuf))))
 
@@ -155,8 +155,8 @@
                     "and so does the other direction")
       (subagent-cache-rebuild! cbuf)
       (subagent-cache-rebuild! parent)
-      (check-equal! (buffer-local cbuf 'subagent-parent) "zz-sub-parent-e"
+      (check-equal! (buffer-local-value 'subagent-parent cbuf) "zz-sub-parent-e"
                     "the rebuild puts the child's cache back")
-      (check-equal! (buffer-local parent 'subagent-children) (list child)
+      (check-equal! (buffer-local-value 'subagent-children parent) (list child)
                     "and the parent's")
       (t--sub-clean! group parent cbuf))))

@@ -44,16 +44,16 @@
 
 ;; BUF's edge: the one it was moved to, else popper-side
 (define (popper--side buf)
-  (let ((own (buffer-local buf 'popper-side)))
+  (let ((own (buffer-local-value 'popper-side buf)))
     (string->symbol (if own (symbol->string own) popper-side))))
 
 ;; BUF's share of the frame: its own 'popper-size, else popper-window-height
 (define (popper--size buf)
-  (or (buffer-local buf 'popper-size) popper-window-height))
+  (or (buffer-local-value 'popper-size buf) popper-window-height))
 
 ;; the list's answer for BUF
 (define (popper--reference? buf)
-  (let ((mode (buffer-local buf 'mode-name)))
+  (let ((mode (buffer-local-value 'mode-name buf)))
     (let loop ((refs popper-reference-buffers))
       (cond ((null? refs) #f)
             ((cond ((string? (car refs)) (re-match? (car refs) buf))
@@ -70,8 +70,8 @@
 (define (popper-popup? buf)
   (and (string? buf) (buffer-known? buf)
        (not (string-prefix? " " buf))
-       (or (buffer-local buf 'popper-floating) (not (float--class? buf)))
-       (let ((status (buffer-local buf 'popper-popup-status)))
+       (or (buffer-local-value 'popper-floating buf) (not (float--class? buf)))
+       (let ((status (buffer-local-value 'popper-popup-status buf)))
          (cond ((equal? status 'popup) #t)
                ((equal? status 'raised) #f)
                (else (popper--reference? buf))))))
@@ -80,7 +80,7 @@
 ;; floated, else #f
 (define (popper-window)
   (let ((w (float-window)))
-    (and w (buffer-local (window-buffer w) 'popper-floating)
+    (and w (buffer-local-value 'popper-floating (window-buffer w))
          (popper-popup? (window-buffer w))
          w)))
 

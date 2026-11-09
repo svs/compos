@@ -67,7 +67,7 @@
                               "the edge names the chat's slug")
                 (check-true! (string-prefix? "zz-slug-" (cadr edge))
                              "recorded once the brief gave the chat its slug, not its buffer name")
-                (check-true! (buffer-local chat 'subagent-notify) "the parent hears its turn ends")
+                (check-true! (buffer-local-value 'subagent-notify chat) "the parent hears its turn ends")
                 (buffer-kill! chat)))))))))
 
 (deftest 'todo-assign-chat-reuses-a-kept-chat-only-while-it-is-current

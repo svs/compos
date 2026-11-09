@@ -81,7 +81,7 @@
       (whatsapp--goto-message! buf 'next)
       (check-equal! (buffer-point buf) (whatsapp--msg-start (cadr rows))
                     "next lands on the next message's own start")
-      (check-contains! (value->string (buffer-local buf 'render-blocks))
+      (check-contains! (value->string (buffer-local-value 'render-blocks buf))
                        "whatsapp-message-current"
                        "the view marks the message at point")
       (whatsapp--goto-message! buf 'next)
@@ -104,7 +104,7 @@
   "The conversation uses catalogued actions and an empty state."
   (lambda ()
     (let* ((buf (t--whatsapp-conversation "Could not load messages\n"))
-           (blocks (buffer-local buf 'render-blocks)))
+           (blocks (buffer-local-value 'render-blocks buf)))
       (check-equal! (length blocks) 2
                     "actions and the empty state render")
       (check-contains! (value->string blocks) "Reply"

@@ -53,9 +53,9 @@
 (define (occur-ts--value entry key) (plist-get entry key))
 
 (define (occur-ts--rows buf)
-  (let ((rows (ts-filter (buffer-local buf 'occur-ts-source)
-                         (buffer-local buf 'occur-ts-language)
-                         (buffer-local buf 'occur-ts-query))))
+  (let ((rows (ts-filter (buffer-local-value 'occur-ts-source buf)
+                         (buffer-local-value 'occur-ts-language buf)
+                         (buffer-local-value 'occur-ts-query buf))))
     (desktop-skip! buf 'occur-ts-total)
     (buffer-set-local! buf 'occur-ts-total (length rows))
     rows))
@@ -72,13 +72,13 @@
 
 (define (occur-ts--meta buf)
   (string-append
-    (number->string (or (buffer-local buf 'occur-ts-total) 0)) " captures · "
-    (buffer-local buf 'occur-ts-language) " · "
-    (buffer-short-label (buffer-local buf 'occur-ts-source))))
+    (number->string (or (buffer-local-value 'occur-ts-total buf) 0)) " captures · "
+    (buffer-local-value 'occur-ts-language buf) " · "
+    (buffer-short-label (buffer-local-value 'occur-ts-source buf))))
 
 (define (occur-ts--show entry select?)
   (let* ((results (current-buffer))
-         (source (buffer-local results 'occur-ts-source))
+         (source (buffer-local-value 'occur-ts-source results))
          (start (occur-ts--value entry 'start)))
     (when (buffer-exists? source)
       ;; the searched buffer exists, so it is only shown
@@ -118,7 +118,7 @@
     'cells occur-ts--cells
     'title (lambda (buf) "Tree-sitter matches")
     'meta occur-ts--meta
-    'total (lambda (buf) (or (buffer-local buf 'occur-ts-total) 0))
+    'total (lambda (buf) (or (buffer-local-value 'occur-ts-total buf) 0))
     'footer (lambda (buf)
               '(("RET" "visit") ("/" "filter") ("\\" "widen")
                 ("g" "refresh") ("q" "quit")))
@@ -153,7 +153,7 @@
 (define-command "occur-ts" "Show tree-sitter query captures for this buffer"
   (lambda ()
     (let* ((source (current-buffer))
-           (language (buffer-local source 'ts-lang)))
+           (language (buffer-local-value 'ts-lang source)))
       (if language
           (occur-ts--read-query source language)
           (minibuffer-read "Grammar: "

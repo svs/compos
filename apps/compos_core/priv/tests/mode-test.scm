@@ -45,9 +45,9 @@
     (with-current-buffer "zz-mode-test-buf"
       (lambda ()
         (run-command "zz-mode-test-parent")
-        (check-equal! (buffer-local (current-buffer) 'mode-name) "zz-mode-test-parent" "entered")
+        (check-equal! (buffer-local-value 'mode-name (current-buffer)) "zz-mode-test-parent" "entered")
         (run-command "zz-mode-test-parent")
-        (check-equal! (buffer-local (current-buffer) 'mode-name) "zz-mode-test-parent" "still in it")))
+        (check-equal! (buffer-local-value 'mode-name (current-buffer)) "zz-mode-test-parent" "still in it")))
     (buffer-kill! "zz-mode-test-buf")))
 
 (deftest 'a-change-of-major-mode-runs-change-major-mode-hook-and-starts-the-keys-afresh
@@ -142,7 +142,7 @@
           (auto-mode "zz-mode-test-count.zz-auto-count")
           (check-equal! (reverse *mode-test-log*) '(auto-setup)
                         "a buffer that already wears the mode pays nothing")
-          (check-equal! (buffer-local (current-buffer) 'mode-name) "zz-auto-mode-count"
+          (check-equal! (buffer-local-value 'mode-name (current-buffer)) "zz-auto-mode-count"
                         "and it keeps the mode")
           ;; set-mode! stays the door a reload and a desktop restore use:
           ;; it re-runs the setup fn on purpose, mode unchanged or not.
@@ -160,6 +160,6 @@
     (buffer-set-local! "zz-mode-test-buf" 'zz-mode-test-keep 1)
     (buffer-set-local! "zz-mode-test-buf" 'zz-mode-test-drop 2)
     (kill-all-local-variables! "zz-mode-test-buf")
-    (check-equal! (buffer-local "zz-mode-test-buf" 'zz-mode-test-keep) 1 "kept")
-    (check-false! (buffer-local "zz-mode-test-buf" 'zz-mode-test-drop) "dropped")
+    (check-equal! (buffer-local-value 'zz-mode-test-keep "zz-mode-test-buf") 1 "kept")
+    (check-false! (buffer-local-value 'zz-mode-test-drop "zz-mode-test-buf") "dropped")
     (buffer-kill! "zz-mode-test-buf")))

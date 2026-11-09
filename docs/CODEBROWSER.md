@@ -234,7 +234,7 @@ The `summary` column is the first sentence of the entry's summary, or a badge: `
 |     (cond                                               | The seam for LSP. With a server attached,        |
 |       ((not sym) (message "No symbol at point"))        | lsp-definition answers. Without one, the same    |
 |       ((and (boundp 'lsp-definition)                    | file answers: the first line that defines the    |
-|             (buffer-local (current-buffer) 'lsp-server))| symbol under point.                              |
+|             (buffer-local-value 'lsp-server (current-buffer)))| symbol under point.                              |
 |        (lsp-definition sym))                            |                                                  |
 |       (else ...                                         | code.scm reads a source file with structural     |
 |                                                         | keys. It is a minor mode: ...                    |

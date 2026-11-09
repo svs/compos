@@ -342,11 +342,11 @@
          ;; the week offset in days: [ and ] move it, . zeroes it. It is
          ;; a plain local, so the selected week survives refresh and a
          ;; desktop restore of the mode.
-         (start (+ today (or (buffer-local buf 'agenda-start-offset) 0)))
+         (start (+ today (or (buffer-local-value 'agenda-start-offset buf) 0)))
          (ndays (if (number? morg-agenda-days) morg-agenda-days 7))
          (files (agenda--files))
          (week (agenda--week files today start ndays))
-         (closed (or (buffer-local buf 'agenda-closed-days) '()))
+         (closed (or (buffer-local-value 'agenda-closed-days buf) '()))
          (header (string-append "Agenda — " (agenda--day-label start))))
     (let loop ((days week)
                (text (string-append header "\n"))
@@ -425,12 +425,12 @@
           (else (loop (cdr ls) (+ n 1) (+ at (string-byte-length (car ls)) 1))))))
 
 (define (agenda--entry-at buf line)
-  (assoc line (or (buffer-local buf 'agenda-index) '())))
+  (assoc line (or (buffer-local-value 'agenda-index buf) '())))
 
 ;; the day whose header sits at or above LINE
 (define (agenda--day-at buf line)
   (fold (lambda (acc d) (if (<= (car d) line) (cadr d) acc))
-        #f (or (buffer-local buf 'agenda-day-lines) '())))
+        #f (or (buffer-local-value 'agenda-day-lines buf) '())))
 
 ;;; --- commands ----------------------------------------------------------------
 
@@ -448,7 +448,7 @@
 (define (agenda--step dir)
   (let* ((buf (current-buffer))
          (here (agenda--line-number buf (point)))
-         (lines (map car (or (buffer-local buf 'agenda-index) '())))
+         (lines (map car (or (buffer-local-value 'agenda-index buf) '())))
          (cand (filter (lambda (l) (if (> dir 0) (> l here) (< l here))) lines))
          (best (fold (lambda (acc l)
                        (if (or (not acc) (if (> dir 0) (< l acc) (> l acc)))
@@ -466,7 +466,7 @@
   'modes '(morg-agenda-mode))
 
 (define (agenda--toggle-day! buf day)
-  (let ((closed (or (buffer-local buf 'agenda-closed-days) '())))
+  (let ((closed (or (buffer-local-value 'agenda-closed-days buf) '())))
     (buffer-set-local! buf 'agenda-closed-days
       (if (member day closed)
           (filter (lambda (d) (not (equal? d day))) closed)
@@ -492,14 +492,14 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (agenda--set-offset! buf
-        (+ (or (buffer-local buf 'agenda-start-offset) 0) 7))))
+        (+ (or (buffer-local-value 'agenda-start-offset buf) 0) 7))))
   'modes '(morg-agenda-mode))
 
 (define-command "agenda-week-prev" "Show the previous week"
   (lambda ()
     (let ((buf (current-buffer)))
       (agenda--set-offset! buf
-        (- (or (buffer-local buf 'agenda-start-offset) 0) 7))))
+        (- (or (buffer-local-value 'agenda-start-offset buf) 0) 7))))
   'modes '(morg-agenda-mode))
 
 (define-command "agenda-today" "Return the agenda to the week that starts today"
@@ -509,7 +509,7 @@
 (define-command "agenda-toggle-view" "Toggle between the cards and the plain listing"
   (lambda ()
     (let* ((buf (current-buffer))
-           (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
+           (rich? (equal? (buffer-local-value 'render-mode buf) "blocks")))
       (buffer-set-local! buf 'render-mode (if rich? #f "blocks"))
       (message (if rich? "plain agenda" "agenda cards"))))
   'modes '(morg-agenda-mode))
@@ -518,7 +518,7 @@
 ;; entry row opens its file
 (add-hook! (list 'block-click 'agenda)
   (lambda (buf id)
-    (and (buffer-local buf 'agenda-index)
+    (and (buffer-local-value 'agenda-index buf)
          (cond ((string-prefix? "d-" id)
                 (let ((z (string->number
                            (substring-bytes id 2 (string-byte-length id)))))
@@ -587,7 +587,7 @@
 ;; cache keeps the catch-up cheap
 (add-hook! 'buffer-shown-hook
   (lambda (b)
-    (when (and (equal? b *agenda-buffer*) (buffer-local b 'agenda-index))
+    (when (and (equal? b *agenda-buffer*) (buffer-local-value 'agenda-index b))
       (agenda--render! b))))
 
 ;;; --- the stylesheet -----------------------------------------------------------

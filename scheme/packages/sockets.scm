@@ -125,8 +125,8 @@
 (define (sockets-agent-restart! slug)
   (let ((buf (agent-buf slug)))
     (agent-reconnect! slug
-      (buffer-local buf 'agent-connector)
-      (or (buffer-local buf 'agent-model) ""))))
+      (buffer-local-value 'agent-connector buf)
+      (or (buffer-local-value 'agent-model buf) ""))))
 
 (define (sockets-restart! row)
   (let ((kind (plist-get row 'kind))

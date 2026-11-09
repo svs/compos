@@ -103,7 +103,7 @@
       ;; the buffer has no ".md" to read a renderer from — it says so
       (buffer-set-local! buf 'preview-renderer "markdown")
       ;; the rendered page numbers its source lines; M-x display-line-numbers-mode hides them
-      (unless (buffer-local buf 'line-numbers)
+      (unless (buffer-local-value 'line-numbers buf)
         (buffer-set-local! buf 'line-numbers "on"))
       (when (minor-mode-on? buf "preview-mode")
         (preview-mode--apply! buf))
@@ -222,13 +222,13 @@
           "\n"))))
 
 (define (help--minor-modes buf)
-  (let ((ms (or (buffer-local buf 'minor-modes) '())))
+  (let ((ms (or (buffer-local-value 'minor-modes buf) '())))
     (if (null? ms) "" (string-append "minor modes `" (string-join ms "` `") "`"))))
 
 ;; each minor mode gets its say, the way the major mode does — the
 ;; name-only list answered "which" but never "so what"
 (define (help--minor-sections buf)
-  (let ((ms (or (buffer-local buf 'minor-modes) '())))
+  (let ((ms (or (buffer-local-value 'minor-modes buf) '())))
     (if (null? ms)
         ""
         (string-join
@@ -273,9 +273,9 @@
     ;; read the buffer BEFORE the page opens: from inside *Help*, the
     ;; question is still about the buffer the reader came from
     (let* ((buf (if (equal? (current-buffer) *help-buffer*)
-                    (or (buffer-local *help-buffer* 'help-from) (current-buffer))
+                    (or (buffer-local-value 'help-from *help-buffer*) (current-buffer))
                     (current-buffer)))
-           (mode (or (buffer-local buf 'mode-name) "fundamental-mode")))
+           (mode (or (buffer-local-value 'mode-name buf) "fundamental-mode")))
       (help-doc! mode (help--mode-markdown buf mode))
       (buffer-set-local! *help-buffer* 'help-from buf))))
 
@@ -286,14 +286,14 @@
   (lambda ()
     ;; read the buffer BEFORE the page opens, the way describe-mode does
     (let* ((buf (if (equal? (current-buffer) *help-buffer*)
-                    (or (buffer-local *help-buffer* 'help-from) (current-buffer))
+                    (or (buffer-local-value 'help-from *help-buffer*) (current-buffer))
                     (current-buffer)))
-           (mode (or (buffer-local buf 'mode-name) "fundamental-mode")))
+           (mode (or (buffer-local-value 'mode-name buf) "fundamental-mode")))
       (help-doc! "locals"
         (string-append
           "# Buffer locals\n\n"
           "Buffer `" buf "`, mode `" mode "`. "
-          "Read one value with `(buffer-local \"" buf "\" 'name)`.\n\n"
+          "Read one value with `(buffer-local-value 'name \"" buf "\")`.\n\n"
           (help--locals-table buf)
           "\n---\n\n"
           "`M-x` runs a command by name · `q` closes this page\n"))
@@ -302,7 +302,7 @@
 (define-command "describe-bindings" "Show every key binding, this buffer's first"
   (lambda ()
     (let* ((buf (current-buffer))
-           (mode (or (buffer-local buf 'mode-name) "fundamental-mode")))
+           (mode (or (buffer-local-value 'mode-name buf) "fundamental-mode")))
       (help-doc! "bindings"
         (string-append
           "# Key bindings\n\n"
@@ -462,7 +462,7 @@
 
 (define (apropos-filter!)
   "Show one kind of the apropos page's hits, or all of them again."
-  (let ((q (buffer-local (current-buffer) 'apropos-query)))
+  (let ((q (buffer-local-value 'apropos-query (current-buffer))))
     (if (not q)
         (message "This page is not an apropos page")
         (minibuffer-read "Show: " (map car *apropos-kinds*)
@@ -561,8 +561,8 @@
               (else (help--apropos-section name))))))
 
 (define (help--here-markdown buf name)
-  (let ((mode (or (buffer-local buf 'mode-name) "fundamental-mode"))
-        (doc (mode-doc (or (buffer-local buf 'mode-name) "fundamental-mode"))))
+  (let ((mode (or (buffer-local-value 'mode-name buf) "fundamental-mode"))
+        (doc (mode-doc (or (buffer-local-value 'mode-name buf) "fundamental-mode"))))
     (string-append
       "# Here\n\n"
       (help--meta (list (string-append "`" buf "` in `" mode "`")
@@ -586,7 +586,7 @@
     (let* ((here (current-buffer))
            (from-help (equal? here *help-buffer*))
            (buf (if from-help
-                    (or (buffer-local *help-buffer* 'help-from) here)
+                    (or (buffer-local-value 'help-from *help-buffer*) here)
                     here))
            (name (if from-help #f (help--symbol-at))))
       (help-doc! "here" (help--here-markdown buf name))
@@ -630,7 +630,7 @@
 ;; the lead. Everything else is one line under it.
 (define (help--key-markdown buf seq)
   (let* ((keys (string-join seq " "))
-         (mode (or (buffer-local buf 'mode-name) "fundamental-mode"))
+         (mode (or (buffer-local-value 'mode-name buf) "fundamental-mode"))
          (cmd (key-binding seq))
          (where (string-append "pressed in `" buf "` (`" mode "`)")))
     (string-append

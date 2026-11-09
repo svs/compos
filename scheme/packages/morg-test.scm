@@ -52,8 +52,8 @@
   "prose wants visual lines, so morg turns them on; the presentation is the user's"
   (lambda ()
     (t--morg! t--morg-fixture 0)
-    (check-true! (buffer-local t--morg-buf 'visual-line-mode) "visual lines are on")
-    (check-false! (member "writing-mode" (buffer-local t--morg-buf 'minor-modes))
+    (check-true! (buffer-local-value 'visual-line-mode t--morg-buf) "visual lines are on")
+    (check-false! (member "writing-mode" (buffer-local-value 'minor-modes t--morg-buf))
                   "writing-mode stays off")
     (t--morg-done!)))
 
@@ -61,7 +61,7 @@
   "the level is the depth of the hash marks"
   (lambda ()
     (t--morg! t--morg-fixture 0)
-    (check-equal! (buffer-local t--morg-buf 'mode-name) "morg-mode" "the mode is set")
+    (check-equal! (buffer-local-value 'mode-name t--morg-buf) "morg-mode" "the mode is set")
     (let ((ovs (buffer-overlays t--morg-buf)))
       (check-true! (member '(0 3 "org-level-1") ovs) "the top heading")
       (check-true! (member '(9 17 "org-level-2") ovs) "and the child"))
@@ -116,7 +116,7 @@
   (lambda ()
     (t--morg! t--morg-fixture 12)
     (t--morg-run! "morg-narrow")
-    (let* ((anchor (buffer-local t--morg-buf 'morg-narrow-anchor))
+    (let* ((anchor (buffer-local-value 'morg-narrow-anchor t--morg-buf))
            (scan (morg-scan t--morg-buf))
            (entry (morg-entry-at scan anchor))
            (end (markdown--section-end scan t--morg-buf entry)))
@@ -142,16 +142,16 @@
   (lambda ()
     (t--morg! t--morg-fixture 12)
     (t--morg-run! "morg-narrow")
-    (let ((before (buffer-local t--morg-buf 'morg-narrow-anchor)))
+    (let ((before (buffer-local-value 'morg-narrow-anchor t--morg-buf)))
       (buffer-insert! t--morg-buf 0 "intro\n")
       (check-true!
         (wait-until
           (lambda ()
-            (equal? (buffer-local t--morg-buf 'morg-narrow-anchor)
+            (equal? (buffer-local-value 'morg-narrow-anchor t--morg-buf)
                     (+ before 6)))
           3000 20)
         "the change hook completes")
-      (check-equal! (buffer-local t--morg-buf 'morg-narrow-anchor)
+      (check-equal! (buffer-local-value 'morg-narrow-anchor t--morg-buf)
                     (+ before 6) "the anchor follows an earlier edit")
       (buffer-widen! t--morg-buf)
       (with-current-buffer t--morg-buf (lambda () (set-mode! "morg-mode")))
@@ -167,12 +167,12 @@
     (buffer-goto! t--morg-buf 5)
 
     (t--morg-run! "morg-outline")
-    (check-equal! (buffer-local t--morg-buf 'morg-folds) '(0 9 24) "every heading folded")
+    (check-equal! (buffer-local-value 'morg-folds t--morg-buf) '(0 9 24) "every heading folded")
     (check-equal! (buffer-hidden t--morg-buf) '((3 8) (17 23) (27 33)) "the hidden ranges")
     (check-equal! (buffer-point t--morg-buf) 0 "point moved to the first heading")
 
     (t--morg-run! "morg-outline")
-    (check-equal! (buffer-local t--morg-buf 'morg-folds) '(0 9 24) "a second run is a no-op")
+    (check-equal! (buffer-local-value 'morg-folds t--morg-buf) '(0 9 24) "a second run is a no-op")
     (t--morg-done!)))
 
 (deftest 'morg-cycle-toggles-one-heading-without-leaving-outline-mode
@@ -183,8 +183,8 @@
     (buffer-goto! t--morg-buf 9)
     (t--morg-run! "morg-cycle")
 
-    (check-true! (buffer-local t--morg-buf 'morg-outline) "still in outline mode")
-    (check-equal! (buffer-local t--morg-buf 'morg-folds) '(0 24) "that heading is open")
+    (check-true! (buffer-local-value 'morg-outline t--morg-buf) "still in outline mode")
+    (check-equal! (buffer-local-value 'morg-folds t--morg-buf) '(0 24) "that heading is open")
     (check-equal! (buffer-hidden t--morg-buf) '((3 8) (27 33)) "and the others are not")
 
     (t--morg-run! "morg-cycle")

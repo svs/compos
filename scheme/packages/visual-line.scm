@@ -42,7 +42,7 @@
 ;; names rows that moved, so the caller moves by source line instead, and
 ;; the measure after the next paint repairs it. A key never waits.
 (define (visual-rows buf)
-  (and (equal? (buffer-local buf 'visual-line-mode) #t)
+  (and (equal? (buffer-local-value 'visual-line-mode buf) #t)
        (let ((m (window-wrap-map (active-window))))
          (and m
               (equal? (car m) (buffer-version buf))
@@ -115,7 +115,7 @@
 ;; start. It lives while point stands where the last move left it: any
 ;; other move, horizontal or a click, starts the column afresh.
 (define (visual--goal buf start pos)
-  (let ((g (buffer-local buf 'visual-goal)))
+  (let ((g (buffer-local-value 'visual-goal buf)))
     (if (and g (equal? (car g) pos))
         (cadr g)
         (string-length (buffer-substring start pos)))))
@@ -139,17 +139,17 @@
 ;; where every row wraps, so no map is measured or kept for it. A
 ;; rendered page and a read-only buffer keep the wrap map.
 (define (visual--client? buf)
-  (and (equal? (buffer-local buf 'visual-line-mode) #t)
+  (and (equal? (buffer-local-value 'visual-line-mode buf) #t)
        (not (buffer-read-only? buf))
        ;; a client that has reported its caret is there to answer; a
        ;; headless buffer keeps the server's own motion
-       (equal? (buffer-local buf 'client-caret) #t)
+       (equal? (buffer-local-value 'client-caret buf) #t)
        ;; a window that measured a map, fresh or stale, draws a page that
        ;; measures; an editable surface never sends one
        (not (window-wrap-map (active-window)))
        ;; only the plain text view is an editable surface; a rendered page,
        ;; a block view, a transcript, and a terminal draw something else
-       (not (member (buffer-local buf 'render-mode)
+       (not (member (buffer-local-value 'render-mode buf)
                     '("markdown" "html" "app" "blocks" "terminal")))))
 
 (define (visual--client-move! alter dir granularity &optional count)
@@ -184,7 +184,7 @@
 ;; own, and the page reads it as one row. Turn preview-mode off to edit
 ;; inside a cell.
 (define (visual--table-row? buf)
-  (and (buffer-local buf 'preview-rows)
+  (and (buffer-local-value 'preview-rows buf)
        (re-match "^[ \t]*[|]" (line-text))
        #t))
 

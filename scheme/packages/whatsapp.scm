@@ -239,11 +239,11 @@
       (buffer-set-local! buf 'render-mode "blocks")
       (buffer-set-local! buf 'render-blocks
         (whatsapp--conversation-blocks rows current
-          (buffer-local buf 'whatsapp-notice)))
+          (buffer-local-value 'whatsapp-notice buf)))
       (buffer-set-local! buf 'modeline-info
         (string-append
           "WhatsApp · "
-          (whatsapp--text (buffer-local buf 'whatsapp-name) "chat")
+          (whatsapp--text (buffer-local-value 'whatsapp-name buf) "chat")
           (if current
               (string-append " · " (whatsapp--msg-sender current))
               ""))))))
@@ -256,7 +256,7 @@
     (whatsapp--replace-text! buf text)
     (buffer-set-local! buf 'whatsapp-notice text)
     (buffer-set-local! buf 'whatsapp-messages-jid
-      (buffer-local buf 'whatsapp-jid))
+      (buffer-local-value 'whatsapp-jid buf))
     (whatsapp--paint! buf)
     (buffer-set-read-only! buf #t)))
 
@@ -307,7 +307,7 @@
           (k #f)))))
 
 (define (whatsapp--refresh-conversation! buf)
-  (let ((jid (buffer-local buf 'whatsapp-jid)))
+  (let ((jid (buffer-local-value 'whatsapp-jid buf)))
     (when jid
       (whatsapp--render-conversation! buf "Loading messages…\n")
       (*whatsapp-call* 'whatsapp "list_messages"
@@ -319,7 +319,7 @@
           ;; One shared scene pane serves every chat. Ignore a response
           ;; whose request no longer owns that pane.
           (when (and (buffer-known? buf)
-                     (equal? jid (buffer-local buf 'whatsapp-jid)))
+                     (equal? jid (buffer-local-value 'whatsapp-jid buf)))
             (whatsapp--render-conversation! buf
               (if ok
                   text
@@ -345,7 +345,7 @@
           (unless (buffer-known? buf) (buffer-create buf))
           ;; Keep the conversation buffer's text attached to the selected
           ;; JID: the transcript in it is the only copy of this chat.
-          (unless (equal? jid (buffer-local buf 'whatsapp-messages-jid))
+          (unless (equal? jid (buffer-local-value 'whatsapp-messages-jid buf))
             (buffer-set-local! buf 'whatsapp-messages-jid #f)
             (buffer-set-local! buf 'whatsapp-notice #f)
             (buffer-set-local! buf 'render-blocks #f))
@@ -367,7 +367,7 @@
          (jid
            (if chat
                (plist-get chat 'jid)
-               (buffer-local buf 'whatsapp-jid))))
+               (buffer-local-value 'whatsapp-jid buf))))
     (if (not jid)
         (message "No WhatsApp chat is selected")
         (begin
@@ -406,7 +406,7 @@
 
 (add-hook! (list 'block-click 'whatsapp)
   (lambda (buf id)
-    (and (equal? (buffer-local buf 'mode-name) "whatsapp-chat-mode")
+    (and (equal? (buffer-local-value 'mode-name buf) "whatsapp-chat-mode")
          (cond
            ((equal? id "whatsapp-reply")
             (with-current-buffer buf
@@ -426,10 +426,10 @@
 (define-mode "whatsapp-chat-mode"
   (lambda ()
     (let* ((buf (current-buffer))
-           (jid (buffer-local buf 'whatsapp-jid))
+           (jid (buffer-local-value 'whatsapp-jid buf))
            (loaded?
              (and jid
-                  (equal? jid (buffer-local buf 'whatsapp-messages-jid)))))
+                  (equal? jid (buffer-local-value 'whatsapp-messages-jid buf)))))
       (whatsapp--join-group! buf)
       ;; before anything reads the buffer: every question below is a
       ;; question for the grammar
@@ -517,7 +517,7 @@
     (unless (buffer-known? *whatsapp-show-buffer*)
       (buffer-create *whatsapp-show-buffer*))
     (whatsapp--join-group! *whatsapp-show-buffer*)
-    (when (and (not (buffer-local *whatsapp-show-buffer* 'whatsapp-jid))
+    (when (and (not (buffer-local-value 'whatsapp-jid *whatsapp-show-buffer*))
                (= (buffer-size *whatsapp-show-buffer*) 0))
       (buffer-append! *whatsapp-show-buffer* "No conversation selected.\n")
       (buffer-set-read-only! *whatsapp-show-buffer* #t))))

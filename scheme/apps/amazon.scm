@@ -335,23 +335,23 @@
 
 (define (amazon-in-cart? asin)
   ;; what the last read of the cart named, or what this session added
-  (and (or (member asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))
+  (and (or (member asin (or (buffer-local-value 'amazon-cart *amazon-buffer*) '()))
            (member asin (map (lambda (r) (plist-get r 'asin))
-                             (or (buffer-local *amazon-cart-buffer* 'amazon-rows) '()))))
+                             (or (buffer-local-value 'amazon-rows *amazon-cart-buffer*) '()))))
        #t))
 
 ;; saved products and their notes live on the listing buffer, so they survive
 ;; the next search and come back with the desktop
-(define (amazon-saved-list) (or (buffer-local *amazon-buffer* 'amazon-saved) '()))
+(define (amazon-saved-list) (or (buffer-local-value 'amazon-saved *amazon-buffer*) '()))
 (define (amazon-saved? asin) (and (member asin (amazon-saved-list)) #t))
 
 ;; a hidden product stays in the rows but out of the listing, so a search is
 ;; never re-read to get it back; X shows the hidden ones again, marked ⊘
-(define (amazon-hidden-list) (or (buffer-local *amazon-buffer* 'amazon-hidden) '()))
+(define (amazon-hidden-list) (or (buffer-local-value 'amazon-hidden *amazon-buffer*) '()))
 (define (amazon-hidden? asin) (and (member asin (amazon-hidden-list)) #t))
-(define (amazon-showing-hidden?) (and (buffer-local *amazon-buffer* 'amazon-show-hidden) #t))
+(define (amazon-showing-hidden?) (and (buffer-local-value 'amazon-show-hidden *amazon-buffer*) #t))
 
-(define (amazon-notes) (or (buffer-local *amazon-buffer* 'amazon-notes) '()))
+(define (amazon-notes) (or (buffer-local-value 'amazon-notes *amazon-buffer*) '()))
 (define (amazon-note asin)
   (let ((hit (assoc asin (amazon-notes)))) (and hit (car (cdr hit)))))
 
@@ -522,8 +522,8 @@
 ;; page and a tab the reader asked for start one.
 (define *amazon-detail-sheet* "web/parsers/amazon-detail.xsl")
 
-(define (amazon-detail-data buf) (buffer-local buf 'amazon-detail))
-(define (amazon-detail-state buf) (or (buffer-local buf 'amazon-detail-state) 'cold))
+(define (amazon-detail-data buf) (buffer-local-value 'amazon-detail buf))
+(define (amazon-detail-state buf) (or (buffer-local-value 'amazon-detail-state buf) 'cold))
 
 (define (amazon-detail-refresh! buf)
   (when (and (buffer-exists? buf) (site-app-get buf 'data))
@@ -792,8 +792,8 @@
 ;;; page, which says whether the ASIN is in it.
 
 (define (amazon-row-by-asin asin)
-  (let loop ((rs (append (or (buffer-local *amazon-buffer* 'amazon-rows) '())
-                         (or (buffer-local *amazon-cart-buffer* 'amazon-rows) '()))))
+  (let loop ((rs (append (or (buffer-local-value 'amazon-rows *amazon-buffer*) '())
+                         (or (buffer-local-value 'amazon-rows *amazon-cart-buffer*) '()))))
     (cond ((null? rs) #f)
           ((equal? (plist-get (car rs) 'asin) asin) (car rs))
           (else (loop (cdr rs))))))
@@ -868,11 +868,11 @@
   ;; results unless X shows them, soonest delivery first when d asks, and the
   ;; cells of each
   (when (buffer-known? buf)
-    (let* ((all (or (buffer-local buf 'amazon-rows) '()))
+    (let* ((all (or (buffer-local-value 'amazon-rows buf) '()))
            (shown (if (or (amazon-showing-hidden?) (not (equal? buf *amazon-buffer*)))
                       all
                       (filter (lambda (r) (not (amazon-hidden? (plist-get r 'asin)))) all)))
-           (rows (if (equal? (buffer-local buf 'amazon-sort) 'delivery) (amz-sort-by-delivery shown) shown)))
+           (rows (if (equal? (buffer-local-value 'amazon-sort buf) 'delivery) (amz-sort-by-delivery shown) shown)))
       (site-app-set! buf 'rows (map amazon--cells-of rows))
       (buffer-set-local! buf 'list-layout-cache #f)
       (list-refresh! buf))))
@@ -957,7 +957,7 @@
      (ok
       (unless (amazon-in-cart? asin)
         (buffer-set-local! *amazon-buffer* 'amazon-cart
-                           (cons asin (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
+                           (cons asin (or (buffer-local-value 'amazon-cart *amazon-buffer*) '()))))
       (amazon-log! (string-append asin " added -- " text))
       (when (buffer-known? *amazon-cart-buffer*) (amazon-cart-sync!))
       (message (string-append (amazon-name-of asin) " added to the cart"))
@@ -1069,9 +1069,9 @@
       (when (buffer-known? *amazon-buffer*)
         (buffer-set-local! *amazon-buffer* 'amazon-cart
                            (filter (lambda (a) (not (equal? a asin)))
-                                   (or (buffer-local *amazon-buffer* 'amazon-cart) '()))))
+                                   (or (buffer-local-value 'amazon-cart *amazon-buffer*) '()))))
       (when (buffer-known? *amazon-cart-buffer*)
-        (amazon--fill! *amazon-cart-buffer* (amazon--without asin (buffer-local *amazon-cart-buffer* 'amazon-rows))))
+        (amazon--fill! *amazon-cart-buffer* (amazon--without asin (buffer-local-value 'amazon-rows *amazon-cart-buffer*))))
       (amazon-touch! asin)
       (amazon--bar! *amazon-typing*)
       (amazon-log! (string-append asin " removed -- " text))
@@ -1164,7 +1164,7 @@
 
 (define-command "amazon-sort-delivery" "Order the listing by soonest delivery, or back to Amazon's order"
   (lambda ()
-    (let ((on (not (equal? (buffer-local *amazon-buffer* 'amazon-sort) 'delivery))))
+    (let ((on (not (equal? (buffer-local-value 'amazon-sort *amazon-buffer*) 'delivery))))
       (buffer-set-local! *amazon-buffer* 'amazon-sort (if on 'delivery 'relevance))
       (amazon--redraw! *amazon-buffer*)
       (message (if on "Soonest delivery first" "Amazon's order")))))
@@ -1505,10 +1505,10 @@
 (define (amazon--meta buf)
   ;; where you are in the search: the store, the page, the order, what is hidden
   (string-append amazon-host
-                 (let ((p (or (buffer-local buf 'amazon-page) 1)))
+                 (let ((p (or (buffer-local-value 'amazon-page buf) 1)))
                    (if (> p 1) (string-append " · page " (number->string p)) ""))
-                 (if (buffer-local buf 'amazon-more) "" " · last page")
-                 (if (equal? (buffer-local buf 'amazon-sort) 'delivery) " · soonest delivery first" "")
+                 (if (buffer-local-value 'amazon-more buf) "" " · last page")
+                 (if (equal? (buffer-local-value 'amazon-sort buf) 'delivery) " · soonest delivery first" "")
                  (let ((n (length (amazon-hidden-list))))
                    (cond ((= n 0) "")
                          ((amazon-showing-hidden?) (string-append " · showing " (number->string n) " hidden"))
@@ -1525,7 +1525,7 @@
 (define (amazon--list-head buf)
   ;; the search bar, then the shelf: what you searched, or the cart, and where you are in it
   (let* ((cart? (equal? buf *amazon-cart-buffer*))
-         (query (or (buffer-local *amazon-buffer* 'amazon-query) ""))
+         (query (or (buffer-local-value 'amazon-query *amazon-buffer*) ""))
          (n (length (site-app-rows buf))))
     (filter pair? (list (component 'amazon/search-bar (list 'query (or *amazon-typing* query) 'active? (and *amazon-typing* #t)
                                               'click "amazon:amazon-search" 'key "/"))
@@ -1664,7 +1664,7 @@
         'pages
         (list
           (amazon--section 'results "Results" "1"
-            (lambda () (amazon-page-url (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query) (amazon-page)))
+            (lambda () (amazon-page-url (or (buffer-local-value 'amazon-query *amazon-buffer*) amazon-default-query) (amazon-page)))
             #f "amazon-product-mode" *amazon-page-keys*
             (list (list 'label "" 'width 4 'field 'marks)
                   (list 'label "₹" 'width 9 'field 'pay)
@@ -1778,7 +1778,7 @@
   (let ((buf (amazon--section! 'results)))
     (buffer-set-local! buf 'amazon-query query)
     (let* ((hit (amazon--cached *amazon-searches* (amazon--search-key query page)))
-           (here? (lambda () (and (equal? (buffer-local buf 'amazon-query) query)
+           (here? (lambda () (and (equal? (buffer-local-value 'amazon-query buf) query)
                                   (equal? (amazon-page) page))))
            (fill! (lambda (rows next)
                     (buffer-set-local! buf 'amazon-page page)
@@ -1786,7 +1786,7 @@
                     (amazon--fill! buf rows)
                     ;; mark the rows the cart already holds, not just the ones this
                     ;; session put there. The cart is a tab read, so once in a while
-                    (let ((last (or (buffer-local buf 'amazon-cart-read) 0)))
+                    (let ((last (or (buffer-local-value 'amazon-cart-read buf) 0)))
                       (when (or first? (> (- (current-time) last) 300))
                         (buffer-set-local! buf 'amazon-cart-read (current-time))
                         (amazon-cart-sync!)))
@@ -1824,14 +1824,14 @@
 ;;;###autoload
 (define-command "amazon" "Open the Amazon app"
   (lambda ()
-    (amazon-open! (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query))))
+    (amazon-open! (or (buffer-local-value 'amazon-query *amazon-buffer*) amazon-default-query))))
 
 ;;;###autoload
 (define-command "amazon-search" "Search Amazon and fill the listing"
   (lambda ()
     ;; the prompt opens on the search you are in, and the bar over the list
     ;; follows what you type until you search or quit
-    (let ((now (or (buffer-local *amazon-buffer* 'amazon-query) "")))
+    (let ((now (or (buffer-local-value 'amazon-query *amazon-buffer*) "")))
       (amazon--bar! now)
       (minibuffer-read* "Amazon: " '()
         (list (list 'initial now)
@@ -1847,22 +1847,22 @@
 
 (define-command "amazon-refresh" "Read the search again"
   (lambda ()
-    (amazon-open-page! (or (buffer-local *amazon-buffer* 'amazon-query) amazon-default-query)
+    (amazon-open-page! (or (buffer-local-value 'amazon-query *amazon-buffer*) amazon-default-query)
                        (amazon-page) #f)))
 
-(define (amazon-page) (or (buffer-local *amazon-buffer* 'amazon-page) 1))
-(define (amazon-more?) (buffer-local *amazon-buffer* 'amazon-more))
+(define (amazon-page) (or (buffer-local-value 'amazon-page *amazon-buffer*) 1))
+(define (amazon-more?) (buffer-local-value 'amazon-more *amazon-buffer*))
 
 (define-command "amazon-next-page" "Read the next page of results"
   (lambda ()
-    (let ((query (buffer-local *amazon-buffer* 'amazon-query)))
+    (let ((query (buffer-local-value 'amazon-query *amazon-buffer*)))
       (cond ((not query) (message "Nothing searched yet"))
             ((not (amazon-more?)) (message "This is the last page"))
             (else (amazon-open-page! query (+ (amazon-page) 1) #f))))))
 
 (define-command "amazon-prev-page" "Read the page before this one"
   (lambda ()
-    (let ((query (buffer-local *amazon-buffer* 'amazon-query)))
+    (let ((query (buffer-local-value 'amazon-query *amazon-buffer*)))
       (cond ((not query) (message "Nothing searched yet"))
             ((<= (amazon-page) 1) (message "This is the first page"))
             (else (amazon-open-page! query (- (amazon-page) 1) #f))))))

@@ -347,7 +347,7 @@
 (define (webhooks-refresh!)
   (when (buffer-exists? *webhooks-buffer*) (list-refresh! *webhooks-buffer*))
   (for-each (lambda (b)
-              (let ((name (buffer-local b 'webhook-name)))
+              (let ((name (buffer-local-value 'webhook-name b)))
                 (when name (webhooks--draw-detail! b name))))
             (mode-group-buffers "webhooks-detail-mode")))
 
@@ -403,7 +403,7 @@
 (define (webhooks--request-row? r) (eq? (car r) 'request))
 
 (define (webhooks--page-rows buf)
-  (let* ((name (buffer-local buf 'webhook-name))
+  (let* ((name (buffer-local-value 'webhook-name buf))
          (hook (and name (webhook-get name))))
     (if (not hook)
         '()
@@ -454,12 +454,12 @@
            (list (list (format-time (plist-get (cadr r) 'at) "%H:%M") "dim")
                  ;; a request that names no source came from the endpoint's own sender
                  (list (nth 1 p) "webhooks-name")
-                 (list (if (equal? (nth 2 p) "") (or (buffer-local buf 'webhook-name) "") (nth 2 p)) "dim")
+                 (list (if (equal? (nth 2 p) "") (or (buffer-local-value 'webhook-name buf) "") (nth 2 p)) "dim")
                  (nth 3 p))))
         (else (list (list (car (cadr r)) "dim") (cadr (cadr r))))))
 
 (define (webhooks--page-meta buf)
-  (let* ((name (buffer-local buf 'webhook-name))
+  (let* ((name (buffer-local-value 'webhook-name buf))
          (hook (and name (webhook-get name))))
     (if (not hook)
         "this endpoint is gone"
@@ -479,7 +479,7 @@
     (buffer-set-read-only! buf #f)
     (buffer-set-text! buf (json-encode (plist-get e 'data) #t) #t)
     (with-current-buffer buf
-      (lambda () (unless (equal? (buffer-local buf 'mode-name) "json-mode") (set-mode! "json-mode"))))
+      (lambda () (unless (equal? (buffer-local-value 'mode-name buf) "json-mode") (set-mode! "json-mode"))))
     (buffer-set-local! buf 'webhooks-seq (plist-get e 'seq))
     (buffer-set-read-only! buf #t)
     (display-buffer-detail! buf page)))
@@ -499,9 +499,9 @@
 
 (define (webhooks--list)
   "the list at hand: this one, the one this page belongs to, else the first"
-  (if (equal? (buffer-local (current-buffer) 'mode-name) "webhooks-mode")
+  (if (equal? (buffer-local-value 'mode-name (current-buffer)) "webhooks-mode")
       (current-buffer)
-      (or (buffer-local (current-buffer) 'webhooks-list) *webhooks-buffer*)))
+      (or (buffer-local-value 'webhooks-list (current-buffer)) *webhooks-buffer*)))
 
 (define (webhooks-show-detail! name)
   "show the page of webhook NAME beside the list; each group's list keeps its own pages"
@@ -560,7 +560,7 @@
                      "server stopped, s starts it")))
 
 (define (webhooks--on-current fn)
-  (let ((name (or (buffer-local (current-buffer) 'webhook-name)
+  (let ((name (or (buffer-local-value 'webhook-name (current-buffer))
                   (let ((l (webhooks--list))) (and (buffer-exists? l) (list-current l))))))
     (if name (fn name) (message "no webhook on this line"))))
 
@@ -737,7 +737,7 @@
                                 ((webhooks--day-row? r) "")
                                 (else (cadr (cadr r)))))
     'preview (lambda (buf r) (when (webhooks--request-row? r) (webhooks--show-payload! buf (cadr r))))
-    'title (lambda (buf) (string-append "Webhook " (or (buffer-local buf 'webhook-name) "")))
+    'title (lambda (buf) (string-append "Webhook " (or (buffer-local-value 'webhook-name buf) "")))
     'meta webhooks--page-meta
     'noun "request"
     'no-marks #t

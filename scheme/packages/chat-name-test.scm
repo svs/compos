@@ -104,7 +104,7 @@
           (chat (test-buffer! "*fix the preset merge*" "")))
       (chat-set-group! chat id)
       (group-record-update! id 'primary-chat-id (chat-stable-id! chat))
-      (check-false! (buffer-local chat 'chat-derived-name)
+      (check-false! (buffer-local-value 'chat-derived-name chat)
                     "the legacy chat carries no derived name")
 
       (let ((moved (group-chat-derive-all!)))
@@ -140,7 +140,7 @@
       (check-false! (buffer-known? buf) "the old name is gone")
       (check-equal! (buffer-text "*zz-named-keep*") "one\ntwo\nthree\n" "the text came with it")
       (check-equal! (buffer-point "*zz-named-keep*") 4 "and the point")
-      (check-equal! (buffer-local "*zz-named-keep*" 'chat-presets) '(compos) "and the locals")
+      (check-equal! (buffer-local-value 'chat-presets "*zz-named-keep*") '(compos) "and the locals")
 
       ;; the undo history came with it
       (with-current-buffer "*zz-named-keep*" (lambda () (undo!)))
@@ -196,6 +196,6 @@
           (minibuffer-input! named)
           (run-command "minibuffer-confirm-input")
           (check-true! (buffer-known? named) "a typed answer is the new name")
-          (check-equal! (buffer-local named 'chat-title) named "and it is the chat's title")
+          (check-equal! (buffer-local-value 'chat-title named) named "and it is the chat's title")
           (check-equal! after 2 "the caller hears each answer")))
       (t--rn-kill! buf named))))

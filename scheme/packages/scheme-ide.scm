@@ -62,7 +62,7 @@
 ;; then the editor's own source, then the user's config
 (define (scheme-ide--sources)
   (let ((open (filter (lambda (b)
-                        (equal? (buffer-local b 'mode-name) "scheme-mode"))
+                        (equal? (buffer-local-value 'mode-name b) "scheme-mode"))
                       (buffer-list))))
     (append
       (map (lambda (b) (list 'buffer b)) open)
@@ -253,7 +253,7 @@
 
 (define (scheme-ide--check! buf)
   (when (and (buffer-exists? buf)
-             (equal? (buffer-local buf 'mode-name) "scheme-mode")
+             (equal? (buffer-local-value 'mode-name buf) "scheme-mode")
              (member "scheme" (ts-langs)))
     (overlay-set! buf 'scheme-ide
       (map (lambda (cap) (list (cadr cap) (caddr cap) "scheme-err"))
@@ -267,7 +267,7 @@
 
 (define (scheme-ide--mode-hook!)
     (let ((buf (current-buffer)))
-      (let ((cur (or (buffer-local buf 'capf-sources) '())))
+      (let ((cur (or (buffer-local-value 'capf-sources buf) '())))
         (unless (member scheme-ide--capf cur)
           (buffer-set-local! buf 'capf-sources (cons scheme-ide--capf cur))))
       (desktop-skip! buf 'capf-sources)

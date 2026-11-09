@@ -28,11 +28,11 @@
     (let ((path (string-append t--project-defaults-root "/one.scm")))
       (write-file! path "(display \"one\")\n")
       (visit path)
-      (check-equal! (buffer-local path 'llm-connector) "codex-app-server"
+      (check-equal! (buffer-local-value 'llm-connector path) "codex-app-server"
                     "the connector came from the project")
-      (check-equal! (buffer-local path 'llm-model) "zz-project-model"
+      (check-equal! (buffer-local-value 'llm-model path) "zz-project-model"
                     "the model came from the project")
-      (check-equal! (buffer-local path 'llm-effort) "high"
+      (check-equal! (buffer-local-value 'llm-effort path) "high"
                     "the effort came from the project")
       (buffer-kill! path))
     (t--project-defaults-reset!)))
@@ -51,7 +51,7 @@
       (switch-to-buffer! path)
       (auto-mode path)
       (run-hooks 'find-file-hook)
-      (check-equal! (buffer-local path 'llm-model) "zz-buffer-model"
+      (check-equal! (buffer-local-value 'llm-model path) "zz-buffer-model"
                     "the explicit buffer model remains")
       (buffer-kill! path))
     (t--project-defaults-reset!)))
@@ -70,17 +70,17 @@
       (write-file! second "two\n")
       (write-file! chosen "chosen\n")
       (visit first)
-      (check-equal! (buffer-local first 'llm-model) "model-a"
+      (check-equal! (buffer-local-value 'llm-model first) "model-a"
                     "the first load applies model A")
       (visit chosen)
       (buffer-set-local! chosen 'llm-model "chosen-model")
       (write-file! config "(project-default! 'llm-model \"model-b\")\n")
       (visit second)
-      (check-equal! (buffer-local first 'llm-model) "model-b"
+      (check-equal! (buffer-local-value 'llm-model first) "model-b"
                     "the old buffer updates to model B")
-      (check-equal! (buffer-local second 'llm-model) "model-b"
+      (check-equal! (buffer-local-value 'llm-model second) "model-b"
                     "the new buffer replaces its cached model A")
-      (check-equal! (buffer-local chosen 'llm-model) "chosen-model"
+      (check-equal! (buffer-local-value 'llm-model chosen) "chosen-model"
                     "the changed buffer keeps its explicit model")
       (for-each buffer-kill! (list first second chosen)))
     (t--project-defaults-reset!)))
@@ -114,7 +114,7 @@
       (visit path)
       (delete-file! config)
       (project-defaults-load! t--project-defaults-root)
-      (check-false! (buffer-local path 'llm-model)
+      (check-false! (buffer-local-value 'llm-model path)
                     "the removed inherited model clears")
       (buffer-kill! path))
     (t--project-defaults-reset!)))
@@ -135,15 +135,15 @@
       (switch-to-buffer! owner)
       (buffer-create chat)
       (with-current-buffer chat (lambda () (set-mode! "chat-mode")))
-      (check-equal! (buffer-local chat 'agent-connector) "api"
+      (check-equal! (buffer-local-value 'agent-connector chat) "api"
                     "the chat connector uses the LLM default")
-      (check-equal! (buffer-local chat 'agent-model) "zz-chat-model"
+      (check-equal! (buffer-local-value 'agent-model chat) "zz-chat-model"
                     "the chat model uses the LLM default")
-      (check-equal! (buffer-local chat 'agent-effort) "medium"
+      (check-equal! (buffer-local-value 'agent-effort chat) "medium"
                     "the chat effort uses the LLM default")
-      (check-false! (buffer-local chat 'llm-model)
+      (check-false! (buffer-local-value 'llm-model chat)
                     "the chat does not retain an unclassified LLM local")
-      (check-equal! (buffer-local chat 'project-config-ran-in) chat
+      (check-equal! (buffer-local-value 'project-config-ran-in chat) chat
                     "arbitrary config ran with the new chat current")
       (buffer-kill! chat)
       (buffer-kill! owner))
@@ -163,7 +163,7 @@
       (write-file! path "arbitrary\n")
       (visit path)
       (check-equal! *t-project-config-runs* 1 "the first visit ran the config")
-      (check-equal! (buffer-local path 'project-config-ran-in) path
+      (check-equal! (buffer-local-value 'project-config-ran-in path) path
                     "the visited file was current during evaluation")
       (visit path)
       (check-equal! *t-project-config-runs* 2 "revisiting ran the config again")

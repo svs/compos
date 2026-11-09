@@ -93,7 +93,7 @@
           ;; the page buffer follows its file, so a reload draws the file
           ;; as it is now; the open page takes the change in place
           (html-edit--render! app source)
-          (unless (equal? (buffer-local app 'html-edit-expect) hash)
+          (unless (equal? (buffer-local-value 'html-edit-expect app) hash)
             (app-post! app (list 'changed hash)))))))
 
 (define (html-edit--unwatch! source)
@@ -170,7 +170,7 @@
     (html-edit--reply 200 (list 'src (clipboard-image-link path full)))))
 
 (define (html-edit--app-request app method body)
-  (let ((source (and (buffer-exists? app) (buffer-local app 'html-edit-source))))
+  (let ((source (and (buffer-exists? app) (buffer-local-value 'html-edit-source app))))
     (and source
          (cond
            ((not (buffer-exists? source))
@@ -202,7 +202,7 @@
     (buffer-set-local! app 'app-keep-on-save #t)
     (buffer-set-local! app 'app-directory
                        (list (car (path-split (buffer-path source))) (html-edit--directory)))
-    (unless (equal? (buffer-local app 'mode-name) "html-edit-mode")
+    (unless (equal? (buffer-local-value 'mode-name app) "html-edit-mode")
       (with-current-buffer app (lambda () (set-mode! "html-edit-mode"))))
     (html-edit--render! app source)
     (buffer-set-local! app 'preview-renderer "html")
@@ -214,7 +214,7 @@
 ;; a restored page lost its watch on the source
 (define-mode "html-edit-mode"
   (lambda ()
-    (let ((source (buffer-local (current-buffer) 'html-edit-source)))
+    (let ((source (buffer-local-value 'html-edit-source (current-buffer))))
       (when (and source (buffer-exists? source)) (html-edit--watch! source)))))
 ;; the page keeps the keyboard: a which-key panel over it would only refuse it focus
 (which-key-off-in-mode! "html-edit-mode")

@@ -106,7 +106,7 @@
 ;;; --- listing state and authenticated actions -----------------------------
 
 (define (substack--rows buf)
-  (or (buffer-local buf 'substack-rows) (list-entries buf) '()))
+  (or (buffer-local-value 'substack-rows buf) (list-entries buf) '()))
 (define (substack--set-rows! rows)
   (buffer-set-local! *substack-buffer* 'substack-rows rows)
   (buffer-set-local! *substack-buffer* 'list-source-entries rows)
@@ -185,7 +185,7 @@
                (substack--rows *substack-buffer*)))
         row2)))
 (define (substack--fetch-posts! buf)
-  (let ((row (buffer-local buf 'substack-publication)))
+  (let ((row (buffer-local-value 'substack-publication buf)))
     (when row
       (message (string-append "Reading " (plist-get row 'name) "..."))
       (*substack-json-fetch* (substack--archive-url row)
@@ -214,7 +214,7 @@
       (unless (buffer-derived-mode? buf "substack-detail-mode")
         (with-current-buffer buf
           (lambda () (set-mode! "substack-detail-mode"))))
-      (when (null? (or (buffer-local buf 'substack-posts) '()))
+      (when (null? (or (buffer-local-value 'substack-posts buf) '()))
         (substack--fetch-posts! buf))
       (buffer-set-local! *substack-buffer* 'substack-current-detail buf)
       (display-buffer-detail! buf *substack-buffer*)
@@ -257,8 +257,8 @@
   (preview-heal! buf)
   buf)
 (define (substack--fetch-reader! buf)
-  (let ((publication (buffer-local buf 'substack-publication))
-        (post (buffer-local buf 'substack-post)))
+  (let ((publication (buffer-local-value 'substack-publication buf))
+        (post (buffer-local-value 'substack-post buf)))
     (when (and publication post)
       (*substack-json-fetch* (substack--post-api-url publication post)
         (lambda (full)
@@ -273,7 +273,7 @@
 (define (substack-show-reader! owner post)
   "Show POST in one reader buffer beside publication OWNER."
   (when post
-    (let* ((publication (buffer-local owner 'substack-publication))
+    (let* ((publication (buffer-local-value 'substack-publication owner))
            (buf (substack--reader-buffer post)))
       (unless (buffer-exists? buf) (buffer-create buf))
       (buffer-set-local! buf 'substack-publication publication)
@@ -294,7 +294,7 @@
 ;;; --- shared commands -----------------------------------------------------
 
 (effects! '(write external display))
-(define (substack--mode) (buffer-local (current-buffer) 'mode-name))
+(define (substack--mode) (buffer-local-value 'mode-name (current-buffer)))
 ;;;###autoload
 (define-command "substack-open" "Open the next Substack view"
   (lambda ()
@@ -319,8 +319,8 @@
            (publication
              (if (equal? (substack--mode) "substack-mode")
                  (list-current *substack-buffer*)
-                 (buffer-local buf 'substack-publication)))
-           (post (buffer-local buf 'substack-post))
+                 (buffer-local-value 'substack-publication buf)))
+           (post (buffer-local-value 'substack-post buf))
            (url (and publication
                      (if post
                          (substack--post-url publication post)
@@ -375,22 +375,22 @@
     'doc
       "One publication and its recent posts. Moving previews a post. RET reads it. g refreshes. o opens the publication. q quits."
     'transient #f
-    'rows (lambda (buf) (or (buffer-local buf 'substack-posts) '()))
+    'rows (lambda (buf) (or (buffer-local-value 'substack-posts buf) '()))
     'key (lambda (buf post) (plist-get post 'id))
     'columns (lambda (buf)
       (list (list "date" 10) (list "post" #f) (list "audience" 12)))
     'cells substack--post-cells
     'title (lambda (buf)
-      (let ((row (buffer-local buf 'substack-publication)))
+      (let ((row (buffer-local-value 'substack-publication buf)))
         (if row (plist-get row 'name) "Substack")))
     'meta (lambda (buf)
-      (let ((row (buffer-local buf 'substack-publication)))
+      (let ((row (buffer-local-value 'substack-publication buf)))
         (if row
             (string-append (plist-get row 'author) " · "
                            (plist-get row 'url))
             "")))
     'total (lambda (buf)
-      (length (or (buffer-local buf 'substack-posts) '())))
+      (length (or (buffer-local-value 'substack-posts buf) '())))
     'footer (lambda (buf)
       '(("RET" "read") ("o" "browser") ("g" "refresh") ("q" "quit")))
     'preview (lambda (buf post) (substack-show-reader! buf post))
@@ -410,11 +410,11 @@
 
 (detail-name! "substack-detail-mode"
   (lambda (buf)
-    (let ((row (buffer-local buf 'substack-publication)))
+    (let ((row (buffer-local-value 'substack-publication buf)))
       (string-append "*" (if row (plist-get row 'name) "Substack") "*"))))
 (detail-name! "substack-reader-mode"
   (lambda (buf)
-    (let ((post (buffer-local buf 'substack-post)))
+    (let ((post (buffer-local-value 'substack-post buf)))
       (string-append "*" (if post (plist-get post 'title) "Substack post") "*"))))
 
 (mode-icon! "substack-mode" "")
@@ -424,9 +424,9 @@
 ;;; --- app entry and layout ------------------------------------------------
 
 (define (substack-current-detail)
-  (buffer-local *substack-buffer* 'substack-current-detail))
+  (buffer-local-value 'substack-current-detail *substack-buffer*))
 (define (substack-current-reader)
-  (buffer-local *substack-buffer* 'substack-current-reader))
+  (buffer-local-value 'substack-current-reader *substack-buffer*))
 (define (substack-layout!)
   (let* ((id (frame-group))
          (chat (and id (group-chat id)))

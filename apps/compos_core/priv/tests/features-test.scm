@@ -275,7 +275,7 @@
       (buffer-create buf)
       (with-current-buffer buf (lambda () (set-mode! "zz-ft-auto-mode")))
       (check-true! (featurep 'zz-ft-modes) "entering the mode loaded the file")
-      (check-true! (buffer-local buf 'zz-ft-set-up) "and the mode setup ran")
+      (check-true! (buffer-local-value 'zz-ft-set-up buf) "and the mode setup ran")
       (check-false! (autoload-file "zz-ft-auto-mode") "the autoload is spent")
       (buffer-kill! buf))
     (mode-forget! "zz-ft-auto-mode")

@@ -32,9 +32,9 @@
   (lambda ()
     (let ((buf (t--us-chat! #t)))
       (chat-drop-stale-turn! buf)
-      (check-false! (buffer-local buf 'chat-turn-active) "the turn flag is down")
-      (check-false! (buffer-local buf 'chat-activity) "the activity row is gone")
-      (check-equal! (nth 6 (car (buffer-local buf 'agent-blocks))) "failed"
+      (check-false! (buffer-local-value 'chat-turn-active buf) "the turn flag is down")
+      (check-false! (buffer-local-value 'chat-activity buf) "the activity row is gone")
+      (check-equal! (nth 6 (car (buffer-local-value 'agent-blocks buf))) "failed"
                     "the running tool card is finalized")
       (buffer-kill! buf))))
 
@@ -52,9 +52,9 @@
     (let ((buf (t--us-chat! #t)))
       (check-false! (chat-live-runtime? buf) "nothing is running this turn")
       (chat-sweep-runtime-locals! buf)
-      (check-false! (buffer-local buf 'chat-turn-active)
+      (check-false! (buffer-local-value 'chat-turn-active buf)
                     "the turn flag is down: no status event can ever arrive")
-      (check-false! (buffer-local buf 'chat-activity)
+      (check-false! (buffer-local-value 'chat-activity buf)
                     "and the activity row goes with it")
       (buffer-kill! buf))))
 
@@ -63,8 +63,8 @@
   (lambda ()
     (let ((buf (t--us-chat! #t)))
       (with-current-buffer buf (lambda () (run-command "chat-unstick")))
-      (check-false! (buffer-local buf 'chat-turn-active) "the turn flag is down")
-      (check-false! (buffer-local buf 'chat-activity) "the activity row is gone")
+      (check-false! (buffer-local-value 'chat-turn-active buf) "the turn flag is down")
+      (check-false! (buffer-local-value 'chat-activity buf) "the activity row is gone")
       (buffer-kill! buf))))
 
 (deftest 'chat-unstick-leaves-a-chat-with-no-turn-alone
@@ -72,8 +72,8 @@
   (lambda ()
     (let ((buf (t--us-chat! #f)))
       (with-current-buffer buf (lambda () (run-command "chat-unstick")))
-      (check-false! (buffer-local buf 'chat-turn-active) "still no turn")
-      (check-equal! (nth 6 (car (buffer-local buf 'agent-blocks))) "running"
+      (check-false! (buffer-local-value 'chat-turn-active buf) "still no turn")
+      (check-equal! (nth 6 (car (buffer-local-value 'agent-blocks buf))) "running"
                     "the tool card is untouched")
       (buffer-kill! buf))))
 
@@ -117,7 +117,7 @@
               (list 'agent-send-msg! (lambda (slug text) (set! sent (cons (list slug text) sent)))))
         (lambda ()
           (chat-sweep-runtime-locals! buf)
-          (check-false! (buffer-local buf 'chat-turn-active) "the sweep lowered the flag")
+          (check-false! (buffer-local-value 'chat-turn-active buf) "the sweep lowered the flag")
           (chat-recover-interrupted! buf)))
       (check-equal! sent (list (list "zz-slug" *chat-restart-message*))
                     "the recovery sends the restart message once")

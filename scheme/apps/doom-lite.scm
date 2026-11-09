@@ -349,11 +349,11 @@
 
 (define (doom-lite--sprite-pass buf px py dx dy plx ply w h zbuf)
   (let* ((monsters (filter (lambda (m) (doom-lite--get m 'alive))
-                           (or (buffer-local buf 'doom-lite-monsters) '())))
+                           (or (buffer-local-value 'doom-lite-monsters buf) '())))
          (items (filter (lambda (i) (doom-lite--get i 'alive))
-                        (or (buffer-local buf 'doom-lite-items) '())))
-         (hurt-until (or (buffer-local buf 'doom-lite-hurt-until) 0))
-         (tick (or (buffer-local buf 'doom-lite-tick) 0))
+                        (or (buffer-local-value 'doom-lite-items buf) '())))
+         (hurt-until (or (buffer-local-value 'doom-lite-hurt-until buf) 0))
+         (tick (or (buffer-local-value 'doom-lite-tick buf) 0))
          (pairs
           (append
             (map (lambda (m)
@@ -396,11 +396,11 @@
 ;;; --- the head-up display ------------------------------------------------------
 
 (define (doom-lite--hud buf)
-  (let* ((health (or (buffer-local buf 'doom-lite-health) 0))
-         (ammo (or (buffer-local buf 'doom-lite-ammo) 0))
-         (kills (or (buffer-local buf 'doom-lite-kills) 0))
-         (total (length (or (buffer-local buf 'doom-lite-monsters) '())))
-         (msg (or (buffer-local buf 'doom-lite-message) "")))
+  (let* ((health (or (buffer-local-value 'doom-lite-health buf) 0))
+         (ammo (or (buffer-local-value 'doom-lite-ammo buf) 0))
+         (kills (or (buffer-local-value 'doom-lite-kills buf) 0))
+         (total (length (or (buffer-local-value 'doom-lite-monsters buf) '())))
+         (msg (or (buffer-local-value 'doom-lite-message buf) "")))
     (doom-lite--div "doom-lite-hud"
       (doom-lite--txt "doom-lite-label" "health")
       (doom-lite--txt (if (< health 34) "doom-lite-crit" "doom-lite-ok") (number->string health))
@@ -417,10 +417,10 @@
 (define (doom-lite--blocks buf)
   (let* ((w (max 24 doom-lite-columns))
          (h *doom-lite-view-h*)
-         (px (or (buffer-local buf 'doom-lite-px) 0))
-         (py (or (buffer-local buf 'doom-lite-py) 0))
-         (ang (or (buffer-local buf 'doom-lite-angle) 0))
-         (tick (or (buffer-local buf 'doom-lite-tick) 0))
+         (px (or (buffer-local-value 'doom-lite-px buf) 0))
+         (py (or (buffer-local-value 'doom-lite-py buf) 0))
+         (ang (or (buffer-local-value 'doom-lite-angle buf) 0))
+         (tick (or (buffer-local-value 'doom-lite-tick buf) 0))
          (dx (doom-lite--cos ang))
          (dy (doom-lite--sin ang))
          (plx (quotient (* (- 0 dy) 66) 100))
@@ -428,9 +428,9 @@
          (walls (doom-lite--wall-pass px py dx dy plx ply w h))
          (zbuf (doom-lite--get walls 'z))
          (sprites (doom-lite--sprite-pass buf px py dx dy plx ply w h zbuf))
-         (firing (> (or (buffer-local buf 'doom-lite-fire-until) 0) tick))
-         (pain (> (or (buffer-local buf 'doom-lite-pain-until) 0) tick))
-         (over (buffer-local buf 'doom-lite-over)))
+         (firing (> (or (buffer-local-value 'doom-lite-fire-until buf) 0) tick))
+         (pain (> (or (buffer-local-value 'doom-lite-pain-until buf) 0) tick))
+         (over (buffer-local-value 'doom-lite-over buf)))
     (list (doom-lite--div "doom-lite-root"
             (doom-lite--div "doom-lite-view"
               (list 'tag "svg" 'class "doom-lite-svg"
@@ -462,14 +462,14 @@
 ;; an 11 by 11 map around the player, so a reader without the blocks view
 ;; still sees where everything stands
 (define (doom-lite--minimap buf)
-  (let* ((px (or (buffer-local buf 'doom-lite-px) 0))
-         (py (or (buffer-local buf 'doom-lite-py) 0))
+  (let* ((px (or (buffer-local-value 'doom-lite-px buf) 0))
+         (py (or (buffer-local-value 'doom-lite-py buf) 0))
          (cx (quotient px *doom-lite-fp*))
          (cy (quotient py *doom-lite-fp*))
          (monsters (filter (lambda (m) (doom-lite--get m 'alive))
-                           (or (buffer-local buf 'doom-lite-monsters) '())))
+                           (or (buffer-local-value 'doom-lite-monsters buf) '())))
          (items (filter (lambda (i) (doom-lite--get i 'alive))
-                        (or (buffer-local buf 'doom-lite-items) '())))
+                        (or (buffer-local-value 'doom-lite-items buf) '())))
          (at? (lambda (xs x y)
                 (let loop ((xs xs))
                   (cond ((null? xs) #f)
@@ -496,13 +496,13 @@
                         out)))))))
 
 (define (doom-lite--text buf)
-  (let* ((health (or (buffer-local buf 'doom-lite-health) 0))
-         (ammo (or (buffer-local buf 'doom-lite-ammo) 0))
-         (kills (or (buffer-local buf 'doom-lite-kills) 0))
-         (total (length (or (buffer-local buf 'doom-lite-monsters) '())))
-         (ang (or (buffer-local buf 'doom-lite-angle) 0))
-         (over (buffer-local buf 'doom-lite-over))
-         (msg (or (buffer-local buf 'doom-lite-message) "")))
+  (let* ((health (or (buffer-local-value 'doom-lite-health buf) 0))
+         (ammo (or (buffer-local-value 'doom-lite-ammo buf) 0))
+         (kills (or (buffer-local-value 'doom-lite-kills buf) 0))
+         (total (length (or (buffer-local-value 'doom-lite-monsters buf) '())))
+         (ang (or (buffer-local-value 'doom-lite-angle buf) 0))
+         (over (buffer-local-value 'doom-lite-over buf))
+         (msg (or (buffer-local-value 'doom-lite-message buf) "")))
     (string-join
       (append
         (list (string-append "DOOM LITE   health " (number->string health)
@@ -525,7 +525,7 @@
 ;; The text changes far less often than the frame, so compare it first. A
 ;; buffer replacement that changes nothing still costs a revision.
 (define (doom-lite--replace-text! buf text)
-  (unless (equal? (buffer-local buf 'doom-lite-text) text)
+  (unless (equal? (buffer-local-value 'doom-lite-text buf) text)
     (buffer-set-local! buf 'doom-lite-text text)
     (buffer-replace-range! buf 0 (buffer-size buf) text)))
 
@@ -566,13 +566,13 @@
 (define (doom-lite--playing? buf)
   (and (buffer-exists? buf)
        (buffer-derived-mode? buf "doom-lite-mode")
-       (not (buffer-local buf 'doom-lite-over))))
+       (not (buffer-local-value 'doom-lite-over buf))))
 
 ;; Move along X and along Y one at a time, so a player who walks into a
 ;; corner slides along the wall instead of stopping dead.
 (define (doom-lite--move! buf mx my)
-  (let* ((px (buffer-local buf 'doom-lite-px))
-         (py (buffer-local buf 'doom-lite-py))
+  (let* ((px (buffer-local-value 'doom-lite-px buf))
+         (py (buffer-local-value 'doom-lite-py buf))
          (nx (if (doom-lite--open-fp? (+ px mx) py) (+ px mx) px))
          (ny (if (doom-lite--open-fp? nx (+ py my)) (+ py my) py)))
     (buffer-set-locals! buf (list 'doom-lite-px nx 'doom-lite-py ny))
@@ -580,7 +580,7 @@
 
 (define (doom-lite--walk! buf sign)
   (when (doom-lite--playing? buf)
-    (let* ((ang (buffer-local buf 'doom-lite-angle))
+    (let* ((ang (buffer-local-value 'doom-lite-angle buf))
            (step (* sign doom-lite-move-step)))
       (doom-lite--move! buf
                    (doom-lite--fpm (doom-lite--cos ang) step)
@@ -589,7 +589,7 @@
 
 (define (doom-lite--strafe! buf sign)
   (when (doom-lite--playing? buf)
-    (let* ((ang (buffer-local buf 'doom-lite-angle))
+    (let* ((ang (buffer-local-value 'doom-lite-angle buf))
            (step (* sign doom-lite-move-step)))
       (doom-lite--move! buf
                    (doom-lite--fpm (doom-lite--cos (+ ang 64)) step)
@@ -599,7 +599,7 @@
 (define (doom-lite--turn! buf sign)
   (when (doom-lite--playing? buf)
     (buffer-set-local! buf 'doom-lite-angle
-                       (modulo (+ (buffer-local buf 'doom-lite-angle)
+                       (modulo (+ (buffer-local-value 'doom-lite-angle buf)
                                   (* sign doom-lite-turn-step))
                                256))
     (doom-lite--render! buf)))
@@ -610,8 +610,8 @@
     (+ (* dx dx) (* dy dy))))
 
 (define (doom-lite--pick-up! buf)
-  (let* ((px (buffer-local buf 'doom-lite-px))
-         (py (buffer-local buf 'doom-lite-py))
+  (let* ((px (buffer-local-value 'doom-lite-px buf))
+         (py (buffer-local-value 'doom-lite-py buf))
          (near (quotient (* *doom-lite-fp* *doom-lite-fp*) 2))
          (taken '()))
     (buffer-set-local! buf 'doom-lite-items
@@ -621,15 +621,15 @@
                  (begin (set! taken (cons (doom-lite--get i 'kind "ammo") taken))
                         (doom-lite--put i 'alive #f))
                  i))
-           (or (buffer-local buf 'doom-lite-items) '())))
+           (or (buffer-local-value 'doom-lite-items buf) '())))
     (for-each
       (lambda (kind)
         (if (equal? kind "health")
             (begin (buffer-set-local! buf 'doom-lite-health
-                                      (min 100 (+ (buffer-local buf 'doom-lite-health) 25)))
+                                      (min 100 (+ (buffer-local-value 'doom-lite-health buf) 25)))
                    (buffer-set-local! buf 'doom-lite-message "you took a medikit"))
             (begin (buffer-set-local! buf 'doom-lite-ammo
-                                      (+ (buffer-local buf 'doom-lite-ammo) 25))
+                                      (+ (buffer-local-value 'doom-lite-ammo buf) 25))
                    (buffer-set-local! buf 'doom-lite-message "you took a shell box"))))
       taken)))
 
@@ -640,16 +640,16 @@
 (define (doom-lite--target buf)
   (let* ((w (max 24 doom-lite-columns))
          (h *doom-lite-view-h*)
-         (px (buffer-local buf 'doom-lite-px))
-         (py (buffer-local buf 'doom-lite-py))
-         (ang (buffer-local buf 'doom-lite-angle))
+         (px (buffer-local-value 'doom-lite-px buf))
+         (py (buffer-local-value 'doom-lite-py buf))
+         (ang (buffer-local-value 'doom-lite-angle buf))
          (dx (doom-lite--cos ang))
          (dy (doom-lite--sin ang))
          (plx (quotient (* (- 0 dy) 66) 100))
          (ply (quotient (* dx 66) 100))
          (wall (nth 0 (doom-lite--cast px py dx dy)))
          (mid (quotient w 2)))
-    (let loop ((ms (or (buffer-local buf 'doom-lite-monsters) '()))
+    (let loop ((ms (or (buffer-local-value 'doom-lite-monsters buf) '()))
                (i 0) (best #f) (best-ty 0))
       (if (null? ms)
           best
@@ -678,7 +678,7 @@
 (define (doom-lite--damage-monster! buf index amount)
   (let ((kills 0))
     (buffer-set-local! buf 'doom-lite-monsters
-      (let loop ((ms (or (buffer-local buf 'doom-lite-monsters) '())) (i 0) (out '()))
+      (let loop ((ms (or (buffer-local-value 'doom-lite-monsters buf) '())) (i 0) (out '()))
         (cond ((null? ms) (reverse out))
               ((= i index)
                (let* ((m (car ms))
@@ -690,17 +690,17 @@
                                (doom-lite--put
                                  (doom-lite--put m 'hp (max 0 hp))
                                  'alive (not dead))
-                               'hurt (+ (or (buffer-local buf 'doom-lite-tick) 0) 2))
+                               'hurt (+ (or (buffer-local-value 'doom-lite-tick buf) 0) 2))
                              out))))
               (else (loop (cdr ms) (+ i 1) (cons (car ms) out))))))
     (when (= kills 1)
-      (buffer-set-local! buf 'doom-lite-kills (+ (buffer-local buf 'doom-lite-kills) 1)))
+      (buffer-set-local! buf 'doom-lite-kills (+ (buffer-local-value 'doom-lite-kills buf) 1)))
     kills))
 
 (define (doom-lite--fire! buf)
   (when (doom-lite--playing? buf)
-    (let ((ammo (buffer-local buf 'doom-lite-ammo))
-          (tick (or (buffer-local buf 'doom-lite-tick) 0)))
+    (let ((ammo (buffer-local-value 'doom-lite-ammo buf))
+          (tick (or (buffer-local-value 'doom-lite-tick buf) 0)))
       (if (<= ammo 0)
           (buffer-set-local! buf 'doom-lite-message "out of shells")
           (let ((target (doom-lite--target buf)))
@@ -715,10 +715,10 @@
     (doom-lite--render! buf)))
 
 (define (doom-lite--check-over! buf)
-  (cond ((<= (buffer-local buf 'doom-lite-health) 0)
+  (cond ((<= (buffer-local-value 'doom-lite-health buf) 0)
          (buffer-set-locals! buf (list 'doom-lite-over "died" 'doom-lite-health 0)))
         ((null? (filter (lambda (m) (doom-lite--get m 'alive))
-                        (or (buffer-local buf 'doom-lite-monsters) '())))
+                        (or (buffer-local-value 'doom-lite-monsters buf) '())))
          (buffer-set-local! buf 'doom-lite-over "won"))))
 
 ;;; --- the monsters -------------------------------------------------------------
@@ -726,9 +726,9 @@
 ;; A monster walks toward the player when the player is inside twelve
 ;; cells, and bites when it stands within one cell.
 (define (doom-lite--monsters-move! buf)
-  (let* ((px (buffer-local buf 'doom-lite-px))
-         (py (buffer-local buf 'doom-lite-py))
-         (tick (buffer-local buf 'doom-lite-tick))
+  (let* ((px (buffer-local-value 'doom-lite-px buf))
+         (py (buffer-local-value 'doom-lite-py buf))
+         (tick (buffer-local-value 'doom-lite-tick buf))
          (bite 0)
          (step 48)
          (sight (* 12 *doom-lite-fp*)))
@@ -756,10 +756,10 @@
                               (nx (if (doom-lite--open-fp? (+ mx sx) my) (+ mx sx) mx))
                               (ny (if (doom-lite--open-fp? nx (+ my sy)) (+ my sy) my)))
                          (doom-lite--put (doom-lite--put m 'x nx) 'y ny)))))))
-           (or (buffer-local buf 'doom-lite-monsters) '())))
+           (or (buffer-local-value 'doom-lite-monsters buf) '())))
     (when (> bite 0)
       (buffer-set-locals! buf
-        (list 'doom-lite-health (max 0 (- (buffer-local buf 'doom-lite-health) bite))
+        (list 'doom-lite-health (max 0 (- (buffer-local-value 'doom-lite-health buf) bite))
               'doom-lite-pain-until (+ tick 2)
               'doom-lite-message "a monster bit you"))
       (doom-lite--check-over! buf))))
@@ -771,9 +771,9 @@
 
 (define (doom-lite--tick buf)
   (when (and (buffer-exists? buf) (buffer-derived-mode? buf "doom-lite-mode"))
-    (if (and (window-showing buf) (not (buffer-local buf 'doom-lite-over)))
+    (if (and (window-showing buf) (not (buffer-local-value 'doom-lite-over buf)))
         (begin
-          (buffer-set-local! buf 'doom-lite-tick (+ (or (buffer-local buf 'doom-lite-tick) 0) 1))
+          (buffer-set-local! buf 'doom-lite-tick (+ (or (buffer-local-value 'doom-lite-tick buf) 0) 1))
           (doom-lite--monsters-move! buf)
           (doom-lite--render! buf)
           (doom-lite--arm! buf doom-lite-tick-ms))
@@ -787,7 +787,7 @@
   (buffer-set-read-only! buf #t)
   (buffer-set-local! buf 'render-mode "blocks")
   (for-each (lambda (k) (desktop-skip! buf k)) *doom-lite-runtime-locals*)
-  (unless (buffer-local buf 'doom-lite-px) (doom-lite--new-game! buf))
+  (unless (buffer-local-value 'doom-lite-px buf) (doom-lite--new-game! buf))
   (doom-lite--render! buf)
   (doom-lite--arm! buf doom-lite-tick-ms))
 

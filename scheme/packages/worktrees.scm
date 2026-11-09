@@ -92,7 +92,7 @@
 ;; Git remains the source of truth. The reminder therefore survives reloads
 ;; without another persistent buffer local.
 (define (workspace--buffers workspace)
-  (filter (lambda (b) (equal? (buffer-local b 'workspace-root) workspace))
+  (filter (lambda (b) (equal? (buffer-local-value 'workspace-root b) workspace))
           (buffer-list)))
 
 (define (workspace--unsaved workspace)
@@ -108,31 +108,31 @@
 ;; distinguishable from a workspace that has never chosen anything.
 (define (workspace--llm-defaults-from buf)
   (let ((chat? (or (chat-buffer? buf)
-                   (equal? (buffer-local buf 'mode-name) "chat-mode"))))
+                   (equal? (buffer-local-value 'mode-name buf) "chat-mode"))))
     (list
-      'connector (or (buffer-local buf (if chat? 'agent-connector 'llm-connector))
+      'connector (or (buffer-local-value (if chat? 'agent-connector 'llm-connector) buf)
                      (if chat? *default-connector* "codex-app-server"))
-      'model (buffer-local buf (if chat? 'agent-model 'llm-model))
-      'effort (buffer-local buf (if chat? 'agent-effort 'llm-effort))
-      'presets (or (buffer-local buf 'chat-presets) '())
+      'model (buffer-local-value (if chat? 'agent-model 'llm-model) buf)
+      'effort (buffer-local-value (if chat? 'agent-effort 'llm-effort) buf)
+      'presets (or (buffer-local-value 'chat-presets buf) '())
       'permission-mode
-      (or (buffer-local buf 'chat-permission-mode) *permission-default-mode*))))
+      (or (buffer-local-value 'chat-permission-mode buf) *permission-default-mode*))))
 
 (define (workspace--llm-defaults workspace)
   (let ((sources
           (filter (lambda (b)
-                    (and (equal? (buffer-local b 'workspace-root) workspace)
-                         (pair? (buffer-local b 'workspace-llm-defaults))))
+                    (and (equal? (buffer-local-value 'workspace-root b) workspace)
+                         (pair? (buffer-local-value 'workspace-llm-defaults b))))
                   (buffer-list-mru))))
-    (and (pair? sources) (buffer-local (car sources) 'workspace-llm-defaults))))
+    (and (pair? sources) (buffer-local-value 'workspace-llm-defaults (car sources)))))
 
 (define (workspace-llm-defaults-note! buf)
-  (let ((workspace (buffer-local buf 'workspace-root)))
+  (let ((workspace (buffer-local-value 'workspace-root buf)))
     (when workspace
       (let ((defaults (workspace--llm-defaults-from buf)))
         (for-each
           (lambda (b)
-            (when (equal? (buffer-local b 'workspace-root) workspace)
+            (when (equal? (buffer-local-value 'workspace-root b) workspace)
               (buffer-set-local! b 'workspace-llm-defaults defaults)))
           (buffer-list))
         defaults))))
@@ -149,9 +149,9 @@
   chat)
 
 (define (workspace--finish-state buf)
-  (let ((workspace (buffer-local buf 'workspace-root))
-        (project (buffer-local buf 'workspace-project-root))
-        (id (buffer-local buf 'workspace-id)))
+  (let ((workspace (buffer-local-value 'workspace-root buf))
+        (project (buffer-local-value 'workspace-project-root buf))
+        (id (buffer-local-value 'workspace-id buf)))
     (if (and workspace project id (file-directory? workspace))
         (let* ((rows (worktree-list project))
                (base (or (and (pair? rows) (plist-get (car rows) 'branch)) "HEAD"))
@@ -167,8 +167,8 @@
         #f)))
 
 (define (worktree--class-add! buf name)
-  (let ((classes (if (buffer-local buf 'window-class)
-                     (string-split (buffer-local buf 'window-class) " ")
+  (let ((classes (if (buffer-local-value 'window-class buf)
+                     (string-split (buffer-local-value 'window-class buf) " ")
                      '())))
     (unless (member name classes)
       (buffer-set-local! buf 'window-class
@@ -177,14 +177,14 @@
 (define (worktree--class-remove! buf name)
   (let ((classes
           (filter (lambda (c) (not (equal? c name)))
-                  (if (buffer-local buf 'window-class)
-                      (string-split (buffer-local buf 'window-class) " ")
+                  (if (buffer-local-value 'window-class buf)
+                      (string-split (buffer-local-value 'window-class buf) " ")
                       '()))))
     (buffer-set-local! buf 'window-class
       (if (null? classes) #f (string-join classes " ")))))
 
 (define (worktree--daemon-port buf)
-  (let* ((url (or (buffer-local buf 'workspace-daemon) (editor-url)))
+  (let* ((url (or (buffer-local-value 'workspace-daemon buf) (editor-url)))
          (colon (and (string? url) (string-rindex url ":"))))
     (if colon
         (let ((tail (substring url (+ colon 1) (string-length url))))
@@ -197,7 +197,7 @@
   (let ((state (workspace--finish-state buf)))
     (if state
         (string-append
-          "WORKTREE " (or (buffer-local buf 'workspace-name)
+          "WORKTREE " (or (buffer-local-value 'workspace-name buf)
                             (plist-get state 'id))
           " · PORT " (worktree--daemon-port buf) " · "
           (cond ((or (> (plist-get state 'dirty) 0)
@@ -235,7 +235,7 @@
 (define (worktree-mode--refresh-workspace! workspace)
   (for-each
     (lambda (b)
-      (when (equal? (buffer-local b 'workspace-root) workspace)
+      (when (equal? (buffer-local-value 'workspace-root b) workspace)
         (unless (minor-mode-on? b "worktree-mode")
           (enable-minor-mode! b "worktree-mode"))
         (worktree-mode--apply! b)))
@@ -260,10 +260,10 @@
 
 (add-hook! '(buffer-workspace-label worktrees)
   (lambda (b)
-    (let ((id (buffer-local b 'workspace-id)))
+    (let ((id (buffer-local-value 'workspace-id b)))
       (if id
           (string-append "worktree "
-                         (or (buffer-local b 'workspace-name) id)
+                         (or (buffer-local-value 'workspace-name b) id)
                          " :" (worktree--daemon-port b))
           ""))))
 
@@ -378,7 +378,7 @@
                 " · " (number->string (plist-get state 'behind)) " behind"
                 " · commit to get the land-and-teardown prompt")))
         (message notice)
-        (worktree-mode--refresh-workspace! (buffer-local buf 'workspace-root))
+        (worktree-mode--refresh-workspace! (buffer-local-value 'workspace-root buf))
         (when (buffer-exists? *worktrees-buffer*)
           (list-refresh! *worktrees-buffer*))
         (workspace--offer-finish! buf state)
@@ -409,12 +409,12 @@
   (let ((hits
           (filter (lambda (b)
                     (and (chat-buffer? b)
-                         (equal? (buffer-local b 'workspace-root) path)))
+                         (equal? (buffer-local-value 'workspace-root b) path)))
                   (buffer-list-mru))))
     (if (pair? hits) (car hits) #f)))
 
 (define (worktree--agent-status chat slug)
-  (let* ((owner (and chat (buffer-local chat 'agent-slug)))
+  (let* ((owner (and chat (buffer-local-value 'agent-slug chat)))
          (id (or owner slug)))
     (and id (boundp (quote agent-threads))
          (let ((e (assoc id (agent-threads))))
@@ -424,11 +424,11 @@
 ;; rows also pin the base branch (the primary's) on the buffer: render and
 ;; the commands read it, and the primary row is always the first entry
 (define (worktree-rows buf)
-  (let* ((root (buffer-local buf 'worktree-root))
+  (let* ((root (buffer-local-value 'worktree-root buf))
          (wts (if root (worktree-list root) '())))
     (buffer-set-local! buf 'worktree-base
       (or (and (pair? wts) (plist-get (car wts) 'branch)) "HEAD"))
-    (let ((base (buffer-local buf 'worktree-base)))
+    (let ((base (buffer-local-value 'worktree-base buf)))
       (map
         (lambda (wt)
           (let* ((path (plist-get wt 'path))
@@ -446,7 +446,7 @@
         wts))))
 
 (define (worktree-cells buf wt)
-  (let* ((root (buffer-local buf 'worktree-root))
+  (let* ((root (buffer-local-value 'worktree-root buf))
          (path (plist-get wt 'path))
          (primary? (equal? path root))
          (dirty (or (plist-get wt 'dirty) 0))
@@ -460,8 +460,8 @@
 
 (define (worktree-meta buf)
   (string-append (number->string (length (list-entries buf))) " worktrees · base "
-                 (or (buffer-local buf 'worktree-base) "HEAD") " · "
-                 (or (buffer-local buf 'worktree-root) "?")))
+                 (or (buffer-local-value 'worktree-base buf) "HEAD") " · "
+                 (or (buffer-local-value 'worktree-root buf) "?")))
 
 ;;; --- commands -------------------------------------------------------------------
 
@@ -476,20 +476,20 @@
   (if (equal? (current-buffer) *worktrees-buffer*)
       (let* ((buf (current-buffer))
              (wt (worktree--current))
-             (root (buffer-local buf 'worktree-root))
+             (root (buffer-local-value 'worktree-root buf))
              (path (and wt (plist-get wt 'path))))
         (and wt
              (list 'id (or (worktree--slug wt) (plist-get wt 'branch) path)
                    'workspace path
                    'project root
-                   'base (or (buffer-local buf 'worktree-base) "HEAD")
+                   'base (or (buffer-local-value 'worktree-base buf) "HEAD")
                    'branch (plist-get wt 'branch)
                    'sha (plist-get wt 'sha)
                    'dirty (worktree--dirty path)
                    'unsaved (workspace--unsaved path)
                    'ahead (or (plist-get wt 'ahead) 0)
                    'behind (worktree--behind path
-                             (or (buffer-local buf 'worktree-base) "HEAD")))))
+                             (or (buffer-local-value 'worktree-base buf) "HEAD")))))
       (or (workspace--finish-state (current-buffer))
           (begin (message "this buffer is not in a task workspace") #f))))
 
@@ -546,7 +546,7 @@
           (let ((name (string-trim name)))
             (cond ((equal? name "") (message "no name, no worktree"))
                   (else
-                    (let ((r (worktree-create (buffer-local buf 'worktree-root) name)))
+                    (let ((r (worktree-create (buffer-local-value 'worktree-root buf) name)))
                       (list-refresh! buf)
                       (message (if (string? r)
                                    (string-append "created " r)
@@ -612,7 +612,7 @@
     (if (and owner (not (equal? (plist-get owner 'url) (editor-url))))
         (message "open this workspace with M-x workspaces before rebasing it")
         (let ((chat (group-chat path)))
-          (unless (buffer-local chat 'workspace-root)
+          (unless (buffer-local-value 'workspace-root chat)
             (workspace--stamp! chat id path project))
           (buffer-set-local! chat 'group path)
           (group-chat-show! path)
@@ -639,8 +639,8 @@
 ;; Cancel is the flagged x, dired-style. It removes only a clean worktree.
 ;; The branch stays as a recovery path. The daemon claim does not.
 (define (worktree--remove! buf path)
-  (let* ((root (or (buffer-local buf 'worktree-root)
-                   (buffer-local buf 'workspace-project-root)
+  (let* ((root (or (buffer-local-value 'worktree-root buf)
+                   (buffer-local-value 'workspace-project-root buf)
                    (worktrees--root)))
          (workspace-buffers (workspace--buffers path))
          (state (and (pair? workspace-buffers)
@@ -713,7 +713,7 @@
     'noun "workspace"
     'markable? (lambda (buf wt)
                  (not (equal? (plist-get wt 'path)
-                              (buffer-local buf 'worktree-root))))
+                              (buffer-local-value 'worktree-root buf))))
     'flags (list (list "d" "D" "cancel"
                        (lambda (buf path) (worktree--remove! buf path))
                        #t))
@@ -744,14 +744,14 @@
 ;; The chat namer already spends one small-model call on the user's task.
 ;; Reuse that name for the workspace instead of making a second naming call.
 (define (workspace-name-from-chat! buf name)
-  (let ((workspace (buffer-local buf 'workspace-root))
-        (project (buffer-local buf 'workspace-project-root)))
+  (let ((workspace (buffer-local-value 'workspace-root buf))
+        (project (buffer-local-value 'workspace-project-root buf)))
     (when (and workspace project (not (equal? (string-trim name) "")))
       (when (boundp (quote daemon-name-workspace!))
         (daemon-name-workspace! workspace (workspace--project-name project) name))
       (for-each
         (lambda (b)
-          (when (equal? (buffer-local b 'workspace-root) workspace)
+          (when (equal? (buffer-local-value 'workspace-root b) workspace)
             (buffer-set-local! b 'workspace-name name)
             (when (minor-mode-on? b "worktree-mode")
               (worktree-mode--apply! b))))
@@ -915,7 +915,7 @@
     (let ((target (worktree-init-buffer! (current-buffer))))
       (enable-minor-mode! target "code-mode")
       (message (string-append "workspace "
-                              (or (buffer-local target 'workspace-id) "unchanged")
+                              (or (buffer-local-value 'workspace-id target) "unchanged")
                               " · one daemon · this frame")))))
 
 ;; group-chat calls this after it assigns the group. It copies durable
@@ -924,14 +924,14 @@
   (let ((owners
           (filter (lambda (b)
                     (and (not (equal? b chat))
-                         (equal? (buffer-local b 'workspace-root) group)))
+                         (equal? (buffer-local-value 'workspace-root b) group)))
                   (group-buffers group))))
     (when (pair? owners)
       (let ((owner (car owners)))
         (workspace--stamp! chat
-          (buffer-local owner 'workspace-id)
-          (buffer-local owner 'workspace-root)
-          (buffer-local owner 'workspace-project-root))
+          (buffer-local-value 'workspace-id owner)
+          (buffer-local-value 'workspace-root owner)
+          (buffer-local-value 'workspace-project-root owner))
         (let ((defaults (or (workspace--llm-defaults group)
                             (workspace-llm-defaults-note! owner))))
           (workspace--apply-llm-defaults! chat defaults))))
@@ -953,18 +953,18 @@
         (else (worktree--opt-present? (cdr (cdr opts)) key))))
 
 (define (workspace--isolation-choice buf)
-  (or (buffer-local buf 'workspace-isolation-choice)
+  (or (buffer-local-value 'workspace-isolation-choice buf)
       (let ((g (buffer-group buf)))
         (and g
              (let loop ((members (group-buffers g)))
                (cond ((null? members) #f)
-                     ((buffer-local (car members) 'workspace-isolation-choice)
-                      (buffer-local (car members) 'workspace-isolation-choice))
+                     ((buffer-local-value 'workspace-isolation-choice (car members))
+                      (buffer-local-value 'workspace-isolation-choice (car members)))
                      (else (loop (cdr members)))))))))
 
 (define (agent-worktree-opts buf slug opts)
   (let ((opts (or opts '())))
-    (let ((workspace (buffer-local buf 'workspace-root))
+    (let ((workspace (buffer-local-value 'workspace-root buf))
           (choice (workspace--isolation-choice buf)))
       (let ((isolated? (if (worktree--opt-present? opts 'isolated)
                            (plist-get opts 'isolated)

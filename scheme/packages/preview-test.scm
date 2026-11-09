@@ -199,7 +199,7 @@
       (with-current-buffer buf
         (lambda ()
           (run-command "preview-mode")
-          (check-equal! (buffer-local buf 'render-mode) "markdown"
+          (check-equal! (buffer-local-value 'render-mode buf) "markdown"
                         "the page renders as markdown")))
       (buffer-kill! buf))))
 
@@ -212,16 +212,16 @@
           (run-command "preview-mode")
           (check-true! (minor-mode-on? buf "preview-mode")
                        "the enabled mode is durable")
-          (check-false! (buffer-local buf 'render-mode)
+          (check-false! (buffer-local-value 'render-mode buf)
                         "a Markdown page is the buffer's own rows, not an iframe")
-          (check-true! (buffer-local buf 'preview-rows)
+          (check-true! (buffer-local-value 'preview-rows buf)
                         "the setup draws the rows")
           (check-false! (buffer-read-only? buf)
                         "preview does not change edit permission")
           (run-command "preview-mode")
           (check-false! (minor-mode-on? buf "preview-mode")
                         "the disabled mode leaves no durable entry")
-          (check-false! (buffer-local buf 'render-mode)
+          (check-false! (buffer-local-value 'render-mode buf)
                         "the teardown shows the source")
           (check-false! (buffer-read-only? buf)
                         "unpreview also leaves edit permission alone")
@@ -244,24 +244,24 @@
           (buffer-set-local! buf 'text-scale 1)
           (text-scale-sync! buf)
           (run-command "preview-mode")
-          (check-contains! (buffer-local buf 'style) "--default-family:Spectral"
+          (check-contains! (buffer-local-value 'style buf) "--default-family:Spectral"
                            "preview applies its variable font")
           (run-command "preview-mode")
-          (check-contains! (buffer-local buf 'style) "--default-family:JetBrains Mono"
+          (check-contains! (buffer-local-value 'style buf) "--default-family:JetBrains Mono"
                            "source restores its own font")
           (run-command "preview-mode")
           ;; This is the state an old desktop restored: its saved source
           ;; look accidentally contains preview's derived default face.
           (buffer-set-local! buf 'preview-rows-saved
-            (list (buffer-local buf 'face-remap) (buffer-local buf 'style)))
+            (list (buffer-local-value 'face-remap buf) (buffer-local-value 'style buf)))
           (run-command "preview-mode")
-          (check-false! (string-contains? (or (buffer-local buf 'style) "")
+          (check-false! (string-contains? (or (buffer-local-value 'style buf) "")
                                           "--default-family:Spectral")
                         "the variable font leaves with preview")
-          (check-contains! (buffer-local buf 'style) "--text-scale-factor:1.2"
+          (check-contains! (buffer-local-value 'style buf) "--text-scale-factor:1.2"
                            "an unrelated source remap remains")
           (check-false! (member 'preview-rows-saved
-                                (or (buffer-local buf 'desktop-skip-locals) '()))
+                                (or (buffer-local-value 'desktop-skip-locals buf) '()))
                         "the source baseline persists across restore")))
       (buffer-kill! buf))))
 
@@ -277,7 +277,7 @@
                        "read-only-mode controls edit permission")
           (check-true! (minor-mode-on? buf "preview-mode")
                        "the preview mode stays on")
-          (check-equal! (buffer-local buf 'render-mode) "html"
+          (check-equal! (buffer-local-value 'render-mode buf) "html"
                         "the rendered view stays visible")
           (run-command "read-only-mode")
           (check-false! (buffer-read-only? buf)
@@ -285,7 +285,7 @@
           (check-true! (minor-mode-on? buf "preview-mode")
                        "making it writable leaves preview on")
           (restore-minor-modes! buf)
-          (check-equal! (buffer-local buf 'render-mode) "html"
+          (check-equal! (buffer-local-value 'render-mode buf) "html"
                         "reload reapplies preview without changing permission")
           (check-false! (buffer-read-only? buf)
                         "reload leaves edit permission alone")))
@@ -298,7 +298,7 @@
       (with-current-buffer buf
         (lambda ()
           (run-command "preview-mode")
-          (check-equal! (buffer-local buf 'render-mode) "html"
+          (check-equal! (buffer-local-value 'render-mode buf) "html"
                         "the page renders as html")))
       (buffer-kill! buf))))
 
@@ -309,11 +309,11 @@
       (with-current-buffer buf
         (lambda ()
           (set-mode! "morg-mode")
-          (check-true! (buffer-local buf 'plain-source) "raw starts plain")
+          (check-true! (buffer-local-value 'plain-source buf) "raw starts plain")
           (enable-minor-mode! buf "preview-mode")
-          (check-false! (buffer-local buf 'plain-source) "preview restores presentation")
+          (check-false! (buffer-local-value 'plain-source buf) "preview restores presentation")
           (disable-minor-mode! buf "preview-mode")
-          (check-true! (buffer-local buf 'plain-source) "raw is plain again")))
+          (check-true! (buffer-local-value 'plain-source buf) "raw is plain again")))
       (buffer-kill! buf))))
 
 (deftest 'a-morg-buffer-previews-by-its-mode-not-its-name
@@ -326,7 +326,7 @@
           (check-equal! (preview-renderer-for buf) "rows"
                         "an unnamed morg buffer takes the rows renderer")
           (enable-minor-mode! buf "preview-mode")
-          (check-true! (equal? (buffer-local buf 'preview-rows) #t)
+          (check-true! (equal? (buffer-local-value 'preview-rows buf) #t)
                        "and preview-mode draws the rows in place")))
       (buffer-kill! buf))))
 
@@ -337,7 +337,7 @@
       (buffer-set-local! buf 'default-directory "/tmp/zz-csv")
       (buffer-set-local! buf 'preview-renderer "markdown")
       (enable-minor-mode! buf "preview-mode")
-      (check-equal! (buffer-local buf 'preview-csv-files) '("/tmp/zz-csv/data.csv")
+      (check-equal! (buffer-local-value 'preview-csv-files buf) '("/tmp/zz-csv/data.csv")
                     "the fence's file, beside the page")
       (buffer-insert! buf (buffer-size buf)
         "```CSV :tangle /tmp/b.csv :lines 2\n1\n```\n```sh :tangle c.csv\n```\n")
@@ -346,5 +346,5 @@
                     '("/tmp/zz-csv/data.csv" "/tmp/b.csv")
                     "a new csv fence counts and other languages do not")
       (disable-minor-mode! buf "preview-mode")
-      (check-equal! (buffer-local buf 'preview-csv-files) #f "the page is gone, so is the list")
+      (check-equal! (buffer-local-value 'preview-csv-files buf) #f "the page is gone, so is the list")
       (buffer-kill! buf))))

@@ -29,7 +29,7 @@
 ;; style derive from it: sync writes them again after a mode restores a
 ;; remap it saved before the scale was set.
 (define (text-scale-sync! buf)
-  (let ((n (scale-clamp (or (buffer-local buf 'text-scale) 0))))
+  (let ((n (scale-clamp (or (buffer-local-value 'text-scale buf) 0))))
     (face-remap-in! buf 'text-scale
       (if (= n 0) '() (list 'factor (scale-factor n))))))
 
@@ -41,7 +41,7 @@
 
 (define (text-scale-step! d)
   (let ((buf (current-buffer)))
-    (text-scale-apply! buf (+ (or (buffer-local buf 'text-scale) 0) d))))
+    (text-scale-apply! buf (+ (or (buffer-local-value 'text-scale buf) 0) d))))
 
 (define-command "text-scale-increase" "Make this buffer's text larger"
   (lambda () (text-scale-step! 1)))
@@ -59,7 +59,7 @@
     (if (null? bs)
         n
         (let* ((b (car bs))
-               (s (buffer-local b 'text-scale)))
+               (s (buffer-local-value 'text-scale b)))
           (if (and s (not (= s 0)))
               (begin (buffer-set-local! b 'text-scale 0)
                      (text-scale-sync! b)

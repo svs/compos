@@ -96,7 +96,7 @@
       (check-true! (and w #t) "the table has a window")
       (check-equal! (window-docked " *buffers*") w "the window is a dock, not a popup")
       (check-false! (float-open?) "nothing floats"))
-    (check-equal! (buffer-local " *buffers*" 'mode-name) "ibuffer-pretty-mode" "in ibuffer-pretty-mode")
+    (check-equal! (buffer-local-value 'mode-name " *buffers*") "ibuffer-pretty-mode" "in ibuffer-pretty-mode")
     (check-equal! (plist-get (minibuffer-state) 'prompt) "Switch to: " "the prompt line is open")
     (list-set-filters! " *buffers*" (list (list "match" "zz-ibp-")))
     (let ((labels (ibp-labels " *buffers*")))
@@ -113,7 +113,7 @@
     (run-command "ibuffer-prompt-pretty")
     (ibp-type! "zz-ibp-")
     (check-equal! (ibp-mine " *buffers*") '("*zz-ibp-b*" "*zz-ibp-a*" "*zz-ibp-c*") "three rows match")
-    (check-equal! (window-buffer (buffer-local " *buffers*" 'ibuffer-prompt-home-window)) "*zz-ibp-b*"
+    (check-equal! (window-buffer (buffer-local-value 'ibuffer-prompt-home-window " *buffers*")) "*zz-ibp-b*"
                   "the prompt previews the highlighted buffer in the invoking window")
     (check-equal! (list-current " *buffers*") "*zz-ibp-b*" "the highlight starts on the first row")
     (run-command "minibuffer-next-candidate")
@@ -206,8 +206,8 @@
   (lambda ()
     (ibp-setup!)
     (run-command "ibuffer-prompt-pretty")
-    (check-equal! (buffer-local " *buffers*" 'line-numbers) "off" "no line numbers")
-    (check-true! (string-contains? (buffer-local " *buffers*" 'window-classes) "bare")
+    (check-equal! (buffer-local-value 'line-numbers " *buffers*") "off" "no line numbers")
+    (check-true! (string-contains? (buffer-local-value 'window-classes " *buffers*") "bare")
                  "the window wears the bare class")
     (check-true! (and (member '("TAB" "fold") (plist-get (minibuffer-state) 'legend)) #t)
                  "the prompt says the keys it answers")

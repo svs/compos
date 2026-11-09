@@ -165,7 +165,7 @@
         "" remap))
 
 (define (face-remap-in! buf face attrs)
-  (let* ((old (or (buffer-local buf 'face-remap) '()))
+  (let* ((old (or (buffer-local-value 'face-remap buf) '()))
          (remap (alist-put old face attrs)))
     (buffer-set-local! buf 'face-remap remap)
     (buffer-set-local! buf 'style (face-remap--css remap))

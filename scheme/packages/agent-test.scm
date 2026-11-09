@@ -22,7 +22,7 @@
 (define (t--ag-report! cur)
   (agent-handle-event "zz-ag"
     (list 'type 'model-state 'current cur 'available t--ag-available))
-  (buffer-local t--ag-buf 'agent-model))
+  (buffer-local-value 'agent-model t--ag-buf))
 
 (effects! '(write))
 
@@ -46,8 +46,8 @@
   (lambda ()
     (t--ag-chat! #f)
     (agent-handle-event "zz-ag" (list 'type 'session 'id "sess-1" 'resumed #f))
-    (check-equal! (buffer-local t--ag-buf 'agent-session) "sess-1" "the id is kept")
-    (check-equal! (buffer-local t--ag-buf 'agent-session-connector) "zz-connector"
+    (check-equal! (buffer-local-value 'agent-session t--ag-buf) "sess-1" "the id is kept")
+    (check-equal! (buffer-local-value 'agent-session-connector t--ag-buf) "zz-connector"
                   "with the connector that issued it")
     (check-equal! (and (member 'agent-session chat-conversation-locals) #t) #t
                   "a reset clears it with the conversation")))

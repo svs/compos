@@ -24,7 +24,7 @@
   ;; The window the stage lives in: the one start! recorded, or else the
   ;; first window of the frame that does not show the guide.
   (let* ((chat (onboarding-chat))
-         (w (and chat (buffer-local chat 'onboarding-stage))))
+         (w (and chat (buffer-local-value 'onboarding-stage chat))))
     (cond ((not chat) #f)
           ((and w (window-exists? w)
                 (not (equal? (window-buffer w) chat))) w)
@@ -95,7 +95,7 @@
         (when cw (select-window! cw)))
       (let ((w (window-showing stage)))
         (when w (buffer-set-local! chat 'onboarding-stage w)))
-      (unless (buffer-local chat 'onboarding-started)
+      (unless (buffer-local-value 'onboarding-started chat)
         (buffer-set-local! chat 'onboarding-started #t)
         (with-current-buffer chat
           (lambda ()

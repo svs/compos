@@ -20,13 +20,13 @@
   ;; a site app's buffers name their app in their state's 'name, the one
   ;; truth for them; any other app tags its buffers with app-claim!
   (and buf (buffer-known? buf)
-       (let ((nm (plist-get (or (buffer-local buf 'site-app) '()) 'name)))
+       (let ((nm (plist-get (or (buffer-local-value 'site-app buf) '()) 'name)))
          (cond ((symbol? nm) (symbol->string nm))
                ((string? nm) nm)
-               (else (buffer-local buf 'app-id))))))
+               (else (buffer-local-value 'app-id buf))))))
 
 (define (app-role buf)
-  (and buf (buffer-known? buf) (buffer-local buf 'app-role)))
+  (and buf (buffer-known? buf) (buffer-local-value 'app-role buf)))
 
 ;; Every buffer of the instance, shown or not. The hidden ones are the
 ;; point: a detail nobody is looking at is still part of the app, and
@@ -115,8 +115,8 @@
 ;; from the app's detail mode, so the pane holds that family.
 (define (app-class-mode buf)
   (if (eq? (app-role-class buf) 'detail)
-      (or (buffer-local buf 'detail-family) (buffer-local buf 'mode-name))
-      (buffer-local buf 'mode-name)))
+      (or (buffer-local-value 'detail-family buf) (buffer-local-value 'mode-name buf))
+      (buffer-local-value 'mode-name buf)))
 
 ;; the window that holds BUF, on screen or waiting behind its pane
 (define (app-window-of buf)
@@ -227,7 +227,7 @@
          ;; the model forgets the app: its buffers leave every stack and the
          ;; windows of its modes close, so nothing of it is reopened in place
          (modes (filter (lambda (m) m)
-                        (map (lambda (b) (buffer-local b 'mode-name)) (app-buffers id))))
+                        (map (lambda (b) (buffer-local-value 'mode-name b)) (app-buffers id))))
          (kept (if layout
                    (let* ((layout (panes-validate layout buffer-known?))
                           (l (fold (lambda (l b) (if (equal? (app-id b) id) (panes-drop-buffer l b) l))
@@ -524,7 +524,7 @@
 (define (app-commands-out-of-scope buf open &optional names)
   "(app-commands-out-of-scope BUF OPEN [NAMES]) -- the app commands M-x leaves out in BUF: those of every app none of whose modes is on there, less the commands in OPEN"
   ;; the mode chain of BUF is walked once, not once for each app mode
-  (let ((chain (let loop ((m (buffer-local buf 'mode-name)) (seen '()))
+  (let ((chain (let loop ((m (buffer-local-value 'mode-name buf)) (seen '()))
                  (if (or (not m) (member m seen)) seen (loop (mode-parent m) (cons m seen))))))
     (apply append
            (map (lambda (scope)

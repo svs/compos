@@ -205,8 +205,8 @@
   (lambda ()
     (let* ((id (group-record-create! "zzgs-ready-chat"))
            (chat (group-chat id)))
-      (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the mode is set")
-      (check-true! (buffer-local chat 'agent-saved-mark) "the rich input exists")
+      (check-equal! (buffer-local-value 'mode-name chat) "chat-mode" "the mode is set")
+      (check-true! (buffer-local-value 'agent-saved-mark chat) "the rich input exists")
       (t--gs-kill! chat)
       (t--gs-drop! id))))
 
@@ -225,11 +225,11 @@
       ;; the stable identity wins: the SAME buffer answers, and it takes
       ;; the name of its group rather than a second buffer appearing there
       (check-equal! (group-chat id) want "the chat takes its group's name")
-      (check-equal! (buffer-local want 'chat-id) chat-id "and it is the same chat")
+      (check-equal! (buffer-local-value 'chat-id want) chat-id "and it is the same chat")
       (check-false! (buffer-known? chat) "the old name is gone, so there is no duplicate")
 
-      (check-equal! (buffer-local want 'mode-name) "chat-mode" "the mode heals")
-      (check-true! (buffer-local want 'agent-saved-mark) "the input heals")
+      (check-equal! (buffer-local-value 'mode-name want) "chat-mode" "the mode heals")
+      (check-true! (buffer-local-value 'agent-saved-mark want) "the input heals")
       (t--gs-kill! chat want)
       (t--gs-drop! id))))
 
@@ -355,19 +355,19 @@
       (buffer-set-local! a 'group-id #f)
       (buffer-set-local! a 'group name)
       (group-ids)
-      (check-equal! (buffer-local a 'group-id) id "the first walk folded the name into the id")
+      (check-equal! (buffer-local-value 'group-id a) id "the first walk folded the name into the id")
       (check-equal! (modeline-cache-get a 'group) name "the first walk set the modeline segment")
       (check-true! (member a *group-migrated-buffers*) "the buffer is on the migrated list")
       ;; the walk skips a migrated buffer: a name put back by hand stays
       (buffer-set-local! a 'group name)
       (group-ids)
-      (check-equal! (buffer-local a 'group) name "a second walk does not touch a migrated buffer")
+      (check-equal! (buffer-local-value 'group a) name "a second walk does not touch a migrated buffer")
       ;; a newcomer is migrated on the next walk
       (test-buffer! b "")
       (buffer-set-local! b 'group-id #f)
       (buffer-set-local! b 'group name)
       (group-ids)
-      (check-equal! (buffer-local b 'group-id) id "the newcomer got the id")
+      (check-equal! (buffer-local-value 'group-id b) id "the newcomer got the id")
       (t--gs-kill! a b)
       (group-ids)
       (check-false! (member a *group-migrated-buffers*) "a killed buffer leaves the list")

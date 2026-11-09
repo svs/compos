@@ -98,7 +98,7 @@
   "the buffer wears profile-mode, the meta line summarises, the rows are there"
   (lambda ()
     (buffer-create *profile-buffer*)
-    (let ((was (buffer-local *profile-buffer* 'profile-report)))
+    (let ((was (buffer-local-value 'profile-report *profile-buffer*)))
       (buffer-set-local! *profile-buffer* 'profile-report (profile-test--report))
       (with-current-buffer *profile-buffer* (lambda () (set-mode! "profile-mode")))
       (check-true! (buffer-derived-mode? *profile-buffer* "profile-mode") "the mode is on")
@@ -109,7 +109,7 @@
       (let ((text (buffer-text *profile-buffer*)))
         (check-true! (string-contains? text "Compos.Core.Buffer.text/1") "the hottest function is drawn")
         (check-true! (string-contains? text "what ran") "under its heading"))
-      (check-true! (member 'profile-report (buffer-local *profile-buffer* 'desktop-skip-locals))
+      (check-true! (member 'profile-report (buffer-local-value 'desktop-skip-locals *profile-buffer*))
                    "a report is runtime state the desktop skips")
       (buffer-set-local! *profile-buffer* 'profile-report was))))
 

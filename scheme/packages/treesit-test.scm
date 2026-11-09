@@ -12,7 +12,7 @@
   (test-buffer! buf "")
   (switch-to-buffer! buf)
   (set-mode! mode)
-  (buffer-local buf 'ts-lang))
+  (buffer-local-value 'ts-lang buf))
 
 (deftest 'a-mode-declares-the-grammar-its-buffers-are-parsed-with
   "ts-lang is the whole wiring: font lock and sexp nav both read it"

@@ -87,7 +87,7 @@
   (lambda ()
     (run-command "telemetry")
     (check-true! (buffer-exists? *telemetry-buffer*) "the command creates its buffer")
-    (check-equal! (buffer-local *telemetry-buffer* 'mode-name)
+    (check-equal! (buffer-local-value 'mode-name *telemetry-buffer*)
                   "telemetry-mode" "the buffer records its mode")
     (check-true! (string-contains? (buffer-text *telemetry-buffer*) "Telemetry")
                  "the list renders its title")))

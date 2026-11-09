@@ -58,7 +58,7 @@
 (define (lsp--maybe-attach!)
   (let ((buf (current-buffer)))
     (when (and lsp-auto-start (buffer-path buf))
-      (let ((entry (lsp-server-for-mode (buffer-local buf 'mode-name)))
+      (let ((entry (lsp-server-for-mode (buffer-local-value 'mode-name buf)))
             (root (buffer-project-root buf)))
         (when (and entry root (not (equal? root "")))
           (buffer-set-local! buf 'lsp-server (lsp-ensure! (car entry) root))
@@ -66,7 +66,7 @@
 
 (define (lsp--setup! buf)
   (desktop-skip! buf 'lsp-diagnostics)
-  (let ((id (buffer-local buf 'lsp-server)))
+  (let ((id (buffer-local-value 'lsp-server buf)))
     (when id
       ;; after a restart the server is gone: start it again from the id
       (let ((parts (string-split id "@")))
@@ -75,18 +75,18 @@
       (when (lsp--connection? id)
         (lsp-open! id buf))
       (desktop-skip! buf 'capf-sources)
-      (let ((cur (or (buffer-local buf 'capf-sources) '())))
+      (let ((cur (or (buffer-local-value 'capf-sources buf) '())))
         (unless (member lsp--capf cur)
           (buffer-set-local! buf 'capf-sources (cons lsp--capf cur))))
       (lsp--modeline! buf))))
 
 (define (lsp--teardown! buf)
-  (let ((id (buffer-local buf 'lsp-server)))
+  (let ((id (buffer-local-value 'lsp-server buf)))
     (when (and id (lsp--connection? id))
       (lsp-close! id buf)))
   (buffer-set-local! buf 'capf-sources
     (remove (lambda (f) (equal? f lsp--capf))
-            (or (buffer-local buf 'capf-sources) '())))
+            (or (buffer-local-value 'capf-sources buf) '())))
   (overlay-clear! buf 'lsp)
   (buffer-set-local! buf 'lsp-diagnostics #f)
   (buffer-set-local! buf 'lsp-server #f)
@@ -99,7 +99,7 @@
     (let ((buf (current-buffer)))
       (if (minor-mode-on? buf "lsp-mode")
           (begin (disable-minor-mode! buf "lsp-mode") (message "lsp-mode disabled"))
-          (let ((entry (lsp-server-for-mode (buffer-local buf 'mode-name)))
+          (let ((entry (lsp-server-for-mode (buffer-local-value 'mode-name buf)))
                 (root (buffer-project-root buf)))
             (cond ((not entry) (message "No language server registered for this mode"))
                   ((equal? root "") (message "No project root for this buffer"))
@@ -113,7 +113,7 @@
 (define (lsp--status! id status)
   (for-each
     (lambda (buf)
-      (when (equal? (buffer-local buf 'lsp-server) id)
+      (when (equal? (buffer-local-value 'lsp-server buf) id)
         (if (equal? status "ready")
             (when (minor-mode-on? buf "lsp-mode")
               (lsp-open! id buf)
@@ -168,7 +168,7 @@
 ;;; --- modeline ----------------------------------------------------------------
 
 (define (lsp--counts buf)
-  (let loop ((ds (or (buffer-local buf 'lsp-diagnostics) '())) (e 0) (w 0))
+  (let loop ((ds (or (buffer-local-value 'lsp-diagnostics buf) '())) (e 0) (w 0))
     (if (null? ds)
         (list e w)
         (let ((sev (or (plist-get (car ds) 'severity) 1)))
@@ -177,7 +177,7 @@
                 (if (= sev 2) (+ w 1) w))))))
 
 (define (lsp--modeline! buf)
-  (let* ((id (buffer-local buf 'lsp-server))
+  (let* ((id (buffer-local-value 'lsp-server buf))
          (row (and id (assoc id (lsp-connections))))
          (c (lsp--counts buf)))
     (when id
@@ -198,7 +198,7 @@
 (define (lsp--diags-sorted buf)
   (map cadr
        (sort (map (lambda (d) (list (or (plist-get d 'startByte) 0) d))
-                  (or (buffer-local buf 'lsp-diagnostics) '())))))
+                  (or (buffer-local-value 'lsp-diagnostics buf) '())))))
 
 (define (lsp--sev-name sev)
   (cond ((equal? sev 1) "error")
@@ -237,7 +237,7 @@
 (define-command "lsp-show-diagnostic" "Echo the diagnostic at point"
   (lambda ()
     (let* ((buf (current-buffer)) (p (point))
-           (hit (let loop ((ds (or (buffer-local buf 'lsp-diagnostics) '())))
+           (hit (let loop ((ds (or (buffer-local-value 'lsp-diagnostics buf) '())))
                   (cond ((null? ds) #f)
                         ((and (<= (or (plist-get (car ds) 'startByte) 0) p)
                               (<= p (or (plist-get (car ds) 'endByte) 0)))
@@ -264,8 +264,8 @@
                         'sev (or (plist-get d 'severity) 1)
                         'msg (or (plist-get d 'message) "")
                         'start (or (plist-get d 'startByte) 0)))
-                (or (buffer-local buf 'lsp-diagnostics) '())))
-         (filter (lambda (b) (buffer-local b 'lsp-diagnostics)) (buffer-list)))))
+                (or (buffer-local-value 'lsp-diagnostics buf) '())))
+         (filter (lambda (b) (buffer-local-value 'lsp-diagnostics b)) (buffer-list)))))
 
 ;; a preview shows the buffer the diagnostic names in another window;
 ;; it exists already, so nothing makes or kills it
@@ -410,7 +410,7 @@
 ;; server is attached (SYM is echoed, the position does the asking).
 (define (lsp-definition sym)
   (let* ((buf (current-buffer))
-         (id (buffer-local buf 'lsp-server)))
+         (id (buffer-local-value 'lsp-server buf)))
     (if (not id)
         (message "No language server here")
         (lsp-buffer-request id "textDocument/definition" buf (point)
@@ -460,7 +460,7 @@
 (define-command "lsp-references" "List the references to the symbol at point"
   (lambda ()
     (let* ((buf (current-buffer))
-           (id (buffer-local buf 'lsp-server)))
+           (id (buffer-local-value 'lsp-server buf)))
       (if (not id)
           (message "No language server here")
           (lsp-buffer-request id "textDocument/references" buf (point)
@@ -495,7 +495,7 @@
 (define-command "lsp-hover" "Echo the type or documentation at point"
   (lambda ()
     (let* ((buf (current-buffer))
-           (id (buffer-local buf 'lsp-server)))
+           (id (buffer-local-value 'lsp-server buf)))
       (if (not id)
           (message "No language server here")
           (lsp-buffer-request id "textDocument/hover" buf (point)
@@ -527,7 +527,7 @@
 
 (define (lsp--capf)
   (let* ((buf (current-buffer))
-         (id (buffer-local buf 'lsp-server)))
+         (id (buffer-local-value 'lsp-server buf)))
     (if (or (not id) (not (lsp--connection? id)))
         #f
         (let* ((e (point))
@@ -545,7 +545,7 @@
 
 (define (lsp--after-save-hook!)
     (let* ((buf (current-buffer))
-           (id (buffer-local buf 'lsp-server)))
+           (id (buffer-local-value 'lsp-server buf)))
       (when (and id (minor-mode-on? buf "lsp-mode") (lsp--connection? id))
         (lsp-notify! id "textDocument/didSave"
           (list 'textDocument

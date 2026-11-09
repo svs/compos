@@ -488,22 +488,22 @@
                  (pdf--path-key path) "*"))
 
 (define (pdf--page buf)
-  (max 1 (or (buffer-local buf 'pdf-page) 1)))
+  (max 1 (or (buffer-local-value 'pdf-page buf) 1)))
 
 (define (pdf--total buf)
-  (max 0 (or (buffer-local buf 'pdf-total) 0)))
+  (max 0 (or (buffer-local-value 'pdf-total buf) 0)))
 
 (define (pdf--zoom buf)
   (max pdf-min-zoom
-       (min pdf-max-zoom (or (buffer-local buf 'pdf-zoom) 100))))
+       (min pdf-max-zoom (or (buffer-local-value 'pdf-zoom buf) 100))))
 
 (define (pdf--dark? buf)
-  (if (buffer-local buf 'pdf-dark?) #t #f))
+  (if (buffer-local-value 'pdf-dark? buf) #t #f))
 
 (define (pdf--buffer-path buf)
   ;; A normal file buffer owns one canonical path. Synthetic PDF buffers store
   ;; pdf-path because they do not have a file association.
-  (or (buffer-path buf) (buffer-local buf 'pdf-path)))
+  (or (buffer-path buf) (buffer-local-value 'pdf-path buf)))
 
 (define (pdf--revert-open-buffers! path)
   "Clear cached pages and rerender each open buffer for PATH."
@@ -511,7 +511,7 @@
   (for-each
     (lambda (buf)
       (when (and (equal? (pdf--buffer-path buf) path)
-                 (member (buffer-local buf 'mode-name)
+                 (member (buffer-local-value 'mode-name buf)
                          '("pdf-reader-mode" "pdf-edit-mode")))
         (pdf--render! buf #t)))
     (buffer-list))
@@ -626,7 +626,7 @@
 
 (define (pdf--render! buf recount?)
   (let ((path (pdf--buffer-path buf))
-        (original (buffer-local buf 'pdf-original-path))
+        (original (buffer-local-value 'pdf-original-path buf))
         (dark? (pdf--dark? buf)))
     (if (not (and path (*pdf-file-exists?* path)))
         (pdf--replace! buf
@@ -739,13 +739,13 @@
           (else (cons (car rest) (loop (cdr rest) (+ position 1)))))))
 
 (define (pdf--edit-buffer-ready? buf)
-  (and (buffer-local buf 'pdf-original-path)
-       (buffer-local buf 'pdf-path)))
+  (and (buffer-local-value 'pdf-original-path buf)
+       (buffer-local-value 'pdf-path buf)))
 
 (define (pdf--apply-page-order! order new-page success-message)
   (let* ((buf (current-buffer))
-         (path (buffer-local buf 'pdf-path))
-         (undo-path (buffer-local buf 'pdf-undo-path)))
+         (path (buffer-local-value 'pdf-path buf))
+         (undo-path (buffer-local-value 'pdf-undo-path buf)))
     (if (not (pdf--edit-buffer-ready? buf))
         (message "This command requires pdf-edit-mode")
         (if (*pdf-edit-pages!* path order undo-path)
@@ -811,8 +811,8 @@
 (define-command "pdf-edit-undo" "Swap the generated copy with its one-step undo PDF"
   (lambda ()
     (let* ((buf (current-buffer))
-           (path (buffer-local buf 'pdf-path))
-           (undo-path (buffer-local buf 'pdf-undo-path)))
+           (path (buffer-local-value 'pdf-path buf))
+           (undo-path (buffer-local-value 'pdf-undo-path buf)))
       (if (not (pdf--edit-buffer-ready? buf))
           (message "This command requires pdf-edit-mode")
           (if (*pdf-undo-edit!* path undo-path)
@@ -825,9 +825,9 @@
 (define-command "pdf-edit-reset" "Reset the generated copy from the unchanged original"
   (lambda ()
     (let* ((buf (current-buffer))
-           (path (buffer-local buf 'pdf-path))
-           (original (buffer-local buf 'pdf-original-path))
-           (undo-path (buffer-local buf 'pdf-undo-path)))
+           (path (buffer-local-value 'pdf-path buf))
+           (original (buffer-local-value 'pdf-original-path buf))
+           (undo-path (buffer-local-value 'pdf-undo-path buf)))
       (if (not (pdf--edit-buffer-ready? buf))
           (message "This command requires pdf-edit-mode")
           (if (*pdf-reset-edit!* original path undo-path)
@@ -846,7 +846,7 @@
   ;; file association. Adopt the name so the reader renders the document
   ;; instead of an empty page.
   (when (and (not (buffer-path buf))
-             (not (buffer-local buf 'pdf-path))
+             (not (buffer-local-value 'pdf-path buf))
              (*pdf-file-exists?* buf))
     (buffer-set-local! buf 'pdf-path buf))
   (buffer-set-local! buf 'preview-renderer "html")
@@ -960,7 +960,7 @@
 (define-command "pdf-edit-mode" "Create a generated PDF copy and edit that copy"
   (lambda ()
     (let* ((buf (current-buffer))
-           (already (buffer-local buf 'pdf-original-path))
+           (already (buffer-local-value 'pdf-original-path buf))
            (source (pdf--buffer-path buf)))
       (cond (already
               (message (string-append "Already editing generated copy · " source)))

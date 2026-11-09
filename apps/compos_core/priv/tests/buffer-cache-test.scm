@@ -51,7 +51,7 @@
     (*zz-cache-k* #f)
     (check-equal! (buffer-text *zz-cache-buf*) "rows from the network"
                   "a failed fetch keeps what the buffer had")
-    (check-false! (buffer-local *zz-cache-buf* 'cache-inflight) "the flight is over")
+    (check-false! (buffer-local-value 'cache-inflight *zz-cache-buf*) "the flight is over")
 
     (t--cache-kill! *zz-cache-buf*)))
 
@@ -109,7 +109,7 @@
       (define-list-mode! "zz-cache-list-mode"
         (list
           'buffer *zz-cache-list-buf*
-          'rows (lambda (buf) (or (buffer-local buf 'list-entries) '()))
+          'rows (lambda (buf) (or (buffer-local-value 'list-entries buf) '()))
           'cache-fetch (lambda (buf k)
                          (set! *zz-cl-fetches* (+ *zz-cl-fetches* 1))
                          (k '("alpha" "beta")))

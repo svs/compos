@@ -50,8 +50,8 @@
   (predict--publish!))
 
 (define (predict-skip-keys buf)
-  (let ((modes (cons (or (buffer-local buf 'mode-name) "")
-                     (or (buffer-local buf 'minor-modes) '()))))
+  (let ((modes (cons (or (buffer-local-value 'mode-name buf) "")
+                     (or (buffer-local-value 'minor-modes buf) '()))))
     (apply append
       (map cdr (filter (lambda (e) (member (car e) modes)) *predict-skip*)))))
 

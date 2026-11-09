@@ -23,7 +23,7 @@
   (lambda ()
     (let ((buf (chat-view-test--buffer "*zz-chat-view*")))
       (chat-view-sync! buf)
-      (let* ((tree (buffer-local buf 'render-blocks))
+      (let* ((tree (buffer-local-value 'render-blocks buf))
              (list-block (car tree))
              (rows (chat-view-test--children list-block))
              (tool (nth 2 rows))
@@ -40,11 +40,11 @@
         (check-equal! (length (chat-view-test--children details)) 1
                       "a closed card draws its summary and no body")
         (check-equal! (plist-get summary 'click) "chat-card:t1" "the summary toggles its card")
-        (check-equal! (buffer-local buf 'render-input) "agent-saved-mark"
+        (check-equal! (buffer-local-value 'render-input buf) "agent-saved-mark"
                       "the input starts at the chat mark")
-        (check-equal! (plist-get (car (buffer-local buf 'render-root)) 'tag) #f
+        (check-equal! (plist-get (car (buffer-local-value 'render-root buf)) 'tag) #f
                       "the root is one plist")
-        (check-equal! (plist-get (buffer-local buf 'render-root) 'class) "agent-view"
+        (check-equal! (plist-get (buffer-local-value 'render-root buf) 'class) "agent-view"
                       "the root names the chat's layout"))
       (buffer-kill! buf))))
 
@@ -53,10 +53,10 @@
   (lambda ()
     (let ((buf (chat-view-test--buffer "*zz-chat-view-push*")))
       (chat-view-sync! buf)
-      (let ((before (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+      (let ((before (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
         (agent-block-push! buf 34 34 "meta" '())
         (chat-view-sync! buf)
-        (let ((after (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+        (let ((after (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
           (check-equal! (length after) 4 "the new block has a view")
           (check-equal! (reverse (cdr (reverse after))) before "the older views are the same")))
       (buffer-kill! buf))))
@@ -68,7 +68,7 @@
       (chat-view-sync! buf)
       (check-true! (run-hook-with-args-until-success 'block-click buf "chat-card:t1")
                    "the chat handles its own click")
-      (let* ((tool (nth 2 (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+      (let* ((tool (nth 2 (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
              (details (car (chat-view-test--children tool))))
         (check-equal! (plist-get details 'open) #t "the card is open")
         (check-equal! (length (chat-view-test--children details)) 2 "an open card draws its body")
@@ -81,7 +81,7 @@
     (let ((buf (chat-view-test--buffer "*zz-chat-view-plain*")))
       (buffer-set-local! buf 'render-mode "plain")
       (chat-view-sync! buf)
-      (check-equal! (buffer-local buf 'render-blocks) #f "no tree")
+      (check-equal! (buffer-local-value 'render-blocks buf) #f "no tree")
       (buffer-kill! buf))))
 
 (deftest 'chat-view-activity-follows-the-runtime
@@ -114,12 +114,12 @@
       (buffer-set-local! buf 'chat-activity "streaming")
       (chat-view-sync! buf)
       (check-true! (re-match? "ag-activity"
-                              (value->string (buffer-local buf 'render-blocks)))
+                              (value->string (buffer-local-value 'render-blocks buf)))
                    "the row is in the tree while the work runs")
       (buffer-set-local! buf 'chat-activity #f)
       (chat-view-sync! buf)
       (check-false! (re-match? "ag-activity"
-                               (value->string (buffer-local buf 'render-blocks)))
+                               (value->string (buffer-local-value 'render-blocks buf)))
                     "the turn ends and the row leaves the tree")
       (buffer-kill! buf))))
 
@@ -144,7 +144,7 @@
           (6 20 "prose")
           (0 6 "user" "hello")))
       (chat-view-sync! buf)
-      (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+      (let ((rows (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
         (check-equal! (length rows) 3 "every block has a view")
         (check-equal! (plist-get (nth 1 rows) 'range) '(6 20) "the changed block is new"))
       (buffer-kill! buf))))
@@ -156,7 +156,7 @@
 
 (define (chat-view-test--drawn buf)
   (map (lambda (r) (plist-get r 'class))
-       (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+       (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
 
 (deftest 'chat-view-draws-the-newest-blocks-within-the-budget
   "a transcript over the byte budget draws its newest blocks and a row that names the hidden count"
@@ -165,13 +165,13 @@
       (chat-view-test--with-window 15
         (lambda ()
           (chat-view-sync! buf)
-          (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+          (let ((rows (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
             (check-equal! (length rows) 2 "the earlier row and the newest block")
             (check-equal! (plist-get (car rows) 'class) "ag-earlier" "the earlier row comes first")
             (check-equal! (plist-get (car (chat-view-test--children (car rows))) 'text)
                           "Show earlier blocks (2 hidden)" "the row names the hidden count")
             (check-equal! (plist-get (cadr rows) 'tag) "c-toolcall" "the newest block draws")
-            (check-equal! (plist-get (car (buffer-local buf 'render-blocks)) 'index-base) 1
+            (check-equal! (plist-get (car (buffer-local-value 'render-blocks buf)) 'index-base) 1
                           "the newest block keeps index 2, its place in the whole transcript"))))
       (buffer-kill! buf))))
 
@@ -184,7 +184,7 @@
           (chat-view-sync! buf)
           (check-true! (run-hook-with-args-until-success 'block-click buf "chat-earlier")
                        "the chat handles its own click")
-          (let ((rows (chat-view-test--children (car (buffer-local buf 'render-blocks)))))
+          (let ((rows (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
             (check-equal! (map (lambda (r) (plist-get r 'tag)) (cdr rows))
                           '("c-agent" "c-toolcall") "the prose block draws now")
             (check-equal! (plist-get (car (chat-view-test--children (car rows))) 'text)
@@ -198,7 +198,7 @@
       (chat-view-test--with-window 0
         (lambda ()
           (chat-view-sync! buf)
-          (check-equal! (length (chat-view-test--children (car (buffer-local buf 'render-blocks))))
+          (check-equal! (length (chat-view-test--children (car (buffer-local-value 'render-blocks buf))))
                         3 "every block draws, and no earlier row")))
       (buffer-kill! buf))))
 
@@ -212,7 +212,7 @@
           (run-hook-with-args-until-success 'block-click buf "chat-earlier")
           (check-equal! (plist-get (car (chat-view-test--children
                                            (car (chat-view-test--children
-                                                  (car (buffer-local buf 'render-blocks))))))
+                                                  (car (buffer-local-value 'render-blocks buf))))))
                                    'text)
                         "Show earlier blocks (1 hidden)" "the 20-byte block draws after one reveal")))
       (buffer-kill! buf))))
@@ -242,13 +242,13 @@
           (chat-view-sync! buf)
           (check-equal! (chat-view--counts buf) '(2 3) "two blocks hidden of three")
           (chat-view-step! buf -1)
-          (check-equal! (buffer-local buf 'follow-place) '(#t 0 2 0) "the first step goes to the newest block")
+          (check-equal! (buffer-local-value 'follow-place buf) '(#t 0 2 0) "the first step goes to the newest block")
           (chat-view-step! buf -1)
-          (check-equal! (buffer-local buf 'follow-place) '(#t 0 1 0) "the next goes to the block before")
+          (check-equal! (buffer-local-value 'follow-place buf) '(#t 0 1 0) "the next goes to the block before")
           (check-equal! (car (chat-view--counts buf)) 1 "which is drawn now")
           (chat-view-step! buf 1)
           (chat-view-step! buf 1)
-          (check-equal! (buffer-local buf 'follow-place) #f "past the newest the view follows the bottom")))
+          (check-equal! (buffer-local-value 'follow-place buf) #f "past the newest the view follows the bottom")))
       (buffer-kill! buf))))
 
 (deftest 'chat-view-meta-arrows-walk-the-history

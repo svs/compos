@@ -71,7 +71,7 @@
       (collect-label-at)))
 
 (define (collect-label-at)
-  (let* ((labels (or (buffer-local *collect-buffer* 'collect-labels) '()))
+  (let* ((labels (or (buffer-local-value 'collect-labels *collect-buffer*) '()))
          (before (substring-bytes (buffer-text *collect-buffer*) 0 (point)))
          (ln (- (length (string-split before "\n")) 2)))
     (if (and (>= ln 0) (< ln (length labels))) (list-ref labels ln) #f)))

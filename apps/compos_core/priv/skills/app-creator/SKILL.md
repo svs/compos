@@ -136,7 +136,7 @@ Give the kept name a rule, or it takes a number:
 
 ```scheme
 (detail-name! "amazon-detail-mode"
-  (lambda (buf) (string-append "*" (or (buffer-local buf 'amazon-title) buf) "*")))
+  (lambda (buf) (string-append "*" (or (buffer-local-value 'amazon-title buf) buf) "*")))
 ```
 
 Never move a detail with `switch-to-buffer!`, `pop-to-buffer` or a bare `display-buffer`. Each bypasses the remembered window, and the app grows a pane per row.

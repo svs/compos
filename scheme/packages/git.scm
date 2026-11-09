@@ -69,7 +69,7 @@
 ;; the working tree against the index, staged is the index against HEAD —
 ;; then one answer for diff-mode.
 (define (git--read buf cb)
-  (let ((root (buffer-local buf 'diff-root))
+  (let ((root (buffer-local-value 'diff-root buf))
         (scope (diff-scope buf)))
     (when root
       (git-status root (or scope "")
@@ -91,13 +91,13 @@
                             (git--ok commits))))))))))))))
 
 (define (git--resolve buf file)
-  (let ((root (buffer-local buf 'diff-root)))
+  (let ((root (buffer-local-value 'diff-root buf)))
     (and root (string-append root "/" file))))
 
 ;; `git show` output is a unified diff with the commit message in front, so
 ;; diff-show! renders it as the same cards with the message on top
 (define (git--show buf commit)
-  (let ((root (buffer-local buf 'diff-root))
+  (let ((root (buffer-local-value 'diff-root buf))
         (out (string-append "*git show: " (caddr commit) "*")))
     (git-show root (cadr commit)
       (lambda (text)
@@ -106,14 +106,14 @@
         (buffer-set-local! out 'diff-root root)))))
 
 (define (git--stage-file buf card cb)
-  (let ((root (buffer-local buf 'diff-root))
+  (let ((root (buffer-local-value 'diff-root buf))
         (file (diff--get card 'file)))
     (if (and root file)
         (git-stage-file root file cb)
         (cb '(error "this diff has no file to stage")))))
 
 (define (git--stage-hunk buf card hunk cb)
-  (let ((root (buffer-local buf 'diff-root))
+  (let ((root (buffer-local-value 'diff-root buf))
         (file-data (diff--get card 'f)))
     (if (and root file-data hunk)
         (git-stage-patch root
@@ -130,7 +130,7 @@
 ;; the primary tree leads the list, but this buffer may be about a linked
 ;; worktree.
 (define (git--head buf cb)
-  (let ((root (buffer-local buf 'diff-root)))
+  (let ((root (buffer-local-value 'diff-root buf)))
     (if (not (string? root)) (cb #f)
       (let* ((mine (filter (lambda (w) (equal? (diff--get w 'path) root))
                            (worktree-list root)))
@@ -195,7 +195,7 @@
 (define-command "diff-mode" "Toggle the source-control diff for this file or directory"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (buffer-local buf 'diff-backend)
+      (if (buffer-local-value 'diff-backend buf)
           ;; from inside a diff the same command toggles back
           (run-command "quit-window")
           (let* ((path (buffer-path buf))

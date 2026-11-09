@@ -58,12 +58,12 @@
 
 ;; a chat buffer, a chat id or an agent id, as the chat's stable id
 (define (agent-listen--chat-id who)
-  (cond ((not who) (buffer-local (current-buffer) 'chat-id))
+  (cond ((not who) (buffer-local-value 'chat-id (current-buffer)))
         ((string-prefix? "chat:" who) who)
         ((string-prefix? "agent:chat-" who)
          (let ((parts (string-split (substring who 11 (string-length who)) "-")))
            (and (= (length parts) 2) (string-append "chat:" (car parts) ":" (cadr parts)))))
-        ((buffer-exists? who) (buffer-local who 'chat-id))
+        ((buffer-exists? who) (buffer-local-value 'chat-id who))
         (else #f)))
 
 (define (agent-listen--wants? l e)
@@ -103,7 +103,7 @@
                    (apply string-append
                           (map (lambda (l) (string-append (format "~s" l) "\n")) *agent-listeners*))))
   ;; a task's page lists what its agent listens for
-  (for-each (lambda (b) (when (equal? (buffer-local b 'mode-name) "todo-detail-mode")
+  (for-each (lambda (b) (when (equal? (buffer-local-value 'mode-name b) "todo-detail-mode")
                           (todo--detail-render! b)))
             (buffer-list)))
 

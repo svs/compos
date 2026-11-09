@@ -30,7 +30,7 @@
     (message "failed event" 'error)
     (run-command "view-messages")
     (check-equal! (current-buffer) "*Messages*" "the command keeps the Emacs buffer name")
-    (check-equal! (buffer-local "*Messages*" 'mode-name)
+    (check-equal! (buffer-local-value 'mode-name "*Messages*")
                   "messages-mode" "the buffer records its mode")
     (check-true! (string-contains? (buffer-text "*Messages*") "SOURCE")
                  "the list shows one source column")
@@ -79,7 +79,7 @@
   (lambda ()
     (messages-clear!)
     (message "a row" 'info)
-    (check-equal! (buffer-local "*Messages*" 'text-scale) messages-text-scale
+    (check-equal! (buffer-local-value 'text-scale "*Messages*") messages-text-scale
                   "the buffer carries the configured step")))
 
 (deftest 'the-messages-list-pins-its-keys-in-the-keys-bar
@@ -88,7 +88,7 @@
     (messages-clear!)
     (message "a row" 'info)
     (run-command "view-messages")
-    (let ((blocks (buffer-local "*Messages*" 'footer-line-blocks)))
+    (let ((blocks (buffer-local-value 'footer-line-blocks "*Messages*")))
       (check-true! (pair? blocks) "the footer carries blocks")
       (check-equal! (plist-get (car blocks) 'tag) "c-keys-bar"
                     "and those blocks are the keys bar"))))
@@ -168,7 +168,7 @@
   (lambda ()
     (messages-clear!)
     (message "first row" 'info)
-    (check-equal! (buffer-local "*Messages*" 'mode-name) "messages-mode" "the mode is on")
+    (check-equal! (buffer-local-value 'mode-name "*Messages*") "messages-mode" "the mode is on")
     (check-true! (buffer-read-only? "*Messages*") "the list is read-only")
     (list-refresh! "*Messages*")
     (check-true! (string-contains? (buffer-text "*Messages*") "first row")
@@ -181,7 +181,7 @@
     (when (buffer-exists? "*Messages*") (buffer-kill! "*Messages*"))
     (message "after the kill" 'info)
     (check-true! (buffer-exists? "*Messages*") "the buffer is back")
-    (check-equal! (buffer-local "*Messages*" 'mode-name) "messages-mode" "in messages-mode")
+    (check-equal! (buffer-local-value 'mode-name "*Messages*") "messages-mode" "in messages-mode")
     (check-true! (buffer-read-only? "*Messages*") "and read-only")
     (list-refresh! "*Messages*")
     (check-true! (string-contains? (buffer-text "*Messages*") "after the kill")

@@ -227,13 +227,13 @@
   (buffer-goto! buf (buffer-size buf)))
 
 (define (imessage--refresh-conversation! buf)
-  (let ((chat (buffer-local buf 'imessage-chat)))
+  (let ((chat (buffer-local-value 'imessage-chat buf)))
     (when chat
       (task-run! (lambda () (imessage--conversation-text chat (imessage-messages (plist-get chat 'id))))
         (lambda (ok? text)
           ;; one pane serves every chat: drop an answer for a chat it left
           (when (and (buffer-known? buf)
-                     (equal? (plist-get chat 'id) (plist-get (buffer-local buf 'imessage-chat) 'id)))
+                     (equal? (plist-get chat 'id) (plist-get (buffer-local-value 'imessage-chat buf) 'id)))
             (imessage--render! buf (if ok? text (string-append "Could not read Messages: " (format "~a" text) "\n")))))))))
 
 (define (imessage--open-chat! chat &optional display?)
@@ -279,7 +279,7 @@
 (define (imessage--chat-here buf)
   (if (buffer-derived-mode? buf "imessage-mode")
       (list-current *imessage-buffer*)
-      (buffer-local buf 'imessage-chat)))
+      (buffer-local-value 'imessage-chat buf)))
 
 (define-command "imessage-reply" "Send a message to this iMessage or SMS chat"
   (lambda ()
@@ -380,7 +380,7 @@
     (unless (buffer-known? *imessage-show-buffer*)
       (buffer-create *imessage-show-buffer*))
     (imessage--join-group! *imessage-show-buffer*)
-    (when (and (not (buffer-local *imessage-show-buffer* 'imessage-chat))
+    (when (and (not (buffer-local-value 'imessage-chat *imessage-show-buffer*))
                (= (buffer-size *imessage-show-buffer*) 0))
       (buffer-append! *imessage-show-buffer* "No conversation selected.\n")
       (buffer-set-read-only! *imessage-show-buffer* #t))))

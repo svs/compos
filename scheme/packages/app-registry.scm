@@ -95,7 +95,7 @@
 
 (define (app-registry--open-buffers row)
   (let ((modes (plist-get row 'modes)))
-    (filter (lambda (b) (member (buffer-local b 'mode-name) modes)) (buffer-list))))
+    (filter (lambda (b) (member (buffer-local-value 'mode-name b) modes)) (buffer-list))))
 
 (define (app-registry--rows buf)
   (let ((apps (app-registry-apps)))
@@ -161,13 +161,13 @@
 (effects! '(write display))
 
 (define (app-registry--list)
-  (if (equal? (buffer-local (current-buffer) 'mode-name) "app-registry-mode")
+  (if (equal? (buffer-local-value 'mode-name (current-buffer)) "app-registry-mode")
       (current-buffer)
-      (or (buffer-local (current-buffer) 'app-registry-list) *app-registry-buffer*)))
+      (or (buffer-local-value 'app-registry-list (current-buffer)) *app-registry-buffer*)))
 
 (define (app-registry--at)
   "the app at hand: the page's own, else the list's row"
-  (or (buffer-local (current-buffer) 'app-registry-app)
+  (or (buffer-local-value 'app-registry-app (current-buffer))
       (let ((r (list-current (app-registry--list)))) (and r (not (app-registry--sep? r)) r))))
 
 (define (app-registry-show-detail! row)

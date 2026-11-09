@@ -180,19 +180,19 @@
     (t--nm-run! "notmuch-open-thread")
 
     (check-equal! (current-buffer) (nm--thread-buffer "0002") "the thread's page is current")
-    (check-equal! (buffer-local (current-buffer) 'render-mode) "html" "rendered as html")
+    (check-equal! (buffer-local-value 'render-mode (current-buffer)) "html" "rendered as html")
     (let ((text (buffer-text (current-buffer))))
       (check-contains! text "<!DOCTYPE html" "a whole document")
       (check-contains! text "Hello <b>HTML</b> world" "with the body")
       (check-contains! text "Quarterly report" "and the subject"))
 
     (t--nm-run! "notmuch-show-toggle-view")
-    (check-equal! (buffer-local (current-buffer) 'render-mode) "blocks" "the toggle renders semantic plain text")
+    (check-equal! (buffer-local-value 'render-mode (current-buffer)) "blocks" "the toggle renders semantic plain text")
     ;; the renderer is stubbed to cat, so the text view carries the raw html
     (check-contains! (buffer-text (current-buffer)) "Hello <b>HTML" "which is the raw html here")
 
     (t--nm-run! "notmuch-show-toggle-view")
-    (check-equal! (buffer-local (current-buffer) 'render-mode) "html" "and back again")
+    (check-equal! (buffer-local-value 'render-mode (current-buffer)) "html" "and back again")
     (t--nm-done!)))
 
 (deftest 'every-thread-opens-its-own-page
@@ -286,7 +286,7 @@
     (check-equal! (current-buffer) "*mailboxes*" "the mailbox list")
     (check-true!
       (wait-until (lambda ()
-                    (and (equal? (buffer-local "*mailboxes*" 'nm-hello-status) "")
+                    (and (equal? (buffer-local-value 'nm-hello-status "*mailboxes*") "")
                          (not (string-contains? (buffer-text "*mailboxes*") "loading counts"))))
                   3000 10)
       "the asynchronous counts arrive")
@@ -713,7 +713,7 @@
     (t--nm-setup!)
     (let ((saved notmuch-auto-preview)
           (shown (lambda () (let ((p (find window-showing (nm--show-buffers))))
-                              (and p (buffer-local p 'notmuch-thread))))))
+                              (and p (buffer-local-value 'notmuch-thread p))))))
       (set! notmuch-auto-preview #t)
       (t--nm-run! "notmuch-inbox")
       (t--nm-run! "notmuch-next")

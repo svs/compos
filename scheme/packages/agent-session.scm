@@ -11,14 +11,14 @@
 ;; from its agent, or a family) and the model is not among it.
 (define (agent-model-foreign? buf cname m)
   (let ((known (or (pair? (connector-models cname))
-                   (pair? (buffer-local buf 'agent-models))
+                   (pair? (buffer-local-value 'agent-models buf))
                    (plist-get (connector-config cname) 'accepts))))
     (and m known
          (not (connector-accepts? cname m))
-         (not (assoc m (or (buffer-local buf 'agent-models) '()))))))
+         (not (assoc m (or (buffer-local-value 'agent-models buf) '()))))))
 
 (define (agent-model-for-connector buf cname)
-  (let ((m0 (buffer-local buf 'agent-model)))
+  (let ((m0 (buffer-local-value 'agent-model buf)))
     (if (agent-model-foreign? buf cname m0)
         (begin
           (buffer-set-local! buf 'agent-model #f)
@@ -58,9 +58,9 @@
                     (workspace-llm-defaults-note! buf))))))))))
 
 (define (agent-conversation-text buf)
-  (let ((bs (or (buffer-local buf 'agent-blocks) '()))
+  (let ((bs (or (buffer-local-value 'agent-blocks buf) '()))
         (text (buffer-text buf))
-        (mark (or (buffer-local buf 'agent-saved-mark) (buffer-size buf))))
+        (mark (or (buffer-local-value 'agent-saved-mark buf) (buffer-size buf))))
     (if (null? bs)
         (substring-bytes text 0 mark)
         (let loop ((bs (reverse bs)) (acc ""))
@@ -96,7 +96,7 @@
 
 (define (chat-attachment-path buf mime)
   (let ((dir (string-append (compos-home) "/attachments"))
-        (n (length (or (buffer-local buf 'chat-pending-images) '()))))
+        (n (length (or (buffer-local-value 'chat-pending-images buf) '()))))
     (unless (file-directory? dir) (make-directory! dir))
     (string-append dir "/"
                    (or (agent-slug-of buf) "chat") "-"
@@ -122,7 +122,7 @@
              (path (chat-attachment-path buf mime)))
         (write-file! path (base64-decode data))
         (buffer-set-local! buf 'chat-pending-images
-          (append (or (buffer-local buf 'chat-pending-images) '())
+          (append (or (buffer-local-value 'chat-pending-images buf) '())
                   (list (list mime path))))
         ;; the input shows it now; the transcript takes it with the message
         (chat-view-sync! buf)
@@ -131,7 +131,7 @@
 
 ;; the Nth pending image leaves before the send; its file goes too
 (define (chat-image-drop! buf n)
-  (let ((pending (or (buffer-local buf 'chat-pending-images) '())))
+  (let ((pending (or (buffer-local-value 'chat-pending-images buf) '())))
     (when (and (integer? n) (< -1 n (length pending)))
       (let ((im (list-ref pending n)))
         (buffer-set-local! buf 'chat-pending-images
@@ -142,7 +142,7 @@
 ;; the images a sent message carries wait here, by its text, for the
 ;; user-msg that draws it; they land in the transcript under it
 (define (chat-image-land! buf text)
-  (let* ((flight (or (buffer-local buf 'chat-images-in-flight) '()))
+  (let* ((flight (or (buffer-local-value 'chat-images-in-flight buf) '()))
          (hit (assoc text flight)))
     (when hit
       (buffer-set-local! buf 'chat-images-in-flight (remove (lambda (e) (eq? e hit)) flight))
@@ -156,12 +156,12 @@
 ;; differs from the block this chat sent last, when C-c RET named a source, or
 ;; when a fresh session has seen no block yet.
 (define (agent-editor-context buf)
-  (let* ((force (or (buffer-local buf 'editor-context-source)
-                    (buffer-local buf 'agent-seed-context)))
+  (let* ((force (or (buffer-local-value 'editor-context-source buf)
+                    (buffer-local-value 'agent-seed-context buf)))
          (pre (editor-context-preamble buf)))
     (string-append
-      (agent-chat-context-once buf (buffer-local buf 'agent-seed-context))
-      (if (and (not force) (equal? pre (buffer-local buf 'editor-context-sent)))
+      (agent-chat-context-once buf (buffer-local-value 'agent-seed-context buf))
+      (if (and (not force) (equal? pre (buffer-local-value 'editor-context-sent buf)))
           ""
           (begin (buffer-set-local! buf 'editor-context-sent pre) pre))
       ;; the component fences the last reply could not draw
@@ -177,7 +177,7 @@
       (let* ((c (chat-context buf))
              (key (list (plist-get c 'group) (plist-get c 'directory)
                         (plist-get c 'companions))))
-        (if (and (not force) (equal? key (buffer-local buf 'chat-context-sent)))
+        (if (and (not force) (equal? key (buffer-local-value 'chat-context-sent buf)))
             ""
             (begin (buffer-set-local! buf 'chat-context-sent key)
                    (chat-context-brief buf))))))
@@ -186,9 +186,9 @@
   (let* ((buf (agent-buf slug))
          ;; a one-shot note - a skill body a mode pushed - rides the next
          ;; message exactly once, then clears
-         (once (or (buffer-local buf 'chat-note-once) ""))
+         (once (or (buffer-local-value 'chat-note-once buf) ""))
          ;; images the user pasted since the last send ride once, then clear
-         (images (or (buffer-local buf 'chat-pending-images) '()))
+         (images (or (buffer-local-value 'chat-pending-images buf) '()))
          ;; the path rides in the text as well as on the image lane. A
          ;; backend that cannot take image content can still open the file,
          ;; and a path is a few bytes where the picture is megabytes.
@@ -210,8 +210,8 @@
     (buffer-set-local! buf 'chat-pending-images '())
     (unless (null? images)
       (buffer-set-local! buf 'chat-images-in-flight
-        (append (or (buffer-local buf 'chat-images-in-flight) '()) (list (cons raw images)))))
-    (if (buffer-local buf 'agent-seed-context)
+        (append (or (buffer-local-value 'chat-images-in-flight buf) '()) (list (cons raw images)))))
+    (if (buffer-local-value 'agent-seed-context buf)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)
           ;; Say it. This is not a resumed session — the adapter has no
@@ -449,7 +449,7 @@
     (chat-record-push! buf "status" (list (list "text" (string-trim text))) #f)
     ;; chat-render! writes at the saved mark, so a chat with no runtime —
     ;; restored, or never sent to — is a REPL too
-    (when (buffer-local buf 'agent-saved-mark)
+    (when (buffer-local-value 'agent-saved-mark buf)
       (when (boundp 'agent-adopt-prose-tail!) (agent-adopt-prose-tail! buf))
       (let* ((start (chat-render! buf text))
              (end (+ start (string-byte-length text))))
@@ -478,13 +478,13 @@
                   (substring-bytes body (+ nl 1) (string-byte-length body))
                   body)))
     (buffer-set-local! buf 'chat-fast-runs
-      (append (or (buffer-local buf 'chat-fast-runs) '())
+      (append (or (buffer-local-value 'chat-fast-runs buf) '())
               (list (list typed src (if (> (string-length out) 300)
                                         (string-append (substring out 0 300) "…")
                                         out)))))))
 
 (define (chat-fast-note buf)
-  (let ((runs (or (buffer-local buf 'chat-fast-runs) '())))
+  (let ((runs (or (buffer-local-value 'chat-fast-runs buf) '())))
     (if (null? runs)
         ""
         (string-append
@@ -500,7 +500,7 @@
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let* ((buf (current-buffer))
-           (chat? (equal? (buffer-local buf 'mode-name) "chat-mode"))
+           (chat? (equal? (buffer-local-value 'mode-name buf) "chat-mode"))
            (typed (string-trim (chat-input-text buf))))
       (if (and chat? (or (chat-scheme-input? typed) (chat-fast-input? typed)))
           ;; the prompt is a REPL before it is a conversation, and an input
@@ -532,7 +532,7 @@
                  ;; connector; RET is agent-send on EVERY chat
                  (slug (or (agent-slug-of buf)
                            (and chat?
-                                (buffer-local buf 'agent-saved-mark)
+                                (buffer-local-value 'agent-saved-mark buf)
                                 (chat-ensure-runtime! buf)))))
             (cond ((not slug) (message "not an agent buffer"))
                   (else
@@ -624,7 +624,7 @@
 
 (define (chat-scheme--mode-hook!)
   (let ((buf (current-buffer)))
-    (let ((cur (or (buffer-local buf 'capf-sources) '())))
+    (let ((cur (or (buffer-local-value 'capf-sources buf) '())))
       (unless (member chat-scheme--capf cur)
         (buffer-set-local! buf 'capf-sources (cons chat-scheme--capf cur))))
     (desktop-skip! buf 'capf-sources)
@@ -634,7 +634,7 @@
 
 ;; the chats already open never ran the hook
 (for-each (lambda (b)
-            (when (equal? (buffer-local b 'mode-name) "chat-mode")
+            (when (equal? (buffer-local-value 'mode-name b) "chat-mode")
               (with-current-buffer b chat-scheme--mode-hook!)))
           (buffer-list))
 
@@ -647,7 +647,7 @@
 ;; lives in memory only: a restart starts you clean, and the transcripts
 ;; still hold what was said.
 (define (chat-history buf)
-  (or (buffer-local buf 'chat-history-ring) '()))
+  (or (buffer-local-value 'chat-history-ring buf) '()))
 
 (define (chat-history-set! buf ring)
   (buffer-set-local! buf 'chat-history-ring
@@ -682,7 +682,7 @@
   (buffer-set-local! buf 'chat-history-prefix #f))
 
 (define (chat-in-input? buf)
-  (>= (point) (or (buffer-local buf 'agent-saved-mark) 0)))
+  (>= (point) (or (buffer-local-value 'agent-saved-mark buf) 0)))
 
 (define (chat-on-first-input-line? buf)
   (let ((start (car (chat-input-region buf))))
@@ -710,7 +710,7 @@
         (filter (lambda (s) (string-prefix? prefix s)) h))))
 
 (define (chat-history-prefix-of buf)
-  (or (buffer-local buf 'chat-history-prefix)
+  (or (buffer-local-value 'chat-history-prefix buf)
       (let ((prefix (chat-input-text buf)))
         (buffer-set-local! buf 'chat-history-prefix prefix)
         prefix)))
@@ -718,7 +718,7 @@
 (define (chat-history-recall! buf dir)
   (let* ((prefix (chat-history-prefix-of buf))
          (h (chat-history-for buf prefix))
-         (pos (or (buffer-local buf 'chat-history-pos) -1))
+         (pos (or (buffer-local-value 'chat-history-pos buf) -1))
          (next (if (< dir 0) (+ pos 1) (- pos 1))))
     (cond ((>= next (length h))
            (message (if (equal? prefix "")
@@ -734,17 +734,17 @@
             (when (= next -1) (buffer-set-local! buf 'chat-history-prefix #f))
             (chat-replace-input! buf
               (if (= next -1)
-                  (or (buffer-local buf 'chat-history-draft) "")
+                  (or (buffer-local-value 'chat-history-draft buf) "")
                   (nth next h)))))))
 
 ;; the queued rows walk newest first, same direction as sent history, so
 ;; index 0 is the message closest to the input -- the one chat-unqueue
 ;; already treats as "the newest queued message"
-(define (chat-queued-for buf) (reverse (or (buffer-local buf 'chat-queued) '())))
+(define (chat-queued-for buf) (reverse (or (buffer-local-value 'chat-queued buf) '())))
 
 (define (chat-queued-recall! buf dir)
   (let* ((q (chat-queued-for buf))
-         (walk (buffer-local buf 'chat-queued-walk))
+         (walk (buffer-local-value 'chat-queued-walk buf))
          (pos (or (plist-get walk 'pos) -1))
          (draft (if walk (or (plist-get walk 'draft) "") (chat-input-text buf)))
          (next (if (< dir 0) (+ pos 1) (- pos 1))))
@@ -773,8 +773,8 @@
     (chat-history-seed! buf)
     (cond
       ;; already walking the queued rows: stay in that walk
-      ((buffer-local buf 'chat-queued-walk) (chat-queued-recall! buf dir))
-      ((or (not (buffer-local buf 'agent-saved-mark))
+      ((buffer-local-value 'chat-queued-walk buf) (chat-queued-recall! buf dir))
+      ((or (not (buffer-local-value 'agent-saved-mark buf))
            (not (chat-in-input? buf))
            ;; inside a multi-line input, up and down are still motion
            (if (< dir 0)
@@ -785,7 +785,7 @@
       ;; before the sent history, since they are what point is closest to
       ((and (< dir 0)
             (equal? (string-trim (chat-input-text buf)) "")
-            (pair? (buffer-local buf 'chat-queued)))
+            (pair? (buffer-local-value 'chat-queued buf)))
        (chat-queued-recall! buf dir))
       ((null? (chat-history buf)) (run-command motion))
       (else (chat-history-recall! buf dir)))))
@@ -805,11 +805,11 @@
       (when slug
         (cond ((equal? (agent-status slug) 'dead)
                (agent-revive! slug))
-              ((buffer-local buf 'agent-cancelling)
+              ((buffer-local-value 'agent-cancelling buf)
                (buffer-set-local! buf 'agent-cancelling #f)
                (agent-reconnect! slug
-                 (or (buffer-local buf 'agent-connector) *default-connector*)
-                 (or (buffer-local buf 'agent-model) ""))
+                 (or (buffer-local-value 'agent-connector buf) *default-connector*)
+                 (or (buffer-local-value 'agent-model buf) ""))
                (message "agent restarted (hard reset)"))
               (else
                (buffer-set-local! buf 'agent-cancelling #t)
@@ -827,12 +827,12 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
-           (before (length (or (buffer-local buf 'chat-queued) '()))))
+           (before (length (or (buffer-local-value 'chat-queued buf) '()))))
       (if (equal? (string-trim (chat-input-text buf)) "")
           (message "nothing to send")
           (begin
             (run-command "agent-send")
-            (let ((q (or (buffer-local buf 'chat-queued) '())))
+            (let ((q (or (buffer-local-value 'chat-queued buf) '())))
               (when (and slug (> (length q) before) (> (length q) 1))
                 (let ((text (list-ref q (- (length q) 1))))
                   (when (agent-promote! slug text)
@@ -883,7 +883,7 @@
 (define (chat-dismiss--ask) (string-append "This chat is dismissed. " *chat-finish-ask*))
 
 (define (chat-finish--open-todos buf)
-  (let ((id (buffer-local buf 'chat-id)))
+  (let ((id (buffer-local-value 'chat-id buf)))
     (if (string? id)
         (filter (lambda (t) (member id (todo-chats t)))
                 (or (report-errors "chat-finish: read the open todos" (lambda () (todo-list))) '()))
@@ -902,11 +902,11 @@
           (chat-finish--open-todos buf)))))
 
 (define (chat-finish--settle! buf slug ok? stop-reason)
-  (let* ((fin (buffer-local buf 'chat-finish))
+  (let* ((fin (buffer-local-value 'chat-finish buf))
          (outcome (and (pair? fin) (car fin)))
          (summary (if (pair? fin) (cadr fin) ""))
          (title (chats-title buf))
-         (reap? (buffer-local buf 'chat-reap))
+         (reap? (buffer-local-value 'chat-reap buf))
          (blockers (chat-finish--blockers buf slug ok? stop-reason)))
     (buffer-set-local! buf 'chat-dismiss-pending #f)
     (buffer-set-local! buf 'chat-finish-asked #f)
@@ -940,13 +940,13 @@
       ;; only a plain turn end arms auto-close; finish and dismiss settle it
       (buffer-set-local! buf 'chat-auto-close-armed #f)
       ;; a turn the reaper did not start makes a kept chat one it may ask again
-      (when (and (buffer-local buf 'chat-reaped) (not (buffer-local buf 'chat-dismiss-pending)))
+      (when (and (buffer-local-value 'chat-reaped buf) (not (buffer-local-value 'chat-dismiss-pending buf)))
         (buffer-set-local! buf 'chat-reaped #f))
-      (cond ((buffer-local buf 'chat-finish)
+      (cond ((buffer-local-value 'chat-finish buf)
              (chat-finish--settle! buf slug ok? stop-reason))
-            ((buffer-local buf 'chat-dismiss-pending)
+            ((buffer-local-value 'chat-dismiss-pending buf)
              ;; a dismissed chat that has not said how it ended is asked once
-             (if (and ok? (not (buffer-local buf 'chat-finish-asked)))
+             (if (and ok? (not (buffer-local-value 'chat-finish-asked buf)))
                  (begin
                    (buffer-set-local! buf 'chat-finish-asked #t)
                    (agent-send-msg! slug (chat-dismiss--ask)))
@@ -990,8 +990,8 @@
                 (and slug (buffer-exists? b)
                      (equal? (agent-status slug) 'idle)
                      (number? seen) (>= (- now seen) limit)
-                     (not (buffer-local b 'chat-reaped))
-                     (not (buffer-local b 'chat-dismiss-pending))
+                     (not (buffer-local-value 'chat-reaped b))
+                     (not (buffer-local-value 'chat-dismiss-pending b))
                      (not (window-showing b))
                      (null? (agent-listeners b))
                      (equal? (string-trim (chat-input-text b)) ""))))
@@ -1007,7 +1007,7 @@
       '()
       (let ((bs (chat-reap--candidates)))
         (if chat-idle-reap-dry-run
-            (let ((new (filter (lambda (b) (not (buffer-local b 'chat-reap-noted))) bs)))
+            (let ((new (filter (lambda (b) (not (buffer-local-value 'chat-reap-noted b))) bs)))
               (for-each (lambda (b) (buffer-set-local! b 'chat-reap-noted #t)) new)
               (when (pair? new)
                 (message (string-append "Reap (dry run) would ask "
@@ -1056,7 +1056,7 @@
   (let ((slug (and (buffer-exists? buf) (agent-slug-of buf))))
     ;; a new turn, a window or a hold may have come while the summary was written
     (when (and chat-auto-close (eq? status 'success) slug
-               (buffer-local buf 'chat-auto-close-armed)
+               (buffer-local-value 'chat-auto-close-armed buf)
                (equal? (agent-status slug) 'idle)
                (subagent-parent slug)
                (not (window-showing buf))
@@ -1106,7 +1106,7 @@
     (let* ((buf (current-buffer))
            (slug (agent-slug-of buf))
            (q (chat-queued-for buf))
-           (walk (buffer-local buf 'chat-queued-walk))
+           (walk (buffer-local-value 'chat-queued-walk buf))
            (walked (plist-get walk 'pos))
            (idx (if (and walked (< walked (length q))) walked 0)))
       (if (null? q)
@@ -1133,7 +1133,7 @@
 
 (define (agent-claimed-slugs)
   (filter (lambda (s) s)
-          (map (lambda (b) (buffer-local b 'agent-slug)) (buffer-list))))
+          (map (lambda (b) (buffer-local-value 'agent-slug b)) (buffer-list))))
 
 (define (agent-chat-buffer slug) (string-append "*chat:" slug "*"))
 
@@ -1155,7 +1155,7 @@
             slug)))))
 
 (define (chat-marker-guard? buf p)
-  (and (buffer-local buf 'agent-saved-mark)
+  (and (buffer-local-value 'agent-saved-mark buf)
        (<= p (chat-input-start buf))))
 
 (effects! '(write))
@@ -1170,7 +1170,7 @@
 (define-command "chat-delete-forward" "Delete forward, but never the input marker"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (and (buffer-local buf 'agent-saved-mark)
+      (if (and (buffer-local-value 'agent-saved-mark buf)
                (>= (point) (chat-mark buf))
                (< (point) (chat-input-start buf)))
           (message "this is the input marker")
@@ -1199,11 +1199,11 @@
 ;; bumping the token the hook watches, is what makes a chat follow the
 ;; newest message again.
 (define (chat-follow-again! buf)
-  (let ((seq (buffer-local buf 'follow-seq)))
+  (let ((seq (buffer-local-value 'follow-seq buf)))
     (buffer-set-local! buf 'follow-place #f)
     ;; the bottom is the transcript window's home: the earlier blocks a
     ;; reader revealed go back behind the reveal row
-    (when (buffer-local buf 'chat-view-reveal)
+    (when (buffer-local-value 'chat-view-reveal buf)
       (buffer-set-local! buf 'chat-view-reveal #f)
       (when (boundp 'chat-view-sync!) (chat-view-sync! buf)))
     (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))
@@ -1226,7 +1226,7 @@
     (let ((buf (chat-to-bottom-target)))
       (if (not buf)
           (message "no chat here")
-          (let ((seq (buffer-local buf 'follow-seq)))
+          (let ((seq (buffer-local-value 'follow-seq buf)))
             (with-current-buffer buf (lambda () (beginning-of-buffer!)))
             (buffer-set-local! buf 'chat-view-reveal (length (agent-blocks buf)))
             (when (boundp 'chat-view-sync!) (chat-view-sync! buf))
@@ -1641,7 +1641,7 @@
                  (let ((path (subagent-archived-path c)))
                    (and path
                         (let* ((buf (visit-in-group path g))
-                               (title (and buf (buffer-local buf 'chat-title))))
+                               (title (and buf (buffer-local-value 'chat-title buf))))
                           (when (and (string? title) (not (equal? title "")))
                             (chat-title buf title))
                           buf)))))
@@ -1707,7 +1707,7 @@
 (define (subagent-result chat)
   (let* ((slug (subagent-slug chat))
          (buf (subagent-live-buffer chat))
-         (ended (and buf (buffer-local buf 'subagent-turn-end)))
+         (ended (and buf (buffer-local-value 'subagent-turn-end buf)))
          (verdict (subagent-verdict-of slug)))
     (list 'slug slug
           'buffer buf
@@ -1729,7 +1729,7 @@
           ((not buf) 'gone)
           ((subagent-running? slug) 'running)
           ((equal? said "wait") 'wait)
-          ((buffer-local buf 'subagent-turn-end) 'stopped)
+          ((buffer-local-value 'subagent-turn-end buf) 'stopped)
           (else 'idle))))
 
 (define (subagent-done? chat)
@@ -1796,7 +1796,7 @@
 
 (define (subagent-notify-parent! slug ok? stop-reason)
   (let* ((buf (subagent-live-buffer slug))
-         (wanted (and buf (buffer-local buf 'subagent-notify)))
+         (wanted (and buf (buffer-local-value 'subagent-notify buf)))
          (parent (and wanted (subagent-parent slug)))
          (pbuf (and parent (subagent-live-buffer parent))))
     (when pbuf
@@ -1924,7 +1924,7 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
          (orch (subagent-live-buffer slug))
          (pairs (map (lambda (b) (cons b (llm-companion-ensure! b g))) bufs))
          ;; a chat made just now is starting up, not busy
-         (busy? (lambda (p) (let ((s (buffer-local (cadr p) 'agent-slug)))
+         (busy? (lambda (p) (let ((s (buffer-local-value 'agent-slug (cadr p))))
                               (and (not (caddr p)) s (subagent-running? s)))))
          (work (filter (lambda (p) (not (busy? p))) pairs))
          (skipped (map cadr (filter busy? pairs))))

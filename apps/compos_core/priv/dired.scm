@@ -21,7 +21,7 @@
 
 ;; the buffer-local is the durable copy: locals ride desktop.etf, so a
 ;; restored dired knows its directory before its mode setup re-renders
-(define (dired-dir buf) (buffer-local buf 'dired-dir))
+(define (dired-dir buf) (buffer-local-value 'dired-dir buf))
 
 (define (dired-directory? e) (string-suffix? "/" e))
 
@@ -58,8 +58,8 @@
 (define (dired-lists-prime! buf)
   (set! *dired-lists*
     (cons (list buf
-                (or (buffer-local buf 'dired-info) '())
-                (or (buffer-local buf 'dired-vc) '()))
+                (or (buffer-local-value 'dired-info buf) '())
+                (or (buffer-local-value 'dired-vc buf) '()))
           (filter (lambda (entry)
                     (and (not (equal? (car entry) buf))
                          (buffer-exists? (car entry))))
@@ -113,7 +113,7 @@
     (string-append (string-repeat "█" n) (string-repeat "░" (- 5 n)))))
 
 (define (dired-top-size buf)
-  (or (buffer-local buf 'dired-top) 1))
+  (or (buffer-local-value 'dired-top buf) 1))
 
 ;;; --- what git says ------------------------------------------------------------
 ;;; One `git status` when the listing opens, kept on the buffer. A refresh
@@ -371,7 +371,7 @@
 (define (dired-visible buf dir)
   (set! *marginalia-file-dir* (string-append dir "/"))
   (dired-scan-once! buf dir)
-  (list-keep buf (or (buffer-local buf 'dired-all) '())))
+  (list-keep buf (or (buffer-local-value 'dired-all buf) '())))
 
 ;; the whole directory, before the filters: the biggest file sets the
 ;; scale of the size bars, and the header counts what the narrowing hid
@@ -418,9 +418,9 @@
 ;; and a scan per keystroke is a scan per keystroke. A restored dired
 ;; scans on its first refresh, because its locals came back empty.
 (define (dired-scan-once! buf dir)
-  (unless (buffer-local buf 'dired-scanned)
+  (unless (buffer-local-value 'dired-scanned buf)
     (dired-read-directory! buf dir)
-    (unless (buffer-local buf 'dired-error) (dired-vc-scan! buf dir))
+    (unless (buffer-local-value 'dired-error buf) (dired-vc-scan! buf dir))
     (buffer-set-local! buf 'dired-scanned #t))
   ;; the draw that follows reads the lists this scan (or a restore) left
   (dired-lists-prime! buf))
@@ -438,7 +438,7 @@
               dired-watch-armed dired-stale list-source-entries)))
 
 (define (dired-sort-field buf)
-  (or (buffer-local buf 'dired-sort-field) "name"))
+  (or (buffer-local-value 'dired-sort-field buf) "name"))
 
 (define (dired-sort-value buf e)
   (let* ((info (dired-info buf e))
@@ -455,10 +455,10 @@
                (sort (map (lambda (e)
                             (list (dired-sort-value buf e) (string-downcase e) e))
                           entries)))))
-    (if (buffer-local buf 'dired-sort-reverse) (reverse sorted) sorted)))
+    (if (buffer-local-value 'dired-sort-reverse buf) (reverse sorted) sorted)))
 
 (define (dired-sorted buf entries)
-  (if (buffer-local buf 'dired-dirs-first)
+  (if (buffer-local-value 'dired-dirs-first buf)
       (append
         (dired-sort-one buf
           (filter (lambda (e)
@@ -472,7 +472,7 @@
 
 (define (dired-resort! buf)
   (buffer-set-local! buf 'list-source-entries
-    (cons ".." (dired-sorted buf (or (buffer-local buf 'dired-all) '()))))
+    (cons ".." (dired-sorted buf (or (buffer-local-value 'dired-all buf) '()))))
   (list-redraw! buf))
 
 (define (dired-title buf)
@@ -480,17 +480,17 @@
 
 ;; ".." is a way out of the directory, not a thing in it
 (define (dired-meta buf)
-  (let* ((failure (buffer-local buf 'dired-error))
+  (let* ((failure (buffer-local-value 'dired-error buf))
          (n (list-count buf))
-         (branch (buffer-local buf 'dired-branch))
-         (free (buffer-local buf 'dired-free)))
+         (branch (buffer-local-value 'dired-branch buf))
+         (free (buffer-local-value 'dired-free buf)))
     (if failure
         (string-append "error: " failure)
         (string-join
       (append
         (list (string-append (number->string n) " "
                              (if (= n 1) "item" "items"))
-              (string-append (dired-human (or (buffer-local buf 'dired-used) 0)) " used"))
+              (string-append (dired-human (or (buffer-local-value 'dired-used buf) 0)) " used"))
         (if (and free (not (equal? free ""))) (list (string-append free " free")) '())
         (if (and branch (not (equal? branch ""))) (list (string-append "⎇ " branch)) '()))
           " · "))))
@@ -564,7 +564,7 @@
                     (dired-scan-once! buf dir)
                          (cons ".."
                                (dired-sorted buf
-                                 (or (buffer-local buf 'dired-all) '())))))))
+                                 (or (buffer-local-value 'dired-all buf) '())))))))
     'columns (lambda (buf)
                (list (list "" 1)
                      (list "name" #f)
@@ -588,7 +588,7 @@
         (list 'name 'wide 'default #t))
     'title (lambda (buf) (dired-title buf))
     'meta (lambda (buf) (dired-meta buf))
-    'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
+    'total (lambda (buf) (or (buffer-local-value 'dired-total buf) 0))
     'footer (lambda (buf)
               '(("RET" "open") ("M-RET" "open and go") ("SPC" "select") ("* s" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
@@ -636,7 +636,7 @@
 (define (dired-arm-watch! buf)
   (let ((dir (dired-dir buf)))
     (when (and dir (not (remote-path? dir))
-               (not (buffer-local buf 'dired-watch-armed)))
+               (not (buffer-local-value 'dired-watch-armed buf)))
       (let ((answer (watch-path! dir)))
         (unless (and (pair? answer) (equal? (car answer) 'error))
           (buffer-set-local! buf 'dired-watch-armed #t))))))
@@ -645,7 +645,7 @@
 ;; enough: a mode change leaves the local behind, and the hooks below must
 ;; not repaint a buffer that another mode now owns.
 (define (dired-buffer? buf)
-  (and (dired-dir buf) (equal? (buffer-local buf 'mode-name) "Dired")))
+  (and (dired-dir buf) (equal? (buffer-local-value 'mode-name buf) "Dired")))
 
 (define (dired-refresh-buffer! buf)
   (when (and (buffer-exists? buf) (dired-buffer? buf))
@@ -658,7 +658,7 @@
       (lambda (buf)
         (when (and (dired-buffer? buf)
                    (equal? (dired-dir buf) root)
-                   (buffer-local buf 'dired-watch-armed))
+                   (buffer-local-value 'dired-watch-armed buf))
           (if (window-showing buf)
               (begin
                 (buffer-set-local! buf 'dired-stale #f)
@@ -671,7 +671,7 @@
     (when (dired-buffer? buf)
       (dired-skip-derived! buf)
       (dired-arm-watch! buf)
-      (when (buffer-local buf 'dired-stale)
+      (when (buffer-local-value 'dired-stale buf)
         (buffer-set-local! buf 'dired-stale #f)
         (dired-refresh-buffer! buf)))))
 
@@ -769,7 +769,7 @@
 ;; command. An explicit spawn directory (a worktree, a foreign repo) is
 ;; the same local, written by the spawner.
 (define (buffer-companion-directory buf)
-  (buffer-local buf 'chat-directory))
+  (buffer-local-value 'chat-directory buf))
 
 (define (default-directory) (buffer-directory (current-buffer)))
 
@@ -777,7 +777,7 @@
   (let ((dd (and (dired-buffer? buf) (dired-dir buf)))
         (companion (buffer-companion-directory buf))
         (p (buffer-path buf))
-        (born (buffer-local buf 'default-directory)))
+        (born (buffer-local-value 'default-directory buf)))
     (cond (dd (string-append dd "/"))
           (companion companion)
           (p (path-directory p))
@@ -810,7 +810,7 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'dired-sort-reverse
-        (not (buffer-local buf 'dired-sort-reverse)))
+        (not (buffer-local-value 'dired-sort-reverse buf)))
       (dired-resort! buf)
       (message "Sort reversed"))))
 
@@ -818,9 +818,9 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'dired-dirs-first
-        (not (buffer-local buf 'dired-dirs-first)))
+        (not (buffer-local-value 'dired-dirs-first buf)))
       (dired-resort! buf)
-      (message (if (buffer-local buf 'dired-dirs-first)
+      (message (if (buffer-local-value 'dired-dirs-first buf)
                    "Directories first"
                    "Directories mixed")))))
 
@@ -1157,7 +1157,7 @@
     (filter (lambda (l) (not (equal? l ""))) ls)))
 
 (define (wdired-leave! ed)
-  (let ((buf (buffer-local ed 'wdired-dired)))
+  (let ((buf (buffer-local-value 'wdired-dired ed)))
     (buffer-mark-saved! ed)
     (if (and buf (buffer-exists? buf))
         (switch-to-buffer! buf)
@@ -1167,8 +1167,8 @@
 (define-command "wdired-finish-edit" "Rename the files whose names you changed"
   (lambda ()
     (let* ((ed (current-buffer))
-           (buf (buffer-local ed 'wdired-dired))
-           (olds (or (buffer-local ed 'wdired-names) '()))
+           (buf (buffer-local-value 'wdired-dired ed))
+           (olds (or (buffer-local-value 'wdired-names ed) '()))
            (news (wdired-lines (buffer-text ed))))
       (cond ((not (and buf (buffer-exists? buf)))
              (message "The Dired buffer is gone"))
@@ -1343,7 +1343,7 @@
     (cons (list name list-mode commands)
       (filter (lambda (entry) (not (equal? (car entry) name))) *dired-providers*))))
 (define (dired-provider buf)
-  (assoc (buffer-local buf 'dired-provider) *dired-providers*))
+  (assoc (buffer-local-value 'dired-provider buf) *dired-providers*))
 (define-mode "Dired"
   (lambda ()
     (let* ((buf (current-buffer)) (provider (dired-provider buf)))

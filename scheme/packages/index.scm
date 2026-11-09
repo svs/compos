@@ -24,8 +24,8 @@
   ;; a buffer's own declaration wins over its mode's: one browse page is an
   ;; index, the next is an article. 'none refuses the mode's.
   (let* ((b (or buf (current-buffer)))
-         (own (and (buffer-known? b) (buffer-local b 'index-spec)))
-         (mode (and (buffer-known? b) (buffer-local b 'mode-name))))
+         (own (and (buffer-known? b) (buffer-local-value 'index-spec b)))
+         (mode (and (buffer-known? b) (buffer-local-value 'mode-name b))))
     (cond ((eq? own 'none) #f)
           ((pair? own) own)
           (else (and mode (mode-inherited mode 'index))))))

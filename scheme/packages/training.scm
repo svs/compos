@@ -15,7 +15,7 @@
 (define (training--tutorial-progressed? buf)
   (or (buffer-modified? buf)
       (not (equal? (buffer-point buf)
-                   (or (buffer-local buf 'training-starting-point) 0)))))
+                   (or (buffer-local-value 'training-starting-point buf) 0)))))
 
 (define (training--kill-buffer-confirm! next target done)
   (if (and (equal? target *training-tutorial-buffer*)
@@ -64,7 +64,7 @@
 
 (define (training-mode-summary-prompt buf)
   "Return the companion request that teaches BUF's major mode."
-  (let* ((mode (or (buffer-local buf 'mode-name) "fundamental-mode"))
+  (let* ((mode (or (buffer-local-value 'mode-name buf) "fundamental-mode"))
          (doc (or (mode-doc mode) "No mode documentation is registered.")))
     (string-append
       "Teach me the major mode of the buffer named \"" buf "\". "
@@ -111,7 +111,7 @@
       (display-buffer-other-window! chat))
     (training--send! chat (training-mode-summary-prompt source))
     (message (string-append "Asked the companion about "
-                            (or (buffer-local source 'mode-name) "fundamental-mode")))
+                            (or (buffer-local-value 'mode-name source) "fundamental-mode")))
     chat))
 
 ;;;###autoload

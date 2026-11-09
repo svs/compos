@@ -83,7 +83,7 @@
                    "and it shows the starting health")
       (check-true! (string-contains? (buffer-text buf) "@")
                    "and the small map shows the player")
-      (check-true! (> (doom-lite-test-rects (buffer-local buf 'render-blocks)) 40)
+      (check-true! (> (doom-lite-test-rects (buffer-local-value 'render-blocks buf)) 40)
                    "the blocks hold the columns of the view")
       (doom-lite-test-end! buf))))
 
@@ -98,9 +98,9 @@
                                     'doom-lite-py (doom-lite--cell->fp 6)
                                     'doom-lite-angle 128))
       (let loop ((i 0)) (when (< i 12) (doom-lite--walk! buf 1) (loop (+ i 1))))
-      (check-true! (doom-lite--open-fp? (buffer-local buf 'doom-lite-px) (buffer-local buf 'doom-lite-py))
+      (check-true! (doom-lite--open-fp? (buffer-local-value 'doom-lite-px buf) (buffer-local-value 'doom-lite-py buf))
                    "the player still stands on floor")
-      (check-true! (>= (quotient (buffer-local buf 'doom-lite-px) *doom-lite-fp*) 1)
+      (check-true! (>= (quotient (buffer-local-value 'doom-lite-px buf) *doom-lite-fp*) 1)
                    "and never crossed the west wall")
       (doom-lite-test-end! buf))))
 
@@ -111,9 +111,9 @@
       (buffer-set-locals! buf (list 'doom-lite-px (doom-lite--cell->fp 4)
                                     'doom-lite-py (doom-lite--cell->fp 6)
                                     'doom-lite-angle 0))
-      (let ((before (buffer-local buf 'doom-lite-px)))
+      (let ((before (buffer-local-value 'doom-lite-px buf)))
         (doom-lite--walk! buf 1)
-        (check-true! (> (buffer-local buf 'doom-lite-px) before) "the player moved east"))
+        (check-true! (> (buffer-local-value 'doom-lite-px buf) before) "the player moved east"))
       (doom-lite-test-end! buf))))
 
 (deftest 'turning-keeps-the-angle-inside-the-circle
@@ -122,12 +122,12 @@
     (let ((buf (doom-lite-test-start!)))
       (buffer-set-local! buf 'doom-lite-angle 0)
       (doom-lite--turn! buf -1)
-      (check-true! (and (>= (buffer-local buf 'doom-lite-angle) 0)
-                        (< (buffer-local buf 'doom-lite-angle) 256))
+      (check-true! (and (>= (buffer-local-value 'doom-lite-angle buf) 0)
+                        (< (buffer-local-value 'doom-lite-angle buf) 256))
                    "turning left past zero stays in the circle")
       (let loop ((i 0)) (when (< i 40) (doom-lite--turn! buf 1) (loop (+ i 1))))
-      (check-true! (and (>= (buffer-local buf 'doom-lite-angle) 0)
-                        (< (buffer-local buf 'doom-lite-angle) 256))
+      (check-true! (and (>= (buffer-local-value 'doom-lite-angle buf) 0)
+                        (< (buffer-local-value 'doom-lite-angle buf) 256))
                    "and so does turning right past the top")
       (doom-lite-test-end! buf))))
 
@@ -140,9 +140,9 @@
               'doom-lite-health 50
               'doom-lite-items (list (doom-lite--item 4 6 "health"))))
       (doom-lite--pick-up! buf)
-      (check-equal! (buffer-local buf 'doom-lite-health) 75 "the medikit healed the player")
+      (check-equal! (buffer-local-value 'doom-lite-health buf) 75 "the medikit healed the player")
       (check-equal! (length (filter (lambda (i) (doom-lite--get i 'alive))
-                                    (buffer-local buf 'doom-lite-items)))
+                                    (buffer-local-value 'doom-lite-items buf)))
                     0 "and the item is gone from the map")
       (doom-lite-test-end! buf))))
 
@@ -157,15 +157,15 @@
               'doom-lite-angle 0 'doom-lite-ammo 10
               'doom-lite-monsters (list (doom-lite--monster 8 6))))
       (doom-lite--fire! buf)
-      (check-equal! (buffer-local buf 'doom-lite-ammo) 9 "the shot cost one shell")
-      (check-equal! (doom-lite--get (car (buffer-local buf 'doom-lite-monsters)) 'hp) 60
+      (check-equal! (buffer-local-value 'doom-lite-ammo buf) 9 "the shot cost one shell")
+      (check-equal! (doom-lite--get (car (buffer-local-value 'doom-lite-monsters buf)) 'hp) 60
                     "and it wounded the monster")
       (doom-lite--fire! buf)
       (doom-lite--fire! buf)
-      (check-false! (doom-lite--get (car (buffer-local buf 'doom-lite-monsters)) 'alive)
+      (check-false! (doom-lite--get (car (buffer-local-value 'doom-lite-monsters buf)) 'alive)
                     "three shots kill it")
-      (check-equal! (buffer-local buf 'doom-lite-kills) 1 "the kill count rose")
-      (check-equal! (buffer-local buf 'doom-lite-over) "won" "and the level is clear")
+      (check-equal! (buffer-local-value 'doom-lite-kills buf) 1 "the kill count rose")
+      (check-equal! (buffer-local-value 'doom-lite-over buf) "won" "and the level is clear")
       (doom-lite-test-end! buf))))
 
 (deftest 'a-shot-with-the-monster-behind-the-player-misses
@@ -177,9 +177,9 @@
               'doom-lite-angle 128 'doom-lite-ammo 10
               'doom-lite-monsters (list (doom-lite--monster 8 6))))
       (doom-lite--fire! buf)
-      (check-equal! (doom-lite--get (car (buffer-local buf 'doom-lite-monsters)) 'hp) 100
+      (check-equal! (doom-lite--get (car (buffer-local-value 'doom-lite-monsters buf)) 'hp) 100
                     "the monster behind the player is unhurt")
-      (check-equal! (buffer-local buf 'doom-lite-message) "you missed" "and the shot missed")
+      (check-equal! (buffer-local-value 'doom-lite-message buf) "you missed" "and the shot missed")
       (doom-lite-test-end! buf))))
 
 (deftest 'an-empty-gun-fires-nothing
@@ -191,8 +191,8 @@
               'doom-lite-angle 0 'doom-lite-ammo 0
               'doom-lite-monsters (list (doom-lite--monster 8 6))))
       (doom-lite--fire! buf)
-      (check-equal! (buffer-local buf 'doom-lite-ammo) 0 "the count stays at zero")
-      (check-equal! (doom-lite--get (car (buffer-local buf 'doom-lite-monsters)) 'hp) 100
+      (check-equal! (buffer-local-value 'doom-lite-ammo buf) 0 "the count stays at zero")
+      (check-equal! (doom-lite--get (car (buffer-local-value 'doom-lite-monsters buf)) 'hp) 100
                     "and the monster is unhurt")
       (doom-lite-test-end! buf))))
 
@@ -206,9 +206,9 @@
         (list 'doom-lite-px (doom-lite--cell->fp 4) 'doom-lite-py (doom-lite--cell->fp 6)
               'doom-lite-tick 1
               'doom-lite-monsters (list (doom-lite--monster 12 6))))
-      (let ((before (doom-lite--get (car (buffer-local buf 'doom-lite-monsters)) 'x)))
+      (let ((before (doom-lite--get (car (buffer-local-value 'doom-lite-monsters buf)) 'x)))
         (doom-lite--monsters-move! buf)
-        (check-true! (< (doom-lite--get (car (buffer-local buf 'doom-lite-monsters)) 'x) before)
+        (check-true! (< (doom-lite--get (car (buffer-local-value 'doom-lite-monsters buf)) 'x) before)
                      "the monster came west, toward the player"))
       (doom-lite-test-end! buf))))
 
@@ -221,7 +221,7 @@
               'doom-lite-tick 5 'doom-lite-health 100
               'doom-lite-monsters (list (doom-lite--monster 4 6))))
       (doom-lite--monsters-move! buf)
-      (check-true! (< (buffer-local buf 'doom-lite-health) 100) "the bite hurt the player")
+      (check-true! (< (buffer-local-value 'doom-lite-health buf) 100) "the bite hurt the player")
       (doom-lite-test-end! buf))))
 
 (deftest 'the-game-ends-when-the-player-dies
@@ -233,11 +233,11 @@
               'doom-lite-angle 0 'doom-lite-tick 5 'doom-lite-health 5
               'doom-lite-monsters (list (doom-lite--monster 4 6))))
       (doom-lite--monsters-move! buf)
-      (check-equal! (buffer-local buf 'doom-lite-health) 0 "the last bite took it all")
-      (check-equal! (buffer-local buf 'doom-lite-over) "died" "the game is over")
-      (let ((before (buffer-local buf 'doom-lite-px)))
+      (check-equal! (buffer-local-value 'doom-lite-health buf) 0 "the last bite took it all")
+      (check-equal! (buffer-local-value 'doom-lite-over buf) "died" "the game is over")
+      (let ((before (buffer-local-value 'doom-lite-px buf)))
         (doom-lite--walk! buf 1)
-        (check-equal! (buffer-local buf 'doom-lite-px) before "and a dead player stays put"))
+        (check-equal! (buffer-local-value 'doom-lite-px buf) before "and a dead player stays put"))
       (doom-lite-test-end! buf))))
 
 ;;; --- the lifecycle ------------------------------------------------------------
@@ -249,12 +249,12 @@
       (buffer-set-locals! buf (list 'doom-lite-health 3 'doom-lite-ammo 0 'doom-lite-kills 6
                                     'doom-lite-over "died"))
       (doom-lite--new-game! buf)
-      (check-equal! (buffer-local buf 'doom-lite-health) 100 "health is full again")
-      (check-equal! (buffer-local buf 'doom-lite-ammo) 50 "the shells are back")
-      (check-equal! (buffer-local buf 'doom-lite-kills) 0 "the kill count is zero")
-      (check-false! (buffer-local buf 'doom-lite-over) "and the game is open")
+      (check-equal! (buffer-local-value 'doom-lite-health buf) 100 "health is full again")
+      (check-equal! (buffer-local-value 'doom-lite-ammo buf) 50 "the shells are back")
+      (check-equal! (buffer-local-value 'doom-lite-kills buf) 0 "the kill count is zero")
+      (check-false! (buffer-local-value 'doom-lite-over buf) "and the game is open")
       (check-equal! (length (filter (lambda (m) (doom-lite--get m 'alive))
-                                    (buffer-local buf 'doom-lite-monsters)))
+                                    (buffer-local-value 'doom-lite-monsters buf)))
                     (length *doom-lite-monster-cells*) "every monster stands again")
       (doom-lite-test-end! buf))))
 

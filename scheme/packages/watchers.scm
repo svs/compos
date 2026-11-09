@@ -86,7 +86,7 @@
 
 (define (watchers--chat-buffer row)
   (let ((id (plist-get row 'chat)))
-    (and id (find (lambda (b) (equal? (buffer-local b 'chat-id) id)) (buffer-list)))))
+    (and id (find (lambda (b) (equal? (buffer-local-value 'chat-id b) id)) (buffer-list)))))
 
 (define (watchers--task-title row)
   (if (plist-get row 'task-read)
@@ -98,7 +98,7 @@
 (define *watchers-groupings* '("state" "chat" "group" "topic" "none"))
 (define *watchers-state-order* '("listening" "queued" "fired" "cancelled" "gone"))
 
-(define (watchers--grouping buf) (or (buffer-local buf 'watchers-grouping) "state"))
+(define (watchers--grouping buf) (or (buffer-local-value 'watchers-grouping buf) "state"))
 
 (define (watchers--sep? row) (equal? (plist-get row 'kind) "sep"))
 
@@ -120,7 +120,7 @@
   (if (equal? (watchers--grouping buf) "none")
       rows
       (let* ((chats (if (member (watchers--grouping buf) '("chat" "group"))
-                        (filter (lambda (p) p) (map (lambda (b) (let ((id (buffer-local b 'chat-id))) (and id (list id b))))
+                        (filter (lambda (p) p) (map (lambda (b) (let ((id (buffer-local-value 'chat-id b))) (and id (list id b))))
                                                          (buffer-list)))
                         '()))
              (tagged (map (lambda (r) (cons (watchers--section-of buf r chats) r)) rows))
@@ -203,9 +203,9 @@
 
 (define (watchers--list)
   "the list at hand: this one, the one this page belongs to, else the first"
-  (if (equal? (buffer-local (current-buffer) 'mode-name) "watchers-mode")
+  (if (equal? (buffer-local-value 'mode-name (current-buffer)) "watchers-mode")
       (current-buffer)
-      (or (buffer-local (current-buffer) 'watchers-list) *watchers-buffer*)))
+      (or (buffer-local-value 'watchers-list (current-buffer)) *watchers-buffer*)))
 
 (define (watchers-show-detail! row)
   "show the page of the listener ROW beside the list; each group's list keeps its own pages"
@@ -225,7 +225,7 @@
 
 ;; the listener at hand: the page's own, else the list's row
 (define (watchers--at)
-  (or (buffer-local (current-buffer) 'watcher)
+  (or (buffer-local-value 'watcher (current-buffer))
       (let* ((l (watchers--list)) (row (and (buffer-exists? l) (list-current l))))
         (and row (not (watchers--sep? row)) row))))
 
@@ -327,7 +327,7 @@
   (lambda ()
     (event-subscribe! "watchers" "agent-listen:*" 'watchers--saw)
     (let ((buf (list-mode-show! "watchers-mode")))
-      (unless (buffer-local buf 'watchers-scoped)
+      (unless (buffer-local-value 'watchers-scoped buf)
         (buffer-set-local! buf 'watchers-scoped #t)
         (list-facet-set! buf (list-facet buf "group") (group-name (buffer-group buf))))
       buf)))
@@ -339,7 +339,7 @@
 (define-command "watchers-refresh" "Read the watchers again"
   (lambda ()
     (watchers--redraw! #f)
-    (let ((row (buffer-local (current-buffer) 'watcher)))
+    (let ((row (buffer-local-value 'watcher (current-buffer))))
       (when row
         (let ((now (find (lambda (r) (equal? (plist-get r 'id) (plist-get row 'id))) (watchers--rows (watchers--list)))))
           (when now (watchers-show-detail! now))))))

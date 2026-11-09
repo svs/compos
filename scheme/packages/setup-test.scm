@@ -87,7 +87,7 @@
       (lambda ()
         (buffer-set-local! *setup-buffer* 'help-title "not the AI guide")
         (setup--follow-link "ai")
-        (check-equal! (buffer-local *setup-buffer* 'help-title) "Start with AI"
+        (check-equal! (buffer-local-value 'help-title *setup-buffer*) "Start with AI"
                       "the guide is open")
         (check-equal! (buffer-point *setup-buffer*) 0 "the guide starts at its title")
         (check-true! (window-showing *setup-buffer*) "the guide is visible")))
@@ -262,7 +262,7 @@
           (when (buffer-exists? *setup-buffer*) (buffer-kill! *setup-buffer*))
           (run-command "setup-welcome")
           (check-true! (minor-mode-on? *setup-buffer* "preview-mode") "preview-mode is on")
-          (check-equal! (buffer-local *setup-buffer* 'preview-renderer) "markdown" "the renderer")))
+          (check-equal! (buffer-local-value 'preview-renderer *setup-buffer*) "markdown" "the renderer")))
       (buffer-kill! *setup-buffer*)
       (switch-to-buffer! here))))
 

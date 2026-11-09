@@ -775,7 +775,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (buffer-context-only? b)
   (and (buffer-known? b)
-       (equal? (buffer-local b 'context-only) #t)))
+       (equal? (buffer-local-value 'context-only b) #t)))
 
 (define (buffer-context-only! b)
   (when (buffer-known? b)
@@ -794,10 +794,10 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-migrate-chat-state! b id)
   (let ((record (group-record-by-id id)))
     (when (and record (not (group-record-meta record))
-               (buffer-local b 'group-meta))
-      (group-record-update! id 'meta (buffer-local b 'group-meta)))
-    (when (buffer-local b 'group-noise)
-      (group-record-update! id 'noise (buffer-local b 'group-noise)))
+               (buffer-local-value 'group-meta b))
+      (group-record-update! id 'meta (buffer-local-value 'group-meta b)))
+    (when (buffer-local-value 'group-noise b)
+      (group-record-update! id 'noise (buffer-local-value 'group-noise b)))
     (when (and record (not (group-record-primary-chat-id record)))
       (group-record-update! id 'primary-chat-id (chat-stable-id! b)))))
 
@@ -816,15 +816,15 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (buffer-group-store! b id)
   (buffer-set-locals! b
     (append (list 'group-id id)
-            (if (and (buffer-local b 'group-roles)
-                     (not (equal? (buffer-local b 'group-id) id)))
+            (if (and (buffer-local-value 'group-roles b)
+                     (not (equal? (buffer-local-value 'group-id b) id)))
                 (list 'group-roles #f)
                 '())
-            (if (buffer-local b 'group) (list 'group #f) '())
-            (if (buffer-local b 'companion-of) (list 'companion-of #f) '()))))
+            (if (buffer-local-value 'group b) (list 'group #f) '())
+            (if (buffer-local-value 'companion-of b) (list 'companion-of #f) '()))))
 
 (define (buffer-group-id-of b)
-  (let ((held (buffer-local b 'group-id)))
+  (let ((held (buffer-local-value 'group-id b)))
     (cond
       (held
         (let ((valid (group-resolve-id held)))
@@ -832,7 +832,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (buffer-set-local! b 'group-id valid))
           valid))
       (else
-        (let ((legacy (or (buffer-local b 'group) (buffer-local b 'companion-of))))
+        (let ((legacy (or (buffer-local-value 'group b) (buffer-local-value 'companion-of b))))
           (and legacy
                (let ((id (group-ensure-record! legacy)))
                  (buffer-group-store! b id)
@@ -937,7 +937,7 @@ is forgotten and that group falls back to creation order in the switcher."
           ((chat-buffer? b)
            (and (equal? (chat-group-id b) id) "chat"))
           (else
-            (let ((entry (assoc id (or (buffer-local b 'group-roles) '()))))
+            (let ((entry (assoc id (or (buffer-local-value 'group-roles b) '()))))
               (and entry (car (cdr entry))))))))
 
 (define (buffer-set-group-role! b value role)
@@ -952,7 +952,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (else
             (let ((others
                     (remove (lambda (entry) (equal? (car entry) id))
-                            (or (buffer-local b 'group-roles) '()))))
+                            (or (buffer-local-value 'group-roles b) '()))))
               (buffer-set-local! b 'group-roles
                 (append others (list (list id name))))
               name)))))
@@ -1036,7 +1036,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; the buffer that holds a group's durable state ('group-meta,
 ;; 'group-layout): its chat. A chat made by group-chat but never shown
 (define (chat-stable-id! buf)
-  (or (buffer-local buf 'chat-id)
+  (or (buffer-local-value 'chat-id buf)
       (let ((id (string-append "chat:" (number->string (current-time)) ":"
                                (number->string (+ *group-next-id* 1)))))
         (set! *group-next-id* (+ *group-next-id* 1))
@@ -1051,9 +1051,9 @@ is forgotten and that group falls back to creation order in the switcher."
          (let loop ((buffers (buffer-list)))
            (cond ((null? buffers) #f)
                  ((and (equal? (group-resolve-id
-                                 (buffer-local (car buffers) 'group-id))
+                                 (buffer-local-value 'group-id (car buffers)))
                                id)
-                       (equal? (buffer-local (car buffers) 'chat-id)
+                       (equal? (buffer-local-value 'chat-id (car buffers))
                                primary))
                   (car buffers))
                  (else (loop (cdr buffers))))))))
@@ -2555,7 +2555,7 @@ is forgotten and that group falls back to creation order in the switcher."
             ;; the work, not a companion: the group's chat and a scratch
             ;; that belongs to a buffer are not where the work is
             (and (group-work-buffer? b)
-                 (not (buffer-local b 'scratch-owner))))
+                 (not (buffer-local-value 'scratch-owner b))))
           (group-members-in index g)))
 
 ;; One index per prompt: group-buffers-mru scans every buffer twice per
@@ -2578,7 +2578,7 @@ is forgotten and that group falls back to creation order in the switcher."
                                 (n 0))
                       (cond ((or (= n 2) (null? bufs)) n)
                             ((and (group-work-buffer? (car bufs))
-                                  (not (buffer-local (car bufs) 'scratch-owner)))
+                                  (not (buffer-local-value 'scratch-owner (car bufs))))
                              (count (cdr bufs) (+ n 1)))
                             (else (count (cdr bufs) n)))))))
     (cond ((= panes 0) "nothing yet")
@@ -2915,10 +2915,10 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-cycle-ring &optional mode-only)
   (let* ((gid (group-cycle-group))
          (here (current-buffer))
-         (mode (buffer-local here 'mode-name)))
+         (mode (buffer-local-value 'mode-name here)))
     (define (same-mode? b)
       (or (not mode-only)
-          (if mode (buffer-derived-mode? b mode) (not (buffer-local b 'mode-name)))))
+          (if mode (buffer-derived-mode? b mode) (not (buffer-local-value 'mode-name b)))))
     (cons here
           (filter (lambda (b)
                     (and (group-cycle-member? b gid)
@@ -2976,7 +2976,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; A buffer's major mode, the one thing consolidation groups by.
 (define (mode-consolidate-mode-of buf)
   ;; a buffer that never set a mode is fundamental, and consolidates like any other
-  (and (buffer-known? buf) (or (buffer-local buf 'mode-name) "fundamental-mode")))
+  (and (buffer-known? buf) (or (buffer-local-value 'mode-name buf) "fundamental-mode")))
 
 (define (consolidate!)
   (panes-consolidate!))
@@ -3270,8 +3270,8 @@ is forgotten and that group falls back to creation order in the switcher."
   "Return JEV's suggested existing group id for BUF, or #f. With K, answer asynchronously."
   (let* ((target (or buf (current-buffer)))
          (text (or summary
-                   (buffer-local target 'chat-summary)
-                   (buffer-local target 'chat-title)
+                   (buffer-local-value 'chat-summary target)
+                   (buffer-local-value 'chat-title target)
                    ""))
          (ids (group-ids))
          ;; A group name is free text: it repeats (two groups called
@@ -3343,8 +3343,8 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; With no explicit arguments, classify the current buffer from its summary.
 (define (buffer-magic-group-current! &optional buf)
   (let ((target (or buf (current-buffer))))
-    (let ((summary (or (buffer-local target 'chat-summary)
-                       (buffer-local target 'chat-title))))
+    (let ((summary (or (buffer-local-value 'chat-summary target)
+                       (buffer-local-value 'chat-title target))))
       (if (and (string? summary) (not (equal? (string-trim summary) "")))
           (jev-buffer-group target summary
             (lambda (choice)
@@ -3362,8 +3362,8 @@ is forgotten and that group falls back to creation order in the switcher."
   (when (and magic-grouping
              (equal? kind 'summary)
              (buffer-known? buf)
-             (not (buffer-local buf 'magic-grouping-done))
-             (not (buffer-local buf 'magic-grouping-pending)))
+             (not (buffer-local-value 'magic-grouping-done buf))
+             (not (buffer-local-value 'magic-grouping-pending buf)))
     (buffer-set-local! buf 'magic-grouping-pending #t)
     (message (string-append "JEV is checking the first summary for " buf "…"))
     (jev-buffer-group buf summary
@@ -3985,9 +3985,9 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-chat-init! buf g)
   (let ((id (group-resolve-id g))
         (setup? (or (not (chat-buffer? buf))
-                    (not (buffer-local buf 'agent-saved-mark)))))
+                    (not (buffer-local-value 'agent-saved-mark buf)))))
     (when (and (= (buffer-size buf) 0)
-               (not (buffer-local buf 'agent-saved-mark)))
+               (not (buffer-local-value 'agent-saved-mark buf)))
       (buffer-set-local! buf 'agent-saved-mark 0)
       (buffer-set-local! buf 'agent-marker-bytes 0))
     (when setup?
@@ -4054,8 +4054,8 @@ is forgotten and that group falls back to creation order in the switcher."
   ;; it cannot say whether a person typed it or the old namer invented it.
   ;; Treat it as derivable once. After the re-derive it carries the name,
   ;; and from then on a name a person types is the one that is kept.
-  (or (not (buffer-local buf 'chat-derived-name))
-      (equal? buf (buffer-local buf 'chat-derived-name))))
+  (or (not (buffer-local-value 'chat-derived-name buf))
+      (equal? buf (buffer-local-value 'chat-derived-name buf))))
 
 (define (group-chat--claim-name! buf)
   (buffer-set-local! buf 'chat-derived-name buf)
@@ -4104,7 +4104,7 @@ is forgotten and that group falls back to creation order in the switcher."
         (let* ((id (group-record-id record))
                (buf (group-primary-chat id)))
           (when (and buf (buffer-exists? buf)
-                     (not (buffer-local buf 'chat-derived-name)))
+                     (not (buffer-local-value 'chat-derived-name buf)))
             (let ((want (group-chat-rederive! id)))
               (unless (equal? want buf)
                 (set! moved (cons (list buf want) moved)))))))
@@ -4179,7 +4179,7 @@ is forgotten and that group falls back to creation order in the switcher."
     (unless (and record (equal? (group-record-primary-chat-id record) sid))
       (group-record-update! id 'primary-chat-id sid))
     (unless (or (not (boundp (quote chat-for!)))
-                (equal? (buffer-local buf 'chat-for-key) id))
+                (equal? (buffer-local-value 'chat-for-key buf) id))
       (ignore-errors (lambda () (chat-for! id buf id))))
     buf))
 
@@ -4457,9 +4457,9 @@ is forgotten and that group falls back to creation order in the switcher."
          (role (and group (buffer-group-role buf group)))
          (through-group? (and group
                               (or (chat-buffer? buf) (equal? role "scratch"))))
-         (owner (or (buffer-local buf 'scratch-owner) buf))
+         (owner (or (buffer-local-value 'scratch-owner buf) buf))
          (legacy-scratch (and (buffer-known? owner)
-                              (buffer-local owner 'scratch-buffer)))
+                              (buffer-local-value 'scratch-buffer owner)))
          (group-scratches (if group (group-buffers-as group 'scratch) '()))
          (candidates
            (cond (through-group? (group-buffers-mru group))
@@ -4552,7 +4552,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; buffers, and a repeated name is acted on once.
 (define (group-command-selected-buffers)
   (let* ((buf (current-buffer))
-         (mode (buffer-local buf 'mode-name))
+         (mode (buffer-local-value 'mode-name buf))
          (marked (cond ((equal? mode "switch-mode")
                         (list-live-marked buf *list-mark-char*))
                        ;; every table of buffers marks the same way: the
@@ -4562,7 +4562,7 @@ is forgotten and that group falls back to creation order in the switcher."
                         (filter buffer-known? (filter string? (list-targets buf))))
                        (else '())))
          (selected (filter (lambda (candidate)
-                             (buffer-local candidate 'buffer-selected))
+                             (buffer-local-value 'buffer-selected candidate))
                            (buffer-list-mru))))
     (filter group-membership-buffer? (dedupe-names (append marked selected)))))
 

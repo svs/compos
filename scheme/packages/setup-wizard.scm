@@ -105,7 +105,7 @@
     ("decide" "Decision model") ("browser" "Browser extension") ("learn" "Start learning")))
 
 (define (setup-wizard-step buf)
-  (or (buffer-local buf 'setup-wizard-step) "model"))
+  (or (buffer-local-value 'setup-wizard-step buf) "model"))
 
 ;; The model cards: one card for each connector, with one button that
 ;; uses it, installs it, or asks for its key. ROW is (NAME KIND READY?
@@ -791,7 +791,7 @@
 
 (add-hook! (list 'block-click 'setup-wizard)
   (lambda (buf id)
-    (and (equal? (buffer-local buf 'mode-name) "setup-wizard-mode")
+    (and (equal? (buffer-local-value 'mode-name buf) "setup-wizard-mode")
          (setup-wizard-click buf id))))
 
 ;; Setup chooses the columns layout: buffers open side by side, and the

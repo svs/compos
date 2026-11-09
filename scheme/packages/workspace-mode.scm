@@ -62,9 +62,9 @@
       #f))
 
 (define (workspace-mode--read buf entry)
-  (cond ((not (pair? entry)) (or (buffer-local buf entry) #f))
+  (cond ((not (pair? entry)) (or (buffer-local-value entry buf) #f))
         ((procedure? (cadr entry)) ((cadr entry) buf))
-        (else (or (buffer-local buf (car entry)) (cadr entry)))))
+        (else (or (buffer-local-value (car entry) buf) (cadr entry)))))
 
 (define (workspace-mode--snapshot spec buf)
   (append
@@ -86,7 +86,7 @@
 
 (define (workspace-mode-saved name buf key)
   (let ((spec (workspace-mode--spec name)))
-    ((workspace-mode--lookup (or (buffer-local buf (plist-get spec 'saved)) '()))
+    ((workspace-mode--lookup (or (buffer-local-value (plist-get spec 'saved) buf) '()))
      key)))
 
 (define (workspace-mode--scratch! spec buf)
@@ -96,7 +96,7 @@
 (define (workspace-mode--restore! name buf)
   (let* ((spec (workspace-mode--spec name))
          (key (plist-get spec 'saved))
-         (alist (or (buffer-local buf key) '()))
+         (alist (or (buffer-local-value key buf) '()))
          (saved (workspace-mode--lookup alist)))
     ((plist-get spec 'teardown) buf saved)
     (for-each
@@ -116,11 +116,11 @@
 
 (define (workspace-mode--refuse! name buf)
   (let ((spec (workspace-mode--spec name)))
-    (when (buffer-local buf (plist-get spec 'saved))
+    (when (buffer-local-value (plist-get spec 'saved) buf)
       (workspace-mode--restore! name buf))
     (buffer-set-local! buf 'minor-modes
       (remove (lambda (n) (equal? n name))
-              (or (buffer-local buf 'minor-modes) '())))))
+              (or (buffer-local-value 'minor-modes buf) '())))))
 
 ;; The one funnel for enable, refresh and desktop restore. The snapshot is
 ;; taken once: a re-run finds it in place and must not save the mode's own
@@ -130,7 +130,7 @@
     (if (not ((plist-get spec 'accepts?) buf))
         (workspace-mode--refuse! name buf)
         (let* ((key (plist-get spec 'saved))
-               (entering? (not (buffer-local buf key))))
+               (entering? (not (buffer-local-value key buf))))
           (when entering?
             (buffer-set-local! buf key (workspace-mode--snapshot spec buf)))
           ((plist-get spec 'setup) buf entering?)

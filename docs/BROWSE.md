@@ -95,13 +95,13 @@ Pandoc's GitHub-Flavored Markdown is inserted unchanged into the read-only brows
 A generated browse buffer has no `.md` filename, so `browse-mode` declares:
 
 ```scheme
-(buffer-local BUF 'preview-renderer) ; => "markdown"
+(buffer-local-value 'preview-renderer BUF) ; => "markdown"
 ```
 
 New browse tabs enable the real `preview-mode` minor mode by default. It sets:
 
 ```scheme
-(buffer-local BUF 'render-mode) ; => "markdown"
+(buffer-local-value 'render-mode BUF) ; => "markdown"
 ```
 
 The existing Markdown renderer owns headings, lists, block quotes, emphasis, tables, links, and images. Browse still applies its page-specific metadata and article-separator overlays, restores point, updates the title and modeline, and records the visit.

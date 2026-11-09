@@ -49,7 +49,7 @@
 ;; the group whose config this buffer has already run, or #f. It is one of
 ;; chat-identity-locals, so a chat still knows after a restart.
 (define (group-config-loaded buf)
-  (and buf (buffer-known? buf) (buffer-local buf 'group-config-loaded)))
+  (and buf (buffer-known? buf) (buffer-local-value 'group-config-loaded buf)))
 
 (define (group-config--state id)
   (let ((hit (assoc id *group-configs*))) (and hit (cdr hit))))

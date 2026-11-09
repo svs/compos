@@ -115,7 +115,7 @@
       (with-current-buffer buf (lambda () (run-command "agent-send")))
       (check-equal! (buffer-text buf) "transcript\n\nλ (+ 1 2)\n3\n"
                     "the expression and its value are in the transcript")
-      (check-equal! (caddr (car (buffer-local buf 'agent-blocks))) "eval"
+      (check-equal! (caddr (car (buffer-local-value 'agent-blocks buf))) "eval"
                     "the block is its own kind: the reader is shown code, not a summary")
       (check-equal! (chat-input-text buf) "" "the input is clear")
       (buffer-kill! buf))))

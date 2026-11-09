@@ -263,7 +263,7 @@
 ;; The list keeps focus and point.
 (define (subagents-show! b)
   (let* ((list-win (active-window))
-         (pane (or (window-showing-mode (buffer-local b 'mode-name) list-win)
+         (pane (or (window-showing-mode (buffer-local-value 'mode-name b) list-win)
                    (window-showing b))))
     (if (and pane (not (equal? pane list-win)))
         (window-set-buffer! pane b)

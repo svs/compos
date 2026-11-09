@@ -32,7 +32,7 @@
   ;; the transcripts go before the buffers do: the path is read off the
   ;; chat's own group, which a killed buffer no longer has
   (for-each (lambda (b)
-              (let ((id (and (buffer-known? b) (buffer-local b 'chat-log-id))))
+              (let ((id (and (buffer-known? b) (buffer-local-value 'chat-log-id b))))
                 (when (string? id)
                   (delete-file-path! (string-append (chat-log-dir-for b) "/" id ".chat") #t))))
             *chats-test-bufs*)
@@ -130,7 +130,7 @@
       (check-equal! (buffer-group *chat-list*) (frame-group)
                     "the listing belongs to the group it opened in"))
     (check-equal! (window-buffer (active-window)) *chat-list* "the list has focus")
-    (check-equal! (buffer-local *chat-list* 'ibuffer-prompt-home-window) #f
+    (check-equal! (buffer-local-value 'ibuffer-prompt-home-window *chat-list*) #f
                   "the application form previews with a card, not into a home window")
     (chats-test-reset!)))
 
@@ -141,10 +141,10 @@
     (let ((row (list-current *chat-list*)))
       (buffer-set-local! *chat-list* 'listing-preview-dismissed-row row)
       (run-command "chat-list")
-      (check-equal! (buffer-local *chat-list* 'listing-preview-dismissed-row) #f
+      (check-equal! (buffer-local-value 'listing-preview-dismissed-row *chat-list*) #f
                     "arriving looks again at the row you left on")
       (listing-preview! *chat-list* row)
-      (check-equal! (buffer-local (float-buffer) 'listing-preview-source) row
+      (check-equal! (buffer-local-value 'listing-preview-source (float-buffer)) row
                     "and the card is the row you left on"))
     (chats-test-reset!)))
 

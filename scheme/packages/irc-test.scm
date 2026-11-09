@@ -286,7 +286,7 @@ registers you, with the entry's own channels."
       (check-equal! (list-entries buf)
                     (list (list "#big" "300" "the big room") (list "#small" "3" "a small room"))
                     "busiest first")
-      (check-equal! (buffer-local buf 'mode-name) "irc-channels-mode" "in its mode"))
+      (check-equal! (buffer-local-value 'mode-name buf) "irc-channels-mode" "in its mode"))
     (t--irc-clean! "t")))
 
 (deftest 'irc-servers-list-shows-status

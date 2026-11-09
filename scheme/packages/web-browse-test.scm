@@ -41,7 +41,7 @@
 
 (define (t--web-kill-tabs!)
   (for-each (lambda (b)
-              (when (equal? (buffer-local b 'mode-name) "browse-mode")
+              (when (equal? (buffer-local-value 'mode-name b) "browse-mode")
                 (buffer-kill! b)))
             (buffer-list)))
 
@@ -82,26 +82,26 @@
                               "the page belongs to the current group")
                 (check-equal! (group-name (frame-group)) "zzweb-home"
                               "the frame stays in the current group")
-                (check-equal! (buffer-local buf 'browse-view) "mono"
+                (check-equal! (buffer-local-value 'browse-view buf) "mono"
                               "browse opens in the type rendered pages use")
                 (check-true! (minor-mode-on? buf "preview-mode")
                              "the default renders the Markdown")
                 (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
-                (check-equal! (buffer-local buf 'browse-view) "serif"
+                (check-equal! (buffer-local-value 'browse-view buf) "serif"
                               "the first cycle selects serif")
                 (check-equal! (preview-typography) "serif"
                               "the cycle changes the type of every rendered page")
                 (check-true! (minor-mode-on? buf "preview-mode")
                              "serif still renders the Markdown")
-                (check-equal! (buffer-local buf 'render-mode) "markdown"
+                (check-equal! (buffer-local-value 'render-mode buf) "markdown"
                               "a type change never leaves the rendered page")
                 (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
-                (check-equal! (buffer-local buf 'browse-view) "source"
+                (check-equal! (buffer-local-value 'browse-view buf) "source"
                               "the second cycle selects source")
                 (check-false! (minor-mode-on? buf "preview-mode")
                               "source is the only step that leaves the rendered page")
                 (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
-                (check-equal! (buffer-local buf 'browse-view) "mono"
+                (check-equal! (buffer-local-value 'browse-view buf) "mono"
                               "the third cycle returns to monospace")
                 (check-true! (minor-mode-on? buf "preview-mode")
                              "rendering returns without changing the Markdown"))))))
@@ -152,23 +152,23 @@
           (check-contains! text "# Front page" "the heading marker stays")
           (check-contains! text "[second page](/second.html)"
                            "the link target stays")
-          (check-equal! (buffer-local buf 'preview-renderer) "markdown"
+          (check-equal! (buffer-local-value 'preview-renderer buf) "markdown"
                         "the generated buffer declares Markdown")
           (check-true! (minor-mode-on? buf "preview-mode")
                        "preview is the default view")
-          (check-equal! (buffer-local buf 'render-mode) "markdown"
+          (check-equal! (buffer-local-value 'render-mode buf) "markdown"
                         "preview owns the rendered view")
-          (check-false! (buffer-local buf 'preview-rows)
+          (check-false! (buffer-local-value 'preview-rows buf)
                         "the page renders as a page, never as painted rows")
 
           ;; the reading look: centered writing measure, no line numbers
-          (check-equal! (buffer-local buf 'window-class) "writing"
+          (check-equal! (buffer-local-value 'window-class buf) "writing"
                         "the writing measure")
-          (check-equal! (buffer-local buf 'line-numbers) "off"
+          (check-equal! (buffer-local-value 'line-numbers buf) "off"
                         "no line numbers")
 
           ;; Keyboard navigation still uses positions in the same Markdown.
-          (let ((links (value->string (buffer-local buf 'web-links))))
+          (let ((links (value->string (buffer-local-value 'web-links buf))))
             (check-contains! links "/second.html" "the first target")
             (check-contains! links "docs/intro.html" "the second")
             (check-contains! links "https://other.test/x"
@@ -201,7 +201,7 @@
               (buffer-goto! a 12)
               (preview-follow-link! (active-window) "second.html")
               (check-equal! (current-buffer) a "preview navigation stays in tab")
-              (check-equal! (buffer-local a 'browse-url)
+              (check-equal! (buffer-local-value 'browse-url a)
                             "https://site.test/second.html"
                             "the relative target resolves against the page")
               (check-equal! (buffer-point a) 0
@@ -374,9 +374,9 @@
       (lambda (url want k) (k (list "full" "# index\n\ngo [on](https://site.test/x)\n" #f)))
       (lambda ()
         (let ((buf (browse "https://site.test/index.html")))
-          (check-equal! (buffer-local buf 'browse-reading) "full" "the reading on screen")
+          (check-equal! (buffer-local-value 'browse-reading buf) "full" "the reading on screen")
           (check-equal! (web--want buf) "calm" "the reading that was asked for")
-          (check-contains! (buffer-local buf 'modeline-info) "full (no article)"
+          (check-contains! (buffer-local-value 'modeline-info buf) "full (no article)"
                            "the modeline says why the two differ"))))
     (t--web-kill-tabs!)))
 
@@ -387,9 +387,9 @@
       (lambda (url want k) (k (list want "# story\n\nthe [text](https://site.test/x)\n" #f)))
       (lambda ()
         (let ((buf (browse "https://site.test/story.html")))
-          (check-equal! (buffer-local buf 'browse-reading) "calm" "calm was found")
-          (check-contains! (buffer-local buf 'modeline-info) "calm · " "and named plainly")
-          (check-false! (string-contains? (buffer-local buf 'modeline-info) "no article")
+          (check-equal! (buffer-local-value 'browse-reading buf) "calm" "calm was found")
+          (check-contains! (buffer-local-value 'modeline-info buf) "calm · " "and named plainly")
+          (check-false! (string-contains? (buffer-local-value 'modeline-info buf) "no article")
                         "with no note"))))
     (t--web-kill-tabs!)))
 
@@ -406,7 +406,7 @@
         (lambda ()
           (let ((buf (browse "https://site.test/story.html")))
             (check-equal! fetches 1 "the open fetched once")
-            (check-equal! (buffer-local buf 'browse-html) "<html>page</html>"
+            (check-equal! (buffer-local-value 'browse-html buf) "<html>page</html>"
                           "and the html stayed for the switch")
 
             ;; the reading step, stubbed: no shell, no readable, no pandoc
@@ -419,22 +419,22 @@
 
             (check-equal! fetches 1 "the switch did NOT fetch")
             (check-equal! (web--want buf) "full" "the ask flipped")
-            (check-equal! (buffer-local buf 'browse-reading) "full" "and so did the reading")
+            (check-equal! (buffer-local-value 'browse-reading buf) "full" "and so did the reading")
             (check-contains! (buffer-text buf) "whole" "the buffer holds the new reading")
             (set! *web--frame-hosts* (list (list "site.test" #t)))
 
             (with-current-buffer buf
               (lambda () (run-command "browse-toggle-reading")))
-            (check-equal! (buffer-local buf 'render-mode) "web" "then the page itself")
-            (check-equal! (buffer-local buf 'web-url) "https://site.test/story.html"
+            (check-equal! (buffer-local-value 'render-mode buf) "web" "then the page itself")
+            (check-equal! (buffer-local-value 'web-url buf) "https://site.test/story.html"
                           "drawn from its own address")
             (check-contains! (buffer-text buf) "whole" "with the text kept underneath")
 
             (with-current-buffer buf
               (lambda () (run-command "browse-toggle-reading")))
             (check-equal! (web--want buf) "calm" "and it switches back")
-            (check-equal! (buffer-local buf 'render-mode) "markdown" "to the rendered text")
-            (check-false! (buffer-local buf 'web-url) "and the page is gone")
+            (check-equal! (buffer-local-value 'render-mode buf) "markdown" "to the rendered text")
+            (check-false! (buffer-local-value 'web-url buf) "and the page is gone")
             (check-equal! fetches 1 "still no fetch"))))
       (set! web--read saved-read))
     (t--web-kill-tabs!)))
@@ -531,7 +531,7 @@
             (check-equal! (web--want buf) "full" "calm, then full")
             (with-current-buffer buf (lambda () (run-command "browse-toggle-reading")))
             (check-false! (web--page? buf) "no page view")
-            (check-false! (buffer-local buf 'web-url) "and no frame")
+            (check-false! (buffer-local-value 'web-url buf) "and no frame")
             (check-equal! (web--want buf) "calm" "R went on to calm"))))
       (set! web--read saved-read)
       (set! *web--frame-hosts* '()))
@@ -551,9 +551,9 @@
               (let ((l (web--link-after buf 0)))
                 (goto-char! (car l))
                 (run-command "browse-follow")
-                (check-equal! (buffer-local buf 'browse-url)
+                (check-equal! (buffer-local-value 'browse-url buf)
                               "https://site.test/second.html" "the link was followed")
-                (check-equal! (car (buffer-local buf 'browse-history))
+                (check-equal! (car (buffer-local-value 'browse-history buf))
                               (list "https://site.test/index.html" (car l))
                               "the entry names the page and the point")
                 (run-command "browse-back")
@@ -567,7 +567,7 @@
           (buffer-set-local! buf 'browse-history '("https://site.test/index.html"))
           (buffer-set-local! buf 'browse-url "https://site.test/second.html")
           (with-current-buffer buf (lambda () (run-command "browse-back")))
-          (check-equal! (buffer-local buf 'browse-url) "https://site.test/index.html"
+          (check-equal! (buffer-local-value 'browse-url buf) "https://site.test/index.html"
                         "a bare URL still goes back")
           (check-equal! (buffer-point buf) 0 "and opens at the top"))))
     (t--web-kill-tabs!)))

@@ -27,7 +27,7 @@
   (set! *capf-sources* (cons fn *capf-sources*)))
 
 (define (capf-sources)
-  (let ((local (buffer-local (current-buffer) 'capf-sources)))
+  (let ((local (buffer-local-value 'capf-sources (current-buffer))))
     (if local (append local *capf-sources*) *capf-sources*)))
 
 ;; a source that says 'exclusive 'no yields to the next when it has nothing

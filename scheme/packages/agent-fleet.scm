@@ -18,8 +18,8 @@
 
 
 (define (agent-threads)
-  (map (lambda (b) (list (buffer-local b 'agent-slug) (chat-row-status b)))
-       (filter (lambda (b) (buffer-local b 'agent-slug)) (chat-list-bufs))))
+  (map (lambda (b) (list (buffer-local-value 'agent-slug b) (chat-row-status b)))
+       (filter (lambda (b) (buffer-local-value 'agent-slug b)) (chat-list-bufs))))
 
 (define (agent-status-rank s)
   (cond ((equal? s 'needs_attention) 0)
@@ -43,7 +43,7 @@
 ;; too, and (buffer-list) catches a chat nobody has shown yet.
 (define (chat-list-buf? b)
   (and (not (string-prefix? " " b))
-       (or (buffer-local b 'agent-slug) (chat-buffer? b))))
+       (or (buffer-local-value 'agent-slug b) (chat-buffer? b))))
 
 (define (chat-list-bufs)
   ;; the chats and the agents, most recent first, from one snapshot
@@ -211,7 +211,7 @@
 
 ;; the goal status the newest turn summary judged, in the row's words
 (define (chats-goal-label b)
-  (let ((g (buffer-local b 'chat-goal-status)))
+  (let ((g (buffer-local-value 'chat-goal-status b)))
     (and (symbol? g) (if (eq? g 'needs-you) "needs you" (symbol->string g)))))
 
 ;; while the runtime works or asks, it says so; between turns the goal
@@ -241,7 +241,7 @@
         (else "chat-idle")))
 
 (define (chats-model b)
-  (or (buffer-local b 'agent-model) (buffer-local b 'llm-model) ""))
+  (or (buffer-local-value 'agent-model b) (buffer-local-value 'llm-model b) ""))
 
 ;; the size of a chat is the size of its transcript on disk -- the
 ;; number dired would show for that file: what the size column shows,
@@ -252,16 +252,16 @@
   ;; every draw of every buffer table, to learn a size the save already
   ;; knew. The stat stays as the answer for a chat written before this
   ;; local existed, and for one whose log another process changed.
-  (or (buffer-local b 'chat-log-size)
+  (or (buffer-local-value 'chat-log-size b)
       ;; the id the chat already carries, never a fresh one: drawing a row
       ;; must not name a file the chat has not asked for
-      (let ((id (buffer-local b 'chat-log-id)))
+      (let ((id (buffer-local-value 'chat-log-id b)))
         (and (string? id)
              (let ((p (string-append (chat-log-dir-for b) "/" id ".chat")))
                (and (file-exists? p) (file-size p)))))))
 
 (define (chats-summary b)
-  (let ((s (buffer-local b 'chat-summary)))
+  (let ((s (buffer-local-value 'chat-summary b)))
     (and (string? s) (not (equal? s "")) s)))
 
 ;; the row names the chat by its title -- the name somebody gave it, or
@@ -293,7 +293,7 @@
                  (or (chat-subject b) "") " "
                  (chats-model b) " "
                  (chats-row-label b) " "
-                 (or (buffer-local b 'agent-slug) "")))
+                 (or (buffer-local-value 'agent-slug b) "")))
 
 (define (chats-match-text b)
   (string-append (chats-metadata-text b) " " (or (chat-list-hit b) "")))
@@ -336,7 +336,7 @@
         'activity (lambda (b) (chats-activity-at b))
         ;; a spawned chat sits under the chat that spawned it
         'parent (lambda (b)
-                  (let ((p (buffer-local b 'subagent-parent)))
+                  (let ((p (buffer-local-value 'subagent-parent b)))
                     (and p (subagent-live-buffer p))))))
 
 ;; a saved conversation is a file no buffer holds
@@ -432,7 +432,7 @@
 
 (define (agents-current-slug)
   (let ((b (agents-current-buf)))
-    (and b (buffer-local b 'agent-slug))))
+    (and b (buffer-local-value 'agent-slug b))))
 
 ;; the chats a verb acts on: the row at point, or every chat under it
 ;; when that row is a group. A chat the editor put to sleep is still a
@@ -451,7 +451,7 @@
 ;; the slug of a chat whose runtime is up. A dormant chat keeps its slug
 ;; local, so the local alone does not say there is a runtime to answer.
 (define (agents-runtime-slug b)
-  (let ((slug (buffer-local b 'agent-slug)))
+  (let ((slug (buffer-local-value 'agent-slug b)))
     (and slug (not (equal? (agent-status slug) 'dead)) slug)))
 
 (define (agents-report verb bs)
@@ -476,7 +476,7 @@
 (effects! '(read))
 
 (define (chat-subject buf)
-  (let ((c (and (buffer-known? buf) (buffer-local buf 'chat-subject))))
+  (let ((c (and (buffer-known? buf) (buffer-local-value 'chat-subject buf))))
     (and (string? c) (not (equal? c "")) c)))
 
 (define (chat-subjects &optional bufs)
@@ -534,7 +534,7 @@
           (chat-subject-read! b agents-relist!)))))
 
 (define (agents-live-slug buf)
-  (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))
+  (let ((slug (or (buffer-local-value 'agent-slug buf) (chat-ensure-runtime! buf))))
     (if (equal? (agent-status slug) 'dead) (agent-revive! slug) slug)))
 
 (define-command "agents-steer" "Send a steering message to the chat at point"
@@ -595,7 +595,7 @@
                           (and (equal? (nth 2 blk) "meta")
                                (equal? (string-trim (substring-bytes text (car blk) (cadr blk)))
                                        "[agent stopped]")))
-                        (or (buffer-local buf 'agent-blocks) '())))
+                        (or (buffer-local-value 'agent-blocks buf) '())))
          ;; last first, so each cut leaves the earlier offsets as they were
          (spans (reverse (sort (map (lambda (blk) (list (car blk) (cadr blk))) marks)))))
     (for-each (lambda (s) (agent-excise-range! buf (car s) (cadr s))) spans)
@@ -638,7 +638,7 @@
 (define-command "chats-watch" "Watch the chats: one list, the busiest first, kept up as they change"
   (lambda ()
     (let* ((buf (current-buffer))
-           (was (buffer-local buf 'chats-watch)))
+           (was (buffer-local-value 'chats-watch buf)))
       (buffer-set-locals! buf
         (if was
             (list 'chats-watch #f 'list-sort (car was) 'ibuffer-grouping (cadr was))
@@ -716,7 +716,7 @@
 ;; local survives a daemon restart the way chat-turn-active does. So a
 ;; restart between the two commands loses nothing.
 (define (chats-was-running-bufs)
-  (filter (lambda (b) (buffer-local b 'chat-was-running)) (chat-list-bufs)))
+  (filter (lambda (b) (buffer-local-value 'chat-was-running b)) (chat-list-bufs)))
 
 (define-command "chats-stop-all"
   "Stop every chat runtime and keep the transcripts"
@@ -922,7 +922,7 @@
                 (if (and (not (member slug acc))
                          (string? b) (buffer-exists? b)
                          (equal? (agent-status slug) 'idle)
-                         (memq (buffer-local b 'chat-goal-status) '(needs-you blocked)))
+                         (memq (buffer-local-value 'chat-goal-status b) '(needs-you blocked)))
                     (cons slug acc)
                     acc))))))
 
@@ -930,12 +930,12 @@
 ;; shows it already.
 (define (agents-goal-notify! buf status why)
   "a notice only when a question waits for the user in the chat: the turn is over and the agent asked"
-  (let ((waits? (and (eq? status 'needs-you) (not (buffer-local buf 'chat-turn-active)))))
+  (let ((waits? (and (eq? status 'needs-you) (not (buffer-local-value 'chat-turn-active buf)))))
     ;; no question waits any more: its notice has nothing left to ask
     (unless waits?
       (buffer-set-local! buf 'chat-goal-noted #f)
       (notifications-resolve! buf))
-    (when (and waits? (not (buffer-local buf 'chat-goal-noted)) (not (window-showing buf)))
+    (when (and waits? (not (buffer-local-value 'chat-goal-noted buf)) (not (window-showing buf)))
       (buffer-set-local! buf 'chat-goal-noted status)
       (notify! "chat" (string-append "Needs you: " (chats-title buf)) why
                (list 'buffer buf 'sticky #t)))))
@@ -1002,10 +1002,10 @@
   ;; a chat is found by what its summaries say, never by its whole transcript
   (let ((raw (if (buffer-exists? b)
                  (string-join
-                   (append (list (or (chat-title-of b) b) (or (buffer-local b 'chat-summary) ""))
-                           (map cadr (or (buffer-local b 'chat-summary-log) '())))
+                   (append (list (or (chat-title-of b) b) (or (buffer-local-value 'chat-summary b) ""))
+                           (map cadr (or (buffer-local-value 'chat-summary-log b) '())))
                    "\n")
-                 (let ((id (buffer-local b 'chat-log-id)))
+                 (let ((id (buffer-local-value 'chat-log-id b)))
                    (and (string? id)
                         (let ((path (string-append (chat-log-dir-for b) "/" id ".chat")))
                           (and (file-exists? path)
@@ -1043,7 +1043,7 @@
   ;; under hundreds of live chats the archived section is never reached
   (lambda ()
     (let* ((buf (or (mb-list-target) (current-buffer)))
-           (on (not (buffer-local buf 'mode-list-extra-only))))
+           (on (not (buffer-local-value 'mode-list-extra-only buf))))
       (buffer-set-local! buf 'mode-list-extra-only on)
       (list-refresh! buf)
       (list-goto-first-entry buf)
@@ -1091,7 +1091,7 @@
     ;; conversations come under the live ones, and RET reads one back
     'extra-rows (lambda (buf)
                   (ibuffer-section buf "archived" "archived"
-                    (chats-archived-rows (and (buffer-local buf 'mode-list-extra-only) 100)) "faint" #t))
+                    (chats-archived-rows (and (buffer-local-value 'mode-list-extra-only buf) 100)) "faint" #t))
     'text (lambda (b) (chat-list--read-text b))
     ;; only a saved conversation is a file: a row whose chat was killed
     ;; since the list was drawn names no file, and visiting its title
@@ -1125,7 +1125,7 @@
         'title (lambda (buf) "Chats ⚡")
         'title-spans (lambda (buf)
                        (list (list (string-byte-length "Chats ") (string-byte-length "⚡")
-                                   (if (buffer-local buf 'chats-watch) "chat-watch-on" "chat-watch-off"))))
+                                   (if (buffer-local-value 'chats-watch buf) "chat-watch-on" "chat-watch-off"))))
         'noun "chat"
         ;; a chat's transcript size is not what you pick a chat by
         'hide-fields '(size)

@@ -138,7 +138,7 @@
                         *fast-eval-results*)
                 (list rec)))
   (when (and (buffer-exists? fast-eval-buffer)
-             (equal? (buffer-local fast-eval-buffer 'mode-name) "fast-eval-mode"))
+             (equal? (buffer-local-value 'mode-name fast-eval-buffer) "fast-eval-mode"))
     (list-refresh! fast-eval-buffer)))
 
 (define (fast-eval-short-model m)

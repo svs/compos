@@ -869,12 +869,12 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 
 ;; both reads land in the buffer; the list draws once it holds the two
 (define (ats-pipeline-read! buf)
-  (let* ((job (buffer-local buf 'ats-pipeline-job))
-         (title (buffer-local buf 'ats-pipeline-title))
+  (let* ((job (buffer-local-value 'ats-pipeline-job buf))
+         (title (buffer-local-value 'ats-pipeline-title buf))
          (land! (lambda (key value)
                   (buffer-set-local! buf key value)
-                  (let ((apps (buffer-local buf 'ats-pipeline-apps))
-                        (cards (buffer-local buf 'ats-pipeline-cards)))
+                  (let ((apps (buffer-local-value 'ats-pipeline-apps buf))
+                        (cards (buffer-local-value 'ats-pipeline-cards buf)))
                     (when (and apps cards)
                       (buffer-set-local! buf 'ats-pipeline-rows (ats-pipeline-merge job title apps cards))
                       (buffer-set-local! buf 'list-layout-cache #f)
@@ -896,9 +896,9 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
           (unless (pair? cards) (message "ats pipeline: the suggestions board read nothing"))
           (land! 'ats-pipeline-cards (if (pair? cards) cards '())))))))
 
-(define (ats-pipeline-rows buf) (or (buffer-local buf 'ats-pipeline-rows) '()))
+(define (ats-pipeline-rows buf) (or (buffer-local-value 'ats-pipeline-rows buf) '()))
 (define (ats-pipeline-key buf row) (plist-get row 'key))
-(define (ats-pipeline-title buf) (or (buffer-local buf 'ats-pipeline-title) "Pipeline"))
+(define (ats-pipeline-title buf) (or (buffer-local-value 'ats-pipeline-title buf) "Pipeline"))
 
 (define (ats-pipeline-columns buf)
   (list (list "stage" 12) (list "fit" 10) (list "rating" 7) (list "candidate" 24)
@@ -967,7 +967,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
             (else
              (message (string-append "Recommending " (ats-pipeline-title buf) " to " name "..."))
              (mcp-call! 'ats-ash "recommendJobToCandidate"
-               (json-encode (list 'input (list 'job_id (buffer-local buf 'ats-pipeline-job)
+               (json-encode (list 'input (list 'job_id (buffer-local-value 'ats-pipeline-job buf)
                                                'candidate_id (plist-get row 'cid))))
                (lambda (ok text)
                  (message (if ok
@@ -1114,7 +1114,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 
 ;; the approval's ids as (approval-id A application-id P candidate-id C job-id J), once the page has read them
 (define (ats-case-ids id)
-  (let ((b (ats-case-buffer id))) (and b (buffer-local b 'ats-case-ids))))
+  (let ((b (ats-case-buffer id))) (and b (buffer-local-value 'ats-case-ids b))))
 (define (ats-case-candidate-id id) (plist-get (or (ats-case-ids id) '()) 'candidate-id))
 (define (ats-case-job-id id) (plist-get (or (ats-case-ids id) '()) 'job-id))
 (public! 'ats-case-ids "(ats-case-ids APPROVAL-ID) — the approval, application, candidate and job ids of an open approval page")
@@ -1155,7 +1155,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 
 (define (ats-case-ids-fetch! src)
   (let ((app (ats-case-application-id src))
-        (ids (buffer-local src 'ats-case-ids)))
+        (ids (buffer-local-value 'ats-case-ids src)))
     (cond ((and ids (plist-get ids 'candidate-id))
            (ats-candidate-facts-fetch! src (plist-get ids 'candidate-id)))
           (app
@@ -1172,7 +1172,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
 (add-hook! 'ats-application-mode-hook (lambda () (ats-case-ids-fetch! (current-buffer))))
 
 (define (ats-case-handle src noun reader)
-  (let* ((ids (or (buffer-local src 'ats-case-ids) '()))
+  (let* ((ids (or (buffer-local-value 'ats-case-ids src) '()))
          (cand (plist-get ids 'candidate-id))
          (job (plist-get ids 'job-id)))
     (ats-case-ids-fetch! src)
@@ -1300,8 +1300,8 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
                          (set-mode! "ats-draft-mode")
                          (message "C-c C-c saves the draft to the site, C-c C-k drops it"))))))))))))
 (define (ats-draft-push! name)
-  (let* ((id (buffer-local name 'ats-draft-id))
-         (src (buffer-local name 'ats-draft-source))
+  (let* ((id (buffer-local-value 'ats-draft-id name))
+         (src (buffer-local-value 'ats-draft-source name))
          (url (site-app-url (site-app-spec 'ats) (plist-get (site-app-get src 'row) 'href)))
          (form (ats-draft-form id))
          (fill (string-append "(() => { const f = " form "; if (!f) return 'no form'; "

@@ -4,7 +4,8 @@ Builtin behaviours in the compos Scheme that a reader would guess wrong. Each on
 
 ## Values and truth
 
-- `'()` is truthy. `(or (buffer-local b 'k) (compute))` never recomputes once the local holds an empty list. Test with `pair?`, not with truthiness.
+- `'()` is truthy. `(or (buffer-local-value 'k b) (compute))` never recomputes once the local holds an empty list. Test with `pair?`, not with truthiness.
+- `(buffer-local-value NAME BUF)` takes the variable first, as in Emacs. It answers BUF's own value, or `#f`. The default stands in only for a `defvar-local` variable: in this Lisp-1 a function can share the name of a local, and its procedure is no default. The primitive `(buffer-local BUF KEY)` is the same read in the old order; new code uses `buffer-local-value`.
 - `(string->number "x")` returns the atom `:error`, not `#f`. Test the result with `number?`.
 - `(plist-get #f KEY)` raises `cdr: no function clause`. JSON null parses to `#f`, so code that walks parsed JSON needs a guarded getter.
 - `(cons 1 2)` raises "no function clause matching". `cons` wants a list tail; use a two-element list for a pair.

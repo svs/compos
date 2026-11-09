@@ -36,7 +36,7 @@
 ;; frame stands in, so the page opens where the reader is. The switcher
 ;; finds the tabs by mode — typing "browse" narrows to them.
 (define (web--buffer? b)
-  (equal? (buffer-local b 'mode-name) "browse-mode"))
+  (equal? (buffer-local-value 'mode-name b) "browse-mode"))
 
 ;; a document is its URL without the #fragment: the sections of one page
 ;; are places in one buffer, not pages of their own
@@ -47,7 +47,7 @@
   (let loop ((bs (buffer-list-mru)))
     (cond ((null? bs) #f)
           ((and (web--buffer? (car bs))
-                (let ((here (buffer-local (car bs) 'browse-url)))
+                (let ((here (buffer-local-value 'browse-url (car bs))))
                   (and here (equal? (web--sans-fragment here) (web--sans-fragment url)))))
            (car bs))
           (else (loop (cdr bs))))))
@@ -95,7 +95,7 @@
 
 (define (web--want buf)
   (web--reading
-    (or (buffer-local buf 'browse-want)
+    (or (buffer-local-value 'browse-want buf)
         browse-reading)))
 
 ;;; --- sites ----------------------------------------------------------------------
@@ -593,7 +593,7 @@
 (define (web--reread-url! url)
   (let loop ((bs (web--tabs)))
     (cond ((null? bs) #f)
-          ((equal? (buffer-local (car bs) 'browse-url) url)
+          ((equal? (buffer-local-value 'browse-url (car bs)) url)
            (web--reread! (car bs))
            #t)
           (else (loop (cdr bs))))))
@@ -785,7 +785,7 @@
 (define (web--refetch-url! url)
   (let loop ((bs (web--tabs)))
     (cond ((null? bs) #f)
-          ((equal? (buffer-local (car bs) 'browse-url) url)
+          ((equal? (buffer-local-value 'browse-url (car bs)) url)
            (buffer-set-local! (car bs) 'cache-time #f)
            (cache-refresh! (car bs))
            #t)
@@ -1130,13 +1130,13 @@
 ;; reading the person asked for, it says why — otherwise `R` looks
 ;; broken on a page that has no article to show.
 (define (web--reading-label buf)
-  (let ((reading (buffer-local buf 'browse-reading)))
+  (let ((reading (buffer-local-value 'browse-reading buf)))
     (cond ((not reading) "")
           ((equal? reading (web--want buf)) (string-append reading " · "))
           (else (string-append reading " (no article) · ")))))
 
 (define (web--update-modeline! buf)
-  (let ((url (buffer-local buf 'browse-url)))
+  (let ((url (buffer-local-value 'browse-url buf)))
     ;; The process keeps its stable buffer identity while the visible title
     ;; follows in-place navigation.
     (when url
@@ -1181,7 +1181,7 @@
 ;; and the tab is killed. The page still enters the history, because it
 ;; is still a page you read.
 (define (web--show-file! buf path)
-  (let ((url (buffer-local buf 'browse-url))
+  (let ((url (buffer-local-value 'browse-url buf))
         (win (window-showing buf))
         (group (buffer-group buf))
         (file-buf (find-file path)))
@@ -1323,7 +1323,7 @@
 
 ;; the run whose summary line holds P
 (define (web--chrome-at buf p)
-  (let loop ((rs (or (buffer-local buf 'web-chrome-runs) '())))
+  (let loop ((rs (or (buffer-local-value 'web-chrome-runs buf) '())))
     (cond ((null? rs) #f)
           ((and (>= p (car (car rs))) (< p (- (cadr (car rs)) 1))) (car rs))
           (else (loop (cdr rs))))))
@@ -1396,7 +1396,7 @@
 
 (define (web--index-sync! buf md links)
   ;; i on the page decides for it, and the decision outlives a refetch
-  (unless (buffer-local buf 'browse-index-pinned)
+  (unless (buffer-local-value 'browse-index-pinned buf)
     (index-set! buf (if (web--index-page? md links) *web-index-spec* 'none))))
 
 ;; the page URL opens is SOURCE's child, in the one window SOURCE opens its
@@ -1404,7 +1404,7 @@
 ;; URL is a section of the document BUF already shows: go there, without a
 ;; fetch. #f when URL is another document, or BUF has no text yet.
 (define (browse-goto-fragment! buf url)
-  (let ((here (buffer-local buf 'browse-url)))
+  (let ((here (buffer-local-value 'browse-url buf)))
     (and here (> (buffer-size buf) 0)
          (equal? (web--sans-fragment here) (web--sans-fragment url))
          (begin
@@ -1436,11 +1436,11 @@
 
 (define (web--render! buf md)
   (let* ((t0 (monotonic-ms))
-         (url (buffer-local buf 'browse-url))
+         (url (buffer-local-value 'browse-url buf))
          (md (if url (web--absolute-images md url) md))
          ;; the calm reading folds what is left of the site's furniture; an
          ;; index's runs of links are its contents, not furniture
-         (folded (if (and (equal? (buffer-local buf 'browse-reading) "calm")
+         (folded (if (and (equal? (buffer-local-value 'browse-reading buf) "calm")
                           (not (web--index-page? md (web--markdown-links md))))
                      (web--chrome-fold md)
                      (list md '())))
@@ -1459,7 +1459,7 @@
     (overlay-clear! buf 'web)
     (web--apply-meta-faces! buf)
     (web--apply-separator-faces! buf)
-    (let ((p (buffer-local buf 'browse-restore-point)))
+    (let ((p (buffer-local-value 'browse-restore-point buf)))
       (buffer-set-local! buf 'browse-restore-point #f)
       (web--goto-everywhere! buf (min (or p (web--fragment-pos md links url) 0) (buffer-size buf))))
     ;; a page that came by l, r or g while the page itself shows: the
@@ -1498,7 +1498,7 @@
                    ((web--image-url? (car (cdr (cdr l)))) "img-embed")
                    ((web--date-link? l) "web-date")
                    (else "web-link"))))
-         (or (buffer-local buf 'web-links) '()))))
+         (or (buffer-local-value 'web-links buf) '()))))
 
 (define (web--meta-ranges text)
   (let loop ((lines (string-split text "\n"))
@@ -1547,9 +1547,9 @@
     ;; Holding a session copy, the fetch revalidates; a 304 — or a
     ;; failed network — serves the copy we hold.
     (lambda (b k)
-      (let* ((url (buffer-local b 'browse-url))
+      (let* ((url (buffer-local-value 'browse-url b))
              (hit (and url (web--page-cached b url)))
-             (request-url (if (buffer-local b 'web-hard-refresh)
+             (request-url (if (buffer-local-value 'web-hard-refresh b)
                               (web--cache-bust-url url)
                               url)))
         (if (not url)
@@ -1576,7 +1576,7 @@
             (begin
               (buffer-set-local! b 'browse-reading reading)
               (buffer-set-local! b 'browse-html html)
-              (web--page-remember! b (buffer-local b 'browse-url) reading md)
+              (web--page-remember! b (buffer-local-value 'browse-url b) reading md)
               (web--render! b md)))))
     *web-cache-ttl*))
 
@@ -1595,11 +1595,11 @@
   (buffer-set-local! buf 'browse-pages
     (take (cons (list url reading md (current-time))
                   (filter (lambda (e) (not (equal? (car e) url)))
-                          (or (buffer-local buf 'browse-pages) '())))
+                          (or (buffer-local-value 'browse-pages buf) '())))
             *web-page-cache-max*)))
 
 (define (web--page-cached buf url)
-  (assoc url (or (buffer-local buf 'browse-pages) '())))
+  (assoc url (or (buffer-local-value 'browse-pages buf) '())))
 
 ;;; A tab's history is two stacks in the buffer, 'browse-history behind
 ;;; and 'browse-forward ahead. An entry is (URL POINT): back and forward
@@ -1613,11 +1613,11 @@
 
 (define (web--history-push! buf key here)
   (buffer-set-local! buf key
-    (cons (list here (buffer-point buf)) (or (buffer-local buf key) '()))))
+    (cons (list here (buffer-point buf)) (or (buffer-local-value key buf) '()))))
 
 ;; POINT, when given, is where the page opens once it renders
 (define (web--goto-url! buf url push? &optional point)
-  (let ((here (buffer-local buf 'browse-url)))
+  (let ((here (buffer-local-value 'browse-url buf)))
     (when (and push? here (not (equal? here url)))
       (web--history-push! buf 'browse-history here)
       ;; a new page starts a new future: forward clears, like a browser
@@ -1673,7 +1673,7 @@
   ;; markup: the page puts it on the opening [ when the caret stands at
   ;; the start, and past the ] when it stands at the end. The whole
   ;; [label](url) is the link.
-  (let loop ((ls (or (buffer-local buf 'web-links) '())))
+  (let loop ((ls (or (buffer-local-value 'web-links buf) '())))
     (cond ((null? ls) #f)
           ((let* ((l (car ls))
                   (tail (+ (cadr l) 2 (string-byte-length (caddr l)))))
@@ -1684,7 +1684,7 @@
 ;; the first link starting after P, or the last one starting before it —
 ;; the two directions of TAB
 (define (web--link-after buf p)
-  (let loop ((ls (or (buffer-local buf 'web-links) '())) (best #f))
+  (let loop ((ls (or (buffer-local-value 'web-links buf) '())) (best #f))
     (cond ((null? ls) best)
           ((and (> (car (car ls)) p)
                 (or (not best) (< (car (car ls)) (car best))))
@@ -1692,7 +1692,7 @@
           (else (loop (cdr ls) best)))))
 
 (define (web--link-before buf p)
-  (let loop ((ls (or (buffer-local buf 'web-links) '())) (best #f))
+  (let loop ((ls (or (buffer-local-value 'web-links buf) '())) (best #f))
     (cond ((null? ls) best)
           ((and (< (car (car ls)) p)
                 (or (not best) (> (car (car ls)) (car best))))
@@ -1720,7 +1720,7 @@
           (message "no link here"))
         (else
           (let ((url (web--resolve (car (cdr (cdr l)))
-                                   (or (buffer-local buf 'browse-url) ""))))
+                                   (or (buffer-local-value 'browse-url buf) ""))))
             ;; an image is not text: the browser renders it
             (cond ((web--image-url? url) (web--open-image! url))
                   ;; an index keeps its place: the link opens beside it
@@ -1736,7 +1736,7 @@
       (if (not l)
           (message "no link here")
           (let ((url (web--resolve (car (cdr (cdr l)))
-                                   (or (buffer-local buf 'browse-url) ""))))
+                                   (or (buffer-local-value 'browse-url buf) ""))))
             (if (web--image-url? url)
                 (web--open-image! url)
                 (web--open-tab! url))))))
@@ -1758,8 +1758,8 @@
 (define-command "browse-back" "Go back to the previous page"
   (lambda ()
     (let* ((buf (current-buffer))
-           (h (or (buffer-local buf 'browse-history) '()))
-           (here (buffer-local buf 'browse-url)))
+           (h (or (buffer-local-value 'browse-history buf) '()))
+           (here (buffer-local-value 'browse-url buf)))
       (if (null? h)
           (message "no earlier page")
           (begin
@@ -1772,8 +1772,8 @@
 (define-command "browse-forward" "Go forward to the page you came back from"
   (lambda ()
     (let* ((buf (current-buffer))
-           (f (or (buffer-local buf 'browse-forward) '()))
-           (here (buffer-local buf 'browse-url)))
+           (f (or (buffer-local-value 'browse-forward buf) '()))
+           (here (buffer-local-value 'browse-url buf)))
       (if (null? f)
           (message "no later page")
           (begin
@@ -1788,7 +1788,7 @@
 (define-command "browse-up" "Go to the parent of this page's path"
   (lambda ()
     (let* ((buf (current-buffer))
-           (url (buffer-local buf 'browse-url)))
+           (url (buffer-local-value 'browse-url buf)))
       (cond ((not url) (message "no page here"))
             ((equal? (web--parent-url url) url) (message "at the top"))
             (else (web--goto-url! buf (web--parent-url url) #t)))))
@@ -1797,7 +1797,7 @@
 (define-command "browse-top" "Go to the root of this page's site"
   (lambda ()
     (let* ((buf (current-buffer))
-           (url (buffer-local buf 'browse-url)))
+           (url (buffer-local-value 'browse-url buf)))
       (cond ((not url) (message "no page here"))
             (else (web--goto-url! buf (string-append (web--origin url) "/") #t)))))
   'modes '(browse-mode))
@@ -1808,7 +1808,7 @@
 (define-command "browse-hard-refresh" "Refetch the current page while bypassing cached responses"
   (lambda ()
     (let* ((buf (current-buffer))
-           (url (buffer-local buf 'browse-url)))
+           (url (buffer-local-value 'browse-url buf)))
       (if (not url)
           (message "no page here")
           (begin
@@ -1824,7 +1824,7 @@
 (define-command "browse-refresh" "Fetch a page: this one again, or another"
   (lambda ()
     (let* ((buf (current-buffer))
-           (cur (buffer-local buf 'browse-url)))
+           (cur (buffer-local-value 'browse-url buf)))
       (if (not cur)
           (run-command "browse")
           (minibuffer-read* "Go to (default this page): "
@@ -1849,8 +1849,8 @@
 ;; conversion, no network. Only a page served from the session copy —
 ;; which keeps markdown, not html — has to fetch again.
 (define (web--reread! buf)
-  (let ((html (buffer-local buf 'browse-html))
-        (url (buffer-local buf 'browse-url))
+  (let ((html (buffer-local-value 'browse-html buf))
+        (url (buffer-local-value 'browse-url buf))
         (want (web--want buf)))
     (message (string-append "reading " want " …"))
     (cond
@@ -1889,7 +1889,7 @@
 ;;; the browser's refusal there; o still opens it in the real browser.
 
 (define (web--page? buf)
-  (equal? (buffer-local buf 'browse-page) #t))
+  (equal? (buffer-local-value 'browse-page buf) #t))
 
 ;; calm-mode is on exactly while the buffer asks for calm and shows text.
 ;; R and a changed default move the ask without the mode's commands, so
@@ -1897,7 +1897,7 @@
 (define (web--calm-mark! buf)
   (let ((on? (and (equal? (web--want buf) "calm") (not (web--page? buf))))
         (others (remove (lambda (name) (equal? name "calm-mode"))
-                        (or (buffer-local buf 'minor-modes) '()))))
+                        (or (buffer-local-value 'minor-modes buf) '()))))
     (buffer-set-local! buf 'minor-modes (if on? (cons "calm-mode" others) others))))
 
 ;; A site may forbid every frame: X-Frame-Options, or a CSP whose
@@ -1937,12 +1937,12 @@
 ;; the page itself, when the site allows it. DENIED runs when it does
 ;; not: R moves on to calm, and a page reached by l, r or g stays text.
 (define (web--page-show! buf &optional denied)
-  (let ((url (buffer-local buf 'browse-url)))
+  (let ((url (buffer-local-value 'browse-url buf)))
     (if (not url)
         (message "no page here")
         (web--framable url
           (lambda (ok?)
-            (when (and (buffer-exists? buf) (equal? (buffer-local buf 'browse-url) url))
+            (when (and (buffer-exists? buf) (equal? (buffer-local-value 'browse-url buf) url))
               (if ok?
                   (web--page-on! buf url)
                   (begin
@@ -1954,14 +1954,14 @@
 ;; again; a tab that shows the page itself keeps showing it.
 (define (web--page-keep! buf)
   (when (web--page? buf)
-    (web--page-on! buf (buffer-local buf 'browse-url))))
+    (web--page-on! buf (buffer-local-value 'browse-url buf))))
 
 (define (web--page-hide! buf)
   (when (web--page? buf)
     (buffer-set-local! buf 'browse-page #f)
     (buffer-set-local! buf 'web-url #f)
     (buffer-set-local! buf 'render-mode #f)
-    (unless (equal? (buffer-local buf 'browse-view) "source")
+    (unless (equal? (buffer-local-value 'browse-view buf) "source")
       (disable-minor-mode! buf "preview-mode")
       (enable-minor-mode! buf "preview-mode"))
     (web--update-modeline! buf)))
@@ -2006,7 +2006,7 @@ whole document. R cycles calm, full and the page itself.")
 
 (define-command "browse-open-external" "Open this page in the real browser"
   (lambda ()
-    (let ((url (buffer-local (current-buffer) 'browse-url)))
+    (let ((url (buffer-local-value 'browse-url (current-buffer))))
       (when url (tab-open url))))
   'modes '(browse-mode))
 
@@ -2020,7 +2020,7 @@ whole document. R cycles calm, full and the page itself.")
       (if (not l)
           (message "no link here")
           (let ((url (web--resolve (car (cdr (cdr l)))
-                                   (or (buffer-local buf 'browse-url) ""))))
+                                   (or (buffer-local-value 'browse-url buf) ""))))
             (if (web--image-url? url)
                 (web--open-image! url)
                 (browse-beside! url buf))))))
@@ -2030,8 +2030,8 @@ whole document. R cycles calm, full and the page itself.")
 (define (web--url-at-point buf)
   (let ((l (web--link-at buf (buffer-point buf))))
     (if l
-        (web--resolve (car (cdr (cdr l))) (or (buffer-local buf 'browse-url) ""))
-        (buffer-local buf 'browse-url))))
+        (web--resolve (car (cdr (cdr l))) (or (buffer-local-value 'browse-url buf) ""))
+        (buffer-local-value 'browse-url buf))))
 
 (define-command "browse-copy-url" "Copy the link at point, else the page URL"
   (lambda ()
@@ -2051,8 +2051,8 @@ whole document. R cycles calm, full and the page itself.")
 (define-command "browse-view-source" "Show this page's html in a buffer"
   (lambda ()
     (let* ((buf (current-buffer))
-           (html (buffer-local buf 'browse-html))
-           (url (buffer-local buf 'browse-url)))
+           (html (buffer-local-value 'browse-html buf))
+           (url (buffer-local-value 'browse-url buf)))
       (cond ((not url) (message "no page here"))
             ((not html) (message "no source held for this page; g refetches it"))
             (else
@@ -2189,14 +2189,14 @@ whole document. R cycles calm, full and the page itself.")
   (markdown-paint-on! buf))
 
 (define (web--unpaint-source! buf)
-  (when (equal? (buffer-local buf 'markdown-paint) #t)
+  (when (equal? (buffer-local-value 'markdown-paint buf) #t)
     (markdown-paint-off! buf)))
 
 (define-command "browse-cycle-view"
   "Cycle browse between monospace, serif, and Markdown source"
   (lambda ()
     (let* ((buf (current-buffer))
-           (view (or (buffer-local buf 'browse-view) "mono"))
+           (view (or (buffer-local-value 'browse-view buf) "mono"))
            (next (cond ((equal? view "mono") "serif")
                        ((equal? view "serif") "source")
                        (else "mono"))))
@@ -2254,9 +2254,9 @@ whole document. R cycles calm, full and the page itself.")
       ;; renderer. A page is rendered Markdown, in the type every rendered
       ;; page uses.
       (buffer-set-local! buf 'preview-renderer "markdown")
-      (unless (buffer-local buf 'browse-view)
+      (unless (buffer-local-value 'browse-view buf)
         (buffer-set-local! buf 'browse-view (preview-typography)))
-      (if (equal? (buffer-local buf 'browse-view) "source")
+      (if (equal? (buffer-local-value 'browse-view buf) "source")
           (begin
             (when (minor-mode-on? buf "preview-mode")
               (disable-minor-mode! buf "preview-mode"))
@@ -2381,8 +2381,8 @@ the tabs. C-s searches to any link.")
 ;; opener gives it browse-text-scale.
 (define (web--scale-tab! name opener)
   (let ((n (and (buffer-known? opener)
-                (equal? (buffer-local opener 'mode-name) "browse-mode")
-                (buffer-local opener 'text-scale))))
+                (equal? (buffer-local-value 'mode-name opener) "browse-mode")
+                (buffer-local-value 'text-scale opener))))
     (text-scale-apply! name (if (number? n) n browse-text-scale))))
 
 (define (web--tab-for! url)
@@ -2565,7 +2565,7 @@ the tabs. C-s searches to any link.")
 ;;; this is the one handler it needs for a page.
 
 (define (web--bookmark-record buf)
-  (list 'url (buffer-local buf 'browse-url)
+  (list 'url (buffer-local-value 'browse-url buf)
         'title (web--title (buffer-text buf))
         'position (buffer-point buf)))
 

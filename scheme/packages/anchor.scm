@@ -50,7 +50,7 @@
 (define (anchor-levels a) (and (> (length a) 5) (list-ref a 5)))
 
 (define (anchor-list buf)
-  (or (and (buffer-known? buf) (buffer-local buf 'anchors)) '()))
+  (or (and (buffer-known? buf) (buffer-local-value 'anchors buf)) '()))
 
 ;; The innermost anchor holding POS: of the ones that contain it, the one
 ;; that starts last. Nesting is allowed and the inner keymap wins.
@@ -124,7 +124,7 @@
 ;; A list declares its rows so on every draw
 (define (anchor-index! buf as)
   (let ((sorted (anchor--sorted as)))
-    (unless (equal? sorted (buffer-local buf 'anchors))
+    (unless (equal? sorted (buffer-local-value 'anchors buf))
       (buffer-set-local! buf 'anchors sorted)
       (when (minor-mode-on? buf "anchor-mode") (anchor-sync! buf)))
     sorted))
@@ -199,16 +199,16 @@
 (define (anchor--mark-blocks! buf a &optional force)
   ;; The page's own draw is kept as anchor-drawn, and every mark starts from
   ;; it, so a part content-scale folded away comes back when it unfolds.
-  (let* ((blocks (buffer-local buf 'render-blocks))
-         (last (buffer-local buf 'anchor-marked))
+  (let* ((blocks (buffer-local-value 'render-blocks buf))
+         (last (buffer-local-value 'anchor-marked buf))
          (fresh (not (and last (eq? (cdr last) blocks))))
          (lines (anchor--span-lines buf a))
-         (key (list lines (buffer-local buf 'anchor-scale))))
-    (when (and (equal? (buffer-local buf 'render-mode) "blocks") (pair? blocks)
+         (key (list lines (buffer-local-value 'anchor-scale buf))))
+    (when (and (equal? (buffer-local-value 'render-mode buf) "blocks") (pair? blocks)
                (or fresh force (not (equal? (car last) key))))
       (when fresh (buffer-set-local! buf 'anchor-drawn blocks))
       ;; the top part is where a page opens: it marks itself, and dims nothing
-      (let* ((marked (anchor--marked (buffer-local buf 'anchor-drawn) lines
+      (let* ((marked (anchor--marked (buffer-local-value 'anchor-drawn buf) lines
                                      (and a (equal? (anchor-start a) (anchor--top buf)))))
              (new (if (boundp 'anchor-scale-blocks)
                       ((symbol-value 'anchor-scale-blocks) buf marked)
@@ -220,7 +220,7 @@
   ;; a page drawn as blocks shows only its parts: point outside every one
   ;; (the line after the last) is nowhere on screen. It comes back to the
   ;; part before it, or to the top for a page just drawn.
-  (when (equal? (buffer-local buf 'render-mode) "blocks")
+  (when (equal? (buffer-local-value 'render-mode buf) "blocks")
     (let ((pos (buffer-point buf)) (as (anchor-list buf)))
       (when (and (pair? as) (not (anchor-at buf pos)))
         (let ((a (if top? (car as) (or (anchor--before buf pos) (car as)))))
@@ -534,10 +534,10 @@
   ;; 'doc, when it has one, is the preview. A page drawn as blocks is indexed
   ;; as its components name it, when that names every part. A page that
   ;; indexes itself names its function in 'anchor-imenu-index
-  (if (symbol? (buffer-local buf 'anchor-imenu-index))
-      ((eval (buffer-local buf 'anchor-imenu-index)) buf)
-  (let* ((entries (and (equal? (buffer-local buf 'render-mode) "blocks")
-                       (anchor-block-entries (or (buffer-local buf 'render-blocks) '()))))
+  (if (symbol? (buffer-local-value 'anchor-imenu-index buf))
+      ((eval (buffer-local-value 'anchor-imenu-index buf)) buf)
+  (let* ((entries (and (equal? (buffer-local-value 'render-mode buf) "blocks")
+                       (anchor-block-entries (or (buffer-local-value 'render-blocks buf) '()))))
          (starts (map car (or entries '())))
          (text (buffer-text buf)))
     ;; when every part starts where an entry does: the entries may name it anew
@@ -566,7 +566,7 @@
 
 (define (anchor--apply! buf)
   ;; a page that indexes itself (every tab of a site page) keeps its index
-  (unless (buffer-local buf 'imenu-index-function)
+  (unless (buffer-local-value 'imenu-index-function buf)
     (buffer-set-local! buf 'imenu-index-function 'anchor-imenu-rows))
   ;; Anchor navigation must win over generic scrolling in other minor maps.
   (let ((maps (buffer-minor-maps buf)))
@@ -579,7 +579,7 @@
 (define (anchor--teardown! buf)
   (when (buffer-exists? buf)
     (buffer-at-point-map! buf #f)
-    (when (eq? (buffer-local buf 'imenu-index-function) 'anchor-imenu-rows)
+    (when (eq? (buffer-local-value 'imenu-index-function buf) 'anchor-imenu-rows)
       (buffer-set-local! buf 'imenu-index-function #f))
     (overlay-set! buf 'anchor '())
     (anchor--mark-blocks! buf #f))
@@ -654,7 +654,7 @@
                 (with-current-buffer b (lambda () (set-mode! mode)))
                 ;; a grammar the mode names and nobody installed: install
                 ;; it, and set the mode again so the copy parses with it
-                (let ((lang (buffer-local b 'ts-lang)))
+                (let ((lang (buffer-local-value 'ts-lang b)))
                   (when (and lang (not (member lang (ts-langs))) (ts-ensure-grammar! lang))
                     (with-current-buffer b (lambda () (set-mode! mode)))))))
             (f b))

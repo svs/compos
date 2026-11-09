@@ -86,7 +86,7 @@
         (bookmark-store! "target" (bookmark--put (t--bm-record-at 11)
                                                   'annotation "Read this") #t)
         (list-mode-show! "bookmark-bmenu-mode")
-        (check-equal! (buffer-local *bookmark-list-buffer* 'mode-name)
+        (check-equal! (buffer-local-value 'mode-name *bookmark-list-buffer*)
                       "bookmark-bmenu-mode" "the mode survives restore")
         (check-contains! (buffer-text *bookmark-list-buffer*) "target"
                          "the name is visible")

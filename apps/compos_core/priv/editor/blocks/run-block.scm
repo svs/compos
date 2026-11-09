@@ -133,7 +133,7 @@
 ;;; It is meaningless after a restart, so the desktop must not save it.
 
 (define (morg-babel-inflight buf)
-  (or (buffer-local buf 'morg-babel-inflight) '()))
+  (or (buffer-local-value 'morg-babel-inflight buf) '()))
 
 (define (morg-babel-inflight! buf rows)
   (desktop-skip! buf 'morg-babel-inflight)
@@ -268,7 +268,7 @@
   (and (member (string-downcase lang) morg-babel-llm-languages) #t))
 
 (define (morg-babel-buffer-model buf)
-  (let ((m (buffer-local buf 'llm-model)))
+  (let ((m (buffer-local-value 'llm-model buf)))
     (and (string? m) (not (equal? m "")) m)))
 
 ;; The seam every LLM block runs through. K receives the answer text.

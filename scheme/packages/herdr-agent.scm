@@ -37,14 +37,14 @@
 ;; the shell writes as the same author. The buffer's name can change, as a
 ;; session title renames the shell; the slug does not.
 (define (herdr-agent-slug buf)
-  (or (buffer-local buf 'herdr-agent-slug)
+  (or (buffer-local-value 'herdr-agent-slug buf)
       (let ((slug (string-append "term-" (number->string (random 1000000000)))))
         (buffer-set-local! buf 'herdr-agent-slug slug)
         slug)))
 
 ;; the terminal whose shell has SLUG, or #f
 (define (herdr-agent-terminal slug)
-  (find (lambda (b) (equal? (buffer-local b 'herdr-agent-slug) slug)) (buffer-list)))
+  (find (lambda (b) (equal? (buffer-local-value 'herdr-agent-slug b) slug)) (buffer-list)))
 
 (add-hook! '(term-environment-functions herdr-agent)
   (lambda (buf)
@@ -68,7 +68,7 @@
 ;; deny for a tool that a chat refuses, allow for a compos tool, whose
 ;; call the daemon's own gate decides; #f leaves the tool to the harness
 (define (herdr-agent-tool-verdict buf tool)
-  (let* ((harness (buffer-local buf 'herdr-agent-harness))
+  (let* ((harness (buffer-local-value 'herdr-agent-harness buf))
          (compos? (or (herdr-harness-get harness 'compos-tool?) (lambda (t) #f))))
     (cond ((member tool (herdr-agent-refused-tools harness)) 'deny)
           ((compos? tool) 'allow)
@@ -97,12 +97,12 @@
   ;; a turn-off that herdr-agent-stop! did not ask for is yours: it holds
   ;; until the agent exits
   (lambda (buf)
-    (unless (buffer-local buf 'herdr-agent-stopping)
+    (unless (buffer-local-value 'herdr-agent-stopping buf)
       (buffer-set-local! buf 'herdr-agent-declined #t))))
 
 (define (herdr-agent-start! buf harness)
   (when (and (herdr-harness harness)
-             (not (buffer-local buf 'herdr-agent-declined)))
+             (not (buffer-local-value 'herdr-agent-declined buf)))
     (buffer-set-local! buf 'herdr-agent-harness harness)
     (unless (minor-mode-on? buf "herdr-agent-mode")
       (enable-minor-mode! buf "herdr-agent-mode"))
@@ -111,7 +111,7 @@
         (enable-minor-mode! buf mode)))))
 
 (define (herdr-agent-stop! buf)
-  (let ((mode (herdr-harness-get (buffer-local buf 'herdr-agent-harness) 'mode)))
+  (let ((mode (herdr-harness-get (buffer-local-value 'herdr-agent-harness buf) 'mode)))
     (buffer-set-local! buf 'herdr-agent-stopping #t)
     (when (and mode (minor-mode-on? buf mode)) (disable-minor-mode! buf mode))
     (when (minor-mode-on? buf "herdr-agent-mode") (disable-minor-mode! buf "herdr-agent-mode"))
@@ -119,7 +119,7 @@
                                   'herdr-agent-harness #f))))
 
 (define (herdr-agent-on? buf)
-  (and (minor-mode-on? buf "herdr-agent-mode") (buffer-local buf 'herdr-agent-harness)))
+  (and (minor-mode-on? buf "herdr-agent-mode") (buffer-local-value 'herdr-agent-harness buf)))
 
 ;; OSC 7501: the harness names itself in its status
 (add-hook! '(terminal-status-hook herdr-agent)

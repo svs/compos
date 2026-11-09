@@ -86,7 +86,7 @@
 ;; instead of silently disappearing from every bundle saved before they existed.
 ;; A name no fragment has any more is harmless: it switches nothing off.
 (define (prompt-disabled-parts buf)
-  (or (buffer-local buf 'prompt-disabled-parts) '()))
+  (or (buffer-local-value 'prompt-disabled-parts buf) '()))
 
 (define (prompt-parts-enabled buf parts)
   (let ((disabled (prompt-disabled-parts buf)))
@@ -94,7 +94,7 @@
 
 (define (prompt-parts-set-disabled! buf names)
   (let ((next (filter string? names))
-        (old (or (buffer-local buf 'prompt-disabled-parts) '())))
+        (old (or (buffer-local-value 'prompt-disabled-parts buf) '())))
     (unless (equal? next old)
       (buffer-set-local! buf 'prompt-disabled-parts next))
     next))
@@ -126,7 +126,7 @@
 ;; Modes add named fragments to the buffer they affect. The value is derived
 ;; runtime state: mode setup rebuilds it after restore or reload.
 (define (prompt-buffer-parts buf)
-  (or (buffer-local buf 'prompt-parts) '()))
+  (or (buffer-local-value 'prompt-parts buf) '()))
 
 (define (prompt-part-set! buf name text)
   (let* ((key (if (symbol? name) (symbol->string name) name))
@@ -158,7 +158,7 @@
   (if (chat-prompt-direct? buf) 'direct 'acp))
 
 (define (chat-prompt-snapshot buf)
-  (buffer-local buf 'chat-prompt-snapshot))
+  (buffer-local-value 'chat-prompt-snapshot buf))
 
 ;; The unfiltered source is for configuration and inspection. It holds one
 ;; section per fragment; current group membership is fetched by chat-context.
@@ -219,9 +219,9 @@
   (buffer-set-local! buf 'chat-prompt-snapshot #f)
   (let ((parts (chat-prompt-freeze! buf)))
     (when (and (not (chat-prompt-direct? buf))
-               (buffer-local buf 'agent-slug)
-               (member (buffer-local buf 'agent-slug) (agent-list)))
-      (let* ((slug (buffer-local buf 'agent-slug))
+               (buffer-local-value 'agent-slug buf)
+               (member (buffer-local-value 'agent-slug buf) (agent-list)))
+      (let* ((slug (buffer-local-value 'agent-slug buf))
              (status (agent-status slug)))
         (if (member status '(running starting needs_attention))
             (buffer-set-local! buf 'chat-mcp-dirty #t)
@@ -229,8 +229,8 @@
               (buffer-set-local! buf 'chat-mcp-dirty #f)
               (agent-reconnect!
                 slug
-                (or (buffer-local buf 'agent-connector) *default-connector*)
-                (or (buffer-local buf 'agent-model) ""))))))
+                (or (buffer-local-value 'agent-connector buf) *default-connector*)
+                (or (buffer-local-value 'agent-model buf) ""))))))
     parts))
 
 (define (prompt-code-block text)
@@ -351,7 +351,7 @@
             (message (string-append
                        "prompt refreshed: " (number->string (length parts))
                        " sections"
-                       (if (buffer-local buf 'chat-mcp-dirty)
+                       (if (buffer-local-value 'chat-mcp-dirty buf)
                            " — ACP reconnects before the next turn"
                            ""))))
           (message "No chat here — open one with M-x chat first")))))

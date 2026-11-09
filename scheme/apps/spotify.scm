@@ -822,7 +822,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
   (for-each (lambda (b)
               (when (member (site-app-get b 'active) '("ambient" "artist" "album"))
                 (let ((now (spotify--tab-inputs b)))
-                  (unless (spotify--same-inputs? now (buffer-local b 'sp-drawn))
+                  (unless (spotify--same-inputs? now (buffer-local-value 'sp-drawn b))
                     (buffer-set-local! b 'sp-drawn now)
                     (site-app-draw! b)))))
             (filter spotify--detail? (buffer-list))))
@@ -1685,7 +1685,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
   (let* ((path (spotify--now-path))
          (buf (spotify--section-ready! 'playing))
          (pane (spotify--section-pane))
-         (moved (not (equal? path (buffer-local buf 'spotify-playing-path)))))
+         (moved (not (equal? path (buffer-local-value 'spotify-playing-path buf)))))
     (cond ((equal? path "") (message "Nothing is playing"))
           (else
            (buffer-set-local! buf 'spotify-playing-path path)
@@ -2443,7 +2443,7 @@ c-buffer:has(.sp-track, .sp-tile, .sp-hero, .sp-np-hero, .sp-ambient, .sp-artist
         ;; one tab plays and reads; a Spotify tab already open is that tab
         'adopt #t
         ;; a page whose inputs are as they were at its last draw is not drawn again
-        'drawn-same? (lambda (buf row) (spotify--same-inputs? (spotify--tab-inputs buf row) (buffer-local buf 'sp-drawn)))
+        'drawn-same? (lambda (buf row) (spotify--same-inputs? (spotify--tab-inputs buf row) (buffer-local-value 'sp-drawn buf)))
         'drawn! (lambda (buf) (buffer-set-local! buf 'sp-drawn (spotify--tab-inputs buf)))
         ;; a track's or album's page does not change by the minute: what it read stands for an hour
         'fresh-ms 3600000

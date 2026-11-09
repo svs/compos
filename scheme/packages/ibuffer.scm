@@ -102,7 +102,7 @@
 (define (ibuffer-view? b)
   (and (string? b)
        (or (assoc b *ibuffer-views*)
-           (member (buffer-local b 'mode-name) *ibuffer-view-modes*))
+           (member (buffer-local-value 'mode-name b) *ibuffer-view-modes*))
        #t))
 
 (define (ibuffer-view-default buf key)
@@ -207,7 +207,7 @@
         (tail (member key *ibuffer-row-local-keys*)))
     (if (and row tail)
         (list-ref row (- (+ (length *ibuffer-row-local-keys*) 1) (length tail)))
-        (buffer-local b key))))
+        (buffer-local-value key b))))
 
 (define (ibuffer-row-kind b)
   (let ((e (assoc b *ibuffer-kind-notes*)))
@@ -247,7 +247,7 @@
 ;;; --- the buffer kind and the file kind ----------------------------------------
 
 (define (ibuffer-short-mode b)
-  (let* ((mode (or (buffer-local b 'mode-name) "Fundamental"))
+  (let* ((mode (or (buffer-local-value 'mode-name b) "Fundamental"))
          (n (string-length mode)))
     (if (and (> n 5) (string-suffix? "-mode" mode))
         (substring mode 0 (- n 5))
@@ -313,14 +313,14 @@
 (define (ibuffer-buffer-size b) (and (buffer-known? b) (buffer-size b)))
 
 (define (ibuffer-buffer-label b)
-  (if (buffer-known? b) (or (buffer-local b 'mode-name) "Fundamental") "file"))
+  (if (buffer-known? b) (or (buffer-local-value 'mode-name b) "Fundamental") "file"))
 
 (define (ibuffer-buffer-last b)
   (if (buffer-known? b) (ibuffer-last-label b) (ibuffer-file-age b)))
 
 (define (ibuffer-buffer-match b)
   (if (buffer-known? b)
-      (string-append (or (buffer-local b 'mode-name) "Fundamental") " "
+      (string-append (or (buffer-local-value 'mode-name b) "Fundamental") " "
                      (or (buffer-path b) ""))
       "file"))
 
@@ -513,10 +513,10 @@
     (cond ((equal? tab 'group)
            (let ((g (frame-group))) (and g (switch-member? name g))))
           ((equal? tab 'window)
-           (let ((w (buffer-local buf 'ibuffer-tab-window)))
+           (let ((w (buffer-local-value 'ibuffer-tab-window buf)))
              (and w (window-exists? w) (member name (window-prev-buffers w)) #t)))
           ((equal? tab 'pane)
-           (let ((w (buffer-local buf 'ibuffer-tab-window)))
+           (let ((w (buffer-local-value 'ibuffer-tab-window buf)))
              (and w (window-exists? w) (member name (switch-pane-tab-buffers w)) #t)))
           (else #t))))
 
@@ -586,7 +586,7 @@
                        #t))))))
 
 (define (ibuffer-scope-names buf)
-  (let ((scope (buffer-local buf 'ibuffer-scope)))
+  (let ((scope (buffer-local-value 'ibuffer-scope buf)))
     (ibuffer-tab-filter buf
       (cond ((equal? scope #f) (buffer-list-mru))
             ((symbol? scope)
@@ -643,7 +643,7 @@
 
 (define (ibuffer-grouping &optional buf)
   (let ((buf (or buf (ibuffer-view))))
-    (or (buffer-local buf 'ibuffer-grouping)
+    (or (buffer-local-value 'ibuffer-grouping buf)
         (and (member (list-mode-of buf) '("ibuffer-mode" "ibuffer-pretty-mode"))
              (ibuffer-render-option buf 'group-by ibuffer-group-by))
         (ibuffer-view-default buf 'grouping)
@@ -809,7 +809,7 @@
 (define (ibuffer-separator? buf row)
   (and (ibuffer-heading? row)
        (or (equal? (nth 2 row) "match")
-           (and (not (buffer-local buf 'ibuffer-heading-rows))
+           (and (not (buffer-local-value 'ibuffer-heading-rows buf))
                 (equal? (nth 2 row) "separator")))))
 
 ;; a section: its heading, then its members in the view's order. AS-IS?
@@ -1479,7 +1479,7 @@
   (let loop ((rows (list-entries buf)) (n 0))
     (cond ((null? rows)
            (let ((rendered (line buf n 0 0))
-                 (scope (buffer-local buf 'ibuffer-narrow-group)))
+                 (scope (buffer-local-value 'ibuffer-narrow-group buf)))
              (if scope
                  (list (string-append (car rendered) " · group: " (cadr scope))
                        (cadr rendered))
@@ -1528,7 +1528,7 @@
 
 (define (ibuffer-source-facts! buf)
   (set! *ibuffer-source-facts* (alist-put *ibuffer-source-facts* buf (length (remove ibuffer-heading?
-                                    (or (buffer-local buf 'list-source-entries) '()))))))
+                                    (or (buffer-local-value 'list-source-entries buf) '()))))))
 
 (define (ibuffer-source-facts buf) (assoc buf *ibuffer-source-facts*))
 
@@ -1537,7 +1537,7 @@
          (entries (if view (cadr view) '()))
          (hit (assoc row entries)))
     (if hit (cdr hit)
-        (let* ((mode (or (buffer-local row 'mode-name) ""))
+        (let* ((mode (or (buffer-local-value 'mode-name row) ""))
                (text (string-append row " " (ibuffer-row-title row) " " mode " "
                                     (ibuffer-row-match row) " "
                                     (or (buffer-path row) "") " "
@@ -1631,7 +1631,7 @@
 (define (ibuffer-filter-row? buf e f)
   (if (not (string? e)) #t
       (let ((kind (car f)) (arg (cadr f)))
-        (cond ((equal? kind "mode") (equal? (or (buffer-local e 'mode-name) "Fundamental") arg))
+        (cond ((equal? kind "mode") (equal? (or (buffer-local-value 'mode-name e) "Fundamental") arg))
               ((equal? kind "derived") (and (buffer-derived-mode? e arg) #t))
               ((equal? kind "name") (ibuffer-re? arg e))
               ((equal? kind "file") (ibuffer-re? arg (ibuffer-row-path e)))
@@ -1665,9 +1665,9 @@
   (let* ((buf (current-buffer))
          (modes (let loop ((ns (ibuffer-filter-rows buf)) (out '()))
                   (if (null? ns) (sort out)
-                      (let ((m (or (buffer-local (car ns) 'mode-name) "Fundamental")))
+                      (let ((m (or (buffer-local-value 'mode-name (car ns)) "Fundamental")))
                         (loop (cdr ns) (if (and (string? m) (not (member m out))) (cons m out) out))))))
-         (here (let ((r (list-current buf))) (and (string? r) (or (buffer-local r 'mode-name) "Fundamental")))))
+         (here (let ((r (list-current buf))) (and (string? r) (or (buffer-local-value 'mode-name r) "Fundamental")))))
     (completing-read "Filter by mode: " modes
       (lambda (m) (when (and (string? m) (not (equal? m ""))) (k buf m)))
       'default (or here ""))))
@@ -1711,7 +1711,7 @@
 ;; Scope the source by section key before text filtering. Keep the complete
 ;; source snapshot so widening never needs to refetch or lose the query.
 (define (ibuffer-narrow-source buf source)
-  (let ((scope (buffer-local buf 'ibuffer-narrow-group)))
+  (let ((scope (buffer-local-value 'ibuffer-narrow-group buf)))
     (if (not scope) source
         (let loop ((rows source) (inside #f) (out '()))
           (cond ((null? rows) (reverse out))
@@ -1733,7 +1733,7 @@
 (define-command "ibuffer-widen-group" "Show every group, keeping the text filter"
   (lambda ()
     (let ((buf (ibuffer-view)))
-      (when (buffer-local buf 'ibuffer-narrow-group)
+      (when (buffer-local-value 'ibuffer-narrow-group buf)
         (buffer-set-local! buf 'ibuffer-narrow-group #f)
         (list-render! buf 'view)))))
 
@@ -1753,7 +1753,7 @@
          (here (window-buffer (active-window)))
          (fits? (lambda (b)
                   (and (buffer-known? b)
-                       (equal? (buffer-local b 'mode-name) mode)
+                       (equal? (buffer-local-value 'mode-name b) mode)
                        (equal? (buffer-group b) group))))
          ;; meta.db: this group's views in that mode, last used first
          (existing (filter fits?
@@ -1779,11 +1779,11 @@
 (define (listing-preview! owner target)
   (when (and (buffer-known? owner) (buffer-known? target)
              (not (equal? owner target))
-             (not (buffer-local owner 'ibuffer-prompt-home-window))
-             (not (buffer-local owner 'listing-preview-disabled))
+             (not (buffer-local-value 'ibuffer-prompt-home-window owner))
+             (not (buffer-local-value 'listing-preview-disabled owner))
              (or (equal? (window-buffer (active-window)) owner)
                  (equal? (mb-list-target) owner))
-             (not (equal? (buffer-local owner 'listing-preview-dismissed-row) target)))
+             (not (equal? (buffer-local-value 'listing-preview-dismissed-row owner) target)))
     (listing-peek! owner target)))
 
 (define (listing-preview-owner) (peek-owner))
@@ -1808,13 +1808,13 @@
         (key (string-append "listing-preview:" (selected-frame))))
     (set-frame-local! 'listing-preview-ticket ticket)
     (debounce-cancel! key)
-    (unless (equal? target (buffer-local owner 'listing-preview-dismissed-row))
+    (unless (equal? target (buffer-local-value 'listing-preview-dismissed-row owner))
       (buffer-set-local! owner 'listing-preview-dismissed-row #f))
     (unless (and (string? target) (buffer-known? target))
       (listing-preview-dismiss! owner))
-    (when (and (not (buffer-local owner 'listing-preview-disabled))
+    (when (and (not (buffer-local-value 'listing-preview-disabled owner))
                (string? target) (buffer-known? target))
-      (unless (equal? target (buffer-local owner 'listing-preview-dismissed-row))
+      (unless (equal? target (buffer-local-value 'listing-preview-dismissed-row owner))
         (buffer-set-local! owner 'listing-preview-dismissed-row #f)
         ;; The wait is for the first peek of a list: opening one lays the
         ;; frame out, and that should not happen while the user is still
@@ -1829,7 +1829,7 @@
 (define-command "ibuffer-toggle-preview" "Toggle automatic previews in this listing"
   (lambda ()
     (let* ((owner (ibuffer-view))
-           (disabled (not (buffer-local owner 'listing-preview-disabled))))
+           (disabled (not (buffer-local-value 'listing-preview-disabled owner))))
       (buffer-set-local! owner 'listing-preview-disabled disabled)
       (listing-preview-dismiss! owner)
       (unless disabled
@@ -1941,11 +1941,11 @@
          ;; history's buffer in this pane and lost what stood beside it.
          ;; The minibuffer form floats a shaped popup and takes no window,
          ;; so it records nothing.
-         (_t (unless (buffer-local buf 'window-shape)
+         (_t (unless (buffer-local-value 'window-shape buf)
                (transient-frame-rearm! 'ibuffer buf)))
          ;; a list a command opens comes to the pane the user is in
-         (_m (unless (buffer-local buf 'window-shape) (listing--come-here! buf)))
-         (_d (if (buffer-local buf 'window-shape)
+         (_m (unless (buffer-local-value 'window-shape buf) (listing--come-here! buf)))
+         (_d (if (buffer-local-value 'window-shape buf)
                  (begin
                    (display-buffer buf)
                    (let ((w (window-showing-other buf from)))
@@ -2500,7 +2500,7 @@
                   ;; cannot remove the copy or its floating window.
                   (let ((copy (preview-buffer)))
                     (when (and (equal? (listing-preview-owner) view)
-                               (equal? (buffer-local copy 'listing-preview-source) target))
+                               (equal? (buffer-local-value 'listing-preview-source copy) target))
                       (listing-preview-dismiss! view))))
                 (ibuffer-kill-targets! view
                                       (cdr targets)
@@ -2581,7 +2581,7 @@
             ;; rules can ask for the attribute itself and never a value
             (if (ibuffer-row-in-section? buf entry) (list (list "level" "1")) '())
             (if (buffer-exists? entry)
-              (list (list "mode" (or (buffer-local entry 'mode-name) ""))
+              (list (list "mode" (or (buffer-local-value 'mode-name entry) ""))
                     (list "bytes" (buffer-size entry))) '())))))
 
 (define (ibuffer-composml-fields buf entry)
@@ -2783,7 +2783,7 @@
   'group 'buffers 'type 'boolean)
 
 (define (ibuffer-render-option buf key fallback)
-  (let ((options (buffer-local buf 'ibuffer-render-options)))
+  (let ((options (buffer-local-value 'ibuffer-render-options buf)))
     (if (and options (list-plist-key? options key)) (plist-get options key) fallback)))
 
 (define (ibuffer-pretty? buf) (ibuffer-render-option buf 'pretty ibuffer-pretty))
@@ -2791,7 +2791,7 @@
 
 (define (ibuffer-set-render-option! buf key value)
   (buffer-set-local! buf 'ibuffer-render-options
-    (ibuffer-plist-put (or (buffer-local buf 'ibuffer-render-options) '()) key value)))
+    (ibuffer-plist-put (or (buffer-local-value 'ibuffer-render-options buf) '()) key value)))
 
 ;; Keep immutable display data outside buffer locals. Each source refresh
 ;; reads the required fields in one host call; filtering and formatting read

@@ -553,7 +553,7 @@
                      'files (jj-change-files root change))))
            rows))))
 
-(define (jj-chat-slug buf) (buffer-local buf 'agent-slug))
+(define (jj-chat-slug buf) (buffer-local-value 'agent-slug buf))
 
 (public! 'chat-changes
   "(chat-changes [BUF]) -- the jj changes this chat made, oldest first, each with its state")

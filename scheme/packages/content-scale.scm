@@ -65,7 +65,7 @@
       (let ((d (assoc "*" *content-scale-specs*))) (if d (cadr d) '()))))
 
 (define (content-scale-levels buf)
-  (let ((mode (buffer-local buf 'mode-name)))
+  (let ((mode (buffer-local-value 'mode-name buf)))
     ;; an anchored page zooms by its parts, unless its mode says otherwise
     (if (and (anchor-scale-page? buf) (not (content-scale--own-spec mode)))
         (anchor-scale--page-levels buf)
@@ -214,7 +214,7 @@
 ;;; list of (TEXT LINKS) for the companion buffer and LINKS is a list of
 ;;; (VIEW-LINE SOURCE-POS) that RET follows back into the source.
 
-(define (content-scale-level buf) (or (buffer-local buf 'content-scale) 0))
+(define (content-scale-level buf) (or (buffer-local-value 'content-scale buf) 0))
 
 (define (content-scale--arrived! buf n)
   (when (and (buffer-known? buf) (= (content-scale-level buf) n))
@@ -291,7 +291,7 @@
 
 (define (content-scale-view-name buf) (string-append " *scale: " buf "*"))
 
-(define (content-scale-source buf) (or (buffer-local buf 'content-scale-of) buf))
+(define (content-scale-source buf) (or (buffer-local-value 'content-scale-of buf) buf))
 
 ;; The window this buffer, or its view, stands in: the active one first.
 (define (content-scale--window buf)
@@ -305,7 +305,7 @@
 
 (define (content-scale--level-title buf n)
   (let ((entry (content-scale--entry buf n)))
-    (string-append (or (buffer-local buf 'chat-title) buf)
+    (string-append (or (buffer-local-value 'chat-title buf) buf)
                    " · " (if entry (symbol->string (cadr entry)) "text")
                    " (" (number->string n) ")")))
 
@@ -330,7 +330,7 @@
   (let ((view (content-scale-view-name buf)))
     (when (buffer-known? view)
       (let ((win (content-scale--window buf))
-            (pos (buffer-local buf 'content-scale-point)))
+            (pos (buffer-local-value 'content-scale-point buf)))
         (when (and win (equal? (window-buffer win) view))
           (window-set-buffer! win buf)
           (when (number? pos) (buffer-goto! buf pos))))
@@ -413,9 +413,9 @@
 (define-command "content-scale-visit" "Return to the text at the place this line came from"
   (lambda ()
     (let* ((view (current-buffer))
-           (buf (buffer-local view 'content-scale-of))
+           (buf (buffer-local-value 'content-scale-of view))
            (line (with-current-buffer view (lambda () (line-number-at-pos (buffer-point view)))))
-           (hits (filter (lambda (l) (<= (car l) line)) (or (buffer-local view 'content-scale-links) '())))
+           (hits (filter (lambda (l) (<= (car l) line)) (or (buffer-local-value 'content-scale-links view) '())))
            (pos (and (pair? hits) (cadr (car (reverse hits))))))
       (when buf
         (when pos (buffer-set-local! buf 'content-scale-point pos))
@@ -458,7 +458,7 @@
     (unless abstract
       (summarize text 'abstract (lambda (s) (content-scale--arrived! buf 4))))
     (string-append buf "\n"
-                   (or (buffer-local buf 'mode-name) "fundamental") " · "
+                   (or (buffer-local-value 'mode-name buf) "fundamental") " · "
                    (number->string lines) " lines · ~" (number->string words) " words\n\n"
                    (or abstract "Summarizing…"))))
 
@@ -512,7 +512,7 @@
 ;; would never be found again; summaries read the finished turns.
 (define (chat-scale--settled-turns buf)
   (let ((turns (chat-scale--turns buf)))
-    (if (and (buffer-local buf 'chat-turn-active) (pair? turns))
+    (if (and (buffer-local-value 'chat-turn-active buf) (pair? turns))
         (reverse (cdr (reverse turns)))
         turns)))
 
@@ -537,11 +537,11 @@
 (define (chat-scale--card buf)
   (let* ((turns (chat-scale--turns buf))
          (tools (length (chat-scale--parts-of buf '("tool"))))
-         (summary (buffer-local buf 'chat-summary)))
-    (string-append (or (buffer-local buf 'chat-title) buf) "\n"
+         (summary (buffer-local-value 'chat-summary buf)))
+    (string-append (or (buffer-local-value 'chat-title buf) buf) "\n"
                    (number->string (length turns)) " turns · "
                    (number->string tools) " tool calls"
-                   (let ((m (buffer-local buf 'llm-model))) (if (string? m) (string-append " · " m) ""))
+                   (let ((m (buffer-local-value 'llm-model buf))) (if (string? m) (string-append " · " m) ""))
                    "\n\n"
                    (if (string? summary) (string-append "Last: " summary) ""))))
 
@@ -616,7 +616,7 @@
   (fold (lambda (m l) (max m (car l))) 0 (anchor-scale--levels a)))
 
 (define (anchor-scale-of buf name)
-  (let ((hit (assoc name (or (buffer-local buf 'anchor-scale) '()))))
+  (let ((hit (assoc name (or (buffer-local-value 'anchor-scale buf) '()))))
     (if hit (cadr hit) 0)))
 
 ;; the declared level in force at N: the highest one at or below it
@@ -711,7 +711,7 @@
 
 (define (anchor-scale-redraw! buf)
   (when (anchor-scale-page? buf)
-    (if (equal? (buffer-local buf 'render-mode) "blocks")
+    (if (equal? (buffer-local-value 'render-mode buf) "blocks")
         (anchor--mark-blocks! buf (anchor-at buf (buffer-point buf)) #t)
         (anchor-scale--text! buf))))
 
@@ -722,7 +722,7 @@
            (buffer-set-local! buf 'anchor-scale
              (cons (list name n)
                    (filter (lambda (e) (not (equal? (car e) name)))
-                           (or (buffer-local buf 'anchor-scale) '()))))
+                           (or (buffer-local-value 'anchor-scale buf) '()))))
            (anchor-scale-redraw! buf)
            n))))
 
@@ -738,7 +738,7 @@
     (anchor-scale-redraw! buf)))
 
 (define (anchor-scale--presets buf)
-  (filter (lambda (p) (equal? (car p) (buffer-local buf 'mode-name))) anchor-scale-presets))
+  (filter (lambda (p) (equal? (car p) (buffer-local-value 'mode-name buf))) anchor-scale-presets))
 
 (define (anchor-scale--level-at presets n)
   (let ((p (filter (lambda (p) (= (caddr p) n)) presets)))
@@ -801,7 +801,7 @@
        ((not (buffer-read-only? buf)) (run-command "self-insert-command"))
        ((not a) (message "No part here"))
        ;; a page whose parts fold by their own state takes the part back
-       ((let ((h (buffer-local buf 'anchor-fold-handler))) (and (procedure? h) (h buf a))) #t)
+       ((let ((h (buffer-local-value 'anchor-fold-handler buf))) (and (procedure? h) (h buf a))) #t)
        (else
         (let* ((name (anchor-name a))
                (folds (filter (lambda (l) (eq? (cadr l) 'fold)) (anchor-scale--levels a)))
@@ -820,7 +820,7 @@
 
 ;; The zoom each part is at now, kept as a level of this kind of page.
 (define (anchor-scale-save! buf name)
-  (let* ((mode (buffer-local buf 'mode-name))
+  (let* ((mode (buffer-local-value 'mode-name buf))
          (parts (map (lambda (a) (list (anchor-name a) (anchor-scale-of buf (anchor-name a))))
                      (anchor-list buf)))
          (same (lambda (p) (and (equal? (car p) mode) (equal? (cadr p) name))))
@@ -848,7 +848,7 @@
 (define-command "anchor-scale-forget-level" "Forget a saved content level of this kind of page"
   (lambda ()
     (let* ((buf (content-scale-source (current-buffer)))
-           (mode (buffer-local buf 'mode-name))
+           (mode (buffer-local-value 'mode-name buf))
            (names (map cadr (anchor-scale--presets buf))))
       (if (null? names)
           (message "No saved levels for this kind of page")

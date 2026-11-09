@@ -110,7 +110,7 @@
             (project-defaults-mapped buf (cdr (cdr defaults))))))
 
 (define (project-defaults-inherited buf)
-  (let ((state (buffer-local buf 'project-defaults-inherited)))
+  (let ((state (buffer-local-value 'project-defaults-inherited buf)))
     (if (and (pair? state) (pair? (cdr state)))
         (car (cdr state))
         '())))
@@ -119,7 +119,7 @@
   (for-each
     (lambda (entry)
       (when (and (not (assoc (car entry) wanted))
-                 (equal? (buffer-local buf (car entry)) (car (cdr entry))))
+                 (equal? (buffer-local-value (car entry) buf) (car (cdr entry))))
         (buffer-set-local! buf (car entry) #f)))
     inherited))
 
@@ -133,7 +133,7 @@
         (let* ((key (car entry))
                (value (car (cdr entry)))
                (old (assoc key inherited))
-               (current (buffer-local buf key)))
+               (current (buffer-local-value key buf)))
           (cond
             ((and old (equal? current (car (cdr old))))
              (buffer-set-local! buf key value)

@@ -326,7 +326,7 @@
   ;; an app's tab bars (tab-bars.scm) reach past a row keyed otherwise
   (let loop ((ts (tabs--here)))
     (cond ((null? ts)
-           (let* ((mode (buffer-local (current-buffer) 'mode-name))
+           (let* ((mode (buffer-local-value 'mode-name (current-buffer)))
                   (cmd (and mode (keymap-lookup (mode-keymap mode) key))))
              (if (and (string? cmd) (not (string-prefix? "tabs-key-" cmd)))
                  (run-command cmd)

@@ -59,8 +59,8 @@
 ;; writes the file format over the transcript. Any buffer whose save is a
 ;; transform must opt out the same way, with 'auto-revert-exempt.
 (define (auto-revert-serialized? buf)
-  (or (equal? (buffer-local buf 'mode-name) "chat-mode")
-      (buffer-local buf 'auto-revert-exempt)))
+  (or (equal? (buffer-local-value 'mode-name buf) "chat-mode")
+      (buffer-local-value 'auto-revert-exempt buf)))
 
 (define (auto-revert-follows? buf)
   (and (not (auto-revert-serialized? buf))
@@ -182,7 +182,7 @@
 ;; it has nothing of its own to lose. Visiting sets it, saving sets it, a
 ;; revert sets it, and any file event that finds buffer and file equal
 ;; sets it, so the mark heals itself.
-(define (auto-revert-base buf) (buffer-local buf 'auto-revert-base))
+(define (auto-revert-base buf) (buffer-local-value 'auto-revert-base buf))
 
 (define (auto-revert-base! buf text)
   (buffer-set-local! buf 'auto-revert-base text))
@@ -389,7 +389,7 @@
                 (if (and path
                          ;; the root it was watched under, or failing that
                          ;; its own path, for a buffer watched before this
-                         (or (equal? (buffer-local (car bs) 'auto-revert-root) root)
+                         (or (equal? (buffer-local-value 'auto-revert-root (car bs)) root)
                              (string-prefix? root path))
                          (auto-revert-follows? (car bs))
                          (auto-revert-follow! (car bs)))

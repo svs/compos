@@ -18,7 +18,7 @@
           (8 12 "meta")))
       (buffer-set-local! buf 'agent-overlays
         '((1 3 "agent-meta") (5 8 "agent-tool") (10 12 "agent-meta")))
-      (overlay-set! buf 'agent (buffer-local buf 'agent-overlays))
+      (overlay-set! buf 'agent (buffer-local-value 'agent-overlays buf))
       (buffer-set-local! buf 'agent-folds '((4 10 #f) (5 8 #f)))
       (buffer-set-local! buf 'agent-waiting '(8 10))
       (buffer-set-local! buf 'agent-prose-from 9)
@@ -28,21 +28,21 @@
 
       (check-equal! (buffer-text buf) "abcdeijklmnopqrst"
                     "the text loses only the selected bytes")
-      (check-equal! (buffer-local buf 'agent-blocks)
+      (check-equal! (buffer-local-value 'agent-blocks buf)
         '((0 4 "prose")
           (4 7 "tool" "tc" "Read" "read" "running" 5)
           (5 9 "meta"))
         "blocks shift, empty blocks drop, and the tool body moves")
-      (check-equal! (buffer-local buf 'agent-overlays)
+      (check-equal! (buffer-local-value 'agent-overlays buf)
         '((1 3 "agent-meta") (7 9 "agent-meta"))
         "overlays shift and the empty overlay drops")
-      (check-equal! (buffer-local buf 'agent-folds) '((4 7 #f))
+      (check-equal! (buffer-local-value 'agent-folds buf) '((4 7 #f))
                     "folds follow the edited transcript")
-      (check-equal! (buffer-local buf 'agent-waiting) '(5 7)
+      (check-equal! (buffer-local-value 'agent-waiting buf) '(5 7)
                     "the waiting range moves")
-      (check-equal! (buffer-local buf 'agent-prose-from) 6
+      (check-equal! (buffer-local-value 'agent-prose-from buf) 6
                     "the pending prose start moves")
-      (check-equal! (buffer-local buf 'agent-saved-mark) 17
+      (check-equal! (buffer-local-value 'agent-saved-mark buf) 17
                     "the input mark moves")
       (buffer-kill! buf))))
 
@@ -59,7 +59,7 @@
                     "the byte range removes cde")
       (check-equal! (agent-blocks buf) '((2 7 "prose"))
                     "the prose range shifts by three bytes")
-      (check-equal! (buffer-local buf 'agent-saved-mark) 9
+      (check-equal! (buffer-local-value 'agent-saved-mark buf) 9
                     "the input mark shifts by three bytes")
       (buffer-kill! buf))))
 
@@ -83,7 +83,7 @@
                     "restore removes the stale spinner text")
       (check-equal! (agent-blocks buf) '((0 12 "prose"))
                     "restore joins the pending tail to prose")
-      (check-false! (buffer-local buf 'agent-prose-from)
+      (check-false! (buffer-local-value 'agent-prose-from buf)
                     "no pending prose remains")
       (buffer-kill! buf))))
 
@@ -209,15 +209,15 @@
       (agent-add-overlay! buf 0 3 "agent-thought")
       (agent-add-overlay! buf 3 6 "agent-thought")
       (agent-add-overlay! buf 6 9 "agent-thought")
-      (check-equal! (buffer-local buf 'agent-overlays)
+      (check-equal! (buffer-local-value 'agent-overlays buf)
         '((0 9 "agent-thought"))
         "three contiguous deltas are one range")
       (agent-add-overlay! buf 9 12 "agent-prose")
-      (check-equal! (buffer-local buf 'agent-overlays)
+      (check-equal! (buffer-local-value 'agent-overlays buf)
         '((9 12 "agent-prose") (0 9 "agent-thought"))
         "a different face starts a new range")
       (agent-add-overlay! buf 14 16 "agent-prose")
-      (check-equal! (buffer-local buf 'agent-overlays)
+      (check-equal! (buffer-local-value 'agent-overlays buf)
         '((14 16 "agent-prose") (9 12 "agent-prose") (0 9 "agent-thought"))
         "a gap starts a new range")
       (check-equal! (length (buffer-overlays buf)) 3
@@ -278,6 +278,6 @@
       (check-equal! (buffer-text buf) "hi\ntool says [agent stopped]\nbye"
                     "the quoted text in the tool block stays")
       (check-equal! (length (filter (lambda (b) (equal? (nth 2 b) "meta"))
-                                    (buffer-local buf 'agent-blocks)))
+                                    (buffer-local-value 'agent-blocks buf)))
                     0 "no meta block is left")
       (buffer-kill! buf))))

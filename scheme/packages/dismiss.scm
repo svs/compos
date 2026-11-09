@@ -33,11 +33,11 @@
   (equal? buf *mb-list-buffer*))
 
 (define (dismiss--declared-mode? buf)
-  (eq? (mode-inherited (buffer-local buf 'mode-name) 'dismissible) #t))
+  (eq? (mode-inherited (buffer-local-value 'mode-name buf) 'dismissible) #t))
 
 ;; A mode that puts 'dismissible 'never keeps plain buffers: no child-first q.
 (define (dismiss--refused-mode? buf)
-  (eq? (mode-inherited (buffer-local buf 'mode-name) 'dismissible) 'never))
+  (eq? (mode-inherited (buffer-local-value 'mode-name buf) 'dismissible) 'never))
 
 (define (buffer-dismissible? buf)
   ;; a peek dismisses with q whatever the buffer is (peek.scm)
@@ -98,8 +98,8 @@
     (set! *dismiss-caret-modes* (cons mode *dismiss-caret-modes*))))
 
 (define (dismiss--caret-default! buf)
-  (let ((mode (buffer-local buf 'mode-name)))
-    (unless (equal? (buffer-local buf 'dismiss-caret-default) mode)
+  (let ((mode (buffer-local-value 'mode-name buf)))
+    (unless (equal? (buffer-local-value 'dismiss-caret-default buf) mode)
       (desktop-skip! buf 'dismiss-caret-default)
       (buffer-set-local! buf 'dismiss-caret-default mode)
       (when (and (or (member mode *dismiss-caret-modes*) (buffer-path buf))
@@ -110,7 +110,7 @@
   (when (buffer-exists? buf)
     (let ((on (buffer-dismissible? buf)))
       (desktop-skip! buf 'dismissible)
-      (unless (equal? (buffer-local buf 'dismissible) on)
+      (unless (equal? (buffer-local-value 'dismissible buf) on)
         (buffer-set-local! buf 'dismissible on))
       (when on (dismiss--caret-default! buf))
       (cond ((and on (not (minor-mode-on? buf "dismiss-mode")))

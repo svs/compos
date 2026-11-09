@@ -115,9 +115,9 @@
 (define (spreadsheet--reload-source! backend source)
   (for-each
     (lambda (buffer)
-      (when (and (equal? (buffer-local buffer 'mode-name) "spreadsheet-mode")
-                 (equal? (buffer-local buffer 'spreadsheet-backend) backend)
-                 (equal? (buffer-local buffer 'spreadsheet-source) source))
+      (when (and (equal? (buffer-local-value 'mode-name buffer) "spreadsheet-mode")
+                 (equal? (buffer-local-value 'spreadsheet-backend buffer) backend)
+                 (equal? (buffer-local-value 'spreadsheet-source buffer) source))
         (buffer-set-local! buffer 'spreadsheet-chart-runtime
           (list 'state "loading" 'mounted '() 'drawn '() 'failed '()))
         (app-reload! buffer)))
@@ -341,7 +341,7 @@
   (let ((charts (spreadsheet-charts buffer)))
     (if (spreadsheet--error? charts)
         charts
-        (let ((runtime (buffer-local buffer 'spreadsheet-chart-runtime)))
+        (let ((runtime (buffer-local-value 'spreadsheet-chart-runtime buffer)))
           (append
             (list 'configured
                   (map (lambda (chart) (plist-get chart 'id)) charts))
@@ -402,15 +402,15 @@
                 (spreadsheet--put-charts workbook remaining)))))))
 
 (define (spreadsheet-read buffer)
-  (let ((backend (buffer-local buffer 'spreadsheet-backend))
-        (source (buffer-local buffer 'spreadsheet-source)))
+  (let ((backend (buffer-local-value 'spreadsheet-backend buffer))
+        (source (buffer-local-value 'spreadsheet-source buffer)))
     (if (and backend source)
         (spreadsheet-read-source backend source)
         (spreadsheet--error "The buffer is not connected to a workbook backend."))))
 
 (define (spreadsheet-write! buffer workbook)
-  (let ((backend (buffer-local buffer 'spreadsheet-backend))
-        (source (buffer-local buffer 'spreadsheet-source)))
+  (let ((backend (buffer-local-value 'spreadsheet-backend buffer))
+        (source (buffer-local-value 'spreadsheet-source buffer)))
     (cond
       ((not (spreadsheet--workbook? workbook))
        (spreadsheet--error "The workbook value is not valid."))
@@ -425,7 +425,7 @@
 ;; answers for a spreadsheet buffer only.
 (define (spreadsheet--app-request buffer method body)
   (and (buffer-exists? buffer)
-       (equal? (buffer-local buffer 'mode-name) "spreadsheet-mode")
+       (equal? (buffer-local-value 'mode-name buffer) "spreadsheet-mode")
        (spreadsheet-app-request buffer
          (cond ((equal? method "GET") "read")
                ((equal? method "PUT") "write")
@@ -439,10 +439,10 @@
 ;; text into Scheme source.
 (define (spreadsheet-app-request buffer method body)
   (if (not (and (buffer-exists? buffer)
-                (equal? (buffer-local buffer 'mode-name) "spreadsheet-mode")))
+                (equal? (buffer-local-value 'mode-name buffer) "spreadsheet-mode")))
       (list 404 (json-encode (list 'error "No spreadsheet uses this buffer.")))
-      (let ((backend (buffer-local buffer 'spreadsheet-backend))
-            (source (buffer-local buffer 'spreadsheet-source)))
+      (let ((backend (buffer-local-value 'spreadsheet-backend buffer))
+            (source (buffer-local-value 'spreadsheet-source buffer)))
         (cond
           ((equal? method "read")
            (let ((result (spreadsheet--read-json backend source)))
@@ -538,7 +538,7 @@
 
 (define-command "spreadsheet-visit-source" "Visit the current workbook data source"
   (lambda ()
-    (let ((source (buffer-local (current-buffer) 'spreadsheet-source)))
+    (let ((source (buffer-local-value 'spreadsheet-source (current-buffer))))
       (if source
           (visit source (buffer-group (current-buffer)))
           (message "This spreadsheet has no file data source")))))
@@ -559,9 +559,9 @@
 (define (spreadsheet--refresh-theme!)
   (for-each
     (lambda (buffer)
-      (when (and (equal? (buffer-local buffer 'mode-name) "spreadsheet-mode")
-                 (buffer-local buffer 'spreadsheet-backend)
-                 (buffer-local buffer 'spreadsheet-source))
+      (when (and (equal? (buffer-local-value 'mode-name buffer) "spreadsheet-mode")
+                 (buffer-local-value 'spreadsheet-backend buffer)
+                 (buffer-local-value 'spreadsheet-source buffer))
         (spreadsheet--render! buffer)))
     (buffer-list)))
 

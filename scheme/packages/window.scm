@@ -157,7 +157,7 @@
 ;;; ("popup popup-SIDE"); it is not a popup in the popper sense.
 
 (define (float--class? buf)
-  (let ((c (and (string? buf) (buffer-local buf 'window-class))))
+  (let ((c (and (string? buf) (buffer-local-value 'window-class buf))))
     (and c (string-prefix? "popup" c) #t)))
 
 ;; the window that floats in this frame, or #f
@@ -181,7 +181,7 @@
 ;; A buffer can ask for more window classes than the float gives it. The
 ;; extra words come after the side, so float-side-of still reads the side.
 (define (float--extra-classes name)
-  (let ((extra (buffer-local name 'window-classes)))
+  (let ((extra (buffer-local-value 'window-classes name)))
     (if (and (string? extra) (not (equal? extra "")))
         (string-append " " extra)
         "")))
@@ -205,7 +205,7 @@
 ;; the side a floating buffer wears, from its class, or #f. The class can
 ;; carry more words after the side, so the side is the first word.
 (define (float-side-of buf)
-  (let ((c (and buf (buffer-local buf 'window-class))))
+  (let ((c (and buf (buffer-local-value 'window-class buf))))
     (and c (string-prefix? "popup popup-" c)
          (let* ((rest (substring c (string-length "popup popup-") (string-length c)))
                 (space (string-index rest " ")))
@@ -588,7 +588,7 @@
 ;; record the death touched. A float that shows it closes in the core.
 (define (window-records-release! name)
   (let* ((rows (window-list-all))
-         (class (buffer-local name 'window-class))
+         (class (buffer-local-value 'window-class name))
          (float? (and (string? class) (string-prefix? "popup" class)))
          (victims
            (filter (lambda (r)
@@ -903,7 +903,7 @@
 ;; focus: the table is where the reader works.
 (define-display-action! 'shaped
   (lambda (name alist)
-    (let ((shape (or (buffer-local name 'window-shape) minibuffer-default-shape))
+    (let ((shape (or (buffer-local-value 'window-shape name) minibuffer-default-shape))
           (docked (window-docked name)))
       (cond ((not (equal? shape "minibuffer"))
              (float-show! name (or (float-side-of name) (display-param name 'side))
@@ -923,11 +923,11 @@
 ;; history already carried through tiling and desktop restore.
 (define (window-mode win)
   (let ((buf (window-buffer win)))
-    (and (string? buf) (buffer-local buf 'mode-name))))
+    (and (string? buf) (buffer-local-value 'mode-name buf))))
 
 ;; Help is a cover by default; other surfaces may opt in with a buffer local.
 (define (window-preference-cover? buf)
-  (or (buffer-local buf 'window-preference-cover)
+  (or (buffer-local-value 'window-preference-cover buf)
       (buffer-derived-mode? buf "help-mode")))
 
 (define (window-preferred-mode win)
@@ -936,7 +936,7 @@
         (cond ((null? buffers) (window-mode win))
               ((and (buffer-known? (car buffers))
                     (not (window-preference-cover? (car buffers))))
-               (buffer-local (car buffers) 'mode-name))
+               (buffer-local-value 'mode-name (car buffers)))
               (else (loop (cdr buffers)))))))
 
 (define (window-prefers-buffer? win buf)
@@ -1008,7 +1008,7 @@
   (and (agent-edit-author? (current-edit-author))
        (not (plist-get alist 'requested))
        (buffer-known? name)
-       (or (buffer-path name) (buffer-local name 'context-only))
+       (or (buffer-path name) (buffer-local-value 'context-only name))
        #t))
 
 (define (display-buffer-agent-refusal name)
@@ -1182,8 +1182,8 @@
 ;; the layout BUF declares. A minor mode answers before the major mode: it is
 ;; the more specific statement about the same buffer.
 (define (buffer-layout buf)
-  (let loop ((names (append (or (buffer-local buf 'minor-modes) '())
-                            (let ((m (buffer-local buf 'mode-name)))
+  (let loop ((names (append (or (buffer-local-value 'minor-modes buf) '())
+                            (let ((m (buffer-local-value 'mode-name buf)))
                               (if m (list m) '())))))
     (if (null? names)
         #f
@@ -1210,7 +1210,7 @@
 (define (fill-candidate? b)
   (and (string? b) (buffer-known? b)
        (not (string-prefix? " " b))
-       (not (buffer-local b 'context-only))
+       (not (buffer-local-value 'context-only b))
        (not (float--class? b))))
 
 (define window-fill-source (lambda () (buffer-list-mru)))

@@ -526,7 +526,7 @@ nonstandard install out of the built-in connector catalog."
 ;; the connector's: a name the connector or the model env sets wins
 (define (agent-config-buffer-env conf opts)
   (let* ((buf (plist-get opts 'buffer))
-         (extra (and (string? buf) (buffer-exists? buf) (buffer-local buf 'agent-env))))
+         (extra (and (string? buf) (buffer-exists? buf) (buffer-local-value 'agent-env buf))))
     (if (pair? extra)
         (let ((env (or (plist-get conf 'env) '())))
           (append (list 'env (append env (filter (lambda (p) (not (assoc (car p) env))) extra)))

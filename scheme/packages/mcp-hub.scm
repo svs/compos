@@ -252,7 +252,7 @@
 ;; local that says which server this is, so a restored buffer comes back
 ;; live rather than as a frozen screenshot of a dead session
 (define (mcp-hub-detail-setup! buf)
-  (let ((name (buffer-local buf 'mcp-hub-name)))
+  (let ((name (buffer-local-value 'mcp-hub-name buf)))
     (when name (mcp-hub-render-detail! buf name))))
 
 (mode-icon! "mcp-detail-mode" "")
@@ -284,7 +284,7 @@
 
 (define-command "mcp-hub-detail-refresh" "Re-read this server's tools"
   (lambda ()
-    (let ((name (buffer-local (current-buffer) 'mcp-hub-name)))
+    (let ((name (buffer-local-value 'mcp-hub-name (current-buffer))))
       (when name (mcp-hub-render-detail! (current-buffer) name))))
   'modes '(mcp-detail-mode))
 
@@ -316,7 +316,7 @@
     (buffer-set-read-only! buf #t)))
 
 (define (mcp-hub-log-setup! buf)
-  (let ((name (buffer-local buf 'mcp-hub-name)))
+  (let ((name (buffer-local-value 'mcp-hub-name buf)))
     (when name (mcp-hub-render-log! buf name))))
 
 (mode-icon! "mcp-log-mode" "")
@@ -345,14 +345,14 @@
 
 (define-command "mcp-hub-log-refresh" "Re-read this server's frames"
   (lambda ()
-    (let ((name (buffer-local (current-buffer) 'mcp-hub-name)))
+    (let ((name (buffer-local-value 'mcp-hub-name (current-buffer))))
       (when name (mcp-hub-render-log! (current-buffer) name))))
   'modes '(mcp-log-mode))
 
 ;; from a detail buffer, l opens that server's log
 (define-command "mcp-hub-detail-log" "Show this server's frames"
   (lambda ()
-    (let ((name (buffer-local (current-buffer) 'mcp-hub-name)))
+    (let ((name (buffer-local-value 'mcp-hub-name (current-buffer))))
       (when name (mcp-hub-show-log name))))
   'modes '(mcp-detail-mode))
 

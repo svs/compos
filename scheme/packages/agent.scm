@@ -26,7 +26,7 @@
 ;; the tool finishes.
 (define (agent-tool-note! buf e)
   (let* ((id (plist-get e 'id))
-         (pending (or (buffer-local buf 'chat-tool-pending) '()))
+         (pending (or (buffer-local-value 'chat-tool-pending buf) '()))
          (cur (or (assoc id pending) (list id #f "" "")))
          (raw (plist-get e 'input))
          (body (nth 3 cur)))
@@ -57,12 +57,12 @@
 
 (define (agent-note-orphan-tool! buf e)
   (let ((cur (assoc (plist-get e 'id)
-                    (or (buffer-local buf 'chat-tool-pending) '()))))
+                    (or (buffer-local-value 'chat-tool-pending buf) '()))))
     (when (and (equal? (plist-get e 'status) "failed")
                (or (not cur) (equal? (nth 2 cur) "")))
       (buffer-set-local! buf 'agent-orphan-tools
         (cons (plist-get e 'id)
-              (or (buffer-local buf 'agent-orphan-tools) '()))))))
+              (or (buffer-local-value 'agent-orphan-tools buf) '()))))))
 
 (define (agent-orphan-tool-error? buf text)
   (and (string? text)
@@ -71,11 +71,11 @@
                        (string-split (last (string-split text agent-orphan-tool-error-text))
                                      ","))))
          (every (lambda (id)
-                  (member id (or (buffer-local buf 'agent-orphan-tools) '())))
+                  (member id (or (buffer-local-value 'agent-orphan-tools buf) '())))
                 ids))))
 
 (define (agent-tool-record! buf id failed?)
-  (let* ((pending (or (buffer-local buf 'chat-tool-pending) '()))
+  (let* ((pending (or (buffer-local-value 'chat-tool-pending buf) '()))
          (cur (assoc id pending)))
     (when cur
       (buffer-set-local! buf 'chat-tool-pending
@@ -111,11 +111,11 @@
        (buffer-set-local! buf 'agent-models (plist-get e 'available))
        ;; and the connector keeps it: the picker offers this list again for
        ;; a chat that has not attached yet, and after a restart
-       (llm-models-seen! (buffer-local buf 'agent-connector)
+       (llm-models-seen! (buffer-local-value 'agent-connector buf)
                          (plist-get e 'available))
        ;; a model the person chose shows as they chose it
        (let ((cur (plist-get e 'current)))
-         (when (and cur (not (buffer-local buf 'agent-model)))
+         (when (and cur (not (buffer-local-value 'agent-model buf)))
            (buffer-set-local! buf 'agent-model cur)))
        (agent-update-modeline! buf))
 
@@ -124,12 +124,12 @@
       ((equal? type 'mode-state)
        (let ((avail (plist-get e 'available))
              (cur (plist-get e 'current))
-             (known (buffer-local buf 'agent-modes)))
+             (known (buffer-local-value 'agent-modes buf)))
          (when avail (buffer-set-local! buf 'agent-modes avail))
          ;; and the connector keeps the list, the same way it keeps the
          ;; models: the menu can then name a mode for a chat that has not
          ;; attached to this backend yet
-         (llm-modes-seen! (buffer-local buf 'agent-connector) avail)
+         (llm-modes-seen! (buffer-local-value 'agent-connector buf) avail)
          (when (and cur (not (equal? cur "")))
            (buffer-set-local! buf 'agent-mode cur))
          ;; Apply the compos stance when modes are first discovered. Later
@@ -172,7 +172,7 @@
        ;; the assistant's prose accumulates across the turn; turn-end
        ;; records it as one turn
        (buffer-set-local! buf 'agent-turn-text
-         (string-append (or (buffer-local buf 'agent-turn-text) "")
+         (string-append (or (buffer-local-value 'agent-turn-text buf) "")
                         (plist-get e 'text)))
        ;; the text lands in the buffer at once; the prose block reveals
        ;; it one paragraph at a time
@@ -205,7 +205,7 @@
        ;; remember where this tool's body will start (= current mark)
        (buffer-set-local! buf 'agent-tool-bodies
          (cons (list (plist-get e 'id) (agent-mark slug))
-               (or (buffer-local buf 'agent-tool-bodies) '())))
+               (or (buffer-local-value 'agent-tool-bodies buf) '())))
        ;; a running card stays closed: opening it for the run and
        ;; closing it at completion made the transcript jump on every call
        ;; the arguments open the body, ahead of the result, so an opened
@@ -229,7 +229,7 @@
              (if (equal? (plist-get e 'status) "failed") "failed" "done")
              (plist-get e 'duration-ms))
            (let ((entry (assoc (plist-get e 'id)
-                               (or (buffer-local buf 'agent-tool-bodies) '()))))
+                               (or (buffer-local-value 'agent-tool-bodies buf) '()))))
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
                (agent-add-fold! buf (car (cdr entry)) (agent-mark slug))))
            (agent-card-set-open! buf (plist-get e 'id) #f)
@@ -349,7 +349,7 @@
                ((member (plist-get e 'stop-reason) '("error" "failed"))
                 "failed")
                (else "done")))
-       (let ((text (buffer-local buf 'agent-turn-text)))
+       (let ((text (buffer-local-value 'agent-turn-text buf)))
          (cond
            ((and text (not (equal? (string-trim text) "")))
             (chat-record-event! buf "assistant" (list (list "text" text))))
@@ -357,7 +357,7 @@
            ;; the send vanished — say so. (A turn that ran tools, was
            ;; cancelled, or errored already left its own trace.)
            ((and (member (plist-get e 'stop-reason) '("end_turn" "max_tokens"))
-                 (not (buffer-local buf 'agent-turn-any)))
+                 (not (buffer-local-value 'agent-turn-any buf)))
             (let ((start (agent-render! slug
                            "(no reply — the model returned no text)\n"
                            "agent-meta")))
@@ -452,7 +452,7 @@
       ;; its memory instead of reading a pasted transcript.
       ((equal? type 'session)
        (buffer-set-local! buf 'agent-session (plist-get e 'id))
-       (buffer-set-local! buf 'agent-session-connector (buffer-local buf 'agent-connector))
+       (buffer-set-local! buf 'agent-session-connector (buffer-local-value 'agent-connector buf))
        (when (plist-get e 'resumed)
          (message (string-append "agent " slug ": session resumed"))))
 
@@ -522,7 +522,7 @@
       ;; the next one. Restart it after the batch, as a job of its own on
       ;; this lane: the restart is slow, and the turn end must not wait for
       ;; it. The thread it stops still sends the events it holds.
-      (when (buffer-local (agent-buf slug) 'chat-connector-suspect)
+      (when (buffer-local-value 'chat-connector-suspect (agent-buf slug))
         (task-run! (lambda () #t)
           (lambda (ok? v) (agent-reconnect-if-suspect! slug))))))
 
@@ -531,7 +531,7 @@
 (define (agent-reconnect-if-suspect! slug)
   (let ((buf (agent-buf slug)))
     (when (and (buffer-exists? buf)
-               (buffer-local buf 'chat-connector-suspect)
+               (buffer-local-value 'chat-connector-suspect buf)
                (boundp (quote agent-reconnect!)))
       (buffer-set-local! buf 'chat-connector-suspect #f)
       ;; a reconnect that fails must not take the batch with it: the turn
@@ -539,8 +539,8 @@
       (report-errors (string-append "agent " slug ": could not reconnect the session")
         (lambda ()
           (agent-reconnect! slug
-            (or (buffer-local buf 'agent-connector) *default-connector*)
-            (or (buffer-local buf 'agent-model) "")))))))
+            (or (buffer-local-value 'agent-connector buf) *default-connector*)
+            (or (buffer-local-value 'agent-model buf) "")))))))
 
 ;; one batch of a runtime's events, in order, then one view sync
 (llm-session-on-event! agent-handle-events)

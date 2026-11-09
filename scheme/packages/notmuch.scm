@@ -114,7 +114,7 @@ when a message has no text/plain part." 'group 'notmuch)
                            " ) and " filter)))))
 
 (define (nm--query-base-of buf)
-  (or (buffer-local buf 'notmuch-query-base)
+  (or (buffer-local-value 'notmuch-query-base buf)
       ;; a buffer with no base yet searches the default
       (let ((base notmuch-default-query))
         (buffer-set-local! buf 'notmuch-query-base base)
@@ -122,7 +122,7 @@ when a message has no text/plain part." 'group 'notmuch)
         base)))
 
 (define (nm--query-filters-of buf)
-  (or (buffer-local buf 'notmuch-query-filters) '()))
+  (or (buffer-local-value 'notmuch-query-filters buf) '()))
 
 (define (nm--query-of buf)
   (nm--query-with-filters (nm--query-base-of buf)
@@ -139,7 +139,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (nm--query-base-of buf)
   (buffer-set-local! buf 'notmuch-query-positions
     (cons (nm--position-of buf)
-          (or (buffer-local buf 'notmuch-query-positions) '())))
+          (or (buffer-local-value 'notmuch-query-positions buf) '())))
   (buffer-set-local! buf 'notmuch-query-filters
     (cons term (nm--query-filters-of buf))))
 
@@ -148,7 +148,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (nm--query-base-of buf)
   (buffer-set-local! buf 'notmuch-query-positions
     (cons (nm--position-of buf)
-          (or (buffer-local buf 'notmuch-query-positions) '())))
+          (or (buffer-local-value 'notmuch-query-positions buf) '())))
   (buffer-set-local! buf 'notmuch-query-filters
     (cons (list "only" term) (nm--query-filters-of buf))))
 
@@ -159,7 +159,7 @@ when a message has no text/plain part." 'group 'notmuch)
         (begin
           (buffer-set-local! buf 'notmuch-selection #f)
           (buffer-set-local! buf 'notmuch-query-filters (cdr filters))
-          (let ((positions (or (buffer-local buf 'notmuch-query-positions) '())))
+          (let ((positions (or (buffer-local-value 'notmuch-query-positions buf) '())))
             (unless (null? positions)
               (buffer-set-local! buf 'notmuch-query-positions (cdr positions))))
           #t))))
@@ -394,7 +394,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; past that the author has nothing left to say, and a thread with that
 ;; many tags falls back to the initials.
 (define (nm--tags-width buf)
-  (let ((need (or (buffer-local buf 'nm-tags-need) 6)))
+  (let ((need (or (buffer-local-value 'nm-tags-need buf) 6)))
     (min need (max 10 (quotient (list-view-width buf) 2)))))
 
 (define (nm--search-columns buf)
@@ -421,7 +421,7 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; answer when the mail behind it can have changed.
 (define (nm--count-for buf query)
   (let ((key (string-append (nm--source-label) "|" query))
-        (hit (buffer-local buf 'nm-count)))
+        (hit (buffer-local-value 'nm-count buf)))
     (if (and (pair? hit) (equal? (car hit) key))
         (cadr hit)
         ;; count, and not count --output=threads: grouping threads over a
@@ -574,7 +574,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--open-index! query)
   (let* ((buf *notmuch-search-buffer*)
          (cached? (and (buffer-exists? buf)
-                       (pair? (buffer-local buf 'list-entries)))))
+                       (pair? (buffer-local-value 'list-entries buf)))))
     (unless (buffer-exists? buf) (buffer-create buf))
     (nm--join-group! buf 'list)
     (nm--query-reset! buf query)
@@ -676,7 +676,7 @@ when a message has no text/plain part." 'group 'notmuch)
           ;; never receive these results. The callback never selects a window.
           (when (and (buffer-exists? buf)
                      (equal? identity (nm--db-key))
-                     (equal? request (buffer-local buf 'nm-hello-request)))
+                     (equal? request (buffer-local-value 'nm-hello-request buf)))
             (let ((counts (nm--parse-counts output)))
               (if (and (= (length counts) (* 2 (length searches)))
                        (null? (filter (lambda (n) (not (and (number? n) (>= n 0)))) counts)))
@@ -751,7 +751,7 @@ when a message has no text/plain part." 'group 'notmuch)
     'meta (lambda (buf)
             (string-append (number->string (length (list-entries buf)))
                            " mailboxes · " (nm--where-label)
-                           (or (buffer-local buf 'nm-hello-status) "")))
+                           (or (buffer-local-value 'nm-hello-status buf) "")))
     'total (lambda (buf) (length (list-source-entries buf)))
     'local-filter #t
     'footer (lambda (buf)
@@ -767,7 +767,7 @@ when a message has no text/plain part." 'group 'notmuch)
   ;; Pending callbacks and their status do not survive desktop restore.
   ;; Cached mailbox rows still need fresh counts after the mode wakes.
   (let ((buf (current-buffer)))
-    (unless (buffer-local buf 'nm-hello-status)
+    (unless (buffer-local-value 'nm-hello-status buf)
       (list-refresh! buf))))
 
 (add-hook! 'notmuch-hello-mode-hook 'nm--hello-wake!)
@@ -915,7 +915,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (detail-name!
   "notmuch-show-mode"
   (lambda (buf)
-    (let ((subject (or (buffer-local buf 'notmuch-subject) "")))
+    (let ((subject (or (buffer-local-value 'notmuch-subject buf) "")))
       (if (equal? subject "")
           buf
           (string-append "*mail: "
@@ -1832,7 +1832,7 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
 (define-command "notmuch-unfilter-last" "Remove the most recently added notmuch filter"
   (lambda ()
     (let* ((buf (current-buffer))
-           (positions (or (buffer-local buf 'notmuch-query-positions) '()))
+           (positions (or (buffer-local-value 'notmuch-query-positions buf) '()))
            (pos (if (null? positions) #f (car positions))))
       (if (not (nm--query-pop! buf))
           (message "No structured notmuch filters to remove")
@@ -1868,7 +1868,7 @@ carries a tag outside notmuch-autotag-exclude. C-u notmuch-autotag takes them al
   "The thread the command acts on: an open notmuch-show buffer names its thread, a list row carries one."
   (let ((buf (current-buffer)))
     (if (buffer-derived-mode? buf "notmuch-show-mode")
-        (buffer-local buf 'notmuch-thread)
+        (buffer-local-value 'notmuch-thread buf)
         (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
 
 (define (nm--thread-sender thread-id)
@@ -2065,7 +2065,7 @@ them the address is live, so a purge never follows one."
   (lambda ()
     (let* ((buf (current-buffer))
            (thread-id (if (buffer-derived-mode? buf "notmuch-show-mode")
-                          (buffer-local buf 'notmuch-thread)
+                          (buffer-local-value 'notmuch-thread buf)
                           (let ((th (nm--thread-at buf))) (and th (nm--th-id th))))))
       (if (not thread-id)
           (message "No thread here")
@@ -2095,7 +2095,7 @@ them the address is live, so a purge never follows one."
     (let ((buf (current-buffer)))
       (cond
         ((buffer-derived-mode? buf "notmuch-show-mode")
-         (let ((th (buffer-local buf 'notmuch-thread)))
+         (let ((th (buffer-local-value 'notmuch-thread buf)))
            (if (not th)
                (message "No thread here")
                (begin
@@ -2115,7 +2115,7 @@ them the address is live, so a purge never follows one."
 ;; IDS then excludes individual threads. Otherwise IDS names selected threads.
 ;; The query is evaluated when the mail action runs, including unseen results.
 (define (nm--selection buf)
-  (let ((s (buffer-local buf 'notmuch-selection)))
+  (let ((s (buffer-local-value 'notmuch-selection buf)))
     (if (and s (equal? (car s) (nm--db-key))
                (equal? (cadr s) (nm--query-of buf)))
         s
@@ -2325,14 +2325,14 @@ them the address is live, so a purge never follows one."
     (let* ((buf (current-buffer))
            (th (if (equal? buf *notmuch-search-buffer*)
                    (let ((row (nm--thread-at buf))) (and row (nm--th-id row)))
-                   (buffer-local buf 'notmuch-thread)))
+                   (buffer-local-value 'notmuch-thread buf)))
            (page (if (nm--show-buffer? buf) buf (nm--thread-buffer th)))
            (cached? (and page
-                         (buffer-local page 'nm-attachment-source)
+                         (buffer-local-value 'nm-attachment-source page)
                          (or (equal? buf page)
-                             (equal? (nm--db-key) (buffer-local page 'nm-attachment-source)))))
+                             (equal? (nm--db-key) (buffer-local-value 'nm-attachment-source page)))))
            (attachments (if cached?
-                            (or (buffer-local page 'notmuch-attachments) '())
+                            (or (buffer-local-value 'notmuch-attachments page) '())
                             (if th (nm--attachment-options (nm--show-msgs th)) '())))
            (choices (let loop ((rest attachments) (i 1) (acc '()))
                       (if (null? rest) (reverse acc)
@@ -2501,7 +2501,7 @@ them the address is live, so a purge never follows one."
   (desktop-skip! buf 'render-blocks)
   (buffer-set-local! buf 'render-blocks
     (list (list 'tag "mail-thread" 'class "semantic-document"
-                'attrs (list (list "record-id" (buffer-local buf 'notmuch-thread)))
+                'attrs (list (list "record-id" (buffer-local-value 'notmuch-thread buf)))
                 'children (cons (component 'ui/section (list 'title subject 'level 1))
                                 (let loop ((ms msgs) (offsets offsets) (out '()))
                                   (if (null? ms) (reverse out)
@@ -2533,12 +2533,12 @@ them the address is live, so a purge never follows one."
       (buffer-set-read-only! buf #t)
       (when (buffer-known? *notmuch-search-buffer*)
         (buffer-child! *notmuch-search-buffer* buf))
-      (let ((th (buffer-local buf 'notmuch-thread)))
+      (let ((th (buffer-local-value 'notmuch-thread buf)))
         (when th
-          (let* ((subject (or (buffer-local buf 'notmuch-subject) ""))
+          (let* ((subject (or (buffer-local-value 'notmuch-subject buf) ""))
                  (msgs (nm--show-msgs th))
                  (html? (and notmuch-prefer-html
-                             (not (equal? (buffer-local buf 'notmuch-view) "text"))
+                             (not (equal? (buffer-local-value 'notmuch-view buf) "text"))
                              (nm--any-html? msgs))))
             (desktop-skip! buf 'notmuch-attachments)
             (desktop-skip! buf 'nm-attachment-source)
@@ -2586,15 +2586,15 @@ them the address is live, so a purge never follows one."
 ;; lives in the modeline; 'special says so (the mode re-renders from
 ;; 'notmuch-thread on restore).
 (define (nm--show-buffer? b)
-  (equal? (buffer-local b 'mode-name) "notmuch-show-mode"))
+  (equal? (buffer-local-value 'mode-name b) "notmuch-show-mode"))
 
 (define (nm--show-buffers) (filter nm--show-buffer? (buffer-list-mru)))
 
 ;; the page of a thread in the selected database, or #f
 (define (nm--thread-buffer thread-id)
   (and thread-id
-       (find (lambda (b) (and (equal? (buffer-local b 'notmuch-thread) thread-id)
-                              (equal? (buffer-local b 'nm-db) (nm--db-key))))
+       (find (lambda (b) (and (equal? (buffer-local-value 'notmuch-thread b) thread-id)
+                              (equal? (buffer-local-value 'nm-db b) (nm--db-key))))
              (nm--show-buffers))))
 
 ;; the page on screen, else the one read last
@@ -2619,7 +2619,7 @@ them the address is live, so a purge never follows one."
   ;; from this list, and going back to one draws it at once.
   (let* ((old (nm--thread-buffer thread-id))
          (buf (or old (let ((name (nm--thread-buffer-name subject))) (buffer-create name) name)))
-         (read-at (buffer-local buf 'nm-read-at))
+         (read-at (buffer-local-value 'nm-read-at buf))
          (fresh? (and old (number? read-at) (< (- (monotonic-ms) read-at) nm--page-fresh-ms))))
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
@@ -2660,7 +2660,7 @@ them the address is live, so a purge never follows one."
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'notmuch-view
-        (if (equal? (buffer-local buf 'notmuch-view) "text") "html" "text"))
+        (if (equal? (buffer-local-value 'notmuch-view buf) "text") "html" "text"))
       (set-mode! "notmuch-show-mode")))
   'modes '(notmuch-show-mode))
 
@@ -2668,13 +2668,13 @@ them the address is live, so a purge never follows one."
   (lambda ()
     (set! *nm-dismissed* (or (and (buffer-exists? *notmuch-search-buffer*)
                                   (nm--id-at *notmuch-search-buffer*))
-                             (buffer-local (current-buffer) 'notmuch-thread)))
+                             (buffer-local-value 'notmuch-thread (current-buffer))))
     (run-command "quit-window"))
   'modes '(notmuch-show-mode))
 
 (define-command "notmuch-show-archive" "Archive this thread and go back"
   (lambda ()
-    (let ((th (buffer-local (current-buffer) 'notmuch-thread)))
+    (let ((th (buffer-local-value 'notmuch-thread (current-buffer))))
       (when th
         (nm--run (string-append "tag -inbox -- thread:" th))
         (run-command "quit-window")
@@ -2686,7 +2686,7 @@ them the address is live, so a purge never follows one."
 ;; the message the point is in: last offset <= point (above the first
 ;; message — on the subject line — it means the first message)
 (define (nm--msg-at buf)
-  (let ((ms (or (buffer-local buf 'notmuch-msgs) '())))
+  (let ((ms (or (buffer-local-value 'notmuch-msgs buf) '())))
     (let loop ((rest ms) (found (if (null? ms) #f (car ms))))
       (cond ((null? rest) found)
             ((<= (car (car rest)) (buffer-point buf)) (loop (cdr rest) (car rest)))
@@ -2954,8 +2954,8 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
 
 (register-target-provider! "notmuch-show-mode"
   (lambda (buf)
-    (let ((th (buffer-local buf 'notmuch-thread)))
-      (and th (list 'email th (or (buffer-local buf 'notmuch-subject) ""))))))
+    (let ((th (buffer-local-value 'notmuch-thread buf)))
+      (and th (list 'email th (or (buffer-local-value 'notmuch-subject buf) ""))))))
 
 (register-actions! 'email
   (list (list "archive"  (nm--email-tag-act "-inbox"))
@@ -2986,11 +2986,11 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
 
 (register-context-provider! "notmuch-show-mode"
   (lambda (buf)
-    (let ((th (buffer-local buf 'notmuch-thread))
+    (let ((th (buffer-local-value 'notmuch-thread buf))
           (msg (nm--msg-at buf)))
       (and th
            (string-append "the open email thread \""
-                          (or (buffer-local buf 'notmuch-subject) "") "\""
+                          (or (buffer-local-value 'notmuch-subject buf) "") "\""
                           " (notmuch thread:" th ")"
                           (if msg (string-append ", message id:" (cadr msg)) ""))))))
 

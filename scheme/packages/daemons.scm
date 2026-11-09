@@ -53,7 +53,7 @@
         entry)))
 
 (define (daemon--buffer-workspace buf)
-  (or (buffer-local buf 'workspace-root)
+  (or (buffer-local-value 'workspace-root buf)
       (buffer-group buf)
       (let ((root (buffer-project-root buf)))
         (if (equal? root "") #f root))))

@@ -92,7 +92,7 @@
       (buffer-kill! buf))))
 
 (define (t--wr-locals buf)
-  (map (lambda (k) (list k (buffer-local buf k)))
+  (map (lambda (k) (list k (buffer-local-value k buf)))
        '(window-class modeline-info line-numbers render-mode preview-renderer
          visual-line-mode writing-saved)))
 
@@ -121,9 +121,9 @@
       (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
       (buffer-set-local! buf 'render-mode "agent")
       (with-current-buffer buf (lambda () (run-command "writing-mode")))
-      (check-false! (member "writing-mode" (or (buffer-local buf 'minor-modes) '()))
+      (check-false! (member "writing-mode" (or (buffer-local-value 'minor-modes buf) '()))
                     "the mode is refused")
-      (check-equal! (buffer-local buf 'render-mode) "agent" "and the view is untouched")
+      (check-equal! (buffer-local-value 'render-mode buf) "agent" "and the view is untouched")
       (buffer-kill! buf))))
 
 (deftest 'restore-heals-a-chat-that-carries-a-stale-writing-mode-entry
@@ -138,10 +138,10 @@
           (render-mode "agent") (preview-renderer #f) (visual-line-mode #f)))
 
       (restore-minor-modes! buf)
-      (check-false! (member "writing-mode" (or (buffer-local buf 'minor-modes) '()))
+      (check-false! (member "writing-mode" (or (buffer-local-value 'minor-modes buf) '()))
                     "the stale entry is gone")
-      (check-equal! (buffer-local buf 'render-mode) "agent" "the saved view came back")
-      (check-false! (buffer-local buf 'writing-saved) "and nothing is left to restore")
+      (check-equal! (buffer-local-value 'render-mode buf) "agent" "the saved view came back")
+      (check-false! (buffer-local-value 'writing-saved buf) "and nothing is left to restore")
       (buffer-kill! buf))))
 
 (deftest 'write-from-a-chat-without-a-group-document-stops-with-a-message
@@ -155,9 +155,9 @@
         (let ((said (messages-text)))
           (check-contains! (substring said mark (string-length said)) "no document"
                            "it says why")))
-      (check-false! (member "writing-mode" (or (buffer-local buf 'minor-modes) '()))
+      (check-false! (member "writing-mode" (or (buffer-local-value 'minor-modes buf) '()))
                     "and enters nothing")
-      (check-equal! (buffer-local buf 'render-mode) "agent" "leaving the view alone")
+      (check-equal! (buffer-local-value 'render-mode buf) "agent" "leaving the view alone")
       (buffer-kill! buf))))
 
 ;;; --- from here down, the tests enter the workspace -------------------------------
@@ -195,7 +195,7 @@
   (lambda ()
     (let ((buf (test-buffer! "zz-writing.org" "* head\nbody\n")))
       (with-current-buffer buf (lambda () (set-mode! "org-mode")))
-      (let ((org-style (buffer-local buf 'style)))
+      (let ((org-style (buffer-local-value 'style buf)))
         (check-contains! org-style "--default-family:Spectral" "org's own family")
         (check-false! (string-contains? org-style "--default-size")
                       "org names no size: it reads at the default face's")
@@ -203,11 +203,11 @@
         ;; writing-mode toggles the look; write only ever enters the workspace
         (with-current-buffer buf (lambda () (run-command "writing-mode")))
         ;; writing draws the page, and the page's type is the preview's
-        (check-contains! (buffer-local buf 'style) "--default-family:Spectral" "the page's type")
+        (check-contains! (buffer-local-value 'style buf) "--default-family:Spectral" "the page's type")
 
         (with-current-buffer buf (lambda () (run-command "writing-mode")))
-        (check-equal! (buffer-local buf 'style) org-style "org's look is back")
-        (check-equal! (buffer-local buf 'minor-modes) '() "and no minor mode is left")
+        (check-equal! (buffer-local-value 'style buf) org-style "org's look is back")
+        (check-equal! (buffer-local-value 'minor-modes buf) '() "and no minor mode is left")
         (check-equal! (t--wr-locals buf)
                       '((window-class #f) (modeline-info #f) (line-numbers #f)
                         (render-mode #f) (preview-renderer #f)
@@ -222,18 +222,18 @@
            (buf (begin (customize-set! 'writing-model "openai:test-writer")
                        (t--wr-write! "zz-writing-config.md" "Draft.\n")))
            (scratch (string-append "*scratch:" buf "*")))
-      (check-equal! (buffer-local buf 'writing-model) "openai:test-writer"
+      (check-equal! (buffer-local-value 'writing-model buf) "openai:test-writer"
                     "the document carries the setting")
-      (check-contains! (buffer-local buf 'writing-instructions) "Preserve their voice"
+      (check-contains! (buffer-local-value 'writing-instructions buf) "Preserve their voice"
                        "and the instructions")
-      (check-false! (member "llm-mode" (or (buffer-local buf 'minor-modes) '()))
+      (check-false! (member "llm-mode" (or (buffer-local-value 'minor-modes buf) '()))
                     "but llm-mode is not on the document")
 
-      (check-equal! (buffer-local scratch 'llm-model) "openai:test-writer"
+      (check-equal! (buffer-local-value 'llm-model scratch) "openai:test-writer"
                     "the scratch holds the model")
-      (check-contains! (buffer-local scratch 'writing-instructions) "Preserve their voice"
+      (check-contains! (buffer-local-value 'writing-instructions scratch) "Preserve their voice"
                        "and the instructions")
-      (check-true! (member "llm-mode" (buffer-local scratch 'minor-modes))
+      (check-true! (member "llm-mode" (buffer-local-value 'minor-modes scratch))
                    "and llm-mode is on it")
 
       (customize-set! 'writing-model saved)
@@ -251,17 +251,17 @@
       (run-command "write")
 
       (let ((scratch (string-append "*scratch:" buf "*")))
-        (check-equal! (buffer-local scratch 'chat-presets) '(compos web project)
+        (check-equal! (buffer-local-value 'chat-presets scratch) '(compos web project)
                       "the writing presets ride over the document's own")
 
         ;; a live customization is rebuilt from the ORIGINAL document value,
         ;; so a preset removed from the setting does not linger
         (customize-set! 'writing-presets '(research))
-        (check-equal! (buffer-local scratch 'chat-presets) '(compos research project)
+        (check-equal! (buffer-local-value 'chat-presets scratch) '(compos research project)
                       "the removed preset is gone")
 
         (run-command "write")
-        (check-equal! (buffer-local buf 'chat-presets) '(project compos)
+        (check-equal! (buffer-local-value 'chat-presets buf) '(project compos)
                       "and the document keeps its own")
         (set! writing-presets saved)
         (t--wr-done! buf scratch)))))
@@ -270,9 +270,9 @@
   "the setting is not read once at entry"
   (lambda ()
     (let ((buf (t--wr-write! "zz-writing-measure" "words here\n")))
-      (check-contains! (buffer-local buf 'style) "--writing-measure:120ch;" "the default measure")
+      (check-contains! (buffer-local-value 'style buf) "--writing-measure:120ch;" "the default measure")
       (customize-set! 'writing-measure "44ch")
-      (check-contains! (buffer-local buf 'style) "--writing-measure:44ch;" "the new one, live")
+      (check-contains! (buffer-local-value 'style buf) "--writing-measure:44ch;" "the new one, live")
       (customize-set! 'writing-measure "120ch")
       (t--wr-done! buf))))
 
@@ -280,7 +280,7 @@
   "the counter and its label are Scheme; the delivery is the one exception"
   (lambda ()
     (let ((buf (t--wr-write! "zz-writing-live.md" "")))
-      (check-equal! (buffer-local buf 'modeline-info) "0 words" "an empty document")
+      (check-equal! (buffer-local-value 'modeline-info buf) "0 words" "an empty document")
 
       ;; the hook that will call it is registered
       (check-equal! (length (filter (lambda (h) (equal? (car h) buf)) *writing-hooks*)) 1
@@ -294,7 +294,7 @@
       ;; wait for it. writing_test.exs holds that one delivery test.
       (buffer-insert! buf 0 "hello brave new world")
       (writing--update-count! buf)
-      (check-equal! (buffer-local buf 'modeline-info) "4 words · 1 min"
+      (check-equal! (buffer-local-value 'modeline-info buf) "4 words · 1 min"
                     "the count and the read time")
       (t--wr-done! buf))))
 
@@ -305,12 +305,12 @@
       (delete-other-windows!)
       (switch-to-buffer! buf)
       (run-command "visual-line-mode")
-      (check-true! (buffer-local buf 'visual-line-mode) "the local is on")
-      (check-true! (member "visual-line-mode" (buffer-local buf 'minor-modes)) "and the mode")
+      (check-true! (buffer-local-value 'visual-line-mode buf) "the local is on")
+      (check-true! (member "visual-line-mode" (buffer-local-value 'minor-modes buf)) "and the mode")
 
       (run-command "visual-line-mode")
-      (check-false! (buffer-local buf 'visual-line-mode) "off again")
-      (check-false! (member "visual-line-mode" (or (buffer-local buf 'minor-modes) '()))
+      (check-false! (buffer-local-value 'visual-line-mode buf) "off again")
+      (check-false! (member "visual-line-mode" (or (buffer-local-value 'minor-modes buf) '()))
                     "and the mode is gone")
       (t--wr-done! buf))))
 
@@ -362,11 +362,11 @@
       (check-true! (member buf names) "the document is one")
       (check-true! (member scratch names) "and its scratch another")
 
-      (check-equal! (buffer-local buf 'scratch-buffer) scratch "the document names its scratch")
-      (check-false! (buffer-local scratch 'scratch-owner) "the document does not own it")
+      (check-equal! (buffer-local-value 'scratch-buffer buf) scratch "the document names its scratch")
+      (check-false! (buffer-local-value 'scratch-owner scratch) "the document does not own it")
       (check-equal! (buffer-group-role scratch (buffer-group buf)) "scratch"
                     "the group membership owns the scratch")
-      (check-equal! (buffer-local scratch 'scratch-from) buf
+      (check-equal! (buffer-local-value 'scratch-from scratch) buf
                     "navigation still returns to the document")
       ;; the ExUnit original read the LEGACY 'group local, which a group id
       ;; replaced; it has been asserting #f == buf ever since. What the
@@ -408,7 +408,7 @@
       (switch-to-buffer! buf)
       (run-command "chat-companion")
       (check-equal! (current-buffer) companion "the companion has the focus")
-      (check-equal! (buffer-local companion 'mode-name) "chat-mode" "it is a chat")
+      (check-equal! (buffer-local-value 'mode-name companion) "chat-mode" "it is a chat")
       (check-equal! (buffer-group companion) (buffer-group buf) "in the document's group")
       (check-contains! (buffer-text companion) (string-append "companion · " buf)
                        "and it says whose it is")

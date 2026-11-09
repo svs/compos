@@ -190,7 +190,7 @@
     ;; set a setting on one buffer, not globally and not in custom.scm
     (list 'local "set a setting and read it back" "some text\n"
           (lambda (b) (string-append "In the buffer " b ", set the buffer-local variable fill-column to 72, then read it back to confirm. Do not change it anywhere else and do not save a setting."))
-          (lambda (text reply b) (equal? (buffer-local b 'fill-column) 72)))
+          (lambda (text reply b) (equal? (buffer-local-value 'fill-column b) 72)))
     ;; move a buffer to another group and confirm the membership
     (list 'move "move this to another group" "notes for the move\n"
           (lambda (b) (string-append "Move the buffer " b " into the group named " (drive-eval--group b)

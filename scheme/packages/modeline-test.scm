@@ -216,11 +216,11 @@
       (window-configuration-changed!)
       (buffer-set-local! buf 'llm-model "m-before")
       (dashboard--sync! buf)
-      (check-contains! (or (buffer-local buf 'dashboard-line) "") "m-before"
+      (check-contains! (or (buffer-local-value 'dashboard-line buf) "") "m-before"
                        "the headline shows the model before the change")
       (buffer-set-local! buf 'llm-model "m-after")
       (llm-config-changed! buf)
-      (check-contains! (or (buffer-local buf 'dashboard-line) "") "m-after"
+      (check-contains! (or (buffer-local-value 'dashboard-line buf) "") "m-after"
                        "the hook re-reads the model after the change")
       (switch-to-buffer! was)
       (buffer-kill! buf))))
@@ -238,13 +238,13 @@
       (chat-summary-land! buf "Rewriting the dashboard segment.")
       (check-equal! (buffer-dirty? buf 'dashboard) #t
                     "background summaries leave one pending dashboard update")
-      (check-equal! (buffer-local buf 'dashboard-line-blocks) #f
+      (check-equal! (buffer-local-value 'dashboard-line-blocks buf) #f
                     "background summaries build no dashboard blocks")
-      (check-equal! (buffer-local buf 'chat-title) "Adding titles to chats."
+      (check-equal! (buffer-local-value 'chat-title buf) "Adding titles to chats."
                     "the title is the label the chat wrote first")
       (check-equal! (chat-title-of buf) "Adding titles to chats."
                     "and a second paragraph does not move it")
-      (check-equal! (buffer-local buf 'chat-summary) "Rewriting the dashboard segment."
+      (check-equal! (buffer-local-value 'chat-summary buf) "Rewriting the dashboard segment."
                     "the running summary is still the latest")
       (let* ((blocks (dashboard-line-blocks buf))
              (wide (t--dash-wide blocks))
@@ -266,10 +266,10 @@
       (buffer-set-local! buf 'agent-saved-mark 0)
       (buffer-set-local! buf 'agent-blocks '())
       (chat-summary-land! buf "Finding where the chat title is set in code")
-      (check-equal! (buffer-local buf 'chat-title)
+      (check-equal! (buffer-local-value 'chat-title buf)
                     "Finding where the chat title is"
                     "the first label keeps only its first six words")
-      (check-equal! (buffer-local buf 'chat-summary)
+      (check-equal! (buffer-local-value 'chat-summary buf)
                     "Finding where the chat title is set in code"
                     "the running summary keeps the whole sentence")
       (check-equal! (chat-title--short "one two three four five six seven")
@@ -304,7 +304,7 @@
 
       (check-equal! seen-model chat-summary-model
                     "the fallback call names the cheap hosted model")
-      (check-equal! (buffer-local buf 'chat-summary)
+      (check-equal! (buffer-local-value 'chat-summary buf)
                     "Falling back when the card writer answers nothing."
                     "the fallback text still lands as the summary")
       (buffer-kill! buf))))
@@ -332,9 +332,9 @@
       (chat-summary-land! buf "first paragraph")
       (chat-turn-push! buf "assistant" "the answer")
       (chat-summary-land! buf "second paragraph")
-      (check-equal! (buffer-local buf 'chat-summary) "second paragraph"
+      (check-equal! (buffer-local-value 'chat-summary buf) "second paragraph"
                     "the bar's local is the latest")
-      (check-equal! (map cadr (buffer-local buf 'chat-summary-log))
+      (check-equal! (map cadr (buffer-local-value 'chat-summary-log buf))
                     '("second paragraph" "first paragraph")
                     "the log keeps every paragraph, newest first")
       (check-equal! (map (lambda (turn) (plist-get turn 'role)) (chat-record buf))
@@ -356,7 +356,7 @@
         "the archive transcript preserves status ordering")
       (check-false! (string-contains? (chat-model-flatten buf) "first paragraph")
                     "ACP seed text excludes status turns too")
-      (check-equal! (map caddr (buffer-local buf 'agent-blocks))
+      (check-equal! (map caddr (buffer-local-value 'agent-blocks buf))
                     '("status" "status")
                     "each summary is a distinct rendered status block")
       (check-false! (string-contains? (chat-summary--tail buf) "first paragraph")
@@ -392,10 +392,10 @@
       (test-buffer! buf "")
       (buffer-set-local! buf 'default-directory born)
       (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
-      (check-equal! (buffer-local buf 'chat-directory)
+      (check-equal! (buffer-local-value 'chat-directory buf)
                     (string-append (git-root born) "/")
                     "the setup stamps the git root of the born directory")
-      (check-equal! (buffer-directory buf) (buffer-local buf 'chat-directory)
+      (check-equal! (buffer-directory buf) (buffer-local-value 'chat-directory buf)
                     "the chat works in that directory")
       ;; the born directory moves; the companion does not
       (buffer-set-local! buf 'default-directory (string-append (compos-home) "/"))
@@ -414,7 +414,7 @@
       (test-buffer! buf "")
       (buffer-set-local! buf 'default-directory born)
       (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
-      (check-equal! (buffer-local buf 'chat-directory) born
+      (check-equal! (buffer-local-value 'chat-directory buf) born
                     "the born directory is the stamp")
       (buffer-kill! buf))))
 
@@ -428,21 +428,21 @@
       (test-buffer! other "")
       (switch-to-buffer! other)
       (dashboard--sync! other)
-      (let ((before (buffer-local other 'dashboard-line))
-            (before-here (buffer-local here 'dashboard-line)))
+      (let ((before (buffer-local-value 'dashboard-line other))
+            (before-here (buffer-local-value 'dashboard-line here)))
         (buffer-set-local! other 'minor-modes '("zz-silent-mode"))
         (with-current-buffer here (lambda () (post-command!)))
-        (check-equal! (buffer-local other 'dashboard-line) before
+        (check-equal! (buffer-local-value 'dashboard-line other) before
                       "the other buffer's line did not rebuild")
-        (check-equal! (buffer-local here 'dashboard-line) before-here
+        (check-equal! (buffer-local-value 'dashboard-line here) before-here
                       "a command built no line, not even in the buffer it ran in")
         (switch-to-buffer! here)
         (dashboard--sync! here)
-        (check-true! (string? (buffer-local here 'dashboard-line))
+        (check-true! (string? (buffer-local-value 'dashboard-line here))
                      "a sync builds it")
         (switch-to-buffer! other)
         (dashboard--sync! other)
-        (check-true! (string-contains? (buffer-local other 'dashboard-line) "zz-silent")
+        (check-true! (string-contains? (buffer-local-value 'dashboard-line other) "zz-silent")
                      "a sync asked for by name rebuilds it"))
       (buffer-kill! here)
       (buffer-kill! other))))
@@ -679,24 +679,24 @@
       (window-configuration-changed!)
       (dashboard--sync! buf)
       (switch-to-buffer! other)
-      (let ((before (buffer-local buf 'dashboard-line-blocks)))
+      (let ((before (buffer-local-value 'dashboard-line-blocks buf)))
         (buffer-set-local! buf 'minor-modes '("zz-first-mode"))
         (dashboard--sync! buf)
         (buffer-set-local! buf 'minor-modes '("zz-latest-mode"))
         (dashboard--sync! buf)
-        (check-equal! (buffer-local buf 'dashboard-line-blocks) before
+        (check-equal! (buffer-local-value 'dashboard-line-blocks buf) before
                       "hidden sync does not materialize blocks")
-        (check-equal! (buffer-local buf 'dirty?) '(dashboard) "updates remain pending, one time")
-        (check-true! (member 'dirty? (buffer-local buf 'desktop-skip-locals))
+        (check-equal! (buffer-local-value 'dirty? buf) '(dashboard) "updates remain pending, one time")
+        (check-true! (member 'dirty? (buffer-local-value 'desktop-skip-locals buf))
                      "the pending flag is transient")
         (switch-to-buffer! buf)
       (window-configuration-changed!)
         (check-equal! (buffer-dirty? buf 'dashboard) #f "showing consumes pending work")
-        (check-contains! (buffer-local buf 'dashboard-line) "zz-latest"
+        (check-contains! (buffer-local-value 'dashboard-line buf) "zz-latest"
                          "showing renders the latest state")
         (buffer-set-local! buf 'minor-modes '("zz-visible-mode"))
         (dashboard--sync! buf)
-        (check-contains! (buffer-local buf 'dashboard-line) "zz-visible"
+        (check-contains! (buffer-local-value 'dashboard-line buf) "zz-visible"
                          "visible events update immediately"))
       (buffer-kill! buf)
       (buffer-kill! other))))
@@ -707,11 +707,11 @@
     (let ((buf "*zz-dashboard-unseen*"))
       (test-buffer! buf "")
       (dashboard--sync! buf)
-      (check-equal! (buffer-local buf 'dashboard-line-blocks) #f
+      (check-equal! (buffer-local-value 'dashboard-line-blocks buf) #f
                     "hidden restore builds no blocks")
       (switch-to-buffer! buf)
       (window-configuration-changed!)
-      (check-true! (pair? (buffer-local buf 'dashboard-line-blocks))
+      (check-true! (pair? (buffer-local-value 'dashboard-line-blocks buf))
                    "the first display supplies presentation")
       (buffer-kill! buf))))
 

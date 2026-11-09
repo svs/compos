@@ -40,7 +40,7 @@
 
 (define (telemetry--rows buf)
   (let ((rows (telemetry-events)))
-    (if (buffer-local buf 'telemetry-all)
+    (if (buffer-local-value 'telemetry-all buf)
         rows
         (filter (lambda (r) (not (telemetry--noise? r))) rows))))
 
@@ -221,7 +221,7 @@
   (buffer-set-read-only! buf #t)
   (buffer-set-local! buf 'render-mode "blocks")
   (buffer-set-local! buf 'render-blocks
-    (telemetry--detail-blocks (buffer-local buf 'telemetry-detail-row)))
+    (telemetry--detail-blocks (buffer-local-value 'telemetry-detail-row buf)))
   )
 
 (mode-icon! "telemetry-detail-mode" "")
@@ -256,7 +256,7 @@
          (keys (telemetry--newest-keys rows *telemetry-spark-keys*))
          (last (if (null? keys) #f (car (reverse keys)))))
     (string-append
-      (number->string count) (if (buffer-local buf 'telemetry-all) " events · " " events, quiet · ")
+      (number->string count) (if (buffer-local-value 'telemetry-all buf) " events · " " events, quiet · ")
       (number->string slow) " slow · "
       "p50 " (number->string (telemetry--percentile sorted 50)) "ms · "
       "p95 " (number->string (telemetry--percentile sorted 95)) "ms"
@@ -301,7 +301,7 @@
 (define-command "telemetry-all" "Show the editor's own refresh and render rows too; again hides them"
   (lambda ()
     (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'telemetry-all (not (buffer-local buf 'telemetry-all)))
+      (buffer-set-local! buf 'telemetry-all (not (buffer-local-value 'telemetry-all buf)))
       (list-refresh! buf)))
   'modes '(telemetry-mode))
 
@@ -366,7 +366,7 @@
   (let ((buf *telemetry-buffer*))
     (when (and (buffer-exists? buf) (window-showing buf))
       (let ((newest (telemetry--newest-cause (telemetry-events 50)))
-            (seen (or (buffer-local buf 'telemetry-seen) 0)))
+            (seen (or (buffer-local-value 'telemetry-seen buf) 0)))
         (when (> newest (+ seen telemetry-draw-ms))
           (telemetry-refresh!))))))
 
@@ -449,7 +449,7 @@
 (define *chat-perf-flame-width* 44)
 
 (define (chat-perf--slug buf)
-  (or (buffer-local buf 'agent-slug) ""))
+  (or (buffer-local-value 'agent-slug buf) ""))
 
 (define (chat-perf--ms row)
   (let ((n (plist-get row 'duration-ms)))
@@ -531,9 +531,9 @@
 ;; The collector is a ring that rolls over in about two minutes, so a
 ;; redraw after the turn finds nothing. Keep the last steps we saw.
 (define (chat-perf--keep! buf)
-  (let ((rows (chat-perf--rows (or (buffer-local buf 'chat-perf-slug) ""))))
+  (let ((rows (chat-perf--rows (or (buffer-local-value 'chat-perf-slug buf) ""))))
     (if (null? rows)
-        (or (buffer-local buf 'chat-perf-kept) '())
+        (or (buffer-local-value 'chat-perf-kept buf) '())
         (begin (buffer-set-local! buf 'chat-perf-kept rows) rows))))
 
 ;; A tool runs inside the round that called it, so it reads one level in.
@@ -591,13 +591,13 @@
 ;; the chat this list was opened from, by name; the slug is the fallback
 ;; for a list restored from a desktop that lost the buffer
 (define (chat-perf--name buf)
-  (let ((chat (buffer-local buf 'chat-perf-chat)))
+  (let ((chat (buffer-local-value 'chat-perf-chat buf)))
     (if (and chat (buffer-exists? chat))
         chat
-        (or (buffer-local buf 'chat-perf-slug) "no chat"))))
+        (or (buffer-local-value 'chat-perf-slug buf) "no chat"))))
 
 (define (chat-perf--meta buf)
-  (let* ((slug (or (buffer-local buf 'chat-perf-slug) ""))
+  (let* ((slug (or (buffer-local-value 'chat-perf-slug buf) ""))
          (drawn (list-entries buf))
          (rows (if (null? drawn) (chat-perf--keep! buf) drawn))
          (win (chat-perf--window rows))
@@ -655,7 +655,7 @@
     (let* ((chat (current-buffer))
            (slug (chat-perf--slug chat)))
       (if (equal? slug "")
-          (if (buffer-local chat 'agent-saved-mark)
+          (if (buffer-local-value 'agent-saved-mark chat)
               ;; a chat whose runtime died (a restart, a module swap) keeps
               ;; its conversation but stamps nothing until it runs again
               (message "this chat has no live runtime — send once, then M-x chat-perf")
@@ -664,7 +664,7 @@
             (buffer-create *chat-perf-buffer*)
             ;; the kept steps belong to the chat they came from. Opening
             ;; this list on another chat must not show the last one's turn.
-            (unless (equal? (buffer-local *chat-perf-buffer* 'chat-perf-slug) slug)
+            (unless (equal? (buffer-local-value 'chat-perf-slug *chat-perf-buffer*) slug)
               (buffer-set-local! *chat-perf-buffer* 'chat-perf-kept '()))
             (buffer-set-local! *chat-perf-buffer* 'chat-perf-slug slug)
             ;; the reader knows the chat by its name, not by its slug

@@ -78,7 +78,7 @@
 ;; rendering: a page that loads again with the same stamp (a relayout
 ;; remounts the frame) resumes where it was.
 (define (slides--render! app source live?)
-  (let ((stamp (+ 1 (or (buffer-local app 'app-generation) 0))))
+  (let ((stamp (+ 1 (or (buffer-local-value 'app-generation app) 0))))
     (buffer-set-local! app 'app-directory (slides--directories source))
     (buffer-set-read-only! app #f)
     (buffer-replace-range! app 0 (buffer-size app) (slides--page source live? stamp))
@@ -90,7 +90,7 @@
 ;;; --- the live link ----------------------------------------------------------
 
 (define (slides--unwatch! source)
-  (let ((id (and (buffer-exists? source) (buffer-local source 'slides-watch))))
+  (let ((id (and (buffer-exists? source) (buffer-local-value 'slides-watch source))))
     (when id
       (remove-on-change! id)
       (buffer-set-local! source 'slides-watch #f))))
@@ -106,10 +106,10 @@
     (app-post! app (list 'source text
                          'line line
                          'live #t
-                         'stamp (or (buffer-local app 'app-generation) 0)))))
+                         'stamp (or (buffer-local-value 'app-generation app) 0)))))
 
 (define (slides--post! app source)
-  (let ((stamp (or (buffer-local app 'app-generation) 0)))
+  (let ((stamp (or (buffer-local-value 'app-generation app) 0)))
     (buffer-set-read-only! app #f)
     (buffer-replace-range! app 0 (buffer-size app) (slides--page source #f stamp))
     (buffer-set-read-only! app #t)
@@ -117,14 +117,14 @@
     (slides--send! app source)))
 
 (define (slides--refresh! source)
-  (let ((app (and (buffer-exists? source) (buffer-local source 'slides-app))))
+  (let ((app (and (buffer-exists? source) (buffer-local-value 'slides-app source))))
     (if (and app (buffer-exists? app))
         (slides--post! app source)
         (slides--unwatch! source))))
 
 ;; an edit marks the deck; the save redraws it at the edited slide
 (define (slides--watch! source)
-  (unless (buffer-local source 'slides-watch)
+  (unless (buffer-local-value 'slides-watch source)
     (desktop-skip! source 'slides-watch)
     (buffer-set-local! source 'slides-watch
       (on-change! source
@@ -135,7 +135,7 @@
 ;; deck is saved, not on every change.
 (define (slides--after-save!)
   (let ((source (current-buffer)))
-    (when (buffer-local source 'slides-watch)
+    (when (buffer-local-value 'slides-watch source)
       (slides--refresh! source))))
 
 (add-hook! 'after-save-hook 'slides--after-save!)
@@ -144,12 +144,12 @@
 ;; holds point, with the steps up to point's line shown (slides--at).
 (define (slides--follow-point! &optional buf)
   (let* ((source (or buf (current-buffer)))
-         (app (buffer-local source 'slides-app))
+         (app (buffer-local-value 'slides-app source))
          (line (and app (slides--line source))))
     (when (and app
-               (buffer-local source 'slides-watch)
+               (buffer-local-value 'slides-watch source)
                (buffer-exists? app)
-               (not (equal? line (buffer-local source 'slides-sent-line))))
+               (not (equal? line (buffer-local-value 'slides-sent-line source))))
       (buffer-set-local! source 'slides-sent-line line)
       (let ((at (slides--at source)))
         (app-post! app (list 'goto (list 'slide (car at) 'step (cadr at))))))))
@@ -162,7 +162,7 @@
 ;; presenter (slides--follow-point!), a save redraws it, and the keys step
 ;; it from the deck, with its transitions, while point stays put.
 (define (slides--step! dir)
-  (let ((app (buffer-local (current-buffer) 'slides-app)))
+  (let ((app (buffer-local-value 'slides-app (current-buffer))))
     (if (and app (buffer-exists? app))
         (app-post! app (list 'step dir))
         (message "This deck is not presented: C-c C-s presents it"))))
@@ -176,7 +176,7 @@
   'modes '(slides-deck-mode))
 
 (register-minor-mode! "slides-deck-mode"
-  (lambda (buf) (when (buffer-local buf 'slides-app) (slides--watch! buf)))
+  (lambda (buf) (when (buffer-local-value 'slides-app buf) (slides--watch! buf)))
   (lambda (buf)
     (slides--unwatch! buf)
     (buffer-set-local! buf 'slides-app #f)))
@@ -351,7 +351,7 @@
                    (lambda ()
                      ;; the model of the group comes back as it was; to
                      ;; maximize, the slides' pane becomes the one pane
-                     (let ((saved (buffer-local app 'slides-layout)))
+                     (let ((saved (buffer-local-value 'slides-layout app)))
                        (if (and saved (equal? (map cadr (window-list)) (list app)))
                            (begin
                              (panes-apply! (panes-validate saved buffer-known?))
@@ -410,10 +410,10 @@
 
 (define (slides--app-request buf method body)
   (and (buffer-exists? buf)
-       (buffer-local buf 'slides-source)
+       (buffer-local-value 'slides-source buf)
        (cond
          ((equal? method "GET")
-          (let ((at (buffer-local buf 'slides-at)))
+          (let ((at (buffer-local-value 'slides-at buf)))
             (list 200 (if (pair? at) (json-encode at) "{}"))))
          ((equal? method "POST")
           (let* ((msg (json-parse body))
@@ -442,7 +442,7 @@
       (when (boundp 'buffer-join-here!) (buffer-join-here! app)))
     (buffer-set-local! app 'slides-source source)
     (buffer-set-local! source 'slides-app app)
-    (unless (equal? (buffer-local app 'mode-name) "slides-mode")
+    (unless (equal? (buffer-local-value 'mode-name app) "slides-mode")
       (with-current-buffer app (lambda () (set-mode! "slides-mode"))))
     (slides--render! app source #f)
     (slides--watch! source)
@@ -450,7 +450,7 @@
     app))
 
 (define (slides--source-of buf)
-  (or (buffer-local buf 'slides-source) buf))
+  (or (buffer-local-value 'slides-source buf) buf))
 
 ;;;###autoload
 (define-command "slides-present" "Present this Markdown buffer as slides in the other window"
@@ -473,7 +473,7 @@
   (lambda ()
     (let* ((app (current-buffer))
            (source (slides--deck app))
-           (at (buffer-local app 'slides-at))
+           (at (buffer-local-value 'slides-at app))
            (line (+ 1 (or (and (pair? at) (plist-get at 'line)) 0))))
       (if source
           (begin
@@ -513,7 +513,7 @@
 
 ;; the deck of a presenter, or #f
 (define (slides--deck app)
-  (let ((source (buffer-local app 'slides-source)))
+  (let ((source (buffer-local-value 'slides-source app)))
     (cond ((not source) #f)
           ((buffer-exists? source) source)
           ((file-exists? source) (visit source (buffer-group app)))

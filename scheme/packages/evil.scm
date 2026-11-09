@@ -34,14 +34,14 @@
 (define *evil-search-dir* 1)
 (define *evil-visual-anchor* #f)
 
-(define (evil-state) (or (buffer-local (current-buffer) 'evil-state) "normal"))
+(define (evil-state) (or (buffer-local-value 'evil-state (current-buffer)) "normal"))
 
 (define (evil-set-state! st)
   (buffer-set-local! (current-buffer) 'evil-state st)
   (evil--decorate! (current-buffer)))
 
 (define (evil--decorate! buf)
-  (let ((st (or (buffer-local buf 'evil-state) "normal")))
+  (let ((st (or (buffer-local-value 'evil-state buf) "normal")))
     (buffer-set-local! buf 'modeline-info
       (cond ((equal? st "insert") "INSERT")
             ((equal? st "visual") "VISUAL")
@@ -758,7 +758,7 @@
   *evil-keys*)
 
 (define (evil--setup! buf)
-  (unless (buffer-local buf 'evil-state)
+  (unless (buffer-local-value 'evil-state buf)
     (buffer-set-local! buf 'evil-state "normal"))
   (evil--decorate! buf))
 
@@ -776,7 +776,7 @@
   (and (not (string-prefix? " " buf))
        (not (process-running? buf))
        (or (buffer-path buf) (equal? buf "*scratch*"))
-       (not (member (or (buffer-local buf 'mode-name) "")
+       (not (member (or (buffer-local-value 'mode-name buf) "")
                     '("chat-mode" "dired-mode" "notmuch-mode")))))
 
 ;; evil-mode is evil-local-mode in every eligible buffer, now and as

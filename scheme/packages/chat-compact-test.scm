@@ -55,7 +55,7 @@
         (let ((said (map cadr (chat-turns buf))))
           (check-true! (member "ask 5" said) "the newest ask is kept verbatim")
           (check-false! (member "ask 1" said) "the oldest ask is gone"))
-        (check-false! (buffer-local buf 'chat-compacting) "nothing is in flight")))))
+        (check-false! (buffer-local-value 'chat-compacting buf) "nothing is in flight")))))
 
 (deftest 'chat-compact-lists-saved-tool-results
   "a tool result the head saved to a file is named in the compacted turn"

@@ -322,9 +322,9 @@
 
 (define (anon--view-original buf)
   "the tree the mode wrote last, or #f"
-  (let ((cur (buffer-local buf 'render-blocks))
-        (saved (buffer-local buf 'anon-render-blocks)))
-    (cond ((not (and (pair? cur) (equal? (buffer-local buf 'render-mode) "blocks"))) #f)
+  (let ((cur (buffer-local-value 'render-blocks buf))
+        (saved (buffer-local-value 'anon-render-blocks buf)))
+    (cond ((not (and (pair? cur) (equal? (buffer-local-value 'render-mode buf) "blocks"))) #f)
           ((and (pair? saved) (equal? cur (cadr saved))) (car saved))
           ((pair? saved) (anon--unredact cur (cadr saved) (car saved)))
           (else cur))))
@@ -423,7 +423,7 @@ from the buffer, so the redaction must reach that text through the tree"
             (else (cons (walk (car t)) (walk (cdr t))))))))
 
 (define (anon--view-plist buf tree)
-  (let* ((saved (buffer-local buf 'anon-render-blocks))
+  (let* ((saved (buffer-local-value 'anon-render-blocks buf))
          (tree (anon--fill-ranges buf (if (pair? saved) (anon--unredact tree (cadr saved) (car saved)) tree))))
     (set! *anon-new-text* '())
     ;; an answer of decide changes what is barred: then the whole tree again
@@ -519,8 +519,8 @@ from the buffer, so the redaction must reach that text through the tree"
     ;; anchor keeps the page it marks as anchor-drawn and marks from it ever
     ;; after: it gets the original, so its marks reach anon unredacted
     ((and (eq? key 'anchor-drawn) (pair? val) (minor-mode-on? buf "anon-local-mode")
-          (pair? (buffer-local buf 'anon-render-blocks)))
-     (let ((saved (buffer-local buf 'anon-render-blocks)))
+          (pair? (buffer-local-value 'anon-render-blocks buf)))
+     (let ((saved (buffer-local-value 'anon-render-blocks buf)))
        (next buf key (anon--unredact val (cadr saved) (car saved)))))
     (else (anon--set-local-1 next buf key val))))
 

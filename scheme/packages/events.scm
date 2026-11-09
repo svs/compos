@@ -59,7 +59,7 @@
 
 (define (event-job-topic topic &optional chat-id)
   "(event-job-topic TOPIC [CHAT-ID]) — a job: TOPIC made private to a chat, so two chats that both pick job:tests do not wake each other: job:NAME becomes job:SECS-N:NAME for CHAT-ID, or for the chat that is the current buffer. Any other topic, a topic outside a chat, and a topic that already has its chat stay as they are"
-  (let ((cid (or chat-id (buffer-local (current-buffer) 'chat-id))))
+  (let ((cid (or chat-id (buffer-local-value 'chat-id (current-buffer)))))
     (if (and (string? topic) (string-prefix? "job:" topic)
              (string? cid) (string-prefix? "chat:" cid)
              (not (event-job-topic-chat topic)))

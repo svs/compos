@@ -133,15 +133,15 @@
   "one command sets the whole workspace up"
   (lambda ()
     (let ((buf (t--cm-on!)))
-      (let ((modes (buffer-local buf 'minor-modes)))
+      (let ((modes (buffer-local-value 'minor-modes buf)))
         (check-true! (member "code-mode" modes) "code-mode is on")
         (check-true! (member "llm-mode" modes) "and llm-mode with it")
         (check-equal! (length modes) 2 "and nothing else"))
       ;; the ExUnit original compared the legacy 'group local to the buffer
       ;; NAME; a group id replaced it, so that assertion has been failing.
       (check-true! (buffer-group buf) "the buffer joined a group")
-      (check-equal! (buffer-local buf 'chat-presets) '(compos) "with the coding presets")
-      (check-equal! (buffer-local buf 'modeline-info) "code · compos" "and the modeline says so"))
+      (check-equal! (buffer-local-value 'chat-presets buf) '(compos) "with the coding presets")
+      (check-equal! (buffer-local-value 'modeline-info buf) "code · compos" "and the modeline says so"))
     (t--cm-off!)))
 
 (deftest 'the-coding-presets-ride-over-the-buffers-own
@@ -154,17 +154,17 @@
       (switch-to-buffer! buf)
       (run-command "code-mode")
 
-      (check-equal! (buffer-local buf 'chat-presets) '(compos web project)
+      (check-equal! (buffer-local-value 'chat-presets buf) '(compos web project)
                     "the coding presets come first, the buffer's own last")
-      (check-equal! (buffer-local buf 'modeline-info) "code · compos web project" "the modeline")
+      (check-equal! (buffer-local-value 'modeline-info buf) "code · compos web project" "the modeline")
 
       ;; a live customization rebuilds from the buffer's own pre-mode value
       (customize-set! 'code-presets '(compos))
-      (check-equal! (buffer-local buf 'chat-presets) '(compos project)
+      (check-equal! (buffer-local-value 'chat-presets buf) '(compos project)
                     "the removed preset disappears at once")
 
       (run-command "code-mode")
-      (check-equal! (buffer-local buf 'chat-presets) '(project) "and leaving gives back its own")
+      (check-equal! (buffer-local-value 'chat-presets buf) '(project) "and leaving gives back its own")
       (customize-set! 'code-presets saved))
     (t--cm-off!)))
 
@@ -175,11 +175,11 @@
            (scratch (string-append "*scratch:" buf "*")))
       (run-command "scratch-buffer")
       (check-equal! (current-buffer) scratch "the scratch has the focus")
-      (check-equal! (buffer-local scratch 'chat-presets) '(compos) "with the coding presets")
+      (check-equal! (buffer-local-value 'chat-presets scratch) '(compos) "with the coding presets")
       (check-equal! (buffer-group scratch) (buffer-group buf) "in the document's group")
       (check-equal! (buffer-group-role scratch (buffer-group buf)) "scratch"
                     "with the scratch role")
-      (check-true! (member "llm-mode" (buffer-local scratch 'minor-modes)) "and llm-mode on")
+      (check-true! (member "llm-mode" (buffer-local-value 'minor-modes scratch)) "and llm-mode on")
       (t--cm-off! scratch))))
 
 (deftest 'the-scratch-system-prompt-pulls-current-group-context
@@ -211,12 +211,12 @@
       (let* ((buf (t--cm-on!))
              (scratch (string-append "*scratch:" buf "*")))
         (run-command "scratch-buffer")
-        (check-equal! (buffer-local buf 'llm-model) "openai:test-coder" "the document")
-        (check-equal! (buffer-local scratch 'llm-model) "openai:test-coder" "and the scratch")
+        (check-equal! (buffer-local-value 'llm-model buf) "openai:test-coder" "the document")
+        (check-equal! (buffer-local-value 'llm-model scratch) "openai:test-coder" "and the scratch")
 
         ;; clearing the setting gives the editor's default model back
         (customize-set! 'code-model "")
-        (check-false! (buffer-local buf 'llm-model) "cleared")
+        (check-false! (buffer-local-value 'llm-model buf) "cleared")
         (customize-set! 'code-model saved)
         (t--cm-off! scratch)))))
 
@@ -263,7 +263,7 @@
       ;; n: stay in the checkout we are already in
       (check-true! (t--cm-answer! "n") "the prompt closes")
       (check-equal! (current-buffer) path "we stay in the file we were in")
-      (check-equal! (buffer-local path 'workspace-isolation-choice) "current" "the choice is recorded")
+      (check-equal! (buffer-local-value 'workspace-isolation-choice path) "current" "the choice is recorded")
       (check-false! (file-exists? workspace) "and still no worktree")
       (check-false! (plist-get (agent-worktree-opts path "a1" '()) 'cwd)
                     "so an agent runs in the checkout")
@@ -277,11 +277,11 @@
       (check-true! (t--cm-answer! "y") "the prompt closes")
 
       (let ((task (current-buffer)))
-        (check-equal! (buffer-local task 'workspace-root) workspace "the workspace is a sibling")
+        (check-equal! (buffer-local-value 'workspace-root task) workspace "the workspace is a sibling")
         (check-equal! task (string-append workspace "/one.ex") "and we are in its copy")
-        (check-equal! (buffer-local task 'workspace-project-root) root "which knows its project")
-        (check-equal! (buffer-local task 'workspace-id) "a1" "and its id")
-        (check-equal! (buffer-local task 'modeline-info) "code · a1 · compos" "the modeline says both")
+        (check-equal! (buffer-local-value 'workspace-project-root task) root "which knows its project")
+        (check-equal! (buffer-local-value 'workspace-id task) "a1" "and its id")
+        (check-equal! (buffer-local-value 'modeline-info task) "code · a1 · compos" "the modeline says both")
 
         ;; the ordinary editor tool changes the task buffer, and saving
         ;; cannot touch the primary checkout: the displayed buffer is the copy
@@ -297,8 +297,8 @@
         (run-command "chat-companion")
         (let ((chat (current-buffer)))
           (check-equal! chat (group-chat-name workspace) "the chat is the workspace's")
-          (check-equal! (buffer-local chat 'workspace-root) workspace "and carries its root")
-          (check-equal! (buffer-local chat 'workspace-id) "a1" "and its id")
+          (check-equal! (buffer-local-value 'workspace-root chat) workspace "and carries its root")
+          (check-equal! (buffer-local-value 'workspace-id chat) "a1" "and its id")
           (check-equal! (plist-get (agent-worktree-opts chat "a1" '()) 'cwd) workspace
                         "so an agent runs inside it")
           (check-equal! (group-chat workspace) chat "and the group answers with it")
@@ -307,7 +307,7 @@
           (switch-to-buffer! path)
           (run-command "workspace-init")
           (let* ((second (current-buffer))
-                 (second-workspace (buffer-local second 'workspace-root)))
+                 (second-workspace (buffer-local-value 'workspace-root second)))
             (check-equal! second-workspace (string-append root "-worktrees/a2")
                           "the second is a sibling, not a child")
             (switch-to-buffer! second)

@@ -24,7 +24,7 @@
   (list (buffer-text buf)
         (ml--overlays buf)
         (buffer-hidden buf)
-        (sort (or (buffer-local buf 'minor-modes) '()))
+        (sort (or (buffer-local-value 'minor-modes buf) '()))
         (sort (buffer-minor-maps buf))
         (sort (buffer-keymaps buf))))
 
@@ -87,7 +87,7 @@
     (if (not (ignore-errors (lambda () (enter! mode) #t)))
         (fault! "setup raised")
         (let ((once (ml--view buf)))
-          (unless (equal? (buffer-local buf 'mode-name) mode)
+          (unless (equal? (buffer-local-value 'mode-name buf) mode)
             (fault! "the buffer does not wear the mode"))
           ;; re-enter: the door a restore uses, and it changes nothing
           (enter! mode)
@@ -105,7 +105,7 @@
                       (not (member (mode-keymap mode) (buffer-keymaps buf))))
             (fault! "its map still answers after leaving"))
           (for-each (lambda (k)
-                      (when (buffer-local buf k)
+                      (when (buffer-local-value k buf)
                         (fault! (string-append (symbol->string k) " survived leaving"))))
                     ml--render-locals)))
     (buffer-kill! buf)
@@ -137,7 +137,7 @@
          (bad '())
          (fault! (lambda (what) (set! bad (cons (list mode what) bad))))
          (worn (lambda () (length (filter (lambda (m) (equal? m mode))
-                                          (or (buffer-local buf 'minor-modes) '()))))))
+                                          (or (buffer-local-value 'minor-modes buf) '()))))))
     (let ((before (ml--overlays buf)))
       (cond
         ((not (ignore-errors (lambda () (enable-minor-mode! buf mode) #t)))
@@ -323,8 +323,8 @@
     (list 'doom-lite-px (doom-lite--cell->fp 10) 'doom-lite-py (doom-lite--cell->fp 6)
           'doom-lite-health 42 'doom-lite-ammo 7 'doom-lite-kills 3))
   (list 'buf ml--doom-buf
-        'probe (lambda () (list (buffer-local ml--doom-buf 'doom-lite-health)
-                                (buffer-local ml--doom-buf 'doom-lite-ammo)))
+        'probe (lambda () (list (buffer-local-value 'doom-lite-health ml--doom-buf)
+                                (buffer-local-value 'doom-lite-ammo ml--doom-buf)))
         'wipe (lambda () (buffer-set-text! ml--doom-buf "" #t))
         'again (lambda () (with-current-buffer ml--doom-buf (lambda () (set-mode! "doom-lite-mode"))))
         'after (lambda ()
@@ -370,7 +370,7 @@
     (list 'buf buf
           'probe (lambda ()
                    (list (setup-wizard-step buf)
-                         (string-contains? (value->string (buffer-local buf 'render-blocks))
+                         (string-contains? (value->string (buffer-local-value 'render-blocks buf))
                                            "Start learning")))
           'wipe (lambda () (buffer-set-local! buf 'render-blocks #f))
           'again (lambda () (with-current-buffer buf (lambda () (set-mode! "setup-wizard-mode"))))
@@ -385,14 +385,14 @@
   (let ((buf (test-buffer! "zz-ml-preview.html" "<p>hi</p>\n")))
     (with-current-buffer buf (lambda () (run-command "preview-mode")))
     (list 'buf buf
-          'probe (lambda () (list (buffer-local buf 'render-mode)))
+          'probe (lambda () (list (buffer-local-value 'render-mode buf)))
           'wipe (lambda () (buffer-set-local! buf 'render-mode #f))
           'again (lambda () (restore-minor-modes! buf))
           'after (lambda ()
                    (with-current-buffer buf (lambda () (run-command "preview-mode")))
                    (restore-minor-modes! buf)
                    (list (list "a disabled preview stays off through a restore"
-                               (not (buffer-local buf 'render-mode)))))
+                               (not (buffer-local-value 'render-mode buf)))))
           'done (lambda () (buffer-kill! buf)))))
 
 ;; writing: a restore runs the setup again, adds no second hook, and
@@ -408,24 +408,24 @@
     (list 'buf buf
           'probe (lambda ()
                    (list (equal? (ml--writing-hooks buf) 1)
-                         (buffer-local buf 'window-class)
-                         (buffer-local buf 'modeline-info)))
+                         (buffer-local-value 'window-class buf)
+                         (buffer-local-value 'modeline-info buf)))
           'wipe (lambda ()
                   (buffer-set-local! buf 'window-class #f)
                   (buffer-set-local! buf 'modeline-info #f))
           'again (lambda () (restore-minor-modes! buf))
           'after (lambda ()
                    (let ((look (list (list "the look is back"
-                                           (equal? (buffer-local buf 'window-class) "writing"))
+                                           (equal? (buffer-local-value 'window-class buf) "writing"))
                                      (list "and the count"
-                                           (string-contains? (or (buffer-local buf 'modeline-info) "")
+                                           (string-contains? (or (buffer-local-value 'modeline-info buf) "")
                                                              "2 words")))))
                      ;; the user turns the preview off; a restore keeps it off
                      (with-current-buffer buf (lambda () (run-command "preview-mode")))
                      (restore-minor-modes! buf)
                      (append look
                              (list (list "a disabled preview stays off through a restore"
-                                         (not (buffer-local buf 'render-mode)))))))
+                                         (not (buffer-local-value 'render-mode buf)))))))
           'done (lambda ()
                   (when (minor-mode-on? buf "writing-mode") (disable-minor-mode! buf "writing-mode"))
                   (buffer-kill! buf)))))
@@ -442,14 +442,14 @@
   (buffer-set-local! ml--code-buf 'chat-presets '(compos project))
   (list 'buf ml--code-buf
         'probe (lambda ()
-                 (list (sort (or (buffer-local ml--code-buf 'minor-modes) '()))
+                 (list (sort (or (buffer-local-value 'minor-modes ml--code-buf) '()))
                        (and (buffer-group ml--code-buf) #t)
-                       (buffer-local ml--code-buf 'modeline-info)))
+                       (buffer-local-value 'modeline-info ml--code-buf)))
         'wipe (lambda () (buffer-set-local! ml--code-buf 'modeline-info #f))
         'again (lambda () (restore-minor-modes! ml--code-buf))
         'after (lambda ()
-                 (let ((modes (or (buffer-local ml--code-buf 'minor-modes) '()))
-                       (info (or (buffer-local ml--code-buf 'modeline-info) "")))
+                 (let ((modes (or (buffer-local-value 'minor-modes ml--code-buf) '()))
+                       (info (or (buffer-local-value 'modeline-info ml--code-buf) "")))
                    (list (list "code-mode and llm-mode are back, and nothing else"
                                (and (member "code-mode" modes) (member "llm-mode" modes)
                                     (equal? (length modes) 2) #t))
@@ -532,8 +532,8 @@
     (with-current-buffer ml--hr-a (lambda () (set-mode! "zz-ml-hr-mode")))
     (with-current-buffer ml--hr-b (lambda () (set-mode! "zz-ml-hr-other")))
     (enable-minor-mode! ml--hr-b "zz-ml-hr-minor")
-    (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 1 "the mode set the buffer up once")
-    (check-equal! (buffer-local ml--hr-b 'zz-ml-minor-stamp) 1 "the minor setup ran once")
+    (check-equal! (buffer-local-value 'zz-ml-stamp ml--hr-a) 1 "the mode set the buffer up once")
+    (check-equal! (buffer-local-value 'zz-ml-minor-stamp ml--hr-b) 1 "the minor setup ran once")
 
     ;; the definitions above came before the bracket: not a reload
     (reload-begin!)
@@ -543,14 +543,14 @@
     (reload-begin!)
     (ml--major! "zz-ml-hr-mode" 2)
     (check-equal! (ml--modes-only reload-finish!) 1 "one buffer wore the mode the reload named")
-    (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 2 "it took the new setup")
-    (check-equal! (buffer-local ml--hr-b 'zz-ml-stamp) 1 "the other mode was left alone")
+    (check-equal! (buffer-local-value 'zz-ml-stamp ml--hr-a) 2 "it took the new setup")
+    (check-equal! (buffer-local-value 'zz-ml-stamp ml--hr-b) 1 "the other mode was left alone")
 
     ;; a minor mode is worn in a buffer-local list, and counts the same way
     (reload-begin!)
     (ml--minor! "zz-ml-hr-minor" 2)
     (check-equal! (ml--modes-only reload-finish!) 1 "the buffer wearing the minor mode was rebuilt")
-    (check-equal! (buffer-local ml--hr-b 'zz-ml-minor-stamp) 2 "with the new setup")
+    (check-equal! (buffer-local-value 'zz-ml-minor-stamp ml--hr-b) 2 "with the new setup")
 
     (disable-minor-mode! ml--hr-b "zz-ml-hr-minor")
     (buffer-kill! ml--hr-a)
@@ -567,17 +567,17 @@
     ;; alone, and give the frame back after
     (delete-other-windows!)
     (switch-to-buffer! ml--hr-a)
-    (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 1 "the mode set the buffer up once")
+    (check-equal! (buffer-local-value 'zz-ml-stamp ml--hr-a) 1 "the mode set the buffer up once")
 
     ;; the reload redefines no mode at all: only a helper changed
     (ml--major! "zz-ml-hr-visible" 2)
     (reload-begin!)
     (reload-finish!)
-    (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 2 "the visible buffer was rebuilt")
+    (check-equal! (buffer-local-value 'zz-ml-stamp ml--hr-a) 2 "the visible buffer was rebuilt")
 
     ;; with the switch off, the visible half does not run
     (ml--major! "zz-ml-hr-visible" 3)
     (reload-begin!)
     (ml--modes-only reload-finish!)
-    (check-equal! (buffer-local ml--hr-a 'zz-ml-stamp) 2 "the refresh ran with the switch off")
+    (check-equal! (buffer-local-value 'zz-ml-stamp ml--hr-a) 2 "the refresh ran with the switch off")
     (buffer-kill! ml--hr-a)))))

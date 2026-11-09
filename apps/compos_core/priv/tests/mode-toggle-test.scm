@@ -42,7 +42,7 @@
   (lambda ()
     (test-buffer! t--mt-buf "alpha\n")
     (check-true! (> (string-length (t--mt-click! "Fundamental")) 0) "it says so")
-    (check-false! (buffer-local t--mt-buf 'mode-name) "and sets nothing")
+    (check-false! (buffer-local-value 'mode-name t--mt-buf) "and sets nothing")
     (buffer-kill! t--mt-buf)))
 
 (deftest 'a-command-for-another-mode-enters-it
@@ -51,8 +51,8 @@
     (test-buffer! t--mt-buf "<p>hi</p>\n")
     (with-current-buffer t--mt-buf (lambda () (run-command "elixir-mode")))
     (check-contains! (t--mt-click! "html-mode") "html-mode" "the report names the mode")
-    (check-equal! (buffer-local t--mt-buf 'mode-name) "html-mode" "the mode")
-    (check-equal! (buffer-local t--mt-buf 'ts-lang) "html" "and its grammar")
+    (check-equal! (buffer-local-value 'mode-name t--mt-buf) "html-mode" "the mode")
+    (check-equal! (buffer-local-value 'ts-lang t--mt-buf) "html" "and its grammar")
     (buffer-kill! t--mt-buf)))
 
 (deftest 'text-mode-is-a-mode-like-any-other-so-it-leaves-too
@@ -61,7 +61,7 @@
     (test-buffer! t--mt-buf "alpha\n")
     (with-current-buffer t--mt-buf (lambda () (set-mode! "text-mode")))
     (check-contains! (t--mt-click! "text-mode") "text-mode" "the report names the mode")
-    (check-false! (buffer-local t--mt-buf 'mode-name) "and the mode is gone")
+    (check-false! (buffer-local-value 'mode-name t--mt-buf) "and the mode is gone")
     (buffer-kill! t--mt-buf)))
 
 ;; load-mode: the same toggle, reached by name from a prompt. The test
@@ -80,7 +80,7 @@
   (lambda ()
     (test-buffer! t--mt-buf "<p>hi</p>\n")
     (with-current-buffer t--mt-buf (lambda () (load-mode! "html-mode")))
-    (check-equal! (buffer-local t--mt-buf 'mode-name) "html-mode" "the major mode")
+    (check-equal! (buffer-local-value 'mode-name t--mt-buf) "html-mode" "the major mode")
     (with-current-buffer t--mt-buf (lambda () (load-mode! "visual-line-mode")))
     (check-true! (minor-mode-on? t--mt-buf "visual-line-mode") "the minor mode is on")
     (with-current-buffer t--mt-buf (lambda () (load-mode! "visual-line-mode")))

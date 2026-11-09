@@ -40,7 +40,7 @@
                    "the first definition")
       (check-true! (member '(6 "call" "two" "def two(x) do") (code-outline buf))
                    "the second definition")
-      (check-equal! (buffer-local buf 'code-backend) "ts" "tree-sitter answered")
+      (check-equal! (buffer-local-value 'code-backend buf) "ts" "tree-sitter answered")
       (buffer-kill! buf))))
 
 (deftest 'code-find-selects-a-definition-by-its-name-or-doc
@@ -139,7 +139,7 @@
     (let ((buf (test-buffer! "zz-code-plain" "first:\n  a\n  b\nsecond:\n  c\n")))
       (check-true! (member '(1 "block" "first" "first:") (code-outline buf)) "the first block")
       (check-true! (member '(4 "block" "second" "second:") (code-outline buf)) "the second block")
-      (check-equal! (buffer-local buf 'code-backend) "indent" "indentation answered")
+      (check-equal! (buffer-local-value 'code-backend buf) "indent" "indentation answered")
       (check-contains! (code-read buf 4) "second:" "and it reads one block")
       (buffer-kill! buf))))
 
@@ -183,7 +183,7 @@
       (find-file path)
       (check-true! (member '(2 "call" "one" "def one(x) do") (code-outline path))
                    "the outline parsed")
-      (check-equal! (buffer-local path 'code-backend) "ts" "tree-sitter answered")
+      (check-equal! (buffer-local-value 'code-backend path) "ts" "tree-sitter answered")
       (when (buffer-known? path) (buffer-kill! path))
       (delete-file! path))))
 

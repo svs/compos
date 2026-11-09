@@ -30,16 +30,16 @@
 (define (scratch--for owner)
   (let* ((group (buffer-group owner))
          (shared (and group (group-buffer-as group 'scratch)))
-         (saved (buffer-local owner 'scratch-buffer)))
+         (saved (buffer-local-value 'scratch-buffer owner)))
     (cond ((and shared (buffer-exists? shared)) shared)
           ((and saved (buffer-exists? saved)) saved)
           (else (scratch--name owner)))))
 
 (define (scratch--inherit-llm! owner scratch)
-  (buffer-set-local! scratch 'llm-model (buffer-local owner 'llm-model))
-  (buffer-set-local! scratch 'chat-presets (buffer-local owner 'chat-presets))
+  (buffer-set-local! scratch 'llm-model (buffer-local-value 'llm-model owner))
+  (buffer-set-local! scratch 'chat-presets (buffer-local-value 'chat-presets owner))
   (buffer-set-local! scratch 'workspace-isolation-choice
-    (buffer-local owner 'workspace-isolation-choice))
+    (buffer-local-value 'workspace-isolation-choice owner))
   (when (minor-mode-on? owner "llm-mode")
     (unless (minor-mode-on? scratch "llm-mode")
       (enable-minor-mode! scratch "llm-mode"))))
@@ -65,7 +65,7 @@
   (for-each
     (lambda (member)
       (cond ((chat-buffer? member)
-             (when (equal? (buffer-local member 'scratch-buffer) scratch)
+             (when (equal? (buffer-local-value 'scratch-buffer member) scratch)
                (buffer-set-local! member 'scratch-buffer #f)))
             ((not (equal? member scratch))
              (buffer-set-local! member 'scratch-buffer scratch))))
@@ -84,7 +84,7 @@
 ;; it. A scratch that already has a mode keeps it: M-x morg-mode in a scratch
 ;; means plain morg, and nothing here may take that back.
 (define (scratch--set-mode! scratch)
-  (unless (buffer-local scratch 'mode-name)
+  (unless (buffer-local-value 'mode-name scratch)
     (with-current-buffer scratch (lambda () (set-mode! "scratch-mode")))))
 
 (define (scratch--prepare! owner scratch)
@@ -101,7 +101,7 @@
     (scratch--inherit-llm! owner scratch)))
 
 (define (scratch--return-buffer scratch group)
-  (let ((from (buffer-local scratch 'scratch-from)))
+  (let ((from (buffer-local-value 'scratch-from scratch)))
     (if (and from (buffer-exists? from) (buffer-in-group? from group))
         from
         (let ((members
@@ -138,7 +138,7 @@
            (group (and membership
                        (equal? (buffer-group-role here membership) "scratch")
                        membership))
-           (legacy-owner (buffer-local here 'scratch-owner)))
+           (legacy-owner (buffer-local-value 'scratch-owner here)))
       (cond (group
              (let ((back (scratch--return-buffer here group)))
                (if back
@@ -190,7 +190,7 @@
 ;; inside a project scratch — the one it already names
 (define (project-scratch--root)
   (let* ((here (current-buffer))
-         (own (buffer-local here 'project-scratch-root))
+         (own (buffer-local-value 'project-scratch-root here))
          (byfile (buffer-project-root here)))
     (cond (own own)
           ((not (equal? byfile "")) byfile)
@@ -201,7 +201,7 @@
 ;; A project chat's identity must not change because the next visit happened
 ;; to start in a buffer with different presets.
 (define (project-scratch--inherit-once! from scratch)
-  (unless (buffer-local scratch 'chat-presets)
+  (unless (buffer-local-value 'chat-presets scratch)
     (scratch--inherit-llm! from scratch)))
 
 ;; The project's open buffers join its group, so a chat in the scratch can
@@ -234,10 +234,10 @@
   "Toggle between this buffer and its project's scratch buffer"
   (lambda ()
     (let* ((here (current-buffer))
-           (back (buffer-local here 'project-scratch-from)))
+           (back (buffer-local-value 'project-scratch-from here)))
       (cond
         ;; inside the project scratch: go back where the user came from
-        ((and (buffer-local here 'project-scratch-root) back (buffer-exists? back))
+        ((and (buffer-local-value 'project-scratch-root here) back (buffer-exists? back))
          (scratch--focus! back))
         (else
           (let ((root (project-scratch--root)))
@@ -257,18 +257,18 @@
   (lambda (old new)
     (for-each
       (lambda (b)
-        (when (equal? (buffer-local b 'scratch-buffer) old)
+        (when (equal? (buffer-local-value 'scratch-buffer b) old)
           (buffer-set-local! b 'scratch-buffer new))
-        (when (equal? (buffer-local b 'scratch-from) old)
+        (when (equal? (buffer-local-value 'scratch-from b) old)
           (buffer-set-local! b 'scratch-from new)))
       (buffer-list))
     (buffer-set-local! new 'scratch-buffer
-      (if (equal? (buffer-local new 'scratch-buffer) old)
+      (if (equal? (buffer-local-value 'scratch-buffer new) old)
           new
-          (buffer-local new 'scratch-buffer)))
+          (buffer-local-value 'scratch-buffer new)))
     (for-each
       (lambda (b)
-        (when (equal? (buffer-local b 'project-scratch-from) old)
+        (when (equal? (buffer-local-value 'project-scratch-from b) old)
           (buffer-set-local! b 'project-scratch-from new)))
       (buffer-list))))
 
@@ -278,13 +278,13 @@
 (for-each
   (lambda (scratch)
     (let ((group (buffer-group scratch))
-          (owner (buffer-local scratch 'scratch-owner)))
+          (owner (buffer-local-value 'scratch-owner scratch)))
       (when (and group
                  (equal? (buffer-group-role scratch group) "scratch"))
         (scratch--attach-group!
           (cond ((and owner (buffer-exists? owner)) owner)
-                ((buffer-local scratch 'scratch-from)
-                 (buffer-local scratch 'scratch-from))
+                ((buffer-local-value 'scratch-from scratch)
+                 (buffer-local-value 'scratch-from scratch))
                 (else scratch))
           scratch group))))
   (buffer-list))

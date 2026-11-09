@@ -54,7 +54,7 @@
       ;; correctly does nothing.
       (buffer-set-local! buf 'dired-scanned 'sentinel)
       (dired-refresh-buffer! buf)
-      (check-equal! (buffer-local buf 'dired-scanned) 'sentinel
+      (check-equal! (buffer-local-value 'dired-scanned buf) 'sentinel
                     "the refresh leaves the buffer alone"))
     (t--dfile-remove!)))
 

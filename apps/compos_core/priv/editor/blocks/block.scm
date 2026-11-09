@@ -27,7 +27,7 @@
 ;;; Blocks may contain other blocks, but their ranges may never cross.
 
 (define (block-records buf)
-  (or (buffer-local buf 'addressable-blocks) '()))
+  (or (buffer-local-value 'addressable-blocks buf) '()))
 
 (define (block--marker-name id edge)
   (string->symbol (string-append "block-" id "-" edge)))
@@ -55,7 +55,7 @@
                   (cons (cadr rest) (cons (car rest) out)))))))
 
 (define (block--next-id! buf)
-  (let ((n (+ 1 (or (buffer-local buf 'addressable-block-seq) 0))))
+  (let ((n (+ 1 (or (buffer-local-value 'addressable-block-seq buf) 0))))
     (buffer-set-local! buf 'addressable-block-seq n)
     (string-append "b" (number->string n))))
 
@@ -110,8 +110,8 @@
          (record (and (string? buf) (string? id) (buffer-known? buf)
                       (block--record buf id))))
     (and record
-         (let ((start (buffer-local buf (plist-get record 'start-local)))
-               (end (buffer-local buf (plist-get record 'end-local))))
+         (let ((start (buffer-local-value (plist-get record 'start-local) buf))
+               (end (buffer-local-value (plist-get record 'end-local) buf)))
            (and (number? start) (number? end)
                 (list 'buffer buf
                       'id id

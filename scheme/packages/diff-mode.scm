@@ -53,7 +53,7 @@
   (set! *diff-backends* (cons (list name props) *diff-backends*)))
 
 (define (diff--backend-fn buf key)
-  (let ((b (assoc (buffer-local buf 'diff-backend) *diff-backends*)))
+  (let ((b (assoc (buffer-local-value 'diff-backend buf) *diff-backends*)))
     (and b (diff--get (cadr b) key))))
 
 ;;; --- plists ------------------------------------------------------------------
@@ -169,7 +169,7 @@
 
 ;; the labels of the last render, plus the fixed history section
 (define (diff--section-line? buf l)
-  (let loop ((ss (cons "Recent commits" (or (buffer-local buf 'diff-sections) '()))))
+  (let loop ((ss (cons "Recent commits" (or (buffer-local-value 'diff-sections buf) '()))))
     (cond ((null? ss) #f)
           ((string-prefix? (car ss) l) (car ss))
           (else (loop (cdr ss))))))
@@ -190,7 +190,7 @@
 ;; every other caller — blocks, folds, n/p motion, RET — reads the parse
 ;; once per text, not once per keypress.
 (define (diff-layout buf)
-  (or (buffer-local buf 'diff-layout-cache)
+  (or (buffer-local-value 'diff-layout-cache buf)
       (let ((l (diff--layout-parse buf)))
         (buffer-set-local! buf 'diff-layout-cache l)
         l)))
@@ -247,7 +247,7 @@
                                     (or (diff--get f 'hunks) '())))))
 
 (define (diff--layout-parse buf)
-  (let ((overrides (or (buffer-local buf 'diff-overrides) '()))
+  (let ((overrides (or (buffer-local-value 'diff-overrides buf) '()))
         (marks (diff--section-marks buf)))
     (map (lambda (f) (diff--layout-card buf f overrides marks))
          (diff-parse (buffer-text buf)))))
@@ -418,7 +418,7 @@
                                       (string-append (number->string n) " merge conflict"
                                                      (if (= n 1) "" "s")))
                                 (list "diff-conflict-hint"
-                                      (if (buffer-local buf 'diff-conflict-only)
+                                      (if (buffer-local-value 'diff-conflict-only buf)
                                           "show all" "show conflicts only"))))))))
 
 (define (diff--keymap-item key label)
@@ -443,7 +443,7 @@
               (diff--keymap-item "ESC" "clear selection"))))
 
 (define (diff--active-tab buf visible commits)
-  (or (buffer-local buf 'diff-tab)
+  (or (buffer-local-value 'diff-tab buf)
       (if (and (null? visible) (pair? commits)) "history" "changes")))
 
 ;; Magit leads with the state of HEAD, so this does too: the branch you are
@@ -451,7 +451,7 @@
 ;; detached head is the one thing a reader must not have to work out from
 ;; silence, so it says so in words. Nothing shows until the backend answers.
 (define (diff--head-block buf)
-  (let ((h (buffer-local buf 'diff-head)))
+  (let ((h (buffer-local-value 'diff-head buf)))
     (if (not (pair? h)) '()
       (let* ((branch (diff--get h 'branch))
              (sha (or (diff--get h 'sha) ""))
@@ -477,9 +477,9 @@
 
 (define (diff--blocks buf)
   (let* ((layout (diff-layout buf))
-         (only? (and (buffer-local buf 'diff-conflict-only) (diff--has-conflicts? layout)))
+         (only? (and (buffer-local-value 'diff-conflict-only buf) (diff--has-conflicts? layout)))
          (visible (if only? (diff--conflict-cards layout) layout))
-         (commits (if only? '() (or (buffer-local buf 'diff-commits) '())))
+         (commits (if only? '() (or (buffer-local-value 'diff-commits buf) '())))
          (active (diff--active-tab buf visible commits))
          (msg (diff--preamble buf))
          (content
@@ -530,11 +530,11 @@
           (diff--get c 'end))))
 
 (define (diff--section-blocks buf layout)
-  (let ((open (or (buffer-local buf 'diff-open-cards) '()))
-        (closed (or (buffer-local buf 'diff-closed-hunks) '()))
-        (cache (or (buffer-local buf 'diff-card-cache) '()))
+  (let ((open (or (buffer-local-value 'diff-open-cards buf) '()))
+        (closed (or (buffer-local-value 'diff-closed-hunks buf) '()))
+        (cache (or (buffer-local-value 'diff-card-cache buf) '()))
         (selection-active
-          (not (equal? (buffer-local buf 'diff-selection) 'none))))
+          (not (equal? (buffer-local-value 'diff-selection buf) 'none))))
     (let loop ((cs layout) (sec #f) (acc '()) (nc '()))
       (if (null? cs)
           (begin
@@ -744,8 +744,8 @@
 
 (define (diff--apply! buf sections commits)
   (when (buffer-exists? buf)
-    (let* ((seen (or (buffer-local buf 'diff-seen) '()))
-           (old-open (or (buffer-local buf 'diff-open-cards) '()))
+    (let* ((seen (or (buffer-local-value 'diff-seen buf) '()))
+           (old-open (or (buffer-local-value 'diff-open-cards buf) '()))
            (built (diff--build sections commits))
            (old-point (buffer-point buf)))
       (buffer-set-local! buf 'diff-sections (map car sections))
@@ -765,7 +765,7 @@
         (buffer-set-local! buf 'diff-open-cards
           (filter (lambda (k) (if (member k seen) (member k old-open) #t)) keys))
         (buffer-set-local! buf 'diff-seen keys)
-        (when (not (buffer-local buf 'diff-tab))
+        (when (not (buffer-local-value 'diff-tab buf))
           (buffer-set-local! buf 'diff-tab
             (if (and (null? keys) (pair? commits)) "history" "changes"))))
       ;; refresh keeps the reader where they were, clamped to the new text
@@ -795,7 +795,7 @@
 ;; The scope, as a path relative to the root. "" means the whole tree and
 ;; reads as no scope at all.
 (define (diff-scope buf)
-  (let ((p (buffer-local buf 'diff-scope)))
+  (let ((p (buffer-local-value 'diff-scope buf)))
     (if (or (not p) (equal? p "")) #f p)))
 
 (define (diff-refresh buf)
@@ -842,8 +842,8 @@
 ;;; view, so TAB means the same thing in both.
 
 (define (diff--refold! buf)
-  (let ((open (or (buffer-local buf 'diff-open-cards) '()))
-        (closed (or (buffer-local buf 'diff-closed-hunks) '())))
+  (let ((open (or (buffer-local-value 'diff-open-cards buf) '()))
+        (closed (or (buffer-local-value 'diff-closed-hunks buf) '())))
     (fold-set! buf 'diff
       (let loop ((cs (diff-layout buf)) (acc '()))
         (cond
@@ -908,7 +908,7 @@
 
 ;; the commit whose row point is on, or #f
 (define (diff--commit-at buf line)
-  (let loop ((cs (or (buffer-local buf 'diff-commits) '())))
+  (let loop ((cs (or (buffer-local-value 'diff-commits buf) '())))
     (cond ((null? cs) #f)
           ((equal? (car (car cs)) line) (car cs))
           (else (loop (cdr cs))))))
@@ -921,8 +921,8 @@
 ;; the rows n/p step through: hunks in a diff, commits in the log view
 (define (diff--hunk-lines buf)
   (let* ((layout (diff-layout buf))
-         (open (or (buffer-local buf 'diff-open-cards) '()))
-         (closed (or (buffer-local buf 'diff-closed-hunks) '()))
+         (open (or (buffer-local-value 'diff-open-cards buf) '()))
+         (closed (or (buffer-local-value 'diff-closed-hunks buf) '()))
          (hs
            (apply append
              (map
@@ -940,8 +940,8 @@
                             (diff--get c 'hunks)))
                      '()))
                layout))))
-    (cond ((equal? (buffer-local buf 'diff-tab) "history")
-           (map car (or (buffer-local buf 'diff-commits) '())))
+    (cond ((equal? (buffer-local-value 'diff-tab buf) "history")
+           (map car (or (buffer-local-value 'diff-commits buf) '())))
           ((pair? hs) hs)
           (else (diff--file-lines buf)))))
 
@@ -1088,7 +1088,7 @@
 
 (define (diff--changes-text buf)
   (let* ((text (buffer-text buf))
-         (commits (or (buffer-local buf 'diff-commits) '())))
+         (commits (or (buffer-local-value 'diff-commits buf) '())))
     (if (null? commits)
         (string-trim text)
         (let ((change-lines (max 0 (- (car (car commits)) 3))))
@@ -1105,7 +1105,7 @@
       (string-join (map (lambda (h) (or (diff--get h 'patch) "")) hunks) ""))))
 
 (define (diff--explain-text buf)
-  (if (equal? (buffer-local buf 'diff-selection) 'none)
+  (if (equal? (buffer-local-value 'diff-selection buf) 'none)
       (diff--changes-text buf)
       (let* ((layout (diff-layout buf))
              (line (diff--line-number buf (buffer-point buf)))
@@ -1240,7 +1240,7 @@
 
 (define (diff-toggle-all! buf)
   (let* ((keys (map (lambda (c) (diff--get c 'key)) (diff-layout buf)))
-         (open (or (buffer-local buf 'diff-open-cards) '()))
+         (open (or (buffer-local-value 'diff-open-cards buf) '()))
          (all-open? (and (pair? keys)
                          (null? (filter (lambda (key) (not (member key open))) keys)))))
     (buffer-set-local! buf 'diff-open-cards (if all-open? '() keys))
@@ -1274,7 +1274,7 @@
 ;; also the click target: the card header in the rich view calls this
 (define (diff-toggle-card! buf key)
   (buffer-set-local! buf 'diff-selection 'point)
-  (let ((open (or (buffer-local buf 'diff-open-cards) '())))
+  (let ((open (or (buffer-local-value 'diff-open-cards buf) '())))
     (buffer-set-local! buf 'diff-open-cards
       (if (member key open)
           (filter (lambda (k) (not (equal? k key))) open)
@@ -1287,7 +1287,7 @@
 (define (diff-toggle-hunk! buf section file n)
   (buffer-set-local! buf 'diff-selection 'point)
   (let ((key (diff--hunk-key section file n))
-        (closed (or (buffer-local buf 'diff-closed-hunks) '())))
+        (closed (or (buffer-local-value 'diff-closed-hunks buf) '())))
     (buffer-set-local! buf 'diff-closed-hunks
       (if (member key closed)
           (filter (lambda (k) (not (equal? k key))) closed)
@@ -1300,7 +1300,7 @@
 (define (diff-toggle-conflicts! buf)
   (if (diff--has-conflicts? (diff-layout buf))
       (begin
-        (buffer-set-local! buf 'diff-conflict-only (not (buffer-local buf 'diff-conflict-only)))
+        (buffer-set-local! buf 'diff-conflict-only (not (buffer-local-value 'diff-conflict-only buf)))
         (diff--reblock! buf))
       (message "no merge conflicts")))
 
@@ -1312,7 +1312,7 @@
 ;; every blocks mode. The id is ours only in a diff buffer.
 (add-hook! (list 'block-click 'diff)
   (lambda (buf id)
-    (and (buffer-local buf 'diff-backend)
+    (and (buffer-local-value 'diff-backend buf)
          (begin
            (cond ((equal? id "diff-conflict-toggle") (diff-toggle-conflicts! buf))
                  ((equal? id "diff-tab-changes") (diff-select-tab! buf "changes"))
@@ -1325,8 +1325,8 @@
 (define-command "diff-toggle-watch" "Follow the filesystem, or stop"
   (lambda ()
     (let* ((buf (current-buffer))
-           (root (buffer-local buf 'diff-root))
-           (on? (buffer-local buf 'diff-watch)))
+           (root (buffer-local-value 'diff-root buf))
+           (on? (buffer-local-value 'diff-watch buf)))
       (cond ((not root) (message "this diff has no tree to watch"))
             (on?
               (unwatch-path! root 'deep)
@@ -1340,7 +1340,7 @@
 
 ;; a dirty diff catches up the moment a window shows it again
 (define (diff--on-refresh! b keys)
-  (when (and (memq 'diff keys) (buffer-local b 'diff-watch))
+  (when (and (memq 'diff keys) (buffer-local-value 'diff-watch b))
     (diff-refresh b)))
 
 (add-hook! 'buffer-refresh-hook 'diff--on-refresh!)
@@ -1354,8 +1354,8 @@
   (lambda (root)
     (for-each
       (lambda (b)
-        (when (and (equal? (buffer-local b 'diff-root) root)
-                   (buffer-local b 'diff-watch))
+        (when (and (equal? (buffer-local-value 'diff-root b) root)
+                   (buffer-local-value 'diff-watch b))
           (if (window-showing b)
               (begin
                 (buffer-clear-dirty! b 'diff)
@@ -1368,7 +1368,7 @@
 (define-command "diff-toggle-view" "Toggle between the cards and the plain diff"
   (lambda ()
     (let* ((buf (current-buffer))
-           (rich? (equal? (buffer-local buf 'render-mode) "blocks")))
+           (rich? (equal? (buffer-local-value 'render-mode buf) "blocks")))
       (buffer-set-local! buf 'render-mode (if rich? #f "blocks"))
       (message (if rich? "plain diff" "diff cards"))))
   'modes '(diff-mode))
@@ -1406,15 +1406,15 @@
       ;; Restore lands here with the locals and no text. Re-arm the watch
       ;; and re-read; the open cards survive because diff--apply! only opens
       ;; cards it has not shown before.
-      (when (and (buffer-local buf 'diff-watch) (buffer-local buf 'diff-root))
-        (watch-path! (buffer-local buf 'diff-root) 'deep))
+      (when (and (buffer-local-value 'diff-watch buf) (buffer-local-value 'diff-root buf))
+        (watch-path! (buffer-local-value 'diff-root buf) 'deep))
       (diff-refresh buf))))
 
 ;; C-g and ESC clear a selection; with none, the plain quit (q). An unset
 ;; selection follows point, so it is a selection too: only 'none is none.
 (mode-quit! "diff-mode"
   (lambda (buf)
-    (let ((s (buffer-local buf 'diff-selection)))
+    (let ((s (buffer-local-value 'diff-selection buf)))
       (and (not (equal? s 'none))
            (begin (run-command "diff-clear-selection") #t)))))
 

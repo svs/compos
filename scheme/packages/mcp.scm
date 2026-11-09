@@ -160,7 +160,7 @@
   ;; LLM surface receives eval-scheme/apropos/act even when an old restored
   ;; chat has no preset local (or explicitly stored the empty list).  Other
   ;; presets remain buffer-local and user-selectable.
-  (let ((presets (or (buffer-local buf 'chat-presets) '())))
+  (let ((presets (or (buffer-local-value 'chat-presets buf) '())))
     (if (member 'compos presets) presets (cons 'compos presets))))
 
 (define (chat-active-servers buf)
@@ -249,9 +249,9 @@
 ;; Is there a running ACP session here, whose tool list is pinned until it
 ;; restarts? The api lane answers #f: it reads its specs fresh every send.
 (define (chat-presets-live-session? buf)
-  (let ((slug (buffer-local buf 'agent-slug)))
+  (let ((slug (buffer-local-value 'agent-slug buf)))
     (and slug
-         (not (connector-can? (or (buffer-local buf 'agent-connector)
+         (not (connector-can? (or (buffer-local-value 'agent-connector buf)
                                   *default-connector*)
                               'stateless))
          (not (equal? (agent-status slug) 'dead))
@@ -264,7 +264,7 @@
   ;; surface, so make it effective on the very next turn. Plain llm-mode
   ;; buffers have no frozen list and already read live.
   (when (and (boundp (quote chat-adopt-live-tools!))
-             (buffer-local buf 'chat-tool-specs))
+             (buffer-local-value 'chat-tool-specs buf))
     (chat-adopt-live-tools! buf))
   ;; A stateful llm-mode runtime mounted its MCP servers when the native
   ;; thread attached. Drop only the process; the next M-o resumes the same
@@ -326,15 +326,15 @@
 ;; kill + attach the same connector/model: a fresh session with the new
 ;; server list, seeded from the transcript so the conversation continues
 (define (chat-reattach-for-presets! buf)
-  (let ((slug (buffer-local buf 'agent-slug))
-        (cname (or (buffer-local buf 'agent-connector) *default-connector*))
-        (model (or (buffer-local buf 'agent-model) "")))
+  (let ((slug (buffer-local-value 'agent-slug buf))
+        (cname (or (buffer-local-value 'agent-connector buf) *default-connector*))
+        (model (or (buffer-local-value 'agent-model buf) "")))
     (buffer-set-local! buf 'chat-mcp-dirty #f)
     (agent-reconnect! slug cname model)))
 
 ;; the next send honours a pending preset change before prompting
 (define (chat-apply-pending-presets! buf)
-  (when (buffer-local buf 'chat-mcp-dirty)
+  (when (buffer-local-value 'chat-mcp-dirty buf)
     (chat-reattach-for-presets! buf)))
 
 ;;; One preset switch for every UI. The M-x commands and the C-c b menu
@@ -445,7 +445,7 @@
 (define (mcp-visible? name)
   (let ((buf (current-buffer)))
     (or (mcp-self? name)
-        (not (and buf (buffer-local buf 'agent-slug)))
+        (not (and buf (buffer-local-value 'agent-slug buf)))
         (and (member name (chat-active-servers buf)) #t))))
 
 (define (mcp-invisible-note name)
@@ -725,7 +725,7 @@
       (if (not chat)
           (message "No LLM session here — open one with M-x chat first")
           (let* ((out "*chat tools*")
-                 (frozen (buffer-local chat 'chat-tool-specs))
+                 (frozen (buffer-local-value 'chat-tool-specs chat))
                  (specs (if (pair? frozen) frozen (chat-live-tool-specs chat)))
                  (state (cond ((not (pair? frozen)) "live — the next send freezes this list")
                               ((chat-tools-stale? chat) "stale — C-c t adopts the live list")
@@ -773,7 +773,7 @@
                   (if (null? ps)
                       "none"
                       (string-join (map symbol->string ps) ", ")))
-                (if (buffer-local chat 'chat-mcp-dirty)
+                (if (buffer-local-value 'chat-mcp-dirty chat)
                     "   (changed — reconnect to apply)"
                     "")
                 "\n\n"))

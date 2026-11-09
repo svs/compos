@@ -51,7 +51,7 @@
 (define (mode-list-of buf)
   ;; the view says which mode it lists; a prompt over the same list mode
   ;; says it through its list mode
-  (or (buffer-local buf 'mode-list-of)
+  (or (buffer-local-value 'mode-list-of buf)
       (let ((lm (list-mode-of buf)))
         (let loop ((ms *mode-lists*))
           (cond ((null? ms) #f)
@@ -94,7 +94,7 @@
          (keyed (assoc (ibuffer-grouping buf) (mode-list-opt mode 'groupings '())))
          (extra (mode-list-opt mode 'extra-rows)))
     ;; mode-list-extra-only: the list shows its extra rows alone
-    (if (and extra (buffer-local buf 'mode-list-extra-only))
+    (if (and extra (buffer-local-value 'mode-list-extra-only buf))
         (extra buf)
         (let ((rows (if keyed
                         (let ((source (ibuffer-source buf)))
@@ -319,7 +319,7 @@
 
 (define (mode-list-modes)
   ;; the major modes that have a buffer, the current buffer's first
-  (let* ((here (buffer-local (current-buffer) 'mode-name))
+  (let* ((here (buffer-local-value 'mode-name (current-buffer)))
          (modes (dedupe-names
                   (filter (lambda (m) (and (string? m) (not (string-suffix? "-list-mode" m))))
                           (map cadr (buffer-read-many (buffer-list-mru) '() '("mode-name")))))))
@@ -366,7 +366,7 @@
            (grouping (ibuffer-grouping buf)))
       (if (equal? grouping 'none)
           ;; back to the sections you last had, not to a fixed default
-          (let ((back (or (buffer-local buf 'mode-list-grouping-was) 'group)))
+          (let ((back (or (buffer-local-value 'mode-list-grouping-was buf) 'group)))
             (ibuffer-set-grouping! back buf)
             (message (string-append "grouped by " (symbol->string back))))
           (begin

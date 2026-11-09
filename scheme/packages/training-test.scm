@@ -49,7 +49,7 @@
     (with-current-buffer "TUTORIAL" (lambda () (set-mode! "fundamental-mode")))
     (disable-minor-mode! "TUTORIAL" "preview-mode")
     (training--open-tutorial!)
-    (check-equal! (buffer-local "TUTORIAL" 'mode-name) "morg-mode"
+    (check-equal! (buffer-local-value 'mode-name "TUTORIAL") "morg-mode"
                   "the morg mode is back")
     (check-true! (minor-mode-on? "TUTORIAL" "preview-mode")
                  "the tutorial is drawn again")

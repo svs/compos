@@ -15,7 +15,7 @@
       (buffer-text t--file-view-json)
       "{\n  \"z\": null,\n  \"a\": false,\n  \"s\": \"a\\\\nb\"\n}\n"
       "the lexical formatter preserves JSON data")
-    (check-equal! (buffer-local t--file-view-json 'ts-lang) "json" "the parser is active")
+    (check-equal! (buffer-local-value 'ts-lang t--file-view-json) "json" "the parser is active")
     (buffer-kill! t--file-view-json)))
 
 (deftest 'json-mode-leaves-invalid-json-unchanged
@@ -31,7 +31,7 @@
   (lambda ()
     (test-buffer! t--file-view-image "binary")
     (with-current-buffer t--file-view-image (lambda () (set-mode! "browser-file-mode")))
-    (check-equal! (buffer-local t--file-view-image 'render-mode) "file" "the browser view is active")
+    (check-equal! (buffer-local-value 'render-mode t--file-view-image) "file" "the browser view is active")
     (check-true! (buffer-read-only? t--file-view-image) "the file bytes are read-only")
     (check-true! (browser-file-path? "photo.AVIF") "extension matching ignores case")
     (buffer-kill! t--file-view-image)))
@@ -47,7 +47,7 @@
       (visit-quietly p)
       (check-equal! (buffer-size p) 0 "a visit reads none of the file")
       (check-true! (buffer-unread-file? p) "and the buffer knows it never read it")
-      (check-equal! (buffer-local p 'render-mode) "file" "the browser viewer draws it")
+      (check-equal! (buffer-local-value 'render-mode p) "file" "the browser viewer draws it")
       (check-true! (buffer-read-only? p) "nothing here is edited")
       (check-contains! (or (write-refusal p p #f) "") "never read the file"
                        "and a write from it is refused")

@@ -107,7 +107,7 @@
 
 (effects! '(write))
 
-(define (repl--start buf) (buffer-local buf 'repl-input-start))
+(define (repl--start buf) (buffer-local-value 'repl-input-start buf))
 
 (define (repl--text buf from to) (substring-bytes (buffer-text buf) from to))
 
@@ -216,8 +216,8 @@
 ;; one form you want out of fifty.
 (define (repl--walk! buf delta matching?)
   (let* ((cur (repl-input buf))
-         (prev (or (buffer-local buf 'repl-hist-pos) -1))
-         (last (buffer-local buf 'repl-hist-last))
+         (prev (or (buffer-local-value 'repl-hist-pos buf) -1))
+         (last (buffer-local-value 'repl-hist-last buf))
          ;; the walk starts over whenever the input is not what the walk put
          ;; there: you typed, so the walk is about what you typed now
          (fresh (or (= prev -1) (not (equal? cur last))))
@@ -225,7 +225,7 @@
     (when fresh
       (buffer-set-local! buf 'repl-hist-stash cur)
       (buffer-set-local! buf 'repl-hist-prefix (if matching? (string-trim cur) "")))
-    (let* ((prefix (or (buffer-local buf 'repl-hist-prefix) ""))
+    (let* ((prefix (or (buffer-local-value 'repl-hist-prefix buf) ""))
            (items (filter (lambda (s) (string-prefix? prefix s))
                           (history-items *scheme-repl-history*)))
            (next (+ pos delta)))
@@ -234,7 +234,7 @@
             ((>= next (length items)) (message "End of history"))
             (else
               (let ((text (if (= next -1)
-                              (or (buffer-local buf 'repl-hist-stash) "")
+                              (or (buffer-local-value 'repl-hist-stash buf) "")
                               (nth next items))))
                 (repl-set-input! buf text)
                 (buffer-set-local! buf 'repl-hist-pos next)
@@ -513,7 +513,7 @@
 ;;; form you ran, whichever buffer you ran it in.
 
 (define (scheme-repl-buffer? buf)
-  (equal? (buffer-local buf 'mode-name) "scheme-repl-mode"))
+  (equal? (buffer-local-value 'mode-name buf) "scheme-repl-mode"))
 
 ;; every REPL, the one used last first. buffer-read-many, so a sleeping REPL
 ;; stays asleep to answer.
@@ -556,7 +556,7 @@
   (lambda ()
     (let ((here (current-buffer)))
       (if (scheme-repl-buffer? here)
-          (let ((back (buffer-local here 'repl-from)))
+          (let ((back (buffer-local-value 'repl-from here)))
             (if (and back (buffer-exists? back))
                 (repl--focus! back)
                 (message "This REPL has nowhere to go back to")))

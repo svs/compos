@@ -297,14 +297,14 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
 ;; "It" and "this" are what the user is looking at. From a ! in the chat
 ;; the current buffer is the chat, so "filter it" filtered the chat.
 (define (fast-this-buffer)
-  (let ((seen (filter (lambda (b) (not (equal? (buffer-local b 'mode-name) "chat-mode")))
+  (let ((seen (filter (lambda (b) (not (equal? (buffer-local-value 'mode-name b) "chat-mode")))
                       (get-visible-buffers))))
     (if (pair? seen) (car seen) (current-buffer))))
 
 ;; A buffer is named with its mode, so "the dired" finds one, and the
 ;; buffers on screen come first: "this" is one of them.
 (define (fast-buffer-desc b)
-  (let ((mode (buffer-local b 'mode-name)))
+  (let ((mode (buffer-local-value 'mode-name b)))
     (string-append (format "~s" b) (if (string? mode) (string-append " (" mode ")") ""))))
 
 (define (fast-prompt intent &optional steps found-out)

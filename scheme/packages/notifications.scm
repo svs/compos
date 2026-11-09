@@ -77,7 +77,7 @@ first, so a notice that waits for you is not pushed off by status updates"
 
 (define (notifications--lists)
   "every notifications list, one per group"
-  (filter (lambda (n) (equal? (buffer-local n 'mode-name) "notifications-mode")) (buffer-list)))
+  (filter (lambda (n) (equal? (buffer-local-value 'mode-name n) "notifications-mode")) (buffer-list)))
 
 (define (notifications-done! seq)
   "the notice SEQ is dealt with: off the screen, out of the bell and the list"
@@ -176,7 +176,7 @@ or its command; #t when it went somewhere"
 (define (notifications--rows buf)
   "the open notices; with 'notifications-all on, the whole history"
   (let ((es (event-log-newest "notify:*" notifications-history-limit)))
-    (if (buffer-local buf 'notifications-all)
+    (if (buffer-local-value 'notifications-all buf)
         es
         (filter (lambda (e) (assoc (plist-get e 'seq) *notifications-open*)) es))))
 
@@ -204,7 +204,7 @@ or its command; #t when it went somewhere"
     'no-marks #t
     'columns (lambda (buf) (list (list "age" 5) (list "from" 10) (list "title" 28) (list "notice" #f)))
     'cells notifications--cells
-    'title (lambda (buf) (if (buffer-local buf 'notifications-all) "Notifications: all" "Notifications"))
+    'title (lambda (buf) (if (buffer-local-value 'notifications-all buf) "Notifications: all" "Notifications"))
     'total (lambda (buf) (length (list-entries buf)))
     'noun "notice"
     'footer (lambda (buf) '(("RET" "go") ("d" "done") ("a" "all/open") ("/" "filter") ("g" "redraw") ("q" "quit")))
@@ -214,7 +214,7 @@ or its command; #t when it went somewhere"
 (define-command "notifications" "Show the notices that need you, newest first"
   (lambda ()
     (buffer-create *notifications-buffer*)
-    (unless (buffer-local *notifications-buffer* 'group)
+    (unless (buffer-local-value 'group *notifications-buffer*)
       (buffer-set-local! *notifications-buffer* 'group (frame-group)))
     (list-mode-show! "notifications-mode")))
 
@@ -242,7 +242,7 @@ or its command; #t when it went somewhere"
 (define-command "notifications-toggle-all" "Show every notice that passed, or only the open ones"
   (lambda ()
     (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'notifications-all (not (buffer-local buf 'notifications-all)))
+      (buffer-set-local! buf 'notifications-all (not (buffer-local-value 'notifications-all buf)))
       (list-refresh! buf)))
   'modes '(notifications-mode))
 

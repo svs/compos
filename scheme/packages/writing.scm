@@ -166,12 +166,12 @@
 ;; value rides inside a list: a document with no presets must still read as
 ;; remembered, and an empty list is not #f.
 (define (writing--remember-presets! buf)
-  (unless (buffer-local buf 'writing-saved-presets)
+  (unless (buffer-local-value 'writing-saved-presets buf)
     (buffer-set-local! buf 'writing-saved-presets
-      (list (or (buffer-local buf 'chat-presets) '())))))
+      (list (or (buffer-local-value 'chat-presets buf) '())))))
 
 (define (writing--saved-presets buf)
-  (let ((saved (buffer-local buf 'writing-saved-presets)))
+  (let ((saved (buffer-local-value 'writing-saved-presets buf)))
     (if saved (car saved) '())))
 
 (define (writing--configured-presets buf)
@@ -200,12 +200,12 @@
   ;; The document is the finished surface; the scratch is the LLM session.
   ;; Keep all session knobs where M-o actually runs.
   (let* ((model (if (equal? writing-model "")
-                    (buffer-local buf 'llm-model)
+                    (buffer-local-value 'llm-model buf)
                     writing-model))
          (presets (writing--configured-presets buf))
-         (changed (or (not (equal? model (buffer-local scratch 'llm-model)))
+         (changed (or (not (equal? model (buffer-local-value 'llm-model scratch)))
                       (not (equal? presets
-                                   (buffer-local scratch 'chat-presets))))))
+                                   (buffer-local-value 'chat-presets scratch))))))
     (when (and changed (boundp (quote llm-mode-reset-runtime!)))
       ;; Model and MCP changes take effect by resuming the same native Codex
       ;; thread through a fresh local runtime.
@@ -261,8 +261,8 @@
   (let* ((baseline (or (workspace-mode-saved "writing-mode" buf 'writing-source-remap)
                        (preview--source-remap
                          (or (workspace-mode-saved "writing-mode" buf 'face-remap) '()))))
-         (remap (writing--source-remap (or (buffer-local buf 'face-remap) '()) baseline))
-         (preview (buffer-local buf 'preview-rows-saved)))
+         (remap (writing--source-remap (or (buffer-local-value 'face-remap buf) '()) baseline))
+         (preview (buffer-local-value 'preview-rows-saved buf)))
     (buffer-set-local! buf 'face-remap remap)
     (when preview
       (buffer-set-local! buf 'preview-rows-saved
@@ -291,15 +291,15 @@
 (define (writing--restore-look! buf saved)
   (let* ((baseline (or (saved 'writing-source-remap)
                        (preview--source-remap (or (saved 'face-remap) '()))))
-         (remap (writing--source-remap (or (buffer-local buf 'face-remap) '()) baseline))
+         (remap (writing--source-remap (or (buffer-local-value 'face-remap buf) '()) baseline))
          (width (assoc 'writing baseline)))
     (buffer-set-local! buf 'face-remap
       (append (if width (list width) '())
               (remove (lambda (entry) (equal? (car entry) 'writing)) remap)))
-    (buffer-set-local! buf 'style (face-remap--css (buffer-local buf 'face-remap))))
+    (buffer-set-local! buf 'style (face-remap--css (buffer-local-value 'face-remap buf))))
   (text-scale-sync! buf)
   ;; Heal old desktops which had applied writing presentation to a chat.
-  (when (equal? (buffer-local buf 'mode-name) "chat-mode")
+  (when (equal? (buffer-local-value 'mode-name buf) "chat-mode")
     (buffer-set-local! buf 'render-mode (saved 'render-mode)))
   (buffer-set-local! buf 'modeline-info #f))
 
@@ -309,15 +309,15 @@
 ;; changed comes back, and the stale entry leaves 'minor-modes.
 (define-workspace-mode! "writing-mode"
   'saved 'writing-saved
-  'accepts? (lambda (buf) (not (equal? (buffer-local buf 'mode-name) "chat-mode")))
+  'accepts? (lambda (buf) (not (equal? (buffer-local-value 'mode-name buf) "chat-mode")))
   'locals '(line-numbers window-class)
   'modes '("visual-line-mode")
   'remember (list 'face-remap
                   (list 'writing-source-remap
                     (lambda (buf)
-                      (let ((preview (buffer-local buf 'preview-rows-saved)))
+                      (let ((preview (buffer-local-value 'preview-rows-saved buf)))
                         (if preview (car preview)
-                            (or (buffer-local buf 'face-remap) '()))))))
+                            (or (buffer-local-value 'face-remap buf) '()))))))
   'setup writing--present!
   'teardown (lambda (buf saved) (writing--remove-hook! buf))
   'after writing--restore-look!)
@@ -341,7 +341,7 @@
          (scratch (scratch-ensure! buf))
          (chat (group-chat group)))
     (buffer-set-local! buf 'writing-chat-buffer chat)
-    (unless (equal? (buffer-local chat 'mode-name) "chat-mode")
+    (unless (equal? (buffer-local-value 'mode-name chat) "chat-mode")
       (with-current-buffer chat (lambda () (set-mode! "chat-mode"))))
     (writing--configure-scratch! buf scratch)))
 
@@ -361,8 +361,8 @@
   (lambda ()
     ;; When invoked from the companion chat, return to its group's document.
     (let* ((here (current-buffer))
-           (chat? (equal? (buffer-local here 'mode-name) "chat-mode"))
-           (g (buffer-local here 'group))
+           (chat? (equal? (buffer-local-value 'mode-name here) "chat-mode"))
+           (g (buffer-local-value 'group here))
            (docs (if (and g chat?) (group-docs g) '()))
            ;; A chat is never the writing document. When the group has no
            ;; document, stop instead of putting writing-mode on the chat.
@@ -379,7 +379,7 @@
 
 (define-command "writing-mode" "Toggle writing mode in the current buffer"
   (lambda ()
-    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
+    (if (equal? (buffer-local-value 'mode-name (current-buffer)) "chat-mode")
         (message "writing-mode does not apply to a chat buffer")
         (if (toggle-minor-mode! "writing-mode")
             (message "Writing mode enabled")

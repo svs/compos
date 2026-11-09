@@ -63,7 +63,7 @@
 (define (llm-presets--draft name)
   "the draft of preset NAME's page, or #f when no page is open"
   (let ((buf (llm-presets--detail-buffer name)))
-    (and (buffer-exists? buf) (buffer-local buf 'llm-presets-draft))))
+    (and (buffer-exists? buf) (buffer-local-value 'llm-presets-draft buf))))
 
 (define (llm-presets--changes name)
   "the fields the page of NAME changed and did not save"
@@ -72,14 +72,14 @@
 
 (define (llm-presets--list)
   "the listing at hand: this one, the one this page belongs to, else the first"
-  (if (equal? (buffer-local (current-buffer) 'mode-name) "llm-presets-mode")
+  (if (equal? (buffer-local-value 'mode-name (current-buffer)) "llm-presets-mode")
       (current-buffer)
-      (or (buffer-local (current-buffer) 'llm-presets-list) *llm-presets-buffer*)))
+      (or (buffer-local-value 'llm-presets-list (current-buffer)) *llm-presets-buffer*)))
 
 (define (llm-presets--chat)
   "the chat this app acts for: the one it was opened from, else #f"
   (let ((c (and (buffer-exists? (llm-presets--list))
-                (buffer-local (llm-presets--list) 'llm-presets-chat))))
+                (buffer-local-value 'llm-presets-chat (llm-presets--list)))))
     (and c (buffer-exists? c) c)))
 
 ;; --- listing ----------------------------------------------------------------
@@ -95,7 +95,7 @@
 
 (define (llm-presets--count buf name)
   (length (filter (lambda (e) (equal? (cadr e) name))
-                  (or (buffer-local buf 'llm-presets-on) '()))))
+                  (or (buffer-local-value 'llm-presets-on buf) '()))))
 
 (define (llm-presets--keep buf)
   "the columns this width holds, by heading; the last one takes the rest"
@@ -144,7 +144,7 @@
 (define (llm-presets--chat-cells buf chat)
   (let* ((s (llm-config--current chat))
          (on (llm-presets--chat-preset chat))
-         (was (buffer-local chat 'llm-preset))
+         (was (buffer-local-value 'llm-preset chat))
          (g (buffer-group chat)))
     (list (list chat "default")
           (list (or (and g (group-name g)) "") "dim")
@@ -173,7 +173,7 @@
 ;; --- the page of one preset -------------------------------------------------
 
 (define (llm-presets--page-rows buf)
-  (let ((name (buffer-local buf 'llm-preset-name)))
+  (let ((name (buffer-local-value 'llm-preset-name buf)))
     (append *llm-presets-fields*
             (list (list 'section "Used by"))
             (let ((cs (llm-presets--followers name)))
@@ -186,8 +186,8 @@
                                                (if (llm-presets--group-default? name g) "yes" "no"))))))))
 
 (define (llm-presets--page-cells buf r)
-  (let* ((name (buffer-local buf 'llm-preset-name))
-         (draft (buffer-local buf 'llm-presets-draft))
+  (let* ((name (buffer-local-value 'llm-preset-name buf))
+         (draft (buffer-local-value 'llm-presets-draft buf))
          (saved (llm-presets--setup (or (llm-bundle-named name) '()))))
     (cond
       ((eq? (car r) 'section) (list (list (cadr r) "llm-presets-name") (list "" "faint") (list "" "faint")))
@@ -201,7 +201,7 @@
       (else (list (list "" "faint") (list (cadr r) "faint") (list "" "faint"))))))
 
 (define (llm-presets--page-meta buf)
-  (let* ((name (buffer-local buf 'llm-preset-name))
+  (let* ((name (buffer-local-value 'llm-preset-name buf))
          (n (length (llm-presets--followers name)))
          (ch (llm-presets--changes name)))
     (string-append
@@ -234,7 +234,7 @@
           (when g (buffer-move-to-group! buf g))))
       (buffer-set-local! buf 'llm-presets-list list-buf)
       (buffer-set-local! buf 'llm-preset-name name)
-      (unless (buffer-local buf 'llm-presets-draft)
+      (unless (buffer-local-value 'llm-presets-draft buf)
         (buffer-set-local! buf 'llm-presets-draft (llm-presets--setup (llm-bundle-named name))))
       (if (equal? (list-mode-of buf) "llm-presets-detail-mode")
           (llm-presets--draw! buf)
@@ -244,15 +244,15 @@
 
 (define (llm-presets--store buf)
   "the page's draft as a picker store: (GET SET)"
-  (list (lambda (key) (llm-bundle-get (buffer-local buf 'llm-presets-draft) key #f))
+  (list (lambda (key) (llm-bundle-get (buffer-local-value 'llm-presets-draft buf) key #f))
         (lambda (key value)
           (buffer-set-local! buf 'llm-presets-draft
-            (llm-bundle-put (buffer-local buf 'llm-presets-draft) key value))
+            (llm-bundle-put (buffer-local-value 'llm-presets-draft buf) key value))
           (llm-presets-refresh!))))
 
 (define (llm-presets--name-here)
   "the preset this command is about: the page's own, else the listing's row"
-  (or (buffer-local (current-buffer) 'llm-preset-name)
+  (or (buffer-local-value 'llm-preset-name (current-buffer))
       (let* ((l (llm-presets--list))
              (r (and (buffer-exists? l) (list-current l))))
         (and r (eq? (car r) 'preset) (cadr r)))))
@@ -337,7 +337,7 @@
           (else
             (let ((followers (llm-presets--followers name))
                   (order (llm-presets--names)))
-              (llm-bundle-save! name (buffer-local page 'llm-presets-draft))
+              (llm-bundle-save! name (buffer-local-value 'llm-presets-draft page))
               (llm-presets--keep-order! order)
               (let ((new (llm-bundle-named name)))
                 (for-each (lambda (c) (llm-bundle-apply! c new) (llm-config-changed! c)) followers))
@@ -393,7 +393,7 @@
       (for-each (lambda (id) (when (equal? (group-setting id 'llm) old) (group-config-set! id 'llm new)))
                 (group-ids))
       (when (equal? llm-default-bundle old) (customize-save! 'llm-default-bundle new))
-      (for-each (lambda (c) (when (equal? (buffer-local c 'llm-preset) old) (buffer-set-local! c 'llm-preset new)))
+      (for-each (lambda (c) (when (equal? (buffer-local-value 'llm-preset c) old) (buffer-set-local! c 'llm-preset new)))
                 (llm-presets--chats))
       (let ((page (llm-presets--page-for old)))
         (when page (buffer-kill! page)))
@@ -550,7 +550,7 @@
     'section? (lambda (buf r) (eq? (car r) 'section))
     'columns (lambda (buf) (list (list "field" 16) (list "value" #f) (list "" 28)))
     'cells llm-presets--page-cells
-    'title (lambda (buf) (string-append "Preset " (or (buffer-local buf 'llm-preset-name) "")))
+    'title (lambda (buf) (string-append "Preset " (or (buffer-local-value 'llm-preset-name buf) "")))
     'meta llm-presets--page-meta
     'noun "field"
     'no-marks #t

@@ -76,7 +76,7 @@
       (buffer-set-local! buf 'agent-slug "zz-wf")
       (with-current-buffer buf
         (lambda () (write-buffer-to-file! buf p)))
-      (check-equal! (buffer-local p 'chat-directory) (string-append d "/")
+      (check-equal! (buffer-local-value 'chat-directory p) (string-append d "/")
                     "the written directory is chat identity")
       (check-equal! (buffer-directory p) (string-append d "/")
                     "the chat works in the written directory")

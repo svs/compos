@@ -62,7 +62,7 @@
                            (or (string-prefix? "*zz-lc-" b)
                                (equal? b t--lm-buf)
                                (string-contains? b "zz-lc-group")
-                               (equal? (buffer-local b 'listing-preview-owner) t--lm-buf)))
+                               (equal? (buffer-local-value 'listing-preview-owner b) t--lm-buf)))
                   (buffer-kill! b)))
               (buffer-list))
     (switch-to-buffer! "*scratch*")

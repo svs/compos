@@ -86,7 +86,7 @@
     (let ((buf (test-buffer! "zz-llm-perm" "")))
       (chat-permission-mode-set! buf 'ask)
       (check-equal! (chat-permission-mode buf) 'ask "the stance is buffer-local")
-      (check-contains! (buffer-local buf 'modeline-info) "ask"
+      (check-contains! (buffer-local-value 'modeline-info buf) "ask"
                        "and the modeline says what will stop to ask")
       (check-equal! (agent-mode-set! buf "plan") "plan"
                     "a buffer with no session parks the mode for the session to come")
@@ -100,8 +100,8 @@
                                presets (compos web) permission "ask"))
       (check-equal! (chat-presets-of buf) '(compos web) "the tools came with it")
       (check-equal! (chat-permission-mode buf) 'ask "so did the stance")
-      (check-equal! (buffer-local buf 'llm-model) "m1" "and the model")
-      (check-equal! (buffer-local buf 'llm-effort) "high" "and the effort")
+      (check-equal! (buffer-local-value 'llm-model buf) "m1" "and the model")
+      (check-equal! (buffer-local-value 'llm-effort buf) "high" "and the effort")
       (buffer-kill! buf))))
 
 (deftest 'a-bundle-that-recorded-no-presets-changes-none
@@ -112,7 +112,7 @@
       (llm-bundle-apply! buf (llm-bundle-normalize '("api" "m2" "low")))
       (check-equal! (chat-presets-of buf) '(compos web)
                     "what it never recorded, it never sets")
-      (check-equal! (buffer-local buf 'llm-model) "m2" "what it recorded, it sets")
+      (check-equal! (buffer-local-value 'llm-model buf) "m2" "what it recorded, it sets")
       (buffer-kill! buf))))
 
 (deftest 'a-shell-command-asks-instead-of-vanishing
@@ -142,12 +142,12 @@ a hang, and the user never learns there was anything to answer."
   (lambda ()
     (let ((buf (test-buffer! "zz-llm-mline" "")))
       (chat-presets-set! buf '(compos web))
-      (check-contains! (buffer-local buf 'modeline-info) " · web"
+      (check-contains! (buffer-local-value 'modeline-info buf) " · web"
                        "a preset beyond the bridge shows")
       (chat-presets-set! buf '())
-      (check-false! (string-contains? (buffer-local buf 'modeline-info) " · web")
+      (check-false! (string-contains? (buffer-local-value 'modeline-info buf) " · web")
                     "and leaves when it is off")
-      (check-false! (string-contains? (buffer-local buf 'modeline-info) "compos")
+      (check-false! (string-contains? (buffer-local-value 'modeline-info buf) "compos")
                     "the ever-present bridge says nothing")
       (buffer-kill! buf))))
 
@@ -219,10 +219,10 @@ a hang, and the user never learns there was anything to answer."
     (let ((buf (test-buffer! "zz-llm-mode-park" "")))
       (check-equal! (agent-mode-set! buf "plan") "plan"
                     "the choice is taken, not refused")
-      (check-equal! (buffer-local buf 'agent-mode-wanted) "plan" "and parked")
-      (check-equal! (buffer-local buf 'agent-mode) "plan" "the menu shows it")
+      (check-equal! (buffer-local-value 'agent-mode-wanted buf) "plan" "and parked")
+      (check-equal! (buffer-local-value 'agent-mode buf) "plan" "the menu shows it")
       (buffer-set-local! buf 'agent-modes '(("default" "Default" "asks")))
       (check-false! (agent-mode-take-pending! buf)
                     "a mode this backend does not have is dropped")
-      (check-false! (buffer-local buf 'agent-mode-wanted) "and not kept forever")
+      (check-false! (buffer-local-value 'agent-mode-wanted buf) "and not kept forever")
       (buffer-kill! buf))))

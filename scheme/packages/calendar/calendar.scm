@@ -763,13 +763,13 @@
   (format-time (calendar--stamp->secs day) "%A %d %B"))
 
 (define (calendar--view-start buf)
-  (or (buffer-local buf 'calendar-start) (calendar--now-day)))
+  (or (buffer-local-value 'calendar-start buf) (calendar--now-day)))
 
 (defcustom 'calendar-view-span "week"
   "What calendar-mode opens on: day, week or month.")
 
 (define (calendar--view-span buf)
-  (or (buffer-local buf 'calendar-span) calendar-view-span))
+  (or (buffer-local-value 'calendar-span buf) calendar-view-span))
 
 (define (calendar--month-first day) (string-append (substring day 0 8) "01"))
 
@@ -864,9 +864,9 @@
   (let* ((range (calendar--view-range buf))
          (from (car range))
          (n (car (cdr range)))
-         (rows (buffer-local buf 'calendar-rows))
-         (loading (buffer-local buf 'calendar-loading))
-         (closed (or (buffer-local buf 'calendar-closed) '()))
+         (rows (buffer-local-value 'calendar-rows buf))
+         (loading (buffer-local-value 'calendar-loading buf))
+         (closed (or (buffer-local-value 'calendar-closed buf) '()))
          (today (calendar--now-day))
          (now (format-time (current-time) "%H:%M"))
          (header (string-append (calendar--view-title buf)
@@ -946,7 +946,7 @@
                          (when ok?
                            (set! *calendar-view-cache* (cons (cons key rows) *calendar-view-cache*)))
                          (when (and (buffer-exists? buf)
-                                    (equal? (buffer-local buf 'calendar-loading) key))
+                                    (equal? (buffer-local-value 'calendar-loading buf) key))
                            (buffer-set-local! buf 'calendar-rows rows)
                            (buffer-set-local! buf 'calendar-loading #f)
                            (calendar--view-render! buf)
@@ -961,18 +961,18 @@
 
 (define (calendar--view-event-at buf)
   (let ((hit (assoc (calendar--view-line-at buf (buffer-point buf))
-                    (or (buffer-local buf 'calendar-index) '()))))
+                    (or (buffer-local-value 'calendar-index buf) '()))))
     (and hit (car (cdr hit)))))
 
 (define (calendar--view-day-at buf)
   (let ((here (calendar--view-line-at buf (buffer-point buf))))
     (fold (lambda (acc d) (if (<= (car d) here) (car (cdr d)) acc))
-          #f (or (buffer-local buf 'calendar-day-lines) '()))))
+          #f (or (buffer-local-value 'calendar-day-lines buf) '()))))
 
 (define (calendar--view-step! dir)
   (let* ((buf (current-buffer))
          (here (calendar--view-line-at buf (buffer-point buf)))
-         (lines (map car (or (buffer-local buf 'calendar-index) '())))
+         (lines (map car (or (buffer-local-value 'calendar-index buf) '())))
          (cand (filter (lambda (l) (if (> dir 0) (> l here) (< l here))) lines))
          (best (fold (lambda (acc l)
                        (if (or (not acc) (if (> dir 0) (< l acc) (> l acc))) l acc))
@@ -986,7 +986,7 @@
     (if url (tab-open url) (message "calendar: this event has no link"))))
 
 (define (calendar--view-toggle! buf day)
-  (let ((closed (or (buffer-local buf 'calendar-closed) '())))
+  (let ((closed (or (buffer-local-value 'calendar-closed buf) '())))
     (buffer-set-local! buf 'calendar-closed
       (if (member day closed)
           (filter (lambda (d) (not (equal? d day))) closed)
@@ -1047,13 +1047,13 @@
 
 (add-hook! (list 'block-click 'calendar)
   (lambda (buf id)
-    (and (buffer-local buf 'calendar-day-lines)
+    (and (buffer-local-value 'calendar-day-lines buf)
          (cond ((string-prefix? "d-" id)
                 (calendar--view-toggle! buf (substring id 2 (string-length id)))
                 #t)
                ((string-prefix? "e-" id)
                 (let* ((l (string->number (substring id 2 (string-length id))))
-                       (hit (and l (assoc l (or (buffer-local buf 'calendar-index) '())))))
+                       (hit (and l (assoc l (or (buffer-local-value 'calendar-index buf) '())))))
                   (when hit (calendar--view-open! (car (cdr hit)))))
                 #t)
                (else #f)))))

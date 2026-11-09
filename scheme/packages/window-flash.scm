@@ -10,14 +10,14 @@
 (effects! '(read))
 
 (define (window-flash--state buf)
-  (let* ((s (buffer-local buf 'chat-goal-status))
+  (let* ((s (buffer-local-value 'chat-goal-status buf))
          (s (cond ((symbol? s) (symbol->string s)) ((string? s) s) (else "idle"))))
-    (if (buffer-local buf 'chat-turn-active) (string-append s " · running") s)))
+    (if (buffer-local-value 'chat-turn-active buf) (string-append s " · running") s)))
 
 (define (window-flash-card buf)
   "(TITLE SUMMARY STATE) a window flashes for the chat BUF, or #f for any other buffer."
-  (and (equal? (buffer-local buf 'mode-name) "chat-mode")
-       (let ((s (buffer-local buf 'chat-summary)))
+  (and (equal? (buffer-local-value 'mode-name buf) "chat-mode")
+       (let ((s (buffer-local-value 'chat-summary buf)))
          (list (or (chat-title-of buf) buf)
                (if (string? s) s "")
                (window-flash--state buf)))))

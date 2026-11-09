@@ -98,7 +98,7 @@
 ;;; the mode setup fn re-derives it after a restart.
 
 (define (org-folds buf)
-  (let ((f (buffer-local buf 'org-folds)))
+  (let ((f (buffer-local-value 'org-folds buf)))
     (if f f '())))
 
 (define (org-valid-folds buf)
@@ -601,7 +601,7 @@
 (define (org--apply-fonts! _v)
   (for-each
     (lambda (buf)
-      (if (equal? (buffer-local buf 'mode-name) "org-mode")
+      (if (equal? (buffer-local-value 'mode-name buf) "org-mode")
           (face-remap-in! buf 'default
             (list 'family org-font-family
                   'size org-font-size

@@ -202,11 +202,11 @@
           (else (car bs)))))
 
 (define (keys--target buf)
-  (let ((t (buffer-local buf 'keys--target)))
+  (let ((t (buffer-local-value 'keys--target buf)))
     (if (and (string? t) (buffer-known? t)) t (keys--other-buffer))))
 
 (define (keys--scope buf)
-  (or (buffer-local buf 'keys--scope) "all"))
+  (or (buffer-local-value 'keys--scope buf) "all"))
 
 (define (keys--unbound-rows maps)
   ;; a key you took away has no binding left to read, so the edit itself

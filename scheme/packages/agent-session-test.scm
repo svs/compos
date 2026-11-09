@@ -67,11 +67,11 @@
           (run-command "chat-history-previous")
           (check-equal! (chat-input-text buf) "first queued" "standing on the older row")
           (run-command "chat-unqueue")
-          (check-equal! (buffer-local buf 'chat-queued) (list "second queued")
+          (check-equal! (buffer-local-value 'chat-queued buf) (list "second queued")
                         "only that row left the queue")
           (check-equal! (chat-input-text buf) "first queued"
                         "and it landed back in the input, ready to edit or resend")
-          (check-false! (buffer-local buf 'chat-queued-walk) "the walk ends: there is nothing left to stand on")))
+          (check-false! (buffer-local-value 'chat-queued-walk buf) "the walk ends: there is nothing left to stand on")))
       (buffer-kill! buf))))
 
 (deftest 'chat-unqueue-without-a-walk-takes-the-newest
@@ -81,7 +81,7 @@
       (with-current-buffer buf
         (lambda ()
           (run-command "chat-unqueue")
-          (check-equal! (buffer-local buf 'chat-queued) (list "older") "the newest left")
+          (check-equal! (buffer-local-value 'chat-queued buf) (list "older") "the newest left")
           (check-equal! (chat-input-text buf) "newer" "and came back to the input")))
       (buffer-kill! buf))))
 
@@ -103,8 +103,8 @@
       (buffer-set-local! buf 'follow-place '(#t 120 2 7))
       (buffer-set-local! buf 'follow-seq 3)
       (chat-frame-to-bottom!)
-      (check-equal! (buffer-local buf 'follow-place) #f "the old place is gone")
-      (check-equal! (buffer-local buf 'follow-seq) 4 "the view gets the token to follow again")
+      (check-equal! (buffer-local-value 'follow-place buf) #f "the old place is gone")
+      (check-equal! (buffer-local-value 'follow-seq buf) 4 "the view gets the token to follow again")
       (buffer-kill! buf))))
 
 (deftest 'following-again-closes-the-revealed-blocks
@@ -113,7 +113,7 @@
     (let ((buf (t--as-chat! '())))
       (buffer-set-local! buf 'chat-view-reveal 3)
       (chat-follow-again! buf)
-      (check-equal! (buffer-local buf 'chat-view-reveal) #f "the reveals are gone")
+      (check-equal! (buffer-local-value 'chat-view-reveal buf) #f "the reveals are gone")
       (buffer-kill! buf))))
 
 (deftest 'programmatic-continuations-retain-agent-authorship

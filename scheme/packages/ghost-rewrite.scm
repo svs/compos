@@ -25,7 +25,7 @@
 
 ;; the state, a buffer local: (START END OLD ALTS INDEX). START and END are
 ;; byte offsets of the lit passage, OLD its text, ALTS the rewrites so far.
-(define (ghost-rewrite--state buf) (buffer-local buf 'ghost-rewrite))
+(define (ghost-rewrite--state buf) (buffer-local-value 'ghost-rewrite buf))
 (define (ghost-rewrite--set! buf st) (buffer-set-local! buf 'ghost-rewrite st))
 
 ;; SPAN without its closing newlines, or #f when nothing is left
@@ -52,7 +52,7 @@
 (define (ghost-rewrite-prompt buf passage n)
   (string-append
     "You rewrite one passage of a document open in a text editor"
-    (let ((mode (buffer-local buf 'mode-name)))
+    (let ((mode (buffer-local-value 'mode-name buf)))
       (if mode (string-append " (" mode ")") ""))
     ". Text in single square brackets is the author's note to you, an "
     "instruction for that spot: do what it asks there, and leave no bracket "
@@ -112,7 +112,7 @@
                                   "  TAB takes it · M-n M-p walk · C-c i more · C-g lets go"))))))
 
 (define (ghost-rewrite--dismiss! buf)
-  (let ((w (buffer-local buf 'ghost-rewrite-watch)))
+  (let ((w (buffer-local-value 'ghost-rewrite-watch buf)))
     (when w
       (remove-on-change! w)
       (buffer-set-local! buf 'ghost-rewrite-watch #f)))
@@ -124,14 +124,14 @@
 
 (define (ghost-rewrite--ask! buf)
   (let* ((st (ghost-rewrite--state buf))
-         (run (buffer-local buf 'ghost-rewrite-run))
+         (run (buffer-local-value 'ghost-rewrite-run buf))
          (start (car st))
          (old (caddr st))
          (prompt (ghost-rewrite-prompt buf old ghost-rewrite-count))
          (land (lambda (reply)
                  (let ((now (and (buffer-exists? buf) (ghost-rewrite--state buf))))
                    ;; a reply for a run since let go is dropped
-                   (when (and now (equal? (buffer-local buf 'ghost-rewrite-run) run))
+                   (when (and now (equal? (buffer-local-value 'ghost-rewrite-run buf) run))
                      (let ((alts (append (list-ref now 3) (ghost-rewrite-parse reply))))
                        (if (null? alts)
                            (begin (ghost-rewrite--dismiss! buf) (message "The model gave no rewrite"))
@@ -252,7 +252,7 @@
           (and (equal? inserted "]") pos))))))
 
 (define (copilot--teardown! buf)
-  (let ((w (buffer-local buf 'copilot-watch)))
+  (let ((w (buffer-local-value 'copilot-watch buf)))
     (when w
       (remove-on-change! w)
       (buffer-set-local! buf 'copilot-watch #f)))

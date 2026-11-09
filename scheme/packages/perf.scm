@@ -111,7 +111,7 @@
       (list 'perf-lanes (perf--lanes (telemetry-events 1000))
             'perf-mem (list (perf--get os 'mem-total 0) (perf--get os 'mem-free 0)
                             (perf--get (perf--get s 'memory '()) 'total 0))
-            'perf-tick (+ 1 (or (buffer-local buf 'perf-tick) 0))))))
+            'perf-tick (+ 1 (or (buffer-local-value 'perf-tick buf) 0))))))
 
 ;;; --- the apps ----------------------------------------------------------------------
 ;;; ps lists every host process with its resident memory; the processes of
@@ -141,7 +141,7 @@
 ;; ps runs off the lane; its answer lands in the buffer and redraws it.
 ;; One run at a time: a tick that finds one in flight skips its own.
 (define (perf--sample-apps! buf)
-  (unless (buffer-local buf 'perf-ps-busy)
+  (unless (buffer-local-value 'perf-ps-busy buf)
     (buffer-set-local! buf 'perf-ps-busy #t)
     (shell-command->string "ps -axo rss=,comm=" "/"
       (lambda (out)
@@ -164,24 +164,24 @@
 (define (perf--text buf)
   (string-append
     "*perf*  lanes, last " (number->string (quotient *perf-lane-window-ms* 1000)) " s"
-    "  tick " (number->string (or (buffer-local buf 'perf-tick) 0))
-    (if (buffer-local buf 'perf-paused) "  paused" "") "\n"
+    "  tick " (number->string (or (buffer-local-value 'perf-tick buf) 0))
+    (if (buffer-local-value 'perf-paused buf) "  paused" "") "\n"
     "\n"
     (string-pad-right "LANE" 40) (string-pad-left "JOBS" 6) (string-pad-left "BUSY" 8)
     (string-pad-left "WAIT MAX" 10) (string-pad-left "WAIT SUM" 10) (string-pad-left "BACKLOG" 9)
     "  SLOWEST\n"
-    (apply string-append (map perf--lane-text (or (buffer-local buf 'perf-lanes) '())))
+    (apply string-append (map perf--lane-text (or (buffer-local-value 'perf-lanes buf) '())))
     "\n" (perf--mem-summary buf) "\n\n"
     (string-pad-right "APP" 40) (string-pad-left "PROCS" 6) (string-pad-left "MEMORY" 12) "\n"
     (apply string-append
            (map (lambda (r) (string-append (string-pad-right (perf--clip (car r) 38) 40)
                                            (string-pad-left (number->string (caddr r)) 6)
                                            (string-pad-left (perf--bytes (* 1024 (cadr r))) 12) "\n"))
-                (or (buffer-local buf 'perf-apps) '())))))
+                (or (buffer-local-value 'perf-apps buf) '())))))
 
 ;; "used 20 GiB of 24 GiB · 84% · compos 697 MiB"
 (define (perf--mem-summary buf)
-  (let* ((m (or (buffer-local buf 'perf-mem) '(0 0 0)))
+  (let* ((m (or (buffer-local-value 'perf-mem buf) '(0 0 0)))
          (total (car m))
          (used (max 0 (- total (cadr m)))))
     (string-append "memory used " (perf--bytes used) " of " (perf--bytes total)
@@ -246,10 +246,10 @@
       (perf--meter pct (cond ((>= pct 20) "perf-hot") ((>= pct 8) "perf-warm") (else ""))))))
 
 (define (perf--memory-panel buf)
-  (let* ((m (or (buffer-local buf 'perf-mem) '(0 0 0)))
+  (let* ((m (or (buffer-local-value 'perf-mem buf) '(0 0 0)))
          (total (car m))
          (pct (perf--pct (max 0 (- total (cadr m))) total))
-         (apps (or (buffer-local buf 'perf-apps) '())))
+         (apps (or (buffer-local-value 'perf-apps buf) '())))
     (perf--div "perf-panel"
       (perf--div "perf-head"
         (perf--txt "perf-strong" "Memory · apps")
@@ -269,12 +269,12 @@
     (perf--txt "perf-strong" *perf-buffer*)
     (perf--txt "" "g refresh") (perf--txt "" "SPC pause") (perf--txt "" "q quit")
     (perf--txt "perf-spacer" "")
-    (perf--txt (if (buffer-local buf 'perf-paused) "perf-warm" "perf-dim")
-               (if (buffer-local buf 'perf-paused) "paused" (string-append "tick " (number->string (or (buffer-local buf 'perf-tick) 0)))))))
+    (perf--txt (if (buffer-local-value 'perf-paused buf) "perf-warm" "perf-dim")
+               (if (buffer-local-value 'perf-paused buf) "paused" (string-append "tick " (number->string (or (buffer-local-value 'perf-tick buf) 0)))))))
 
 (define (perf--blocks buf)
   (list (perf--div "perf-root"
-          (perf--lanes-panel (or (buffer-local buf 'perf-lanes) '()))
+          (perf--lanes-panel (or (buffer-local-value 'perf-lanes buf) '()))
           (perf--memory-panel buf)
           (perf--footer buf))))
 
@@ -297,7 +297,7 @@
 ;; customize takes effect on the next tick
 (define (perf--tick buf)
   (when (buffer-exists? buf)
-    (if (and (window-showing buf) (not (buffer-local buf 'perf-paused)))
+    (if (and (window-showing buf) (not (buffer-local-value 'perf-paused buf)))
         (begin
           (perf--refresh! buf)
           (perf--arm! buf perf-tick-ms))
@@ -308,7 +308,7 @@
 (define (perf--shown-hook!)
   (when (and (buffer-exists? *perf-buffer*)
              (window-showing *perf-buffer*)
-             (not (buffer-local *perf-buffer* 'perf-paused))
+             (not (buffer-local-value 'perf-paused *perf-buffer*))
              (buffer-derived-mode? *perf-buffer* "perf-mode"))
     (perf--arm! *perf-buffer* 0)))
 
@@ -362,7 +362,7 @@
 (define-command "perf-pause" "Pause or resume the samples"
   (lambda ()
     (let* ((buf (current-buffer))
-           (paused (not (buffer-local buf 'perf-paused))))
+           (paused (not (buffer-local-value 'perf-paused buf))))
       (buffer-set-local! buf 'perf-paused paused)
       (if paused
           (perf--render! buf)

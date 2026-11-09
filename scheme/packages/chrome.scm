@@ -306,17 +306,17 @@
 
 ;; what chat-context shows a site chat: the tab it sits beside, read live
 (define (companion-tab chat)
-  (let ((tab (buffer-local chat 'browse-tab)))
+  (let ((tab (buffer-local-value 'browse-tab chat)))
     (and tab
          (list 'id tab
-               'url (buffer-local chat 'browse-url)
+               'url (buffer-local-value 'browse-url chat)
                'note "\"this\" is this tab; open web pages in it with (tab-navigate ID URL K)"))))
 
 ;; the chat already beside TAB, whatever it is called by now
 (define (chrome--site-chat-find id tab)
   (let loop ((bs (group-buffers id)))
     (cond ((null? bs) #f)
-          ((equal? (buffer-local (car bs) 'browse-tab) tab) (car bs))
+          ((equal? (buffer-local-value 'browse-tab (car bs)) tab) (car bs))
           (else (loop (cdr bs))))))
 
 (define (site-chat host &optional tab url)
@@ -340,8 +340,8 @@
 
 (define-command "site-chat-tab" "Go back to the browser tab this site chat was opened from"
   (lambda ()
-    (let ((tab (buffer-local (current-buffer) 'browse-tab))
-          (url (buffer-local (current-buffer) 'browse-url)))
+    (let ((tab (buffer-local-value 'browse-tab (current-buffer)))
+          (url (buffer-local-value 'browse-url (current-buffer))))
       ;; ask the browser, not the tab cache: a closed tab answers an error,
       ;; and only then does the page open again
       (cond (tab (browser-call "activate" (list 'tab tab)

@@ -77,12 +77,12 @@
   (if (list-draw--entry buf)
       (thunk)
       (let* ((old (job-local 'list-draw))
-             (mode (buffer-local buf 'list-mode))
+             (mode (buffer-local-value 'list-mode buf))
              (opts (list-mode-opts mode))
              (profile (list-active-layout buf)))
         (list-draw--put! buf (list buf mode opts profile
-                                   (buffer-local buf 'list-row-depths)
-                                   (buffer-local buf 'list-row-parents)))
+                                   (buffer-local-value 'list-row-depths buf)
+                                   (buffer-local-value 'list-row-parents buf)))
         (unwind-protect thunk (lambda () (job-local-set! 'list-draw old))))))
 
 ;; the draw writes the depths and the parents after the nest; the memo
@@ -94,7 +94,7 @@
 
 (define (list-mode-of buf)
   (let ((e (list-draw--entry buf)))
-    (if e (nth 1 e) (buffer-local buf 'list-mode))))
+    (if e (nth 1 e) (buffer-local-value 'list-mode buf))))
 
 (define (list-plist-key? pl key)
   (let loop ((rest pl))
@@ -140,7 +140,7 @@
   ;; the cache answers first: working the profile out again means reading
   ;; the mode table and its layouts before finding out nothing changed
   (let ((width (list-view-width buf))
-        (cache (buffer-local buf 'list-layout-cache)))
+        (cache (buffer-local-value 'list-layout-cache buf)))
     (if (and (pair? cache) (equal? (car cache) width))
         (cadr cache)
         (let* ((opts (list-mode-opts (list-mode-of buf)))
@@ -179,7 +179,7 @@
                 (ln (- (length (string-split before "\n")) 1 header-lines)))
            (and (>= ln 0) ln)))))
 
-(define (list-entries buf) (or (buffer-local buf 'list-entries) '()))
+(define (list-entries buf) (or (buffer-local-value 'list-entries buf) '()))
 
 (define (list-key buf e)
   (let ((f (list-opt buf 'key)))
@@ -204,7 +204,7 @@
 
 ;;; marks — a list of (KEY CHAR), on the list buffer
 
-(define (list-marks buf) (or (buffer-local buf 'list-marks) '()))
+(define (list-marks buf) (or (buffer-local-value 'list-marks buf) '()))
 
 ;; the one writer of 'list-marks: a mode that draws its own selection
 ;; (notmuch) hands the whole set here
@@ -507,7 +507,7 @@
 
 ;;; filters — a stack of (LABEL ARG), newest first
 
-(define (list-filters buf) (or (buffer-local buf 'list-filters) '()))
+(define (list-filters buf) (or (buffer-local-value 'list-filters buf) '()))
 
 (define (list-filter-push! buf f)
   (buffer-set-local! buf 'list-filters (cons f (list-filters buf)))
@@ -556,11 +556,11 @@
 ;;; DEFAULT answers while none is chosen. Neither redraws: the caller
 ;;; knows whether a fetch or a plain redraw follows.
 
-(define (list-tab buf &optional default) (or (buffer-local buf 'list-tab) default))
+(define (list-tab buf &optional default) (or (buffer-local-value 'list-tab buf) default))
 
 (define (list-tab-set! buf tab) (buffer-set-local! buf 'list-tab tab) tab)
 
-(define (list-sort buf &optional default) (or (buffer-local buf 'list-sort) default))
+(define (list-sort buf &optional default) (or (buffer-local-value 'list-sort buf) default))
 
 (define (list-sort-set! buf by) (buffer-set-local! buf 'list-sort by) by)
 
@@ -758,7 +758,7 @@
 ;; the filters on the cache: a keystroke in `/` must not call the source
 ;; again. A plain list computes its rows on every draw.
 (define (list-source-entries buf)
-  (or (buffer-local buf 'list-source-entries) '()))
+  (or (buffer-local-value 'list-source-entries buf) '()))
 
 ;; A substring filter can only lose matches as the query grows. Keep the
 ;; previous candidate set outside display state; backspace starts from source.
@@ -796,7 +796,7 @@
   (if (list-opt buf 'local-filter)
       (begin
         (when (or (equal? fetch #t)
-                  (not (buffer-local buf 'list-source-entries)))
+                  (not (buffer-local-value 'list-source-entries buf)))
           (buffer-set-local! buf 'list-source-entries
                              ((list-opt buf 'rows) buf))
           (let ((updated (list-opt buf 'source-refreshed)))
@@ -809,7 +809,7 @@
       ;; network, for sentry) inside a switcher preview. A filter redraw
       ;; still passes #f and reaches the source, which reads the query.
       (if (and (equal? fetch 'cached)
-               (pair? (buffer-local buf 'list-entries)))
+               (pair? (buffer-local-value 'list-entries buf)))
           (list-entries buf)
           ((list-opt buf 'rows) buf))))
 
@@ -878,7 +878,7 @@
 ;; keeps one character clear of the edge, so nothing wraps.
 (define (list-view-width buf)
   ;; A dormant list's saved text and semantic ranges share its last width.
-  (or (and (not (buffer-exists? buf)) (buffer-local buf 'list-width))
+  (or (and (not (buffer-exists? buf)) (buffer-local-value 'list-width buf))
       (max 40 (- (buffer-cols buf) 1))))
 (public! 'list-view-width "(list-view-width BUF) — the columns list BUF draws in; a dormant list answers its last width" 'ui)
 (catalog-meta! 'function "list-view-width" 'effects '(read))
@@ -983,7 +983,7 @@
 (define (list-row-height buf) (max 1 (length (list-column-lines buf))))
 
 (define (list-drawn-row-height buf)
-  (or (buffer-local buf 'list-row-height) 1))
+  (or (buffer-local-value 'list-row-height buf) 1))
 
 (define (list-table? buf) (pair? (list-columns buf)))
 
@@ -1326,13 +1326,13 @@
                  ;; the bar owns ?: a mode that lists it says it twice
                  (list 'main (filter (lambda (k) (not (equal? (car k) "?"))) (footer buf))
                        'grids (list-keys-grids buf)
-                       'expanded (if (buffer-local buf 'list-keys-expanded) #t #f)))))))
+                       'expanded (if (buffer-local-value 'list-keys-expanded buf) #t #f)))))))
 
 (define-command "list-keys-toggle"
   "Grow this list's keys card into the whole keymap, or fold it back"
   (lambda ()
     (let* ((buf (current-buffer))
-           (now (not (buffer-local buf 'list-keys-expanded))))
+           (now (not (buffer-local-value 'list-keys-expanded buf))))
       (desktop-skip! buf 'list-keys-expanded)
       (buffer-set-local! buf 'list-keys-expanded now)
       (let ((blocks (list-keys-bar-blocks buf)))
@@ -1501,7 +1501,7 @@
   (let loop ((p plist) (fresh '()))
     (cond ((or (null? p) (null? (cdr p)))
            (unless (null? fresh) (buffer-set-locals! buf fresh)))
-          ((equal? (buffer-local buf (car p)) (cadr p)) (loop (cddr p) fresh))
+          ((equal? (buffer-local-value (car p) buf) (cadr p)) (loop (cddr p) fresh))
           (else (loop (cddr p) (cons (car p) (cons (cadr p) fresh)))))))
 
 (define (list-write! buf lines first-row n-rows per &optional extra-locals heights)
@@ -1546,7 +1546,7 @@
 
 ;;; --- where point is, in rows ---------------------------------------------------
 
-(define (list-offsets buf) (or (buffer-local buf 'list-offsets) '()))
+(define (list-offsets buf) (or (buffer-local-value 'list-offsets buf) '()))
 
 (define (list-imenu-rows buf)
   ;; one imenu row per drawn entry: the first two cells name it, the rest
@@ -1574,7 +1574,7 @@
         (offs (list-offsets buf)))
     (if (and (number? at) (pair? offs))
         (and (>= at (car offs)) (list-index-at-pos buf at))
-        (let ((ln (line-index-at buf (or (buffer-local buf 'list-head-count)
+        (let ((ln (line-index-at buf (or (buffer-local-value 'list-head-count buf)
                                          (list-header-lines buf)))))
           (and ln (quotient ln (list-drawn-row-height buf)))))))
 
@@ -1646,7 +1646,7 @@
           ;; the key is a change, and a change is a refresh: write it
           ;; only when the selection moved
           (let ((key (list-key buf entry))
-                (old (buffer-local buf 'list-selection-key)))
+                (old (buffer-local-value 'list-selection-key buf)))
             (unless (equal? key old)
               (buffer-set-local! buf 'list-selection-key key)
               ;; the highlight moved by any means (a click, a search, M-<),
@@ -1655,7 +1655,7 @@
               ;; previewed again.
               (when (and old
                          (list-opt buf 'preview)
-                         (not (equal? key (buffer-local buf 'list-preview-key)))
+                         (not (equal? key (buffer-local-value 'list-preview-key buf)))
                          (equal? (window-buffer (active-window)) buf))
                 (list-preview! buf))))
           (if face
@@ -1707,7 +1707,7 @@
 (define (list-restamp! buf)
   (let ((f (list-opt buf 'stamp)))
     (when f
-      (unless (equal? (f buf) (buffer-local buf 'list-stamp))
+      (unless (equal? (f buf) (buffer-local-value 'list-stamp buf))
         (list-refresh! buf)))))
 
 ;; a table lays out in characters, so a window that changed width means a
@@ -1719,7 +1719,7 @@
   (when (list-mode-of buf)
     (when (list-table? buf)
       (let ((w (list-view-width buf)))
-        (unless (equal? w (buffer-local buf 'list-width))
+        (unless (equal? w (buffer-local-value 'list-width buf))
           (buffer-set-local! buf 'list-width w)
           (list-render! buf 'cached))))
     (list-restamp! buf)
@@ -1730,7 +1730,7 @@
   "How long the highlight rests on a row before a list shows that row's page beside it, in milliseconds. A held arrow reaches the row you want before one page is drawn or read. 0 shows the page on every move."
   'group 'list 'type 'number)
 
-(define (list-detail-off? buf) (and (buffer-local buf 'list-detail-off) #t))
+(define (list-detail-off? buf) (and (buffer-local-value 'list-detail-off buf) #t))
 
 (define (list-preview! buf)
  (unless (list-detail-off? buf)
@@ -2167,7 +2167,7 @@
 ;; how many rows the next draw writes: the pages opened so far, or one
 (define (list-page-limit buf)
   (let ((size (list-page-size buf)))
-    (and size (max size (or (buffer-local buf 'list-page-limit) 0)))))
+    (and size (max size (or (buffer-local-value 'list-page-limit buf) 0)))))
 
 (define (list-page-rows buf rows)
   (let ((limit (list-page-limit buf)))
@@ -2179,7 +2179,7 @@
         rows)))
 
 (define (list-shown-count buf)
-  (or (buffer-local buf 'list-shown-count) (length (list-entries buf))))
+  (or (buffer-local-value 'list-shown-count buf) (length (list-entries buf))))
 
 ;; only a paged list has more: a mode without pages may set its own
 ;; entries after a draw, and the count of the last draw is not a page
@@ -2448,11 +2448,11 @@
 
 (define (list-row-depths-of buf)
   (let ((e (list-draw--entry buf)))
-    (or (if e (nth 4 e) (buffer-local buf 'list-row-depths)) '())))
+    (or (if e (nth 4 e) (buffer-local-value 'list-row-depths buf)) '())))
 
 (define (list-row-parents-of buf)
   (let ((e (list-draw--entry buf)))
-    (or (if e (nth 5 e) (buffer-local buf 'list-row-parents)) '())))
+    (or (if e (nth 5 e) (buffer-local-value 'list-row-parents buf)) '())))
 
 (define (list-row-depth buf row)
   (let ((d (and (list-opt buf 'parent)
@@ -2493,7 +2493,7 @@
             (when i (list-goto-index! buf i)))))))
 
 (define (list-toggle-all-children! buf)
-  (let* ((parents (or (buffer-local buf 'list-row-parents) '()))
+  (let* ((parents (or (buffer-local-value 'list-row-parents buf) '()))
          (row (list-fold-target buf (list-current buf)))
          (key (and row (list-key buf row))))
     (fold-keys-set! buf 'list-folded-rows
@@ -2648,7 +2648,7 @@
 (define (list-render! buf fetch)
   ;; a hidden list is not drawn: the render waits for a window, and keeps
   ;; the strongest fetch asked for meanwhile (#t, then 'cached, then #f)
-  (let ((was (buffer-local buf 'list-render-fetch)))
+  (let ((was (buffer-local-value 'list-render-fetch buf)))
     (when (buffer-exists? buf)
       (desktop-skip! buf 'list-render-fetch)
       (buffer-set-local! buf 'list-render-fetch
@@ -2657,7 +2657,7 @@
               (else #f))))
     (buffer-when-shown! buf 'list
       (lambda ()
-        (let ((f (buffer-local buf 'list-render-fetch)))
+        (let ((f (buffer-local-value 'list-render-fetch buf)))
           (buffer-set-local! buf 'list-render-fetch #f)
           (list-render--now! buf f)))
       (equal? (mb-list-target) buf))))
@@ -2688,7 +2688,7 @@
     ;; reorders the rows under the cursor.
     (let* ((here (list-current buf))
            (selected-key (or (and here (list-key buf here))
-                             (buffer-local buf 'list-selection-key)))
+                             (buffer-local-value 'list-selection-key buf)))
            (was (list-index buf))
            ;; each window's own row, before the rows move under it
            (places (list-window-places buf))
@@ -2765,12 +2765,12 @@
           ;; the keys bar at the window's foot is the list's one keymap
           (desktop-skip! buf 'footer-line-blocks)
           (let ((blocks (list-keys-bar-blocks buf)))
-            (unless (equal? blocks (buffer-local buf 'footer-line-blocks))
+            (unless (equal? blocks (buffer-local-value 'footer-line-blocks buf))
               (buffer-set-local! buf 'footer-line-blocks blocks)))
           ;; and the head's blocks ride the window's header line: its tabs
           (desktop-skip! buf 'header-line-blocks)
           (let ((blocks (let ((f (list-opt buf 'head-blocks))) (and f (f buf)))))
-            (unless (equal? blocks (buffer-local buf 'header-line-blocks))
+            (unless (equal? blocks (buffer-local-value 'header-line-blocks buf))
               (buffer-set-local! buf 'header-line-blocks blocks)
               (dashboard--sync! buf)))))
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
@@ -2818,10 +2818,10 @@
 ;; redraws, and a 'local-filter list then reuses its cached source.
 (define (list-mode-copies buf)
   "BUF and the copies other groups keep of it, when BUF is the buffer a list mode names"
-  (let ((mode (buffer-local buf 'mode-name)))
+  (let ((mode (buffer-local-value 'mode-name buf)))
     (if (and mode (equal? buf (plist-get (or (list-mode-opts mode) '()) 'buffer)))
         (cons buf (filter (lambda (b) (and (not (equal? b buf))
-                                           (equal? (buffer-local b 'mode-name) mode)))
+                                           (equal? (buffer-local-value 'mode-name b) mode)))
                           (buffer-list)))
         (list buf))))
 
@@ -2836,7 +2836,7 @@
 (define-command "list-revert" "Fetch this list's rows again and redraw"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (buffer-local buf 'cache-spec)
+      (if (buffer-local-value 'cache-spec buf)
           (cache-refresh! buf)
           (list-refresh! buf))))
   'modes '(list-mode))
@@ -2930,7 +2930,7 @@
 ;;; are in.
 (define *list-views* '("rendered" "bare" "source"))
 
-(define (list-bare? buf) (equal? (buffer-local buf 'list-view) "bare"))
+(define (list-bare? buf) (equal? (buffer-local-value 'list-view buf) "bare"))
 
 (define (list-drop-render! buf)
   (for-each (lambda (k) (buffer-set-local! buf k #f))
@@ -2949,11 +2949,11 @@
 (define (list-source-text buf)
   "the buffer under the list's view: its text, each row wrapped in the record the rendered view draws"
   (let* ((text (buffer-text buf))
-         (root (or (buffer-local buf 'render-text-root) (list 'tag "c-list")))
-         (records (or (buffer-local buf 'render-records) '()))
+         (root (or (buffer-local-value 'render-text-root buf) (list 'tag "c-list")))
+         (records (or (buffer-local-value 'render-records buf) '()))
          (tag (lambda (p) (or (plist-get p 'tag) "c-item"))))
-    (if (and (null? records) (buffer-local buf 'render-blocks))
-        (string-append ";; render blocks\n" (value->string (buffer-local buf 'render-blocks)))
+    (if (and (null? records) (buffer-local-value 'render-blocks buf))
+        (string-append ";; render blocks\n" (value->string (buffer-local-value 'render-blocks buf)))
         (let loop ((rs records) (at 0) (out (list (string-append "<" (tag root) (list-source-attrs root) ">\n"))))
           (if (null? rs)
               (apply string-append
@@ -2986,8 +2986,8 @@
     src))
 
 (define (list-cycle-view! buf)
-  (let* ((list-buf (or (buffer-local buf 'list-source-of) buf))
-         (now (or (buffer-local list-buf 'list-view) "rendered"))
+  (let* ((list-buf (or (buffer-local-value 'list-source-of buf) buf))
+         (now (or (buffer-local-value 'list-view list-buf) "rendered"))
          (next (list-cycle now *list-views* 1)))
     (cond ((equal? next "source") (list-show-source! list-buf))
           (else
@@ -3050,7 +3050,7 @@
             (else (loop (cdr es) (cons (car es) out)))))))
 
 (define (list-tab-blocks buf)
-  (let ((rows (let ((sep-fn (list-opt buf 'separator?)) (all (or (buffer-local buf 'list-tab-source) '())))
+  (let ((rows (let ((sep-fn (list-opt buf 'separator?)) (all (or (buffer-local-value 'list-tab-source buf) '())))
                 (if sep-fn (filter (lambda (e) (not (sep-fn buf e))) all) all)))
         (here (car (list-tab-current buf))))
     (list (component 'ui/tabs
@@ -3145,7 +3145,7 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
          (mine? (lambda (b) (let ((g (buffer-group b))) (or (not g) (not here) (equal? g here))))))
     (cond ((not (buffer-known? base)) base)
           ((mine? base) base)
-          ((find (lambda (b) (and (equal? (buffer-local b 'mode-name) name)
+          ((find (lambda (b) (and (equal? (buffer-local-value 'mode-name b) name)
                                   (equal? (buffer-group b) here)))
                  (buffer-list)))
           (else
@@ -3168,7 +3168,7 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
     ;; an explicit open asks for current rows; a wake does not. The init
     ;; below redraws cached entries when there are any, so fetch here in
     ;; that case — the one place the user chose to look.
-    (let ((cached? (pair? (buffer-local buf 'list-entries))))
+    (let ((cached? (pair? (buffer-local-value 'list-entries buf))))
       ;; enter the mode through set-mode!: it attaches the mode's keymap
       ;; (use-local-map!) and runs the setup above. A bare mode-name
       ;; local leaves the list's keys unreachable (S8).

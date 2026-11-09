@@ -13,7 +13,7 @@
 (define *permission-default-mode* 'auto)
 
 (define (chat-permission-mode buf)
-  (or (and buf (buffer-exists? buf) (buffer-local buf 'chat-permission-mode))
+  (or (and buf (buffer-exists? buf) (buffer-local-value 'chat-permission-mode buf))
       *permission-default-mode*))
 
 ;; The deny-list and permission-denied-verb? live in decide.scm with every
@@ -21,7 +21,7 @@
 
 (define (agent-permission-profile slug)
   (let ((buf (agent-buf slug)))
-    (and buf (buffer-exists? buf) (buffer-local buf 'agent-permission-profile))))
+    (and buf (buffer-exists? buf) (buffer-local-value 'agent-permission-profile buf))))
 
 (define (profile-denies? profile text)
   (and profile
@@ -78,7 +78,7 @@
         (string-trim (string-append (or kind "") " " (or title ""))))))
 
 (define (permission-always-rules buf)
-  (or (and buf (buffer-exists? buf) (buffer-local buf 'permission-always-rules))
+  (or (and buf (buffer-exists? buf) (buffer-local-value 'permission-always-rules buf))
       '()))
 
 (define (permission-always-allow! buf sig)
@@ -179,7 +179,7 @@
 (define (permit? buf title kind raw)
     (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
            (profile (and buf (buffer-exists? buf)
-                         (buffer-local buf 'agent-permission-profile))))
+                         (buffer-local-value 'agent-permission-profile buf))))
       (cond ((let ((shell (permission-shell-text title kind raw)))
                (and shell (permission-denied-verb? shell)))
              'ask)
@@ -262,7 +262,7 @@
 (define *permission-ask-modes* '("default"))
 
 (define (agent--pick-mode buf wanted)
-  (let ((avail (map car (or (buffer-local buf 'agent-modes) '()))))
+  (let ((avail (map car (or (buffer-local-value 'agent-modes buf) '()))))
     (let loop ((ws wanted))
       (cond ((null? ws) #f)
             ((member (car ws) avail) (car ws))
@@ -270,7 +270,7 @@
 
 (define (agent-sync-permission-mode! slug)
   (let* ((buf (agent-buf slug))
-         (cur (buffer-local buf 'agent-mode))
+         (cur (buffer-local-value 'agent-mode buf))
          (auto? (equal? (chat-permission-mode buf) 'auto))
          (want (cond (auto? (agent--pick-mode buf *permission-auto-modes*))
                      ((member cur *permission-auto-modes*)
@@ -282,7 +282,7 @@
 
 ;; the session that can answer right now, or #f
 (define (agent-mode--live buf)
-  (let ((slug (buffer-local buf 'agent-slug)))
+  (let ((slug (buffer-local-value 'agent-slug buf)))
     (and slug (not (equal? (agent-status slug) 'dead)) slug)))
 
 ;; The ACP session's OWN mode. The backend owns the list and the answer:
@@ -307,7 +307,7 @@
            mode)
           ;; a session that has not named its modes yet is still starting:
           ;; that is a wait, not a refusal
-          ((not (pair? (buffer-local buf 'agent-modes)))
+          ((not (pair? (buffer-local-value 'agent-modes buf)))
            (agent-mode--park! buf mode))
           (else #f))))
 
@@ -315,8 +315,8 @@
 ;; before it existed wins over the stance sync, and a mode this backend
 ;; does not have is dropped rather than kept forever
 (define (agent-mode-take-pending! buf)
-  (let ((want (buffer-local buf 'agent-mode-wanted))
-        (avail (map car (or (buffer-local buf 'agent-modes) '()))))
+  (let ((want (buffer-local-value 'agent-mode-wanted buf))
+        (avail (map car (or (buffer-local-value 'agent-modes buf) '()))))
     (and want
          (begin
            (buffer-set-local! buf 'agent-mode-wanted #f)
@@ -327,17 +327,17 @@
 ;; menu can name a mode for a chat whose session is not up.
 (define (agent-mode-options buf)
   (map (lambda (m) (list (car m) (or (nth 2 m) "")))
-       (chat-mode-options buf (buffer-local buf 'agent-connector))))
+       (chat-mode-options buf (buffer-local-value 'agent-connector buf))))
 
 (define-command "agent-set-mode" "Switch the agent session's mode (plan, acceptEdits, ...)"
   (lambda ()
     (let* ((buf (current-buffer))
            (modes (agent-mode-options buf)))
-      (cond ((not (buffer-local buf 'agent-connector)) (message "not an agent chat"))
+      (cond ((not (buffer-local-value 'agent-connector buf)) (message "not an agent chat"))
             ((null? modes) (message "this backend has no session modes"))
             (else
               (minibuffer-read
-                (string-append "Mode (now " (or (buffer-local buf 'agent-mode) "?") "): ")
+                (string-append "Mode (now " (or (buffer-local-value 'agent-mode buf) "?") "): ")
                 (agent-mode-options buf)
                 (lambda (m)
                   (unless (equal? (string-trim m) "")
@@ -365,7 +365,7 @@
       "asks (C-c b k): " (symbol->string stance)
       " — " (chat-permission-mode-note stance) "\n"
       "agent mode (C-c b a): "
-      (let ((m (buffer-local buf 'agent-mode)))
+      (let ((m (buffer-local-value 'agent-mode buf)))
         (if (or (not m) (equal? m "")) "none" m))
       " — the backend's own mode, read live from the session\n"
       "file tools (C-c b f): " agent-filesystem-tools
@@ -404,7 +404,7 @@
   (when (boundp (quote workspace-llm-defaults-note!))
     (workspace-llm-defaults-note! buf))
   ;; a live agent hears about it immediately, not at the next reconnect
-  (let ((slug (buffer-local buf 'agent-slug)))
+  (let ((slug (buffer-local-value 'agent-slug buf)))
     (when (and slug (not (equal? (agent-status slug) 'dead)))
       (agent-sync-permission-mode! slug)))
   (agent-update-modeline! buf)
@@ -458,7 +458,7 @@
            (slug (agent-slug-of buf))
            (info (and slug (agent-info slug)))
            (pending (and info (plist-get info 'permission)))
-           (asked (buffer-local buf 'permission-asked)))
+           (asked (buffer-local-value 'permission-asked buf)))
       ;; the answer becomes this chat's rule, so the next call of the same
       ;; verb never reaches the user. agent.scm recorded what was asked,
       ;; because the backend's pending record keeps no arguments.

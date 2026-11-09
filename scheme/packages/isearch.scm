@@ -176,7 +176,7 @@
 ;;; reads as absent.
 
 (define (hl-line-on? buf)
-  (not (equal? (buffer-local buf 'hl-line-mode) "off")))
+  (not (equal? (buffer-local-value 'hl-line-mode buf) "off")))
 
 (define-command "hl-line-mode" "Toggle the highlight of the current line in this buffer"
   (lambda ()

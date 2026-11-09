@@ -54,7 +54,7 @@
 (define *detail-live* #f)
 
 (define (detail--classes buf)
-  (filter (lambda (c) (not (equal? c ""))) (string-split (or (buffer-local buf 'window-class) "") " ")))
+  (filter (lambda (c) (not (equal? c ""))) (string-split (or (buffer-local-value 'window-class buf) "") " ")))
 
 (define (detail--set-live! buf on?)
   (when (and buf (buffer-exists? buf))
@@ -130,7 +130,7 @@
   (when (and (buffer-known? owner) (buffer-known? name) (not (equal? owner name)))
     (buffer-relate! name 'detail owner)
     (when (and (boundp 'buffer-child!)
-               (not (buffer-local name 'detail-kept))
+               (not (buffer-local-value 'detail-kept name))
                (not (equal? (buffer-parent name) owner)))
       (buffer-child! owner name)))
   (unless (minor-mode-on? name "detail-mode")
@@ -198,7 +198,7 @@
           (if (buffer-known? try) (loop (+ n 1)) try)))))
 
 (define (detail-kept-name buf)
-  (let* ((mode (buffer-local buf 'mode-name))
+  (let* ((mode (buffer-local-value 'mode-name buf))
          (hit (assoc mode *detail-names*))
          (named (and hit ((cadr hit) buf)))
          (want (if (and (string? named) (not (equal? named ""))) named buf)))
@@ -212,7 +212,7 @@
          (owner (detail-owner buf)))
     (cond
       ((not owner) (message "This buffer is not a list's detail") #f)
-      ((buffer-local buf 'detail-kept) (message "This detail is already kept") #f)
+      ((buffer-local-value 'detail-kept buf) (message "This detail is already kept") #f)
       (else
         (let* ((want (detail-kept-name buf))
                (new (if (equal? want buf) buf (rename-buffer! buf want))))

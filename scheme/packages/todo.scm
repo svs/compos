@@ -45,6 +45,9 @@
 (defcustom 'todo-user "svs"
   "The name a change is logged under when the caller names nobody.")
 
+(defcustom 'todo-turn-log #t
+  "After each judged turn, add the turn's verdict (working, needs-you, blocked, success, idle) and its reason to the log of each open task the chat is assigned.")
+
 (defcustom 'todo-default-project "general"
   "The project of a task created without one.")
 
@@ -1746,6 +1749,7 @@
                                                              (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
                                                                             "  ·  w picks, C attaches"))))
                                           (pair "Chat state" (todo--status t))
+                                          (pair "Goal" (todo--goal t))
                                           (pair "Group" (group-name (plist-get t 'group)))
                                           (pair "Filed by" (plist-get t 'by))
                                           (pair "Source" (plist-get t 'source))
@@ -2037,6 +2041,36 @@
          (mine (lambda (ts) (filter (lambda (t) (member who (todo-chats t))) ts)))
          (open (mine (todo-list))))
     (if (pair? open) open (mine (todo-list (list 'all #t))))))
+
+(define (todo--goal-text status why)
+  ;; the verdict the turn summary gave the chat's goal, with its reason
+  (let ((s (if (symbol? status) (symbol->string status) status)))
+    (if (todo--blank? why) s (string-append s " - " why))))
+
+(define (todo--goal t)
+  ;; the newest verdict on the goal of the chat working T, while it is live
+  (let ((c (todo--chat-of t)))
+    (or (and (string? c) (buffer-exists? c)
+             (let ((s (buffer-local-value 'chat-goal-status c)))
+               (and s (todo--goal-text s (buffer-local-value 'chat-goal-why c)))))
+        "")))
+
+(define (todo--on-chat-status! buf status why)
+  ;; a judged turn leaves one log line on each open task the chat is
+  ;; assigned, so the task file says where the work stands; the same
+  ;; verdict twice in a row is logged once
+  (when todo-turn-log
+    (report-errors "todo-turn-log"
+      (lambda ()
+        (let ((line (string-append "turn: " (todo--goal-text status why))))
+          (for-each
+            (lambda (t)
+              (let ((logs (or (plist-get t 'log) '())))
+                (unless (and (pair? logs) (string-suffix? line (car (reverse logs))))
+                  (todo-update (plist-get t 'id) (list 'log line 'by "summary")))))
+            (todo-list (list 'assignee (chat-stable-id! buf)))))))))
+
+(add-hook! 'chat-status-hook 'todo--on-chat-status!)
 
 (define-command "chat-goto-todo" "Show the task this chat works as its own page; with several, ask which"
   (lambda ()

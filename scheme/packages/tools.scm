@@ -552,18 +552,7 @@
                  (let* ((kind (catalog--string (or (catalog--get e 'kind) "")))
                         (name (catalog--string (or (catalog--get e 'name) "")))
                         (qual (catalog--string (or (catalog--get e 'qualified-name) "")))
-                        (enrichment
-                        (list 'qualified-name (catalog--get e 'qualified-name)
-                              'package (catalog--get e 'package)
-                              'namespace (catalog--get e 'namespace)
-                              'domain (catalog--get e 'domain)
-                              'effects (catalog--get e 'effects)
-                              'use (catalog--get e 'use)
-                              ;; the words people say for it: a command
-                              ;; row is searched by its enrichment, so
-                              ;; without them "split editor" never
-                              ;; found split-window-right
-                              'aliases (catalog--get e 'aliases)))
+                        (enrichment (apropos--enrichment-of e))
                       (row (list (apropos--bucket-key name)
                                  (string-append kind " " name) enrichment)))
                    (if (or (equal? qual "") (equal? qual name))
@@ -581,13 +570,18 @@
 ;; With no index it falls back to the linear walk, so a caller outside a
 ;; search keeps working.
 (define (apropos--enrichment-of e)
-  (list 'qualified-name (catalog--get e 'qualified-name)
-        'package (catalog--get e 'package)
-        'namespace (catalog--get e 'namespace)
-        'domain (catalog--get e 'domain)
-        'effects (catalog--get e 'effects)
-        'use (catalog--get e 'use)
-        'aliases (catalog--get e 'aliases)))
+  (let ((aliases (catalog--get e 'aliases)))
+    (append
+      (list 'qualified-name (catalog--get e 'qualified-name)
+            'package (catalog--get e 'package)
+            'namespace (catalog--get e 'namespace)
+            'domain (catalog--get e 'domain)
+            'effects (catalog--get e 'effects)
+            'use (catalog--get e 'use))
+      ;; the words people say for it: a command row is searched by its
+      ;; enrichment, so without them "split editor" never found
+      ;; split-window-right. Only a row that has some carries them.
+      (if (and (string? aliases) (not (equal? aliases ""))) (list 'aliases aliases) '()))))
 
 ;; the six enrichment fields for KIND and NAME, already built when the
 ;; index holds them. With no index it reads the catalog and builds them,

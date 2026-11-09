@@ -32,6 +32,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `find-file` | `C-x C-f` | Visit a file, prompting with filename completion |
 | `frame-isolate` |  | Toggle whether this frame shows only its own groups and wears its own theme |
 | `frame-rename` |  | Name this frame; an empty name gives it back its id |
+| `frame-switch` | `C-x f` | Switch to another frame: type to narrow, RET selects |
 | `group-add` | `C-c g` | Put the selected buffers, else this buffer, in a group |
 | `group-config` |  | Open this group's group.scm |
 | `group-cwd` |  | Set this group's working directory, and move its buffers there |
@@ -151,7 +152,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-abort` |  | Stop the reply in flight in this chat |
 | `chat-adopt` |  | Make this chat the companion of a chosen buffer |
 | `chat-compact` |  | Summarize this chat's older turns, keeping the recent ones |
-| `chat-companion` | `C-c w` | Toggle between a work buffer and its group chat |
+| `chat-companion` | `C-c c` | Toggle between a work buffer and its group chat |
 | `chat-companion-ask` | `C-c RET` | Ask the group's chat about this buffer without leaving it |
 | `chat-component-actions` |  | Choose an action of the component M-up/M-down stepped to, else of the newest one |
 | `chat-component-default` |  | Run the default action of the component M-up/M-down stepped to, else of the newest one |
@@ -180,6 +181,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-scroll-linked-down` |  | Scroll down the window that shows the buffer this chat opened last |
 | `chat-scroll-linked-up` |  | Scroll up the window that shows the buffer this chat opened last |
 | `chat-send-new` |  | Send the input to a new chat in this group; this chat keeps its conversation |
+| `chat-send-next` |  | Send the input as the next message, ahead of the queue |
 | `chat-send-region` | `C-c r` | Add the region to the chat buffer as context |
 | `chat-set-backend` |  | Choose this chat's LLM backend, model, and effort |
 | `chat-set-model` |  | Choose this chat's model |
@@ -196,6 +198,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-unqueue` |  | Remove the previewed queued message (or the newest one) and return it to the input |
 | `chat-unstick` |  | Clear a turn this chat shows as running when no runtime runs one |
 | `chat-where` |  | Switch to the chat where this was said |
+| `chat-window-select` | `C-c C` | Select the chat window you used last |
 | `chats-archive` |  | Archive the chat at point: the runtime stops, the buffer goes, the file stays |
 | `chats-kill-runtime` |  | Stop the runtime of the chat at point and keep its transcript |
 | `chats-show-archived` |  | Show only the archived chats in the chat list, or the live ones again |
@@ -204,6 +207,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chats-watch` |  | Watch the chats: one list, the busiest first, kept up as they change |
 | `group-chat` |  | Show or create the current group's primary chat |
 | `group-home` |  | Open Dired at the current group's home directory |
+| `help-chat` | `C-c h` | Pull the help chat into this group and show it; in it, go back |
+| `help-chat-mode` |  | Toggle the help chat's teaching prompt |
 | `ichat` |  | Open the chat buffer listing here |
 | `llm-ask` | `C-c q` | Ask the LLM from anywhere via the minibuffer |
 | `llm-companion-show` |  | Show this document's hidden chat in the other window |
@@ -311,6 +316,10 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `app-registry` |  | Browse every app: yours, installed packages, and core |
+| `app-registry-open` |  | Open the app at point |
+| `app-registry-refresh` |  | Read the apps again |
+| `app-registry-source` |  | Visit the source of the app at point in the other window |
 | `eval-buffer` |  | Evaluate the current buffer as Scheme |
 | `keys` | `C-h B` | Every key in force here, and the edits |
 | `keys-bind` |  | Bind a command to a key, everywhere |
@@ -320,6 +329,17 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `keys-revert` |  | Take back your edit on this row |
 | `keys-scope` |  | Filter all bindings by keymap |
 | `keys-unbind` |  | Take the key on this row away |
+| `vscode-close-buffer` |  | Close this buffer, asking when it has unsaved changes |
+| `vscode-focus-window-1` |  | Go to window 1, counting left to right |
+| `vscode-focus-window-2` |  | Go to window 2, counting left to right |
+| `vscode-focus-window-3` |  | Go to window 3, counting left to right |
+| `vscode-focus-window-4` |  | Go to window 4, counting left to right |
+| `vscode-focus-window-5` |  | Go to window 5, counting left to right |
+| `vscode-focus-window-6` |  | Go to window 6, counting left to right |
+| `vscode-focus-window-7` |  | Go to window 7, counting left to right |
+| `vscode-focus-window-8` |  | Go to window 8, counting left to right |
+| `vscode-focus-window-9` |  | Go to window 9, counting left to right |
+| `vscode-mode` |  | Toggle the VSCode keys for the palette, files and windows |
 
 ## content-scale
 
@@ -351,6 +371,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | Command | Key | What it does |
 |---|---|---|
 | `chat-perf` |  | Show every step of this chat's last turn, with a flame graph |
+| `client-memory` |  | Show the memory of each browser frame and its growth per hour |
 | `display-memory-mode` |  | Toggle the VM memory in the frame modeline |
 | `perf` |  | Show lane contention: the wait and the work of every lane |
 | `perf-pause` |  | Pause or resume the samples |
@@ -474,6 +495,12 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `view-register` | `C-x r v` | Say what a register holds |
 | `window-configuration-to-register` | `C-x r w` | Save the frame's windows in a register |
 
+## faces
+
+| Command | Key | What it does |
+|---|---|---|
+| `toggle-theme-monospace` |  | Draw all text in the theme's monospace font, or stop |
+
 ## files
 
 | Command | Key | What it does |
@@ -593,6 +620,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `apropos-filter` |  | On an apropos page, show one kind of hits: commands, keys, functions, modes |
 | `contextual-help` | `M-?` | Describe what is here: the name at point, this buffer, its mode and its keys |
 | `describe-bindings` | `C-h b` | Show every key binding, this buffer's first |
 | `describe-buffer-locals` |  | Show this buffer's local variables and their values |
@@ -605,10 +633,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 |---|---|---|
 | `app-preview` | `C-c C-a` | Run the current buffer as an HTML app |
 | `app-reload` | `C-c C-r` | Reload every running app |
-| `command-palette` | `s-p` | Find an action by intent across command docs and recipes |
+| `command-palette` | `s-p` | Find a command by what it does |
 | `digit-argument` | `M-0` | Add a digit to the next command's prefix argument |
-| `do` | `s-k` | Say what you want; a local model picks the command and runs it |
-| `do-forget` |  | Forget every phrase the Do prompt remembers |
 | `global-predict-mode` |  | Toggle local echo of typed text in every file buffer |
 | `goto-address-at-point` |  | Follow the URL or file path at point, else find the definition of the name there |
 | `goto-thing-at-point` | `M-.` | Follow the address at point, else go to the definition |
@@ -636,11 +662,15 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `minibuffer-rail-enter` |  | Move the arrows into the list on the right of the palette, or to the next tab |
 | `minibuffer-rail-exit` |  | Leave the list on the right and go back to the candidates, or to the previous tab |
 | `minibuffer-regroup` |  | Cycle what a section is in the list behind the prompt |
+| `minibuffer-space` |  | Pick the row on an empty prompt, else type a space |
 | `negative-argument` | `M--` | Negate the next command's prefix argument |
 | `next-history-element` |  | Put the next history item in the minibuffer |
-| `notifications` |  | Show the notices that passed, newest first |
+| `notifications` |  | Show the notices that need you, newest first |
 | `notifications-clear` |  | Take every notice off the screen |
+| `notifications-done` |  | Mark the notice at point done: it leaves the list and the bell |
 | `notifications-refresh` |  | Redraw the notices |
+| `notifications-toggle-all` |  | Show every notice that passed, or only the open ones |
+| `notifications-visit` |  | Go where the notice at point points |
 | `predict-mode` |  | Toggle local echo of typed text in the current buffer |
 | `previous-history-element` |  | Put the previous history item in the minibuffer |
 | `self-insert-command` | `!` | Insert the character you typed |
@@ -664,13 +694,37 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `visual-line-mode` |  | Toggle visual-row motion in the current buffer |
 | `whitespace-mode` |  | Toggle the newline and space marks |
 
+## jev
+
+| Command | Key | What it does |
+|---|---|---|
+| `jev` |  | Ask JEV the quickstart question and echo the answers |
+| `jev-apropos` |  | Ask JEV which editor command to run for a request |
+
 ## learning
 
 | Command | Key | What it does |
 |---|---|---|
-| `help-for-help` | `C-h ?` | List every help command with its key, and every task recipe |
-| `help-with-tutorial` | `C-h t` | Select the Compos learn-by-doing tutorial, resuming saved progress |
+| `help-for-help` | `C-h ?` | List every help command with its key, and every task |
+| `help-with-tutorial` | `C-h t` | Open the Compos tutorial at the step you are on |
 | `how-do-i` | `C-h h` | Pick a task and read how to do it; an empty answer lists every task |
+| `tutorial` |  | Open the Compos tutorial: practice, a slide that teaches, and the lesson to read |
+| `tutorial-back` |  | Go to the previous step of the tutorial |
+| `tutorial-close` |  | Close the tutorial; C-h t opens it again where you were |
+| `tutorial-connectors` |  | Set up and test the model connectors |
+| `tutorial-help` |  | Ask the setup chat about the step on the slide |
+| `tutorial-index` |  | Show the list of lessons over the practice page |
+| `tutorial-index-quit` |  | Put the practice page back |
+| `tutorial-index-visit` |  | Go to the lesson on this row |
+| `tutorial-next` |  | Go to the next step of the tutorial |
+| `tutorial-next-lesson` |  | Go to the next lesson |
+| `tutorial-previous-lesson` |  | Go to the previous lesson |
+| `tutorial-refresh` |  | Redraw the list of lessons |
+| `tutorial-reset` |  | Forget all tutorial progress |
+| `tutorial-restart-lesson` |  | Start the lesson on the slide again |
+| `tutorial-retry` |  | Run the check of the step on the slide again |
+| `tutorial-tick-step` |  | Mark the step on the slide done |
+| `tutorial-toggle-done` |  | Mark the lesson on this row done, or not done |
 
 ## llm
 
@@ -696,13 +750,13 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `llm-config-pick-filesystem` |  | Choose what the agent's own file tools may do |
 | `llm-config-pick-model` |  | Choose the LLM model in the box |
 | `llm-config-pick-permission` |  | Choose when this session stops to ask, in the box |
-| `llm-config-pick-preset` |  | Turn tool presets on or off in the box |
+| `llm-config-pick-preset` |  | Choose MCP servers and tool presets |
 | `llm-config-pick-sandbox` |  | Choose whether this chat's shell commands run in the sandbox, in the box |
 | `llm-config-prompt-all` |  | Turn on every prompt section in this draft |
 | `llm-config-prompt-none` |  | Turn off every prompt section in this draft |
 | `llm-config-revert` |  | Undo the unsaved changes to this config |
 | `llm-config-save-bundle` |  | Save this config as a preset under a name |
-| `llm-config-save-default` |  | Make the box's config the default for new chats |
+| `llm-config-save-default` |  | Choose whether this config is the group or Compos default |
 | `llm-config-save-group-default` |  | Make the box's config the default for this group's new chats |
 | `llm-config-save-into` |  | Update the preset with this config |
 | `llm-config-use-bundle` |  | Move to a saved preset by name |
@@ -909,8 +963,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `evil-mode` |  | Toggle Vim emulation everywhere (files + \*scratch\*) |
 | `fast-code` |  | Turn an intent into Scheme and run it |
 | `fast-eval` |  | Show the fast-code eval as a table |
+| `fast-learned` |  | Show the functions fast-code learned |
 | `fast-palette-install` |  | Send unmatched palette input to fast-code |
-| `fast-recipes` |  | Show the functions fast-code learned |
 | `fast-toggle` |  | Toggle fast |
 | `fast-trace` |  | Show the last fast-code resolutions, stage by stage |
 | `focus-left` | `s-<left>` | Select the pane to the left, across the columns |
@@ -921,6 +975,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `history-sweep-redundant` |  | Delete history logs of dormant buffers whose checkpoint carries the text |
 | `hl-line-mode` |  | Toggle the highlight of the current line in this buffer |
 | `html-edit` |  | Edit this HTML file on its rendered page in the other window |
+| `image-generate` |  | Make an image from a prompt and show it |
 | `insta` |  | Open the Instagram feed app |
 | `kill-line` | `C-k` | Kill text from point to end of line |
 | `list-cycle-view` |  | Cycle this list's view: rendered, bare text, and the source under it |
@@ -1107,6 +1162,23 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `workspaces` |  | List workspaces and open one in a new browser tab |
 | `workspaces-refresh` |  | Refresh the workspace list |
 
+## setup
+
+| Command | Key | What it does |
+|---|---|---|
+| `llm-connectors` |  | Set up each model connector and test its connection |
+| `llm-connectors-add-endpoint` |  | Add a hosted provider or a server of your own, give its key, and test it |
+| `llm-connectors-add-key` |  | Add or change the API key of the connector on this line |
+| `llm-connectors-add-model` |  | Add a model id of your own to this connector, and test it |
+| `llm-connectors-install` |  | Install the agent program of the connector on this line |
+| `llm-connectors-make-default` |  | Make the model on this line, or else the connector, the one new chats use |
+| `llm-connectors-refresh` |  | Check every connector again and redraw |
+| `llm-connectors-show` |  | Show the page of the connector on this line beside the list |
+| `llm-connectors-show-test` |  | Show the whole last test of the model on this line, or else the connector |
+| `llm-connectors-sign-in` |  | Sign in to the connector on this line in a terminal |
+| `llm-connectors-test` |  | Test the model on this line, or else the connector, and time the reply |
+| `llm-connectors-test-all` |  | Test every ready connector at once |
+
 ## system
 
 | Command | Key | What it does |
@@ -1147,13 +1219,13 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `messages-refresh` |  | Refresh the structured \*Messages\* list |
 | `messages-watch-list` |  | Say which message watches are in force |
 | `restart-daemon` |  | Save the desktop and restart the daemon |
-| `setup` |  | Set up Compos: choose a model, then learn with the guide |
+| `setup` |  | Set up Compos: choose a model and a search model, then learn with the guide |
 | `setup-ai-guide` |  | Read the first-run AI setup guide |
 | `setup-bootstrap-gemini` |  | Set Gemini Nano as the default local connector |
 | `setup-bot` |  | Walk through first-run setup one question at a time |
 | `setup-inference` |  | Choose the model that new chats use |
 | `setup-install-connector` |  | Install the agent program of a connector in a terminal buffer |
-| `setup-learning-space` |  | Open the guide: a chat that teaches Compos, and a stage to try each step |
+| `setup-learning-space` |  | Open the tutorial: practice, a slide that teaches, and the lesson |
 | `setup-report` |  | Open the secret-free setup status report |
 | `setup-reset` |  | Start setup over: forget the chosen model and show the setup wizard |
 | `setup-secrets` |  | Probe the secret providers and set one up |
@@ -1161,6 +1233,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `setup-teach-keys` |  | Teach M-x and the compos philosophy |
 | `setup-welcome` |  | Open the welcome page |
 | `setup-wizard-back` |  | Go to the previous setup step |
+| `setup-wizard-connectors` |  | Set up and test the model connectors |
+| `setup-wizard-decide-test` |  | Ask the decision model in use a test question |
 | `setup-wizard-next` |  | Go to the next setup step |
 | `setup-wizard-rescan` |  | Scan this machine for models again |
 | `sockets` | `C-c a s` | List every socket the daemon holds. To open a client connection to another program, use endpoint-register! |
@@ -1471,6 +1545,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `split-window-right` | `C-x 3` | Split the window in two, side by side |
 | `switch-window` | `C-x j` | Pick a window of this frame by name and go to it |
 | `window-eat` | `C-x e` | Eat the neighboring pane and take its space |
+| `window-flash-end` |  | Take the chat card off the window: the modifier of the cycle came up |
 | `window-kill-buffers` | `C-x K` | Kill every buffer in this window: the one it shows and its whole history |
 | `window-layout` | `C-x l` | Choose this group's layout; each one shows as you move to it |
 | `window-layout-columns` |  | Equal columns |
@@ -1564,7 +1639,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `todo-mark-doing` |  | Mark the task in progress |
 | `todo-mark-done` |  | Mark the task done |
 | `todo-mark-waiting` |  | Park the task as waiting |
-| `todo-next-sort` |  | Cycle the order: status, urgency, deadline, created |
+| `todo-next-sort` |  | Cycle the order: status, urgency, deadline, created, active |
 | `todo-next-view` |  | Show the next status tab: open, inbox, review, doing, waiting, mine, overdue, closed, all |
 | `todo-prev-view` |  | Show the previous status tab |
 | `todo-refresh` |  | Re-read the todo files, and look again for new ones |

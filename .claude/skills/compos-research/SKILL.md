@@ -14,7 +14,7 @@ automatically earns an edit.
 
 ## Search once, then act
 
-1. Reuse a name or recipe you already confirmed this session — do not
+1. Reuse a name you already confirmed this session — do not
    re-derive it.
 2. Search each unknown once, with the most specific query the catalog or
    grep supports.

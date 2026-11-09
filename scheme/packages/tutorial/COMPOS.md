@@ -242,7 +242,7 @@ You do not need to learn everything at once. Three commands make a wrong guess e
 | `M-x` | Run a command by name. |
 | `C-h t` | Open or resume this tutorial. |
 
-`C-h h` (how-do-i) lists recipes for common tasks. `C-h ?` lists every help command.
+`C-h h` (how-do-i) lists common tasks. `C-h ?` lists every help command.
 
 The boxes marked **Try it** are directions for you to do now. For example:
 

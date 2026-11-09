@@ -1,4 +1,4 @@
-;;; howto-test.scm --- howto.scm: the task recipes and the generated manual.
+;;; howto-test.scm --- howto.scm: the tasks and the generated manual.
 ;;;
 ;;; The stock howtos are documentation that the editor can check. A howto
 ;;; that names a command no one defined is a broken instruction, so the

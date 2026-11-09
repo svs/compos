@@ -45,6 +45,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-c <left>` | `winner-previous` | Switch to the previous window and buffer arrangement |
 | `C-c <right>` | `winner-next` | Switch to the next window and buffer arrangement |
 | `C-c A` | `morg-agenda` | Show the agenda: dated entries from your morg files |
+| `C-c C` | `chat-window-select` | Select the chat window you used last |
 | `C-c C-a` | `app-preview` | Run the current buffer as an HTML app |
 | `C-c C-r` | `app-reload` | Reload every running app |
 | `C-c C-v` | `preview-mode` | Toggle rendered preview of the current buffer |
@@ -55,9 +56,11 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-c a n` | `agent-open` | Prompt for a task and spawn a new agent thread |
 | `C-c a s` | `sockets` | List every socket the daemon holds. To open a client connection to another program, use endpoint-register! |
 | `C-c b` | `llm-configure` | LLM setup |
+| `C-c c` | `chat-companion` | Toggle between a work buffer and its group chat |
 | `C-c d` | `group-describe` | Ask the LLM to write this group's description |
 | `C-c e` | `llm-rewrite` | Rewrite the region; keep drafts as options and iterate with the passage's conversation |
 | `C-c g` | `group-add` | Put the selected buffers, else this buffer, in a group |
+| `C-c h` | `help-chat` | Pull the help chat into this group and show it; in it, go back |
 | `C-c l` | `copy-buffer-link` | Copy an compos:// link to this buffer and line to the clipboard |
 | `C-c m` | `llm-set-model` | Choose the model for C-RET and this buffer's chat |
 | `C-c n` | `chat-new` | Start a new chat buffer; with a prefix, hand a task to a new chat in a group and stay here |
@@ -69,16 +72,16 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-e` | `end-of-line` | Move point to the end of the line |
 | `C-f` | `forward-char` | Move point one character forward |
 | `C-g` | `keyboard-quit` | Quit the current operation: cancel the prompt, close the dashboard, or clear the mark |
-| `C-h ?` | `help-for-help` | List every help command with its key, and every task recipe |
+| `C-h ?` | `help-for-help` | List every help command with its key, and every task |
 | `C-h B` | `keys` | Every key in force here, and the edits |
-| `C-h C-h` | `help-for-help` | List every help command with its key, and every task recipe |
+| `C-h C-h` | `help-for-help` | List every help command with its key, and every task |
 | `C-h a` | `apropos` | Search the whole editor by words or intent; literal hits rank before cached semantic hits |
 | `C-h b` | `describe-bindings` | Show every key binding, this buffer's first |
 | `C-h e` | `view-messages` | Display the structured \*Messages\* buffer |
 | `C-h h` | `how-do-i` | Pick a task and read how to do it; an empty answer lists every task |
 | `C-h k` | `describe-key` | Show what one key does: press the key, read its page |
 | `C-h m` | `describe-mode` | Show this buffer's mode, its keys and what they do |
-| `C-h t` | `help-with-tutorial` | Select the Compos learn-by-doing tutorial, resuming saved progress |
+| `C-h t` | `help-with-tutorial` | Open the Compos tutorial at the step you are on |
 | `C-k` | `kill-line` | Kill text from point to end of line |
 | `C-l` | `recenter-top-bottom` | Recenter point in the window |
 | `C-n` | `next-line` | Move point down one line |
@@ -124,6 +127,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x c` | `chat-prompt` | Switch to a chat with the plain minibuffer list |
 | `C-x d` | `daemons` | List daemons and switch this browser tab |
 | `C-x e` | `window-eat` | Eat the neighboring pane and take its space |
+| `C-x f` | `frame-switch` | Switch to another frame: type to narrow, RET selects |
 | `C-x g` | `group-switch` | Switch to a group and restore its layout |
 | `C-x j` | `switch-window` | Pick a window of this frame by name and go to it |
 | `C-x k` | `kill-buffer` | Kill a buffer, defaulting to the current one |
@@ -226,5 +230,4 @@ Every key in the global map, except the keys that insert their own character. A 
 | `s-]` | `window-next-mode-buffer` | Show the next buffer of this mode down this window's stack; hold Cmd to keep walking |
 | `s-_` | `text-scale-decrease` | Make this buffer's text smaller |
 | `s-i` | `imenu` | Jump to a definition in this buffer; an index of more than one kind has a tab for each |
-| `s-k` | `do` | Say what you want; a local model picks the command and runs it |
-| `s-p` | `command-palette` | Find an action by intent across command docs and recipes |
+| `s-p` | `command-palette` | Find a command by what it does |

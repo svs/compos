@@ -93,7 +93,7 @@ Bundles persist with the desktop. A change is live at once but reaches disk at t
 The prompt is a list of named sections, joined in order by `prompt-parts-text`. Each section comes from one source:
 
 1. **Prompt files.** Each `FILE.md` in `prompts-directories` (default `priv/prompts/`) is a section named `FILE`. The defaults keep a fixed order: `identity`, `quiet-editor`, `scope`, `chat-context`, `scheme`, `discovery`, `reading`, `repository`, `browser`, `components`. Other files follow by name. An earlier directory wins a name, so a user directory overrides a default file.
-2. **Generated sections:** `catalog`, `recipes`, `mcp` (the servers the chat holds), and `skills` when it has text.
+2. **Generated sections:** `catalog`, `mcp` (the servers the chat holds), and `skills` when it has text.
 3. **Preset sections:** `preset:NAME`, one per preset the chat holds that has a prompt, right after `mcp`.
 4. **Buffer parts:** sections a mode or package set on this chat with `prompt-part-set!`, such as `chat-preamble`, `code`, `todo` and `code-agent`.
 

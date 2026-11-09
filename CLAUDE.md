@@ -119,7 +119,7 @@ daemon. Build a link for any buffer with `(buffer-link NAME)`.
 
 Every LLM that writes Scheme must stamp its public definitions. Set one
 `domain!` and one `effects!` scope before `define-command`, `define-mode`,
-`public!`, `defcustom`, `defrecipe!`, or `defcomponent` forms.
+`public!`, `defcustom`, or `defcomponent` forms.
 
 Before writing or editing a Scheme package, query `apropos` for the existing
 API and components. Before choosing or defining UI, read `docs/COMPONENTS.md`.

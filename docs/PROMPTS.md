@@ -1,7 +1,7 @@
 # Prompt composition
 
 Prompt composition is a public architectural contract. Every fragment is one
-section: each Markdown prompt file, each generated part (`catalog`, `recipes`,
+section: each Markdown prompt file, each generated part (`catalog`,
 `mcp`), and each part a mode adds (`chat-preamble`, `code`, `code-agent`).
 
 `C-c b` (`llm-configure`), then `+` (more fields), then `i` opens the

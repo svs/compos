@@ -12,7 +12,7 @@ Press `M-x` (`execute-extended-command`) and type a part of the name. The list g
 
 Every action in the editor is a command. When you forget a key, you can always use its name.
 
-To search by what a command does, use `s-p` (`command-palette`). It also finds task recipes.
+To search by what a command does, use `s-p` (`command-palette`).
 
 ### How do I cancel what I started?
 
@@ -42,7 +42,7 @@ In a list (buffers, files, chats, mail), press `?` to show the keys of the list.
 
 ### How do I find the name of something?
 
-Press `C-h a` (`apropos`) and type some words. The page lists the commands, settings, functions, and recipes that match. Click a name to open its source.
+Press `C-h a` (`apropos`) and type some words. The page lists the commands, settings, functions, and modes that match. Click a name to open its source.
 
 ## Files
 
@@ -168,7 +168,7 @@ Press `M-x group-rename` to give the current group a new name. `M-x group-kill` 
 
 ### How do I ask the agent about my work?
 
-Press `C-c w` (`chat-companion`). The chat of the current group opens. Type your question after the prompt and press `RET` (`agent-send`).
+Press `C-c c` (`chat-companion`). The chat of the current group opens. Type your question after the prompt and press `RET` (`agent-send`).
 
 The agent can read the buffers of the group, so you do not paste them. `C-c RET` (`chat-companion-ask`) asks the chat without leaving the buffer you are in.
 
@@ -184,7 +184,7 @@ Select the text, then press `C-c r` (`chat-send-region`). The chat gets the regi
 
 ### How do I stop the agent?
 
-In the chat, press `C-g` (`chat-abort`). The reply in progress stops, and the transcript keeps what arrived.
+In the chat, press `M-x chat-abort`. The reply in progress stops, and the transcript keeps what arrived.
 
 `M-x chat-reset` clears the transcript and starts again.
 

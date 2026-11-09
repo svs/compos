@@ -417,13 +417,14 @@
     ("window-layout" "layout change layout choose layout arrange panes")
     ("customize" "settings preferences options")
     ("load-theme" "color theme dark mode light mode")
-    ;; zoom is the whole app, as VSCode's ⌘= is; text-scale is one buffer
+    ;; zoom offers both: the whole app (ui-scale, VSCode's ⌘=) and this
+    ;; buffer (text-scale)
     ("ui-scale-increase" "zoom in zoom bigger ui scale")
     ("ui-scale-decrease" "zoom out zoom smaller ui scale")
     ("ui-scale-reset" "reset zoom zoom normal")
-    ("text-scale-increase" "font size bigger text in this buffer")
-    ("text-scale-decrease" "font size smaller text in this buffer")
-    ("text-scale-reset" "font size normal text in this buffer")
+    ("text-scale-increase" "zoom in buffer zoom font size bigger text in this buffer")
+    ("text-scale-decrease" "zoom out buffer zoom font size smaller text in this buffer")
+    ("text-scale-reset" "reset zoom buffer zoom font size normal text in this buffer")
     ("describe-bindings" "keyboard shortcuts keybindings keymap")
     ("describe-key" "what does this key do shortcut")
     ("shell" "terminal console command line")

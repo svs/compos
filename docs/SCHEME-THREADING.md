@@ -153,7 +153,7 @@ The interpreter already supports direct definition lookup:
 - `public-entry` reads one documented function.
 
 Apropos adds semantic discovery. It searches function documentation,
-signatures, commands, keys, settings, components, recipes, package metadata,
+signatures, commands, keys, settings, components, package metadata,
 domains, and effects.
 
 Literal search stays in Scheme. OpenAI embeddings add semantic results when a

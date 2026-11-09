@@ -193,10 +193,10 @@ If you ask for an edit, inspect the result in the buffer before saving it.
 | `C-c r` | Add selected text to the group chat's input. |
 | `C-c a n` | Prompt for a task and spawn a separate agent thread. Use this after your first chat works. |
 | `C-h k` | Find out what a key does in the current buffer. |
-| `C-h h` | Find a recipe for a task, including AI setup. |
+| `C-h h` | Find how to do a task, including AI setup. |
 | `C-h ?` | See the available help commands. |
 
 The main tutorial explains buffers, groups, windows, and more commands. Type
-`C-h t` to open or resume it. Type `C-h h` when you want a task recipe.
+`C-h t` to open or resume it. Type `C-h h` when you want to know how to do a task.
 
 [Back to Welcome](compos:setup/welcome)

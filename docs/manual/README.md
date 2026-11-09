@@ -4,7 +4,7 @@
 
 The editor writes these files from its own registries, so they describe the code that runs.
 
-- [How do I ...?](HOW-DO-I.md): task recipes, by topic.
+- [How do I ...?](HOW-DO-I.md): tasks, by topic.
 - [Commands](COMMANDS.md): every documented command, by domain.
 - [Global keys](KEYS.md): every key in the global map.
 

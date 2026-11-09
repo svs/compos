@@ -2017,13 +2017,25 @@
 
 ;; a chat files its own card: the task is the chat's, in doing, so the
 ;; board can tell a chat that finished from one that stopped halfway
-(define-command "chat-todo" "Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes"
+(define (todo--ask-update! chat id)
+  "ask CHAT's agent to bring task ID up to date from the chat: notes, status and log"
+  (agent-continue! chat
+    (string-append "Bring task " id " up to date from this chat. "
+      "Add each finding the work must keep with (todo-update \"" id "\" (list 'note TEXT 'by WHO)). "
+      "Replace its status with (todo-update \"" id "\" (list 'status TEXT 'by WHO)): Done: and Left:, a few plain lines each. "
+      "Record the progress since the last log line with (todo-log \"" id "\" TEXT WHO). "
+      "WHO is agent: and your agent id. Change nothing else.")))
+
+(define-command "chat-todo" "Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes. The chat's agent then writes the task's notes, status and log; when the chat already holds a task, it brings that one up to date"
   (lambda ()
     (let* ((chat (current-buffer))
            (who (and (chat-buffer? chat) (chat-stable-id! chat)))
            (held (and who (todo-list (list 'assignee who)))))
       (cond ((not who) (message "Not a chat"))
-            ((pair? held) (message (string-append "This chat holds " (plist-get (car held) 'id))))
+            ((pair? held)
+             (let ((id (plist-get (car held) 'id)))
+               (todo--ask-update! chat id)
+               (message (string-append "Updating " id " from this chat"))))
             (else
              (read-string "Task (blank: from the chat): "
                (lambda (s)
@@ -2038,6 +2050,7 @@
                                                            (list 'notes summary)
                                                            '())))))
                    (todo--refresh-all!)
+                   (todo--ask-update! chat id)
                    (message (string-append "Filed " id ": " title))))
                'initial chat)))))
   'modes '(chat-mode))

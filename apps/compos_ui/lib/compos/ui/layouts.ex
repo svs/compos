@@ -46,6 +46,7 @@ defmodule Compos.Ui.Layouts do
         <script src={"/window-motion.js?v=" <> @boot_id}></script>
         <script src={"/rope.js?v=" <> @boot_id}></script>
         <script src={"/predict.js?v=" <> @boot_id}></script>
+        <script src={"/fullscreen.js?v=" <> @boot_id}></script>
         <script src={"/app.js?v=" <> @boot_id}></script>
       </body>
     </html>

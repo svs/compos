@@ -44,7 +44,7 @@ defmodule Compos.Ui.Endpoint do
   )
 
   # the port listens on every interface; this admits loopback and the
-  # trusted networks and refuses the rest before anything else runs
+  # tailnet and refuses the rest before anything else runs
   plug(Compos.Ui.Reach)
 
   # LiveView's browser JS is shipped prebuilt inside the hex packages —
@@ -57,7 +57,7 @@ defmodule Compos.Ui.Endpoint do
   plug(Plug.Static,
     at: "/",
     from: :compos_ui,
-    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js strip-slide.js window-motion.js rope.js rope.wasm predict.js mobile.css mobile.js)
+    only: ~w(manifest.webmanifest icons images composml.css editor.css app.js strip-slide.js window-motion.js rope.js rope.wasm predict.js fullscreen.js mobile.css mobile.js)
   )
 
   if code_reloading? do
@@ -100,7 +100,5 @@ defmodule Compos.Ui.Endpoint do
   and match uri.host to tighten this to one extension.
   """
   def browser_origin?(%URI{scheme: "chrome-extension"}), do: true
-  # Firefox stamps moz-extension://<uuid>, and a page cannot forge it either
-  def browser_origin?(%URI{scheme: "moz-extension"}), do: true
   def browser_origin?(_), do: false
 end

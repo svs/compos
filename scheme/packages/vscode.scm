@@ -110,12 +110,27 @@
     (customize-save! 'vscode-mode (not vscode-mode))
     (message (if vscode-mode "VSCode keys on" "VSCode keys off"))))
 
+;; Chrome keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1..9 and Ctrl-Tab for itself,
+;; except in fullscreen with the Keyboard Lock API. The command asks the
+;; page through frame chrome: fullscreen.js reads a new token and toggles
+;; fullscreen, and locks the keys when the token says lock. keySpec still
+;; decides which keys the editor gets, from cmd-keys.
+(defcustom 'vscode-keyboard-lock #f
+  "In fullscreen, take the keys the browser keeps: Cmd-W, Cmd-T, Cmd-N, Cmd-1..9, Ctrl-Tab."
+  'group 'vscode 'type 'boolean)
+
+(define-command "toggle-frame-fullscreen" "Toggle fullscreen; with vscode-keyboard-lock, the browser keys come to compos"
+  (lambda ()
+    (frame-chrome-set! "fullscreen"
+      (string-append (number->string (monotonic-ms)) (if vscode-keyboard-lock " lock" "")))))
+
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts.")
+  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
 
 (vscode--apply! vscode-mode)
 
 (catalog-meta! 'command "vscode-mode" 'domain 'commands 'effects '(write))
+(catalog-meta! 'command "toggle-frame-fullscreen" 'domain 'commands 'effects '(write display))
 (public! 'cmd-keys "(cmd-keys) — the base keys of the Cmd chords the global maps bind; the browser passes these through")
 (public! 'cmd-keys-publish! "(cmd-keys-publish!) — send cmd-keys to every frame")
 (public! 'vscode--keys "vscode--keys — the ((KEYS COMMAND) ...) vscode-mode puts in force")

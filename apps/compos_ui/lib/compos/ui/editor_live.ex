@@ -1132,6 +1132,7 @@ defmodule Compos.Ui.EditorLive do
       data-frame={@frame}
       data-instance={@instance_name}
       data-cmd-keys={cmd_keys(@state)}
+      data-fullscreen={fullscreen_request(@state)}
     >
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(Compos.Ui.FaceCSS.css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
@@ -1459,6 +1460,15 @@ defmodule Compos.Ui.EditorLive do
   # these chords to the editor, and leaves every other Cmd chord to the browser.
   defp cmd_keys(state) do
     state |> chrome("cmd-keys") |> Enum.filter(&is_binary/1) |> Enum.join(" ")
+  end
+
+  # The last fullscreen request (toggle-frame-fullscreen in vscode.scm):
+  # fullscreen.js toggles fullscreen when it changes.
+  defp fullscreen_request(state) do
+    case chrome(state, "fullscreen", "") do
+      request when is_binary(request) -> request
+      _ -> ""
+    end
   end
 
   defp chrome(state, key, default \\ []),

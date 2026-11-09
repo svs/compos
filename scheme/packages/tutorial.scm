@@ -524,7 +524,10 @@
 (define (tutorial--saw! cmd)
   ;; CMD ran, or a caret motion reads as it: every step that waits for it
   ;; hears it. A step that has all it waits for is done, and listens afresh
-  (when (string? cmd)
+  ;; a key no step waits for costs nothing: the lesson lookup stats the
+  ;; master file, so it runs only when a step hears CMD
+  (when (and (string? cmd)
+             (any (lambda (w) (member cmd (caddr w))) *tutorial-listening*))
     (let* ((l (tutorial--lesson-now))
            (steps (if l (tutorial--steps l) '()))
            ;; where the slide was when the key came: a step this key finishes

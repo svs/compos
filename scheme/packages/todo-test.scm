@@ -41,14 +41,17 @@
     (lambda () (todo-assign-chat! id g))))
 
 (deftest 'todo-a-sub-task-result-lands-on-the-task-and-its-parent
-  "the task is the record: a review summary goes to the sub-task's notes and the parent's log"
+  "the task is the record: a review summary is the sub-task's status and goes to the parent's log"
   (lambda ()
     (t--todo-in-group
       (lambda (g parent)
         (let ((sub (todo-create "zz sub-task" (list 'group g 'project "zz" 'parent parent))))
           (todo-review sub "zz measured 3 rounds\nmore detail" "agent:zz")
-          (check-true! (string-contains? (plist-get (todo-get sub) 'notes) "Result: zz measured 3 rounds")
-                       "the summary is in the sub-task's notes")
+          (check-equal! (plist-get (todo-get sub) 'status) "zz measured 3 rounds\nmore detail"
+                        "the summary is the sub-task's status, both lines, read back from the file")
+          (todo-review sub "" "agent:zz")
+          (check-equal! (plist-get (todo-get sub) 'status) "zz measured 3 rounds\nmore detail"
+                        "a blank summary keeps the status")
           (check-true! (any (lambda (l) (string-contains? l (string-append "sub-task " sub " zz sub-task -> review: zz measured 3 rounds")))
                             (plist-get (todo-get parent) 'log))
                        "the parent's log names the sub-task, its state and the summary's first line")

@@ -54,7 +54,7 @@
 (define *todo-fields* '(id state assignee chats priority urgent source parent depends created by group))
 ;; what todo-update may change
 (define *todo-settable*
-  '(title state project assignee chats priority urgent deadline scheduled tags source parent depends notes group))
+  '(title state project assignee chats priority urgent deadline scheduled tags source parent depends notes status group))
 
 ;;; --- small helpers -----------------------------------------------------------
 
@@ -210,6 +210,9 @@
 
 (define (todo--set-prop t k v)
   (cond ((equal? k "log") (plist-put t 'log (cons v (plist-get t 'log))))
+        ;; the status takes one #+status: line per line of its text
+        ((equal? k "status")
+         (plist-put t 'status (let ((s (plist-get t 'status))) (if (todo--blank? s) v (string-append s "\n" v)))))
         ((equal? k "depends") (plist-put t 'depends (todo--ids v)))
         ((equal? k "chats") (plist-put t 'chats (todo--ids v)))
         ((member (string->symbol k) *todo-fields*)
@@ -349,6 +352,9 @@
         (if (plist-get t 'scheduled) (list (string-append "SCHEDULED: <" (plist-get t 'scheduled) ">")) '())
         (fold (lambda (acc k) (append acc (field k))) '() *todo-fields*)
         (map (lambda (kv) (string-append "#+" (car kv) ": " (cadr kv))) (or (plist-get t 'extra) '()))
+        (if (todo--blank? (plist-get t 'status)) '()
+            (map (lambda (l) (string-append "#+status: " l))
+                 (filter (lambda (l) (not (todo--blank? l))) (string-split (plist-get t 'status) "\n"))))
         (if (todo--blank? notes) '() (list "" notes))
         (if (pair? logs) (cons "" (map (lambda (l) (string-append "#+log: " l)) logs)) '()))
       "\n")))
@@ -605,7 +611,7 @@
                 'by who))))))
 
 (define (todo-update id props)
-  "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, urgent (#t or #f), deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
+  "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, urgent (#t or #f), deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), status (what is done and what is left; it replaces the old), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
   (let* ((t (todo--must id))
          (who (or (plist-get props 'by) todo-user))
          (props (todo--split-log props)))
@@ -665,14 +671,14 @@
           ((not (todo--ready? t (todo--all))) #f)
           (else (todo-update id (list 'state "doing" 'assignee who 'by who))))))
 
-;; the result of a task is part of the task: it goes to the notes as well as
-;; the log, so the page alone hands the task over
-(define (todo--result-note text)
-  (if (todo--blank? text) #f (string-append "Result: " text)))
+;; the summary a task ends a stage with is its status: what is done and what
+;; is left, so the page alone hands the task over. A blank one keeps the old.
+(define (todo--result-status text)
+  (if (todo--blank? text) '() (list 'status text)))
 
 (define (todo-done id &optional result who)
   "(todo-done ID [RESULT] [WHO]) — close the task as done; RESULT goes to the log"
-  (todo--answer (todo-update id (list 'state "done" 'log result 'note (todo--result-note result) 'by (or who todo-user)))))
+  (todo--answer (todo-update id (append (list 'state "done" 'log result 'by (or who todo-user)) (todo--result-status result)))))
 
 (define (todo-cancel id &optional reason who)
   "(todo-cancel ID [REASON] [WHO]) — close the task as cancelled"
@@ -684,7 +690,7 @@
 
 (define (todo-review id summary &optional who)
   "(todo-review ID SUMMARY [WHO]) — hand the task to a human to approve, e.g. a draft before it is sent"
-  (todo--answer (todo-update id (list 'state "review" 'log summary 'note (todo--result-note summary) 'by (or who todo-user)))))
+  (todo--answer (todo-update id (append (list 'state "review" 'log summary 'by (or who todo-user)) (todo--result-status summary)))))
 
 (define (todo-approve id &optional text who)
   "(todo-approve ID [TEXT] [WHO]) — approve a task in review: back to todo for its assignee, logged as approved"
@@ -1189,8 +1195,10 @@
      "You are assigned todo " id ": " (plist-get t 'title) "\n\n"
      (field "Project" 'project) (field "Deadline" 'deadline) (field "Source" 'source)
      (if (todo--blank? notes) "" (string-append "\nNotes:\n" notes "\n"))
+     (if (todo--blank? (plist-get t 'status)) "" (string-append "\nStatus (done and left):\n" (plist-get t 'status) "\n"))
      "\nRead it with (todo-get \"" id "\"). Work it through the todo API as \"" chat "\":\n"
      "- (todo-log \"" id "\" TEXT \"" chat "\") for progress\n"
+     "- (todo-update \"" id "\" (list 'status TEXT 'by \"" chat "\")) when what is done or left changes; TEXT replaces the status\n"
      "- (todo-review \"" id "\" SUMMARY \"" chat "\") before anything goes out, and stop there\n"
      "- (todo-wait \"" id "\" REASON \"" chat "\") when it waits on someone\n"
      "  then (agent-listen! '(topic \"whatsapp:PHONE\" kind received task \"" id "\") NOTE), so the reply wakes you; a mail:ACCOUNT topic needs 'match with the sender\n"
@@ -1708,6 +1716,13 @@
                    (stop (component 'ui/group (list 'title title 'body body)) name first (length lines)))))
          (head (let ((n (line! (plist-get t 'title))))
                  (stop (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state))) "Title" n n)))
+         ;; where the task stands: what is done and what is left
+         (status-part (let ((s (plist-get t 'status)))
+                        (if (todo--blank? s) '()
+                            (let ((n (line! "Status")))
+                              (list (stop (component 'ui/group
+                                            (list 'title "Status" 'body (list (list 'tag "c-group" 'class "c-prose c-lines" 'text s))))
+                                          "Status" n n))))))
          (notes-part (if (todo--blank? notes) '()
                          (let ((n (line! "Notes")))
                            (list (stop (component 'ui/group
@@ -1726,7 +1741,7 @@
                                                          (if (null? more) ""
                                                              (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
                                                                             "  ·  w picks, C attaches"))))
-                                          (pair "Status" (todo--status t))
+                                          (pair "Chat state" (todo--status t))
                                           (pair "Group" (group-name (plist-get t 'group)))
                                           (pair "Filed by" (plist-get t 'by))
                                           (pair "Source" (plist-get t 'source))
@@ -1748,6 +1763,7 @@
             (append
               (list head (component 'ui/meta (list 'segs (todo--detail-facts t))))
               (if (pair? tags) (list (component 'ui/chips (list 'items tags))) '())
+              status-part
               notes-part
               (list details)
               listening
@@ -2210,10 +2226,10 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
 - Read: `(todo-list [SPEC])` gives open tasks, most urgent first. SPEC is a plist: state, project, assignee (\"none\" is unassigned), tag, text, overdue, ready. `(todo-next WHO)`, `(todo-get ID)` and `(todo-projects)` answer the rest.
 - File: `(todo-create TITLE PROPS)` gives the new id. PROPS must hold 'group: \"put a todo in X\" means group X, by name or id, not a project and not your own chat's group. Without it the call errors and lists the groups; pick one and call again. A task you find goes in as inbox, for the user to triage.
 - Kick off: when the user asks for a todo, file it and start an agent on it in the same turn with `(todo-assign-chat! ID GROUP WHO)`, GROUP being the todo's group. It starts the chat on the group's own backend and sends it the brief. Do not stop at filing, and do not ask whether to start it. When your own chat is clean, that is, the todo request is its first task, do not start a new chat: file the todo with 'assignee `(chat-stable-id! CHAT)` and 'state \"doing\", CHAT being your chat buffer, and work it in this chat.
-- Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress. RESULT and SUMMARY go to the task's notes and to its parent's log by themselves; do not add them again. They are the handover: what changed, where, the numbers, and what is left, complete without the chat. Work after review goes in with `todo-review` again and a new summary, not as a log line.
-- The task is the record. Findings, numbers, decisions, where the work stands and the next step go on the task with `(todo-update ID (list 'note TEXT 'by WHO))` as you learn them, never only in the chat, a side file or a memory. Whoever takes the task next reads only the task.
-- A chat that coordinates a parent task keeps the parent's notes current: when a sub-task goes to review or done, add what it changed for the goal.
-- Handover: `(todo-handover! ID WHO)` archives the chat working the task, starts a new chat in the task's group with the task as its brief, and makes it the assignee. Bring the notes up to date first: they are all the new chat gets. A chat that hands over its own task is archived when its turn ends.
+- Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress. RESULT and SUMMARY become the task's status and go to its parent's log by themselves. They are the handover: what is done, where, the numbers, and what is left, complete without the chat. Work after review goes in with `todo-review` again and a new summary, not as a log line.
+- The task is the record, never the chat, a side file or a memory; whoever takes it next reads only the task. It has three parts. Notes are the brief: what to do, why, and the rules; add a finding the work must keep with `(todo-update ID (list 'note TEXT 'by WHO))`. Status is where it stands, what is done and what is left; replace it with `(todo-update ID (list 'status TEXT 'by WHO))` whenever that changes. The log is the history; `todo-log` adds to it.
+- A chat that coordinates a parent task keeps the parent's status current: when a sub-task goes to review or done, say what it changed for the goal.
+- Handover: `(todo-handover! ID WHO)` archives the chat working the task, starts a new chat in the task's group with the task as its brief, and makes it the assignee. Bring the status up to date first: the task is all the new chat gets. A chat that hands over its own task is archived when its turn ends.
 - Waiting on someone: after `todo-wait`, call `(agent-listen! '(topic \"whatsapp:PHONE\" kind received task ID) NOTE)`. The event comes to you as a message; decide whether it answers, then carry on or listen again. `mail:ACCOUNT` topics need `match` with the sender.
 - WHO, and 'by in PROPS, is `agent:` and your agent id from `(chat-context)`.
 - A task that needs the user's OK, such as a draft before it goes out, goes to review. Do not continue it until the user approves.")

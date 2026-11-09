@@ -2303,7 +2303,8 @@ them the address is live, so a purge never follows one."
     (if (member base '("" "." "..")) "attachment" base)))
 
 (define (nm--open-attachment! attachment)
-  (let* ((root (string-append (compos-home) "/attachments")))
+  ;; Mail attachments can be fetched again from notmuch: they are cache.
+  (let* ((root (cache-path "attachments" "")))
     (make-directory! root)
     (let ((dir (string-trim (shell-command->string
                  (string-append "mktemp -d " (sh-quote (string-append root "/part-XXXXXX")))))))

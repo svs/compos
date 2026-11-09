@@ -31,6 +31,22 @@ defmodule Compos.SchemeTortureTest do
       end
     end
 
+    test "a character literal is a one-character string" do
+      assert Reader.read_all(~S{#\a #\space #\newline #\( #\x41}) == ["a", " ", "\n", "(", "A"]
+      assert Reader.read_all(~S{(f #\;)}) == [[{:sym, "f"}, ";"]]
+      assert_raise Reader.Error, ~r/unknown character/, fn -> Reader.read_all(~S{#\bogus}) end
+    end
+
+    test "R7RS char, string and vector procedures over strings and lists" do
+      assert run(~S{(list (char=? #\a #\a) (string<? "a" "b") (char->integer #\A) (list->vector '(1 2)) (vector-ref (vector 1 2) 1) (string->list "ab"))}) ==
+               [true, true, 65, [1, 2], 2, ["a", "b"]]
+    end
+
+    test "apply takes leading arguments before the list" do
+      assert run("(apply + 1 2 '(3 4))") == 10
+      assert err("(apply + 1 2)") =~ "must be a list"
+    end
+
     test "string escapes" do
       assert Reader.read_all(~S{"a\"b\\c\nd\te"}) == ["a\"b\\c\nd\te"]
     end

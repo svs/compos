@@ -332,7 +332,17 @@
     string-prefix? string-suffix? string-split string-join string-trim
     string-downcase string-upcase string=? symbol->string string->symbol
     number->string string->number value->string plist-get json-parse
-    split-lines first-line with-current-buffer list-tail list-head))
+    split-lines first-line with-current-buffer list-tail list-head apply
+    string<? string>? string<=? string>=? string-ci=? string-ci<? string-ci>?
+    string-ci<=? string-ci>=? char=? char<? char>? char<=? char>=? char-ci=?
+    char-ci<? char-ci>? char? char->integer integer->char char-upcase
+    char-downcase char-foldcase char-alphabetic? char-numeric? char-whitespace?
+    char-upper-case? char-lower-case? digit-value string->list list->string
+    string-copy string-ref make-string string-foldcase string->vector
+    vector->string string-map string-for-each vector vector? make-vector
+    list->vector vector->list vector-copy list-copy vector-ref vector-length
+    vector-append vector-map vector-for-each boolean? boolean=? symbol=?
+    exact inexact exact->inexact inexact->exact))
 
 (define (eval-read--items x)
   "the elements of the form X, a dotted tail last: (a b . c) gives (a b c)"

@@ -722,7 +722,11 @@
   (let* ((companion (llm-mode--companion! buf model))
          (id (buffer-local companion 'agent-slug)))
     (llm-inline-begin! id response-id insert-at (string-byte-length display))
-    (llm-session-send! id wire display)))
+    (llm-session-send! id (string-append (llm-mode--chat-context-once companion) wire) display)))
+
+;; the inline lane carries the chat-context brief the chat lane carries
+(define (llm-mode--chat-context-once companion)
+  (if (boundp 'agent-chat-context-once) (agent-chat-context-once companion) ""))
 
 (define-command "llm-companion-show" "Show this document's hidden chat in the other window"
   (lambda ()
@@ -1258,7 +1262,7 @@
           ((and (llm-mode--stateful? buf) (equal? wire ""))
            (message "Nothing new to send") #f)
           (else
-            (llm-session-send! id wire context)
+            (llm-session-send! id (string-append (llm-mode--chat-context-once companion) wire) context)
             (display-buffer-other-window! companion)
             (message (string-append "LLM answers in " companion))
             companion))))

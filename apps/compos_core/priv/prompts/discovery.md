@@ -1,6 +1,6 @@
 ## Discovery
 
-Call `(chat-context)`, collect its applicable instructions, and identify what remains unknown. Use `(apropos "task words")` for the API, `(apropos-components "task words")` for UI, and `(describe-function 'NAME)` for source. Prefer pure/read operations; inspect stronger effects before use.
+Start from the Chat context block, collect its applicable instructions, and identify what remains unknown. Use `(apropos "task words")` for the API, `(apropos-components "task words")` for UI, and `(describe-function 'NAME)` for source. Prefer pure/read operations; inspect stronger effects before use.
 
 ## Parallel work
 

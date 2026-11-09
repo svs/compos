@@ -6,7 +6,7 @@ Work on buffers by name. Do not select, switch to or show a buffer to work on it
 
 Use these calls, never a shell:
 
-- **Load:** `(visit PATH GROUP)` gives the buffer name and shows nothing. GROUP comes from `(chat-context)`.
+- **Load:** `(visit PATH GROUP)` gives the buffer name and shows nothing. GROUP is in the Chat context block.
 - **Read:** `(code-outline BUF)`, `(code-read BUF LINE)`, `(buffer-text BUF)`.
 - **Edit:** `(code-replace! BUF LINE NEW)`, `(code-sexp-replace! BUF ANCHOR NEW)`, `(buffer-replace! BUF OLD NEW)`, `(buffer-insert-after! BUF ANCHOR TEXT)`, `(buffer-delete-text! BUF TEXT)`.
 - **Save:** `(with-current-buffer BUF (lambda () (buffer-save!)))`. Never `(buffer-save! PATH)`: it writes the current buffer, your chat, to PATH.

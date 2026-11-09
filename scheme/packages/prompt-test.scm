@@ -83,6 +83,26 @@
                         "the context reports the frozen prompt")
           (t--prompt-cleanup chat doc hidden))))))
 
+(deftest 'the-first-message-carries-the-chat-context
+  "the agent starts with chat-context in hand; a new member alone does not send it again"
+  (lambda ()
+    (with-fresh-group "prompt-brief-group"
+      (lambda (id)
+        (let ((chat (t--prompt-chat "*prompt-brief*" "api"))
+              (member-buf "prompt-brief.md"))
+          (chat-set-group! chat id)
+          (let ((first (agent-chat-context-once chat)))
+            (check-true! (string-prefix? "[Chat context" first) "the first message opens with the block")
+            (check-contains! first (format "~s" chat) "the block names the chat")
+            (check-contains! first (format "~s" id) "the block names the group")
+            (check-equal! (agent-chat-context-once chat) "" "the next message does not repeat it")
+            (test-buffer! member-buf "x\n")
+            (buffer-add-group! member-buf id)
+            (check-equal! (agent-chat-context-once chat) "" "a new member alone does not send it again")
+            (check-true! (string-prefix? "[Chat context" (agent-chat-context-once chat #t))
+                         "a fresh session sends it again"))
+          (t--prompt-cleanup chat member-buf))))))
+
 (deftest 'group-members-come-from-chat-context-not-the-system-prompt
   "changing group membership leaves the cached prompt byte-identical"
   (lambda ()

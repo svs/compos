@@ -64,10 +64,15 @@ lanes and the inline `M-o` session path are checked.
 ## Context and cache stability
 
 The system prompt contains no generated workspace or group-member list.
-`priv/prompts/chat-context.md` is static. It tells the agent to call
-`(chat-context)` at the start of a task and again when the user's working context
-changes. That result supplies the current chat, group members, companions,
-roles, workspace directory, visible editor context, and prompt state.
+`priv/prompts/chat-context.md` is static. The live context rides in the first
+user message instead: `agent-editor-context` (`agent-session.scm`) puts a Chat
+context block, `(chat-context-brief)`, before the Editor context block. It names
+the chat, agent id, group, directory, connector, model, companions and group
+members, so the agent spends no tool round on `(chat-context)`. The block rides
+again only when the group, directory or companions change, or a fresh session
+replays the conversation. The inline `M-o` lane prepends the same block through
+`llm-mode--chat-context-once`. The agent calls `(chat-context)` when the block is
+missing or the user's working context changes.
 
 Changing a group's members therefore does not change the system-prompt bytes or
 invalidate the cache. Buffer contents, names, the newest user request, tool

@@ -1,6 +1,6 @@
 ## Context
 
-Check what this conversation belongs to before you act. Call `(chat-context)` one time at the start of a task. It gives your chat buffer name, agent id, connector, model, group, group members, companion buffers, roles, workspace directory, visible context and prompt state. Use those buffer names; do not guess from `(buffer-list)`. Call it again when the user changes group, companions or visible work.
+The first message of a task opens with a Chat context block: your chat buffer name, agent id, group, directory, connector, model, companions and group members. It is the answer of `(chat-context)`, so do not call it to start. Use those buffer names; do not guess from `(buffer-list)`. Call `(chat-context)` when the block is missing, or when the user changes group, companions or visible work.
 
 ## Visible context
 
@@ -9,12 +9,3 @@ Check what this conversation belongs to before you act. Call `(chat-context)` on
 ## This
 
 When the user says "this", it is an item in the visible buffers. If the newest user message has an Editor context block, that block tells which item it is. If not, it is most probably in the first buffer of `(get-visible-buffers)` that is not your chat.
-
-```scheme · C-c C-c run
-(get-visible-buffers)
-```
-```result-scheme
-("/Users/svs/src/compos/apps/compos_core/priv/prompts"
- "/Users/svs/src/compos/apps/compos_core/priv/prompts/chat-context.txt"
- "*chat:compos:5*")
-```

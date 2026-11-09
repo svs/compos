@@ -160,7 +160,7 @@
                     (buffer-local buf 'agent-seed-context)))
          (pre (editor-context-preamble buf)))
     (string-append
-      (agent-chat-context-once buf force)
+      (agent-chat-context-once buf (buffer-local buf 'agent-seed-context))
       (if (and (not force) (equal? pre (buffer-local buf 'editor-context-sent)))
           ""
           (begin (buffer-set-local! buf 'editor-context-sent pre) pre))

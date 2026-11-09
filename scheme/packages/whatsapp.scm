@@ -37,6 +37,50 @@
 (define (whatsapp--one-line value)
   (string-join (string-split (whatsapp--text value "") "\n") " "))
 
+;; The MCP chat list sometimes leaves a chat's name and last message empty
+;; while its transcript holds both. These read the newest line of a
+;; transcript, "[TIME] Chat: NAME From: SENDER: BODY", and copy the
+;; missing fields onto the chat.
+(define (whatsapp--transcript-first text)
+  "(whatsapp--transcript-first TEXT) -- (NAME SENDER BODY) of the newest message in a transcript, or #f"
+  (and (string? text)
+       (not (equal? (string-trim text) ""))
+       (let* ((line (car (string-split text "\n")))
+              (head (string-split line "] Chat: ")))
+         (and (pair? (cdr head))
+              (let* ((rest (string-join (cdr head) "] Chat: "))
+                     (halves (string-split rest " From: ")))
+                (and (pair? (cdr halves))
+                     (let* ((name (string-trim (car halves)))
+                            (body (string-split
+                                    (string-join (cdr halves) " From: ") ": ")))
+                       (and (pair? (cdr body))
+                            (list name
+                                  (string-trim (car body))
+                                  (string-join (cdr body) ": "))))))))))
+
+(define (whatsapp--chat-with-last-message chat parts)
+  "(whatsapp--chat-with-last-message CHAT PARTS) -- CHAT with the name, message and sender its transcript gives where they were empty"
+  (if (not parts)
+      chat
+      (let* ((name (car parts))
+             (sender (cadr parts))
+             (body (caddr parts))
+             (chat (if (whatsapp--text (plist-get chat 'name) #f) chat
+                       (plist-put chat 'name name))))
+        (if (plist-get chat 'last_message)
+            chat
+            (plist-put
+              (plist-put chat 'last_message body)
+              'last_is_from_me (if (equal? sender "Me") 1 0))))))
+
+(define (whatsapp--list-time stamp)
+  "(whatsapp--list-time STAMP) -- a chat's last activity as YYYY-MM-DD HH:MM"
+  (let ((s (whatsapp--text stamp "")))
+    (if (> (string-byte-length s) 16)
+        (string-replace (substring-bytes s 0 16) "T" " ")
+        s)))
+
 (define (whatsapp--parse-chats text)
   (if (not (string? text))
       #f
@@ -61,7 +105,7 @@
   (let ((jid (whatsapp--text (plist-get chat 'jid) "unknown")))
     (list
       (whatsapp--text (plist-get chat 'name) jid)
-      (whatsapp--text (plist-get chat 'last_message_time) "")
+      (whatsapp--list-time (plist-get chat 'last_message_time))
       (string-append
         (if (whatsapp--from-me? chat) "me: " "")
         (whatsapp--one-line (plist-get chat 'last_message))))))
@@ -287,6 +331,51 @@
 (domain! 'chat)
 (effects! '(read external))
 
+;; The chat list leaves a name and a preview empty for some chats, while
+;; the chat's newest transcript has both. Keep what a transcript said for
+;; a few minutes, so a refresh does not ask again for every chat.
+(defvar '*whatsapp-details* '())
+(defvar '*whatsapp-details-at* 0)
+(define whatsapp-detail-ttl 300)
+
+(define (whatsapp--detail-lookup jid)
+  (let ((e (assoc jid *whatsapp-details*)))
+    (and e (cadr e))))
+
+(define (whatsapp--detail-remember! jid parts)
+  (set! *whatsapp-details* (cons (list jid parts) *whatsapp-details*))
+  parts)
+
+(define (whatsapp--needs-detail? chat)
+  (or (not (whatsapp--text (plist-get chat 'name) #f))
+      (not (plist-get chat 'last_message))))
+
+(define (whatsapp--fill-chat chat)
+  "(whatsapp--fill-chat CHAT) -- CHAT with the name and preview its newest transcript gives"
+  (let* ((jid (whatsapp--text (plist-get chat 'jid) ""))
+         (known (and (not (equal? jid "")) (whatsapp--detail-lookup jid)))
+         (parts
+           (or known
+               (and (not (equal? jid ""))
+                    (whatsapp--detail-remember! jid
+                      (whatsapp--transcript-first
+                        (mcp-tool-call "whatsapp" "list_messages"
+                          (list 'chat_jid jid 'limit 1 'page 0
+                                'include_context #f))))))))
+    (whatsapp--chat-with-last-message chat parts)))
+
+(define (whatsapp--enrich-chats rows)
+  (when (> (- (current-time) *whatsapp-details-at*) whatsapp-detail-ttl)
+    (set! *whatsapp-details* '())
+    (set! *whatsapp-details-at* (current-time)))
+  (map (lambda (chat)
+         (if (whatsapp--needs-detail? chat)
+             (or (report-errors "whatsapp: chat detail"
+                                (lambda () (whatsapp--fill-chat chat)))
+                 chat)
+             chat))
+       rows))
+
 (define (whatsapp--fetch-chats buf k)
   (let* ((text
            (*whatsapp-call* 'whatsapp "list_chats"
@@ -296,7 +385,7 @@
                    'sort_by "last_active")))
          (rows (whatsapp--parse-chats text)))
     (if rows
-        (begin
+        (let ((rows (whatsapp--enrich-chats rows)))
           ;; A cache callback redraws with the cached rows. Seed the
           ;; unfiltered rows first so local filtering cannot retain the
           ;; empty source installed by the mode's initial render.
@@ -478,7 +567,7 @@
     'cache-fetch whatsapp--fetch-chats
     'cache-ttl whatsapp-cache-ttl
     'columns (lambda (buf)
-               (list (list "chat" 24) (list "last active" 25)
+               (list (list "chat" 22) (list "last active" 16)
                      (list "message" #f)))
     'cells whatsapp--cells
     'title (lambda (buf) "WhatsApp chats")
@@ -745,3 +834,4 @@
                        'jid (plist-get d 'chat)))))))
 
 (event-subscribe! "whatsapp-notify" "whatsapp:*" 'whatsapp-notify--saw)
+

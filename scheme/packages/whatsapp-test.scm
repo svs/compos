@@ -113,3 +113,45 @@
                        "the refresh action is visible")
       (check-contains! (value->string blocks) "Could not load messages"
                        "what the server said is what the reader sees"))))
+
+
+(deftest 'whatsapp-fills-a-chat-from-its-newest-transcript
+  "A chat the list left blank takes its name and preview from its newest message."
+  (lambda ()
+    (let* ((parts (whatsapp--transcript-first t--whatsapp-message-stream))
+           (filled (whatsapp--chat-with-last-message
+                     (list 'jid "123@s.whatsapp.net" 'name ""
+                           'last_message #f 'last_is_from_me #f)
+                     parts)))
+      (check-equal! (car parts) "Mukund" "the transcript names the chat")
+      (check-equal! (cadr parts) "Me" "the transcript names the sender")
+      (check-equal! (caddr parts) "line one"
+                    "the preview is the newest message's first line")
+      (check-equal! (plist-get filled 'name) "Mukund"
+                    "the empty name is filled")
+      (check-equal! (plist-get filled 'last_message) "line one"
+                    "the empty preview is filled")
+      (check-equal! (plist-get filled 'last_is_from_me) 1
+                    "a message from Me is marked as mine"))))
+
+(deftest 'whatsapp-keeps-a-chat-field-the-list-already-has
+  "A name and preview the list gave are never replaced."
+  (lambda ()
+    (let ((filled (whatsapp--chat-with-last-message
+                    (list 'jid "123@s.whatsapp.net" 'name "Mukund"
+                          'last_message "hello" 'last_is_from_me 0)
+                    (list "Other" "Me" "bye"))))
+      (check-equal! (plist-get filled 'name) "Mukund"
+                    "the list name stays")
+      (check-equal! (plist-get filled 'last_message) "hello"
+                    "the list preview stays")
+      (check-equal! (plist-get filled 'last_is_from_me) 0
+                    "the list sender stays"))))
+
+(deftest 'whatsapp-transcript-first-rejects-a-notice
+  "A loading notice is not a transcript."
+  (lambda ()
+    (check-equal! (whatsapp--transcript-first "Loading messages…\n") #f
+                  "a notice gives no message parts")
+    (check-equal! (whatsapp--transcript-first "") #f
+                  "an empty transcript gives no message parts")))

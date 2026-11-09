@@ -7396,7 +7396,10 @@
 ;; Every primitive states what it does, so eval-scheme-read can take or
 ;; refuse it by its stamp. The doc is the primitive's own line.
 (define (editor--public-primitives! names)
-  (for-each (lambda (n) (public! n (primitive-doc (symbol->string n)))) names))
+  (for-each (lambda (n)
+              (let ((doc (and (boundp n) (primitive-doc (symbol->string n)))))
+                (when doc (public! n doc))))
+            names))
 (domain! 'system)
 (effects! '(pure))
 (editor--public-primitives!

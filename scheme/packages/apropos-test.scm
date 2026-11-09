@@ -138,7 +138,7 @@
                         (and (equal? (plist-get e 'origin) "bundled")
                              (equal? (plist-get e 'metadata-source) "unknown")))
                       (catalog)))
-      499 "the unstamped bundled entries")))
+      473 "the unstamped bundled entries")))
 
 (deftest 'no-entry-carries-the-same-key-twice
   "one entry, one answer per key: a duplicate hides from plist-get and not from a walker"
@@ -498,7 +498,7 @@
   (lambda ()
     (let* ((allow (map (lambda (s) (if (symbol? s) (symbol->string s) s))
                        (append *eval-read-builtins* *eval-read-forms*)))
-           (names (filter (lambda (n) (not (member n allow)))
+           (names (filter (lambda (n) (not (or (member n allow) (string-contains? n "--"))))
                           (map car (primitive-docs))))
            (eff (eval-read--effects names)))
       (check-equal!

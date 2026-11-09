@@ -2023,9 +2023,12 @@ defmodule Compos.Core.SchemeAPI do
                                                                                                    k
                                                                                                  ] ->
         cond do
-          # a symbol or a number is never a buffer: the call put KEY first.
-          # A name and a Buffer.Ref both name a buffer.
-          not (is_binary(buf) or is_struct(buf, Buffer.Ref)) ->
+          # #f is no buffer: it has no locals, so the answer is #f
+          buf == false ->
+            false
+
+          # a symbol or a number is never a buffer: the call put KEY first
+          match?({:sym, _}, buf) or is_number(buf) ->
             raise Compos.Scheme.Eval.Error,
               message: "buffer-local: BUF comes first: (buffer-local BUF KEY); got #{inspect(buf)} as BUF"
 

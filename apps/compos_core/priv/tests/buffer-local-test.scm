@@ -1,4 +1,4 @@
-;;; buffer-local-test.scm --- buffer-local takes a buffer name or a buffer ref.
+;;; buffer-local-test.scm --- buffer-local takes a buffer name, a buffer ref, or #f.
 ;;;
 ;;; A Buffer.Ref is the immutable identity of a buffer, so it names the
 ;;; buffer as well as its name does. A symbol in the BUF place is a call
@@ -16,6 +16,7 @@
     (buffer-set-local! *t--bl-buf* 'zz-color "blue")
     (check-equal! (buffer-local *t--bl-buf* 'zz-color) "blue" "the name reads the local")
     (check-equal! (buffer-local (buffer-ref *t--bl-buf*) 'zz-color) "blue" "the ref reads the local")
+    (check-false! (buffer-local #f 'zz-color) "#f is no buffer and has no locals")
     (check-false! (ignore-errors (lambda () (buffer-local 'zz-color *t--bl-buf*) #t))
                   "a symbol in the BUF place raises")
     (buffer-kill! *t--bl-buf*)))

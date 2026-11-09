@@ -1146,7 +1146,7 @@
 (define (todo--at) (let ((t (list-current (todo--list-buffer)))) (and t (not (todo--sep? t)) t)))
 
 (define (todo--keep-place! f)
-  "run F, which may change the task at point, and redraw. A task whose state changes moves in the urgency order; point stays where the reader was, on the task that followed it, so working down the inbox does not lose the place"
+  "run F, which may change the task at point, and redraw. A task whose state changes moves in the order; the highlight moves with it, on the same task. A task the view no longer shows hands point to the task that followed it, so working down the inbox does not lose the place"
   (let* ((buf (todo--list-buffer))
          (i (list-index buf))
          (es (list-entries buf))
@@ -1155,9 +1155,10 @@
     (f)
     (list-refresh! buf)
     (let* ((rows (list-entries buf))
-           (moved? (not (equal? i (and key (list-index-of buf rows key)))))
-           (j (and moved? next (list-index-of buf rows next))))
-      (when j (list-goto-index! buf j)))))
+           (j (or (and key (list-index-of buf rows key))
+                  (and next (list-index-of buf rows next)))))
+      (when (and j (not (equal? j (list-index buf))))
+        (list-goto-index! buf j)))))
 
 (define (todo--with-row f)
   (let ((t (todo--at)))

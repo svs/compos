@@ -3313,6 +3313,8 @@
                            (let ((k (plist-get (cadr e) 'kind)))
                              (and k (or (not kind) (equal? k kind)))))
                          (registry-list 'mode)))))
+(public! 'mode-names "(mode-names [KIND]) — every mode name, sorted; KIND 'major or 'minor gives one kind")
+(catalog-meta! 'function "mode-names" 'domain 'modes 'effects '(read))
 
 ;; Put the current buffer in the mode NAME. This is the same toggle the
 ;; modeline click and the mode's own M-x command run, so a major mode

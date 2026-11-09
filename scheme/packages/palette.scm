@@ -74,51 +74,26 @@
                                   (member (plist-get h 'name) out))))
             hits)))
 
-;; The palette draws the commands apropos finds, in its order,
-;; with the ones whose name holds every word first. Its semantic pass can
-;; take a second, so the refresh runs it in a task after a pause in typing.
+;; The refresh runs the search in a task after a pause in typing.
 (define (command-palette--search query)
-  (let* ((words (apropos-query-words query))
-         (hits (filter (lambda (h) (equal? (plist-get h 'kind) "command"))
+  ;; The palette draws the commands apropos finds, in its order: apropos
+  ;; ranks by meaning. Only a key you typed and the command you named
+  ;; exactly lead: "undo" is undo and "split window right" is
+  ;; split-window-right.
+  (let* ((hits (filter (lambda (h) (equal? (plist-get h 'kind) "command"))
                        (command-palette--for-user (apropos query 'kind "command")
                                                   (command-palette--origin))))
-         (named? (lambda (h) (apropos-text-hit? (plist-get h 'name) words)))
-         ;; "undo" is undo and "split window right" is split-window-right:
-         ;; the command the words name leads, before any that merely share one
          (exact (let ((n (string-join (filter (lambda (w) (not (equal? w "")))
                                               (string-split (string-downcase (string-trim query)) " "))
                                       "-")))
                   (and (command-fn n)
                        (command-applicable? n (command-palette--origin))
-                       n)))
-         (exact? (lambda (h) (and exact (equal? (plist-get h 'name) exact))))
-         ;; then the everyday commands and the ones you ran before: save-buffer
-         ;; before llm-config-save-bundle
-         (ran (history-items 'M-x))
-         (common? (lambda (h) (and (equal? (plist-get h 'kind) "command")
-                                   (or (command-palette--everyday? (plist-get h 'name))
-                                       (member (plist-get h 'name) ran)))))
-         (q (string-downcase (string-trim query)))
-         ;; "save" is the word of save-buffer and write-file: they lead
-         (says? (lambda (h) (let ((row (assoc (plist-get h 'name) command-palette-everyday)))
-                              (and row (string-contains? (cadr row) q)))))
-         ;; a common command leads only when its name has the words: customize
-         ;; mentions saving in its doc, and that is no reason to rank it first
-         (first? (lambda (h) (or (exact? h) (says? h) (and (common? h) (named? h)))))
-         (rest (filter (lambda (h) (not (first? h))) hits)))
+                       n))))
     (append
       (let ((bind (command-palette--bind-hit query)))
         (if bind (list bind) '()))
       (if exact (list (command-palette--command-hit exact)) '())
-      (filter (lambda (h) (and (says? h) (not (exact? h)))) hits)
-      (filter (lambda (h) (and (common? h) (named? h) (not (exact? h)) (not (says? h)))) hits)
-      ;; among the rest, a command with a key is a main one: window-layout
-      ;; (C-x l) before layout-backward for "layout"
-      (let* ((keyed? (lambda (h) (and (equal? (plist-get h 'kind) "command")
-                                      (not (equal? (key-for-command (plist-get h 'name) (command-palette--origin)) "")))))
-             (named (filter named? rest)))
-        (append (filter keyed? named) (filter (lambda (h) (not (keyed? h))) named)))
-      (filter (lambda (h) (not (named? h))) rest))))
+      (filter (lambda (h) (not (and exact (equal? (plist-get h 'name) exact)))) hits))))
 
 ;; The palette prints keys as the keyboard does, ⌃X ⌃S and ⇧⌘P, where M-x
 ;; keeps the Emacs spelling: the resting rows come from M-x's table, so their

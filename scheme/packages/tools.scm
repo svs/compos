@@ -1296,10 +1296,12 @@
             (or (plist-get hit 'use) (plist-get hit 'run) ""))))
     (let ((name-coverage (apropos--field-coverage name words))
           (signature-coverage (apropos--field-coverage signature words)))
+    ;; meaning ranks; words only break near ties, and the words a user
+    ;; taught (aliases) still count in full
     (+ (or (plist-get hit 'semantic-score) 0.0)
-       (* 0.30 name-coverage name-coverage)
-       (* 0.12 signature-coverage signature-coverage)
-       (* 0.06 (apropos--field-coverage doc words))
+       (* 0.05 name-coverage name-coverage)
+       (* 0.02 signature-coverage signature-coverage)
+       (* 0.01 (apropos--field-coverage doc words))
        (* 0.20 (apropos--field-coverage (or (plist-get hit 'aliases) "") words))
        (* 0.02 (apropos--field-coverage metadata words))))))
 
@@ -1491,10 +1493,11 @@
 (define (apropos--search query filters0 index rows)
   (let* ((lexical? (plist-get filters0 'lexical))
          (wait? (apropos--flag filters0 'wait #t))
-         ;; 'semantic #t asks for the semantic pass even when the words
-         ;; found something: a sentence such as "change the layout" matches
-         ;; docs that hold the words, not the commands that do it
-         (semantic? (apropos--flag filters0 'semantic #f))
+         ;; The semantic pass always runs and ranks: a sentence such as
+         ;; "change the layout" matches docs that hold the words, not the
+         ;; commands that do it. The local embedding backend answers a query
+         ;; in milliseconds. 'semantic #f turns it off for one call.
+         (semantic? (apropos--flag filters0 'semantic #t))
          (filters (apropos--without-lexical filters0))
          (words (apropos--words query))
          (scan (apropos--longest-first words))
@@ -1502,11 +1505,9 @@
          (literal-hits (map (lambda (row) (car (cdr row))) literal-rows))
          (suggestions (if (pair? literal-hits) '()
                           (apropos--name-suggestions query words index)))
-         ;; The semantic pass embeds the query through a network service,
-         ;; and it runs on the Session, which takes one form at a time: every
-         ;; caller waits behind it, so a keystroke that needs the Session
-         ;; queued for seconds. It is worth that only when the words found
-         ;; nothing. A query the catalog already answered is answered.
+         ;; The semantic pass runs on the Session, which takes one form at a
+         ;; time, so it must stay fast: a local backend embeds a query in
+         ;; milliseconds. 'lexical #t or 'semantic #f skips it.
          (semantic-all
            (if (or lexical? (and (pair? literal-hits) (not semantic?)))
                '()

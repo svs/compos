@@ -423,6 +423,61 @@
                                                 " [" (eval-read--route (car e)) "]"))
                                "" hits))))))
 
+;; The name scan sees every name the code writes, but not a procedure the
+;; code computes. A call whose procedure is an expression, a local, or the
+;; procedure argument of apply, map and the like could run a write the
+;; scan never saw, so the callee must be a global name or a lambda written
+;; here. A named let's name is a lambda written here too.
+(define *eval-read-proc-args*
+  '((apply 1) (map 1) (for-each 1) (filter 1) (remove 1) (fold 1)
+    (vector-map 1) (vector-for-each 1) (string-map 1) (string-for-each 1)
+    (with-current-buffer 2)))
+
+(define (eval-read--callee-ok? x locals)
+  (or (and (symbol? x) (not (member x locals)))
+      (and (pair? x) (equal? (car x) 'lambda))))
+
+(define (eval-read--computed-call x locals)
+  "the first call in the read payload X whose procedure the scan cannot see, or #f"
+  (let ((walk (lambda (xs) (any (lambda (e) (eval-read--computed-call e locals)) xs))))
+    (cond ((not (pair? x)) #f)
+          ((equal? (car x) 'quote) #f)
+          ((equal? (car x) 'lambda)
+           (and (pair? (cdr x)) (walk (eval-read--items (cddr x)))))
+          ((and (member (car x) '(let let*)) (pair? (cdr x)))
+           (let* ((named (symbol? (cadr x)))
+                  (bindings (if named (and (pair? (cddr x)) (caddr x)) (cadr x)))
+                  (body (if named (cdddr x) (cddr x))))
+             (or (walk (map (lambda (b) (if (pair? b) (cadr b) b))
+                            (filter pair? (if (pair? bindings) bindings '()))))
+                 (walk (eval-read--items body)))))
+          ((equal? (car x) 'cond)
+           (any (lambda (c) (and (pair? c) (walk (eval-read--items c))))
+                (eval-read--items (cdr x))))
+          ((not (eval-read--callee-ok? (car x) locals)) x)
+          (else
+           (let ((at (assoc (car x) *eval-read-proc-args*))
+                 (args (eval-read--items (cdr x))))
+             (if (and at (> (length args) (- (cadr at) 1))
+                      (not (eval-read--callee-ok? (list-ref args (- (cadr at) 1)) locals)))
+                 x
+                 (walk (eval-read--items x))))))))
+
+(define (eval-read--named-lets x)
+  "the names of every named let in the read payload X"
+  (cond ((not (pair? x)) '())
+        ((equal? (car x) 'quote) '())
+        (else (append (if (and (member (car x) '(let let*)) (pair? (cdr x)) (symbol? (cadr x)))
+                          (list (cadr x))
+                          '())
+                      (apply append (map eval-read--named-lets (eval-read--items x)))))))
+
+(define (eval-read--first-computed forms locals)
+  (let ((named (eval-read--named-lets forms)))
+    (any (lambda (f)
+           (eval-read--computed-call f (remove (lambda (s) (member s named)) locals)))
+         forms)))
+
 (define (eval-read-refusal code &optional on-unstamped)
   "#f when CODE only reads, else why not; ON-UNSTAMPED gets a name the catalog has no effects for and answers a task id"
   (let ((forms (ignore-errors (lambda () (scheme-read code)))))
@@ -445,6 +500,10 @@
                                fns)))
           (cond ((pair? unbound)
                  (eval-read--unbound-text (symbol->string (car unbound))))
+                ((eval-read--first-computed forms locals)
+                 (string-append "eval-scheme-read cannot see which procedure "
+                                (value->string (eval-read--first-computed forms locals))
+                                " calls: call a function by its global name or a lambda written here, or run it with eval-scheme"))
                 ((pair? writes)
                  (let* ((n (symbol->string (car writes)))
                         (e (assoc n effects))

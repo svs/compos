@@ -114,6 +114,23 @@
     (check-contains! (tool--error-hint "unbound variable: buffer-texts" "")
                      "buffer-text is" "eval-scheme says the same")))
 
+(deftest 'the-read-eval-refuses-a-procedure-it-cannot-see
+  "apply, map and a call head take a global name or a lambda; a computed procedure is refused"
+  (lambda ()
+    (for-each (lambda (code)
+                (check-contains! (eval-read-refusal code) "cannot see which procedure" code))
+              '("(apply (car (list buffer-text)) '(\"x\"))"
+                "(map (cadr (list 1 2)) '(1))"
+                "((car (list car)) '(1))"
+                "(let ((f (car (list car)))) (f '(1)))"
+                "(map (lambda (g) (apply g '())) (list car))"))
+    (for-each (lambda (code) (check-false! (eval-read-refusal code) code))
+              '("(apply + 1 '(2 3))"
+                "(map (lambda (x) (car x)) '((1)))"
+                "(vector-map char->integer (string->list \"ab\"))"
+                "(let loop ((i 0)) (if (< i 3) (loop (+ i 1)) i))"
+                "(list #\\newline (char=? #\\a #\\a))"))))
+
 (deftest 'apropos-without-vectors-still-finds-a-sentence
   "a sentence no row holds whole still finds the rows with its rare words"
   (lambda ()

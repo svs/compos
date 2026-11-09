@@ -1755,9 +1755,11 @@ defmodule Compos.Core.SchemeAPI do
       # cannot reach it otherwise: the diff is over read forms, and the
       # manifest of what each file last held is the Session's state.
       {"reload-files!",
-       "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS)."} =>
-        fn [paths] ->
-          case Compos.Core.Session.reload_files(List.wrap(paths)) do
+       "(reload-files! PATHS [WHOLE]) — evaluate the changed top-level forms of each .scm, or every form when WHOLE is true, and refresh the modes they redefine; return (FILES FORMS)."} =>
+        fn [paths | whole] ->
+          opts = if whole in [[], [false], [nil]], do: [], else: [whole: true]
+
+          case Compos.Core.Session.reload_files(List.wrap(paths), opts) do
             {:ok, %{files: files, forms: forms}} ->
               [files, forms]
 

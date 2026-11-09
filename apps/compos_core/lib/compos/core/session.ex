@@ -793,12 +793,23 @@ defmodule Compos.Core.Session do
     end
   end
 
-  def handle_call({:reload_files, paths}, _from, state) do
+  def handle_call({:reload_files, paths}, from, state),
+    do: handle_call({:reload_files, paths, []}, from, state)
+
+  def handle_call({:reload_files, paths, opts}, _from, state) do
     # A dev code reload keeps the existing GenServer state. Seed the new
     # manifest lazily so adding this mechanism does not require a restart.
     manifest = Map.get(state, :reload_manifest) || Hotload.Scheme.manifest()
 
-    with {:ok, files} <- Hotload.Scheme.changes(paths, manifest),
+    # A whole reload forgets what the files held, so every form evaluates
+    # again: a name changed live goes back to its definition even when the
+    # file is unchanged.
+    baseline =
+      if Keyword.get(opts, :whole, false),
+        do: Map.drop(manifest, Enum.map(paths, &canonical/1)),
+        else: manifest
+
+    with {:ok, files} <- Hotload.Scheme.changes(paths, baseline),
          {:ok, _, _interp} <- Hotload.Scheme.eval(files) do
       next_manifest =
         Enum.reduce(files, manifest, fn {path, fingerprints, _forms}, acc ->

@@ -69,16 +69,15 @@
 (public! 'package-list "Names of installed user packages")
 
 ;;; --- reloading one file into the live session --------------------------------
-;;; Every file takes the same path: the daemon's incremental form reloader.
-;;; It reads the file, evaluates only the top-level forms whose text
+;;; In development the daemon reloads a file by itself when it is saved
+;;; (Compos.Core.Hotload): it evaluates only the top-level forms whose text
 ;;; changed, stamps the package context from the file name, and re-runs
 ;;; mode setup on the buffers wearing a mode the reload redefined. So
 ;;; editor.scm costs what its diff costs, and no file needs a restart.
 ;;;
-;;; In development the daemon also does this by itself: Compos.Core.Hotload
-;;; watches the sources and reloads a file when it is saved. This command
-;;; is the manual door — for a file outside the watched roots, and for a
-;;; reload you want to ask for by name.
+;;; This command is the manual door, and it evaluates the WHOLE file: a
+;;; name changed live with set!, or a definition gone stale, goes back to
+;;; what the file says even when the file did not change.
 
 (domain! 'packages)
 (effects! '(write execute))
@@ -90,9 +89,9 @@
                   (holds-reload-refusal))))
     (when why (error (string-append "reload-file: " why))))
   (let* ((file (car (reverse (string-split path "/"))))
-         (result (reload-files! (list path))))
+         (result (reload-files! (list path) #t)))
     (message (string-append "reloaded " file " · "
-                            (number->string (cadr result)) " changed forms"))
+                            (number->string (cadr result)) " forms"))
     path))
 
 (public! 'reload-file

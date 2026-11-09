@@ -20,3 +20,10 @@
     (check-equal! (make-list 2 'x) '(x x) "N copies of INIT")
     (check-equal! (expand-file-name "a.txt" "/tmp") "/tmp/a.txt" "relative under DIR")
     (check-equal! (expand-file-name "/etc/hosts" "/tmp") "/etc/hosts" "absolute stays")))
+
+(deftest 'emacs-names-symbol-file-names-the-defining-file
+  "symbol-file answers the package file of a catalogued name, and #f for a builtin or an unknown name"
+  (lambda ()
+    (check-true! (string-suffix? "/emacs-names.scm" (symbol-file 'symbol-file)) "a package function gives its file")
+    (check-false! (symbol-file 'symbol-file 'defvar) "defvar skips functions")
+    (check-false! (symbol-file 'emacs-names-test-no-such-name) "an unknown name is #f")))

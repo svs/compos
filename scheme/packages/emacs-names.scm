@@ -158,4 +158,27 @@
 
 (public! 'current-time-string "(current-time-string [TIME]) — the date and time now as text; Emacs name, calls format-time" 'data)
 
+(domain! 'help)
+(effects! '(read))
+
+;;;###autoload
+(define (symbol-file name &optional type)
+  "(symbol-file 'NAME [TYPE]) - the file that defines NAME, a function, command, variable or mode: the package's file on load-path, or #f for a builtin or an unknown name. The package is the file name without .scm. TYPE 'defun looks only at functions and commands, 'defvar only at variables. It reads the catalog, as apropos does."
+  (let* ((n (if (string? name) name (value->string name)))
+         (kinds (cond ((eq? type 'defun) '("function" "command"))
+                      ((eq? type 'defvar) '("setting" "variable"))
+                      (else '("function" "command" "setting" "variable" "mode"))))
+         (pkg (let loop ((ks kinds))
+                (if (null? ks) #f
+                    (let ((e (catalog-entry (car ks) n)))
+                      (if (and e (plist-get e 'package)) (plist-get e 'package) (loop (cdr ks))))))))
+    (let ((f (and pkg (not (equal? pkg "builtins")) (locate-library pkg))))
+      (and f (let* ((build "/_build/dev/lib/compos_core/priv/")
+                    (i (string-index f build))
+                    (src (and i (string-append (substring-bytes f 0 i) "/apps/compos_core/priv/"
+                                               (substring-bytes f (+ i (string-byte-length build)) (string-byte-length f))))))
+               (if (and src (file-exists? src)) src f))))))
+
+(public! 'symbol-file "(symbol-file 'NAME [TYPE]) — which file or package defines a function, command or variable; #f for a builtin; Emacs name, reads the catalog" 'help)
+
 (provide 'emacs-names)

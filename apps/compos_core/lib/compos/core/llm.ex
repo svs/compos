@@ -197,7 +197,7 @@ defmodule Compos.Core.LLM do
       |> maybe_put(:slug, opts[:slug])
 
     round0 = System.monotonic_time(:millisecond)
-    answer = chat_fun().(req)
+    answer = ask_model(req, rounds)
 
     stage_round(
       opts[:slug],
@@ -272,6 +272,43 @@ defmodule Compos.Core.LLM do
   end
 
   # the nudge applies once, only after tool rounds, and only to a blank reply
+  # A stream that opened and then failed (a dropped connection, an overload
+  # or a 5xx sent mid-stream, a stream that ended with no reply and no
+  # finish reason) is asked again once with the same messages, after the
+  # API's retry-after when it gave one. A second failure ends the turn with
+  # an error that names the round: the chat shows it, and the stop reason
+  # says error. A final error (no key, a refusal the open already ruled on)
+  # is not asked again.
+  @retry_after_cap_ms 60_000
+
+  defp ask_model(req, rounds) do
+    case chat_fun().(req) do
+      {:error, {:dropped, why, after_ms}} ->
+        if req[:on_chunk],
+          do: req.on_chunk.("\n\n[the model stream failed: #{why}; asking again]\n\n")
+
+        if is_integer(after_ms) and after_ms > 0,
+          do: Process.sleep(min(after_ms, @retry_after_cap_ms))
+
+        case chat_fun().(req) do
+          {:error, again} ->
+            {:error,
+             "the model stream failed in round #{rounds + 1}, and again on its one retry: " <>
+               error_text(again)}
+
+          answer ->
+            answer
+        end
+
+      answer ->
+        answer
+    end
+  end
+
+  defp error_text({:dropped, why, _}), do: why
+  defp error_text(msg) when is_binary(msg), do: msg
+  defp error_text(other), do: inspect(other)
+
   defp empty_reply_nudge(text, rounds, opts) do
     nudge = opts[:empty_reply_nudge]
 
@@ -561,8 +598,14 @@ defmodule Compos.Core.LLM do
               end)
 
             case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
-              {:ok, resp} -> {:ok, Map.put(from_req_response(resp, plan), "streamed", true)}
-              {:error, e} -> {:error, err_msg(e)}
+              {:ok, resp} ->
+                case dropped(resp) do
+                  nil -> {:ok, Map.put(from_req_response(resp, plan), "streamed", true)}
+                  why -> {:error, {:dropped, why, nil}}
+                end
+
+              {:error, e} ->
+                {:error, {:dropped, stream_error(e), retry_after_ms(e)}}
             end
 
           {:error, e} ->
@@ -636,6 +679,46 @@ defmodule Compos.Core.LLM do
       other -> other
     end
   end
+
+  # A stream can end without an error and still not be a reply: the
+  # provider said error or incomplete, or the connection closed before any
+  # text, call or finish reason came. That is a failure, not an empty answer.
+  defp dropped(resp) do
+    reason = Map.get(resp, :finish_reason)
+
+    empty? =
+      (ReqLLM.Response.text(resp) || "") == "" and
+        (ReqLLM.Response.tool_calls(resp) || []) == []
+
+    cond do
+      reason in [:error, :incomplete] -> "the stream ended with finish reason #{reason}"
+      reason in [nil, :unknown] and empty? -> "the stream ended with no reply and no finish reason"
+      true -> nil
+    end
+  end
+
+  defp stream_error(%{status: s} = e) when is_integer(s), do: "status #{s}: #{err_msg(e)}"
+  defp stream_error(e), do: err_msg(e)
+
+  # the API's own retry-after, in milliseconds, when the error carries it
+  defp retry_after_ms(%{headers: headers}) when is_list(headers) or is_map(headers) do
+    Enum.find_value(headers, fn {k, v} ->
+      if String.downcase(to_string(k)) == "retry-after", do: seconds_ms(v)
+    end)
+  end
+
+  defp retry_after_ms(_), do: nil
+
+  defp seconds_ms([v | _]), do: seconds_ms(v)
+
+  defp seconds_ms(v) when is_binary(v) do
+    case Integer.parse(String.trim(v)) do
+      {s, _} when s >= 0 -> s * 1000
+      _ -> nil
+    end
+  end
+
+  defp seconds_ms(_), do: nil
 
   defp retry_delay(e, attempt) do
     base = Application.get_env(:compos_core, :llm_retry_base_ms, 500)

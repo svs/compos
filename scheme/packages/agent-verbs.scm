@@ -102,13 +102,18 @@
                  (let ((t (hold! 'test why))) (list t (hold! 'reload why)))
                  '()))
          (l (agent-listen! (list 'topic topic 'kind 'done) note))
-         (r (try (lambda ()
-                   (shell-command->string cmd (or dir (default-directory))
-                     (lambda (out) (for-each release! hs) (event-publish! topic 'done out)))))))
-    (when (and (pair? r) (eq? (car r) 'err))
+         (ok (ignore-errors
+               (lambda ()
+                 (shell-command->string cmd (or dir (default-directory))
+                   (lambda (out) (for-each release! hs) (event-publish! topic 'done out)))
+                 #t))))
+    ;; a command that did not start leaves no hold behind
+    (unless ok
       (for-each release! hs)
       (agent-unlisten! l)
-      (error (cadr r)))
+      (error (string-append "shell-job!: the command did not start"
+                            (let ((no (and (boundp 'decide-shell-command-verdict) (decide-shell-command-verdict cmd))))
+                              (if (string? no) (string-append ": " no) "")))))
     l))
 
 (public! 'shell-job! "(shell-job! TOPIC CMD NOTE [DIR]) — run a long shell command in the background and wake this chat with its output when it is done, in one call: listen, run, publish" 'chat)

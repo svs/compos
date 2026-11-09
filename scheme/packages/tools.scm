@@ -909,6 +909,18 @@
         (set! *apropos--sources-gen* gen)))
     (list *apropos--sources-cache* *apropos--texts-cache*)))
 
+;; A failed sync tells the user once, not once per retry: every catalog
+;; change retries, and a bad key or a dead network fails each time. A sync
+;; that works again resets it, so the next failure is news again.
+(define *apropos--embedding-sync-told* #f)
+
+(define (apropos--sync-failed! why)
+  (unless *apropos--embedding-sync-told*
+    (set! *apropos--embedding-sync-told* #t)
+    (message (string-append "apropos: the embedding sync failed ("
+                            (if (string? why) why (value->string why))
+                            "). Search uses words only until it works; the daemon log has the reason."))))
+
 (define (apropos--start-embedding-sync!)
   (let ((key (apropos--embedding-key)))
     (cond
@@ -931,8 +943,10 @@
                 (*apropos--embedding-sync* (nth 1 both) key)))
             (lambda (ok value)
               (set! *apropos--embedding-sync-running* #f)
-              (when (and ok value)
-                (set! *apropos--embedding-synced-gen* gen))
+              (if (and ok value)
+                  (begin (set! *apropos--embedding-synced-gen* gen)
+                         (set! *apropos--embedding-sync-told* #f))
+                  (apropos--sync-failed! (if ok "the embedding call failed" value)))
               ;; A declaration can land while this batch is in flight. The
               ;; completed snapshot remains valid; schedule the next delta.
               (when (or *apropos--embedding-sync-pending*
@@ -1301,6 +1315,11 @@
           (else (loop (cdr (cdr in))
                       (cons (nth 1 in) (cons (car in) out)))))))
 
+(define (apropos--partial-hits query)
+  "apropos-recall's best rows for QUERY, each noted as a partial match"
+  (map (lambda (h) (append (list 'note "partial match: some of the words") h))
+       (apropos-recall query 10)))
+
 (define (apropos--search query filters0 index rows)
   (let* ((lexical? (plist-get filters0 'lexical))
          (wait? (apropos--flag filters0 'wait #t))
@@ -1340,18 +1359,30 @@
                      literal-hits))
          (hits (append scored suggestions semantic-hits))
          (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
-    (if (or (pair? filtered) (null? words) (pair? filters))
-        (if (and semantic? (not lexical?) (pair? semantic-all))
-            (apropos--rank-semantic filtered query)
-            (apropos--rank filtered query))
-        ;; No embedding key exists and nothing matched. Try any name shape.
-        (map (lambda (e)
-               (apropos--enrich
-                 (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
-                       'domain (symbol->string (nth 3 e))
-                       'category (symbol->string (nth 3 e)) 'note "closest name")
-                 #f index))
-             (tool--suggest (string-trim query))))))
+    (cond
+      ((pair? filtered)
+       (if (and semantic? (not lexical?) (pair? semantic-all))
+           (apropos--rank-semantic filtered query)
+           (apropos--rank filtered query)))
+      ((null? words) '())
+      (else
+       ;; Nothing held every word, and the vectors gave nothing: no key, or
+       ;; a catalog change left them unprepared. A search must not answer
+       ;; empty for that. The rows that hold the rare words come next, so
+       ;; "chat buffer from stable id" still finds chat-stable-id!.
+       (let ((partial (filter (lambda (h) (apropos--filter-match? h filters))
+                              (apropos--partial-hits query))))
+         (cond
+           ((pair? partial) partial)
+           ((pair? filters) '())
+           (else
+            (map (lambda (e)
+                   (apropos--enrich
+                     (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
+                           'domain (symbol->string (nth 3 e))
+                           'category (symbol->string (nth 3 e)) 'note "closest name")
+                     #f index))
+                 (tool--suggest (string-trim query))))))))))
 
 ;; everything in one category — the shape of the API, not a search of it
 (define (apropos-category name)

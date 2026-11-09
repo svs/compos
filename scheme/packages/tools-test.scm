@@ -113,3 +113,21 @@
       (check-contains! write "run it with eval-scheme" "a write names the eval-scheme route"))
     (check-contains! (tool--error-hint "unbound variable: buffer-texts" "")
                      "buffer-text is" "eval-scheme says the same")))
+
+(deftest 'apropos-without-vectors-still-finds-a-sentence
+  "a sentence no row holds whole still finds the rows with its rare words"
+  (lambda ()
+    (check-equal! (plist-get (car (apropos "chat buffer from stable id" 'lexical #t)) 'name)
+                  "chat-stable-id!" "the partial match comes first")))
+
+(deftest 'a-failed-embedding-sync-tells-the-user-once
+  "each retry fails again, and the user hears it one time"
+  (lambda ()
+    (let ((said 0))
+      (with-stub '*apropos--embedding-sync-told* #f
+        (lambda ()
+          (with-stub 'message (lambda (s) (set! said (+ said 1)) s)
+            (lambda ()
+              (apropos--sync-failed! "no key")
+              (apropos--sync-failed! "no key")))))
+      (check-equal! said 1 "two failures, one message"))))

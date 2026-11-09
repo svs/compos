@@ -1079,6 +1079,8 @@
 (add-hook! 'buffer-refresh-hook 'buffer-when-shown--run!)
 (add-hook! 'window-configuration-change-hook 'buffer-refresh-visible!)
 (define (take-n lst n) (take lst n))
+(public! 'take-n "(take-n LST N) — the first N elements of LST")
+(catalog-meta! 'function "take-n" 'domain 'system 'effects '(pure))
 
 ;; The first element of LST that PRED holds for, or #f: SRFI-1 find.
 (define (find pred lst)

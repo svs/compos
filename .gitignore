@@ -35,3 +35,6 @@ __pycache__/
 /.compos/
 apps/compos_core/native/compos_rope_wasm/target/
 apps/compos_core/native/compos_mcp_shim/target/
+
+# Source image; the site uses the .webp
+/site/images/compos-human-agent.png

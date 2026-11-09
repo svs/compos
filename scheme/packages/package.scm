@@ -143,3 +143,8 @@
                   (when (and (equal? path here) (buffer-modified? buf))
                     (run-command "save-buffer"))
                   (reload-file path)))))))))
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write external execute)))
+  '(package-install!))

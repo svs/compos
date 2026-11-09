@@ -3261,3 +3261,12 @@ ATTACHMENTS is a file path, or (PATH NAME) to send it under another name."
                      'mailbox (plist-get d 'mailbox) 'id (plist-get d 'id))))))
 
 (event-subscribe! "mail-notify" "mail:*" 'mail-notify--saw)
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read execute)))
+  '(notmuch-sender-count mail-search mail-read-thread))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write execute)))
+  '(notmuch mail-tag!))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
+  '(mail-open!))

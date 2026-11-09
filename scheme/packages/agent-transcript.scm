@@ -1633,3 +1633,7 @@
 (define (chat-view--mode-hook!) (chat-view-sync! (current-buffer)))
 
 (add-hook! 'chat-mode-hook 'chat-view--mode-hook!)
+
+;; read lookups agents call from eval-scheme-read
+(public! 'agent-buf "(agent-buf SLUG) — the buffer of the agent SLUG")
+(catalog-meta! 'function "agent-buf" 'effects '(read))

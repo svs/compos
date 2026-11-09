@@ -2369,3 +2369,12 @@
 (defcustom 'chat-compact-keep 8
   "How many recent turns a compaction keeps verbatim."
   'group 'chat 'type 'integer)
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(tool-server tool-servers llm-tool-specs))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write external spend)))
+  '(llm-with-tools))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(define-tool! tool-server!))

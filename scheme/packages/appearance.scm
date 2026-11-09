@@ -311,3 +311,9 @@
   (lambda ()
     (customize-save! 'theme-monospace (not theme-monospace))
     (message (if theme-monospace "Monospace everywhere" "Theme fonts"))))
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
+  '(text-scale-apply! text-scale-reset-all! text-scale-sync!
+    ui-scale-apply!))

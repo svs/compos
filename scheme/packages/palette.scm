@@ -527,3 +527,7 @@
 
 ;; the eval that scores what RET runs for the words you type
 (load "palette-eval.scm")
+
+;; read lookups agents call from eval-scheme-read
+(public! 'command-palette-candidates "(command-palette-candidates QUERY) — the rows M-x offers for QUERY")
+(catalog-meta! 'function "command-palette-candidates" 'effects '(read))

@@ -5242,3 +5242,11 @@ is forgotten and that group falls back to creation order in the switcher."
 (group-frame-styles-refresh!)
 (modeline-groups-refresh!)
 
+
+;; read lookups agents call from eval-scheme-read
+(public! 'group-record-by-id "(group-record-by-id ID) — the group record with ID, a pseudo group's too, or #f")
+(catalog-meta! 'function "group-record-by-id" 'effects '(read))
+(public! 'group-resolve-id "(group-resolve-id VALUE) — the id of the group VALUE names, by id or by name, or #f")
+(catalog-meta! 'function "group-resolve-id" 'effects '(read))
+(public! 'group-record-colors-restore "(group-record-colors-restore RECORDS) — RECORDS with each color turned into its palette slot")
+(catalog-meta! 'function "group-record-colors-restore" 'effects '(read))

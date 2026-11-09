@@ -7388,6 +7388,10 @@
     run-hook-with-args-until-success set-default! set-llm-model! set-mode!
     setq-local! unwatch-path! watch-path! variable-set!))
 
+;; the prelude's last, which agents call from eval-scheme-read
+(public! 'last "(last LIST) — the last element of LIST")
+(catalog-meta! 'function "last" 'effects '(pure))
+
 ;;; --- Elixir primitives: effects stamps -----------------------------------------
 ;; Every primitive states what it does, so eval-scheme-read can take or
 ;; refuse it by its stamp. The doc is the primitive's own line.

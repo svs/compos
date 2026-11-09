@@ -385,3 +385,10 @@
 (category! 'mcp)
 (public! 'mcp-hub-refresh! "(mcp-hub-refresh!) — redraw *mcp-hub* if it exists")
 (public! 'mcp-connections "(mcp-connections) — (name status tools type resources prompts) per live MCP connection")
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(mcp-connections))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(mcp-hub-refresh!))

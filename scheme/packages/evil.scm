@@ -797,3 +797,8 @@
 (category! 'evil)
 (public! 'evil-mode-on! "Enable Vim emulation everywhere; put (evil-mode-on!) in init.scm to make it stick")
 (public! 'evil-mode-off! "Disable Vim emulation everywhere")
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(evil-mode-off! evil-mode-on!))

@@ -1020,3 +1020,19 @@
 (public! 'delete-frame! "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler.")
 (public! 'completion-accept! "(completion-accept!) — close the popup; return (START END LABEL) of the selection, END as of now, or #f.")
 (public! 'completion-requery! "(completion-requery!) — narrow the popup to the text between its start and point.")
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(minibuffer-active? minibuffer-buffer? minibuffer-input))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(destroy display)))
+  '(delete-frame!))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
+  '(completing-read yes-or-no? y-or-n? read-char read-char-choice
+    minibuffer-read minibuffer-read* minibuffer-read-preview
+    completion-accept! completion-requery! minibuffer-cancel!
+    minibuffer-change! minibuffer-complete! minibuffer-confirm!
+    minibuffer-confirm-input! minibuffer-del! minibuffer-detach!
+    minibuffer-next! minibuffer-prev! minibuffer-sync-input!))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(minibuffer-mode-ensure!))

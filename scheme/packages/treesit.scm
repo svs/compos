@@ -151,3 +151,8 @@
 (public! 'ts-installed-grammars "(ts-installed-grammars) — the names of the installed tree-sitter grammars")
 (effects! '(write external execute))
 (public! 'ts-ensure-grammar! "(ts-ensure-grammar! LANG [SECONDS]) — #t once LANG's grammar is loaded: a known grammar not loaded yet is installed and waited for, once a session")
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write external execute)))
+  '(ts-install-grammar!))

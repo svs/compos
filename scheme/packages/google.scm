@@ -788,3 +788,8 @@
 ;; Restore older Google directory desktops through the same provider entry point.
 (define-mode "google-drive-mode"
   (lambda () (buffer-set-local! (current-buffer) 'dired-provider "google") (set-mode! "Dired")))
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write external)))
+  '(google-request google-http!))

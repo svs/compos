@@ -833,6 +833,49 @@
 
 (domain! 'chat)
 (effects! '(read))
+;; The answer of chat-context, compact, for the first message of a task:
+;; the agent starts with it and spends no tool round to ask. The visible
+;; items ride in the Editor context block, so they are not repeated here.
+(define *chat-context-brief-members* 12)
+
+(define (chat-context-brief &optional buf)
+  (let* ((c (chat-context buf))
+         (q (lambda (s) (format "~s" s)))
+         (members (plist-get c 'group-members))
+         (n (length members))
+         (shown (if (> n *chat-context-brief-members*)
+                    (list-head members *chat-context-brief-members*)
+                    members))
+         (roles (plist-get c 'roles))
+         (tab (plist-get c 'companion-tab)))
+    (string-append
+      "[Chat context — this is what (chat-context) answers now. Call it again only when the group, companions or visible work change.\n"
+      "chat " (q (plist-get c 'chat))
+      " · agent " (q (or (plist-get c 'agent) "none"))
+      " · group " (q (or (plist-get c 'group) "none"))
+      (if (plist-get c 'group-name) (string-append " (" (q (plist-get c 'group-name)) ")") "")
+      "\ndirectory " (q (plist-get c 'directory))
+      " · connector " (format "~a" (plist-get c 'connector))
+      " · model " (format "~a" (plist-get c 'model))
+      (if (null? roles) ""
+          (string-append "\ncompanions: "
+            (string-join (map (lambda (r) (if (cadr r)
+                                              (string-append (q (car r)) " (" (format "~a" (cadr r)) ")")
+                                              (q (car r))))
+                              roles) ", ")))
+      (if (= n 0) ""
+          (string-append "\ngroup members (" (number->string n) "): "
+            (string-join (map q shown) ", ")
+            (if (> n (length shown))
+                (string-append ", and " (number->string (- n (length shown))) " more")
+                "")))
+      (if tab (string-append "\ncompanion tab: " (format "~s" tab)) "")
+      "]\n\n")))
+
+(public! 'chat-context-brief
+  "(chat-context-brief [BUF]) — chat-context as a short text block; the first message of a task carries it")
+(catalog-meta! 'function "chat-context-brief" 'domain 'chat 'effects '(read))
+
 (public! 'chat-context
   "(chat-context [BUF]) — chat identity, group, companions, workspace, visible context, and prompt state")
 (public! 'chat-context-tokens

@@ -1239,8 +1239,8 @@
 ;; they hold. A row above them reveals one more budget of earlier blocks.
 ;; The buffer keeps all of its text; only the drawing is windowed.
 
-(defcustom 'chat-view-window-bytes 262144
-  "How many bytes of transcript text a rich chat draws. Earlier blocks wait behind a row that reveals them. 0 draws all."
+(defcustom 'chat-view-window-bytes 0
+  "How many bytes of transcript text a rich chat draws. 0 draws all; a number keeps earlier blocks behind a row that reveals them."
   'group 'chat 'type 'integer)
 
 ;; how many blocks of RAW (newest first) PAGES budgets draw. Each page

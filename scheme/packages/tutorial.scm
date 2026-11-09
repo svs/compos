@@ -707,39 +707,7 @@
 
 ;; The master writes keys the Emacs way, and the watch reads them so. The
 ;; reader sees the keyboard's own symbols: C-x o is ⌃X O, s-<right> is ⌘→.
-(define *tutorial-modifiers* '(("C-" "⌃") ("M-" "⌥") ("S-" "⇧") ("s-" "⌘")))
-
-(define *tutorial-key-names*
-  '(("RET" "⏎") ("<return>" "⏎") ("SPC" "Space") ("TAB" "⇥") ("<tab>" "⇥")
-    ("DEL" "⌫") ("<backspace>" "⌫") ("<delete>" "⌦") ("ESC" "esc")
-    ("<left>" "←") ("<right>" "→") ("<up>" "↑") ("<down>" "↓")
-    ;; a laptop keyboard has no Home, End, PageUp or PageDown: fn and an arrow
-    ("<home>" "fn ←") ("<end>" "fn →") ("<prior>" "fn ↑") ("<next>" "fn ↓")))
-
-(define (tutorial--key-label token)
-  ;; one key as symbols, or #f when TOKEN is not a key
-  (let loop ((t token) (mods '()))
-    (let ((m (find (lambda (p) (and (string-prefix? (car p) t) (> (string-length t) 1))) *tutorial-modifiers*)))
-      (if m
-          (loop (substring t 2 (string-length t)) (cons (car m) mods))
-          (let* ((sym (apply string-append
-                             (map cadr (filter (lambda (p) (member (car p) mods)) *tutorial-modifiers*))))
-                 (named (assoc t *tutorial-key-names*))
-                 (base (cond ((equal? t "") (and (pair? mods) ""))
-                             (named (cadr named))
-                             ;; a chord names its letter as the keycap does; a
-                             ;; lone letter stays as typed, since N is Shift-n
-                             ((= (string-length t) 1) (if (pair? mods) (string-upcase t) t))
-                             (else #f))))
-            (and base (or (pair? mods) named (= (string-length t) 1))
-                 (string-append sym base)))))))
-
-(define (tutorial--keys-label span)
-  ;; a span that starts with a key: each key as symbols, the rest as it is
-  (let ((tokens (string-split span " ")))
-    (if (tutorial--key-label (car tokens))
-        (string-join (map (lambda (t) (or (tutorial--key-label t) t)) tokens) " ")
-        span)))
+;; key-symbol and key-symbols (keymaps) draw them, as the palette does.
 
 (define (tutorial--symbolize text)
   "TEXT with every `key` in it written as the keyboard's symbols."
@@ -747,7 +715,7 @@
     (if (null? parts)
         (string-join (reverse out) "`")
         (loop (cdr parts) (not code?)
-              (cons (if code? (tutorial--keys-label (car parts)) (car parts)) out)))))
+              (cons (if code? (key-symbols (car parts)) (car parts)) out)))))
 
 ;;; the slide
 
@@ -773,10 +741,10 @@
                     ((not code?) (append (reverse (tutorial--prose (car parts))) out))
                     (else
                       (let ((tokens (string-split (car parts) " ")))
-                        (if (tutorial--key-label (car tokens))
+                        (if (key-symbol (car tokens))
                             (append (reverse
                                       (map (lambda (t)
-                                             (let ((cap (tutorial--key-label t)))
+                                             (let ((cap (key-symbol t)))
                                                (if cap
                                                    (list 'tag "c-action-key" 'class "tutorial-key" 'text cap)
                                                    (list 'tag "span" 'class "tutorial-code" 'text t))))

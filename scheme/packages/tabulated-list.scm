@@ -2303,21 +2303,6 @@
 }
 ")
 
-;; the looks a column's 'style names, in the formatted view only
-(define-style! 'list-cells "
-.list-cell-dim, .list-cell-date { color: var(--dim-fg, #8a857a); }
-.list-cell-date, .list-cell-number { font-variant-numeric: tabular-nums; }
-.list-cell-title { font-weight: 600; }
-.list-cell-badge { background: var(--hl-line-bg, rgba(128,128,128,.12)); border-radius: 3px; }
-.list-cell-chip { box-shadow: inset 0 0 0 1px var(--dim-fg, #8a857a); border-radius: 3px; }
-.list-cell-badge { color: var(--dim-fg); font-weight: 600; }
-.list-cell-badge.list-cell-good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
-.list-cell-badge.list-cell-warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
-.list-cell-badge.list-cell-bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
-.list-cell-badge.list-cell-info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
-.list-cell-stars { color: var(--warn-fg); }
-")
-
 (public! 'list-format-template
   "(list-format-template FIELDS PRETTY?) — format (TEXT CLASS WIDTH TRIM PREFIX) fields as text and relative UTF-8 ranges; WIDTH #f leaves text natural")
 (define (list-format-template fields pretty?)
@@ -2353,40 +2338,76 @@
             (map (lambda (field)
                    (list (+ base (car field)) (+ base (cadr field)) (nth 2 field))) fields))))))
 
-;; The formatted view of a table is its bare text with a span over each
-;; cell: the spans come from the columns, so a mode supplies nothing more.
-;; A column's 'style names the cell's look; a dropped column has no text,
-;; so it has no span, and both views honour the same ranks.
+;; The formatted view. A plain table draws each row as a grid of cells,
+;; built from the same columns and cells as the bare text: the columns the
+;; width keeps (their ranks drop the rest, as in the bare view), on their
+;; widths, in the sans face. A column's 'style says how its cell looks:
+;; title, dim, number, date, stars, or badge (a pill). STYLE may be a list,
+;; (badge good), or a fn of (BUF ROW) that answers one, so a pill's tone
+;; follows its word. A mode that draws its rows itself says 'composml; a
+;; mode with 'plain #t, a text template or composml fields keeps the text.
 (define (list-style-name s) (if (symbol? s) (symbol->string s) s))
 
-;; STYLE is a name, a list of names (badge good), or a fn of (BUF ROW) that
-;; answers one: a badge whose tone follows its value. #f is no style.
-(define (list-cell-class c &optional buf row)
-  (let* ((s (list-col-style c))
-         (s (if (procedure? s) (s buf row) s))
-         (names (cond ((not s) '()) ((pair? s) s) (else (list s)))))
-    (string-join (cons "list-cell"
-                       (map (lambda (n) (string-append "list-cell-" (list-style-name n)))
-                            (filter (lambda (n) n) names)))
-                 " ")))
+(define (list-grid? buf)
+  (and (not (list-opt buf 'plain))
+       (not (list-opt buf 'composml-fields))
+       (not (list-text-template buf))
+       (let ((cl (list-column-lines buf))) (and (pair? cl) (null? (cdr cl))))))
 
-(define (list-cell-desc c buf row)
-  (list 'tag "span" 'class (list-cell-class c buf row) 'attrs (list (list "col" (car c)))))
-
-(define (list-cell-fields buf ctx)
-  (let ((cl (list-ctx-column-lines ctx)))
-    (and (pair? cl)
-         (let ((cols (car cl)))
-           (if (any (lambda (c) (procedure? (list-col-style c))) cols)
-               (lambda (buf row) (map (lambda (c) (list-cell-desc c buf row)) cols))
-               (let ((descs (map (lambda (c) (list-cell-desc c buf #f)) cols)))
-                 (lambda (buf row) descs)))))))
-
-;; the mode's own row blocks, the escape hatch: 'composml, unless its
-;; 'composml-when (BUF) says this view is a plain table after all
 (define (list-own-composml buf)
-  (let ((f (list-opt buf 'composml)) (when? (list-opt buf 'composml-when)))
-    (and f (or (not when?) (when? buf)) f)))
+  (or (list-opt buf 'composml) (and (list-grid? buf) list-grid-row)))
+
+(define (list-grid-cell buf c cell row)
+  (let* ((text (or (list-cell-text cell) ""))
+         (face (list-cell-face cell))
+         (s (list-col-style c))
+         (s (if (procedure? s) (s buf row) s))
+         (names (filter (lambda (n) n) (cond ((not s) '()) ((pair? s) s) (else (list s)))))
+         (kind (and (pair? names) (list-style-name (car names))))
+         (class (string-join (append (list "lg-cell")
+                                     (if (string? face) (list (string-append "c-" face)) '())
+                                     (if kind (list (string-append "lg-" kind)) '()))
+                             " ")))
+    (if (and (equal? kind "badge") (not (equal? text "")))
+        (list 'tag "span" 'class class
+              'segs (list (list (string-join (cons "c-badge lg-pill" (map list-style-name (cdr names))) " ") text)))
+        (list 'tag "span" 'class class 'text text))))
+
+(define (list-grid-row buf row)
+  (let* ((cols (car (list-column-lines buf)))
+         (cells (let ((cs (list-row-cells buf row))) (if (pair? cs) (car cs) '())))
+         (shown (let loop ((ks cols) (cs cells) (out '()))
+                  (if (or (null? ks) (null? cs)) (reverse out)
+                      (loop (cdr ks) (cdr cs)
+                            (if (list-col-hidden? (car ks)) out (cons (cons (car ks) (car cs)) out))))))
+         (n (length shown)))
+    (list 'tag "div" 'class "lg-row"
+          'attrs (list (list "style"
+                             (string-append "grid-template-columns:"
+                               (string-join (let loop ((ps shown) (i 1) (out '()))
+                                              (if (null? ps) (reverse out)
+                                                  (loop (cdr ps) (+ i 1)
+                                                        (cons (if (= i n) "minmax(0,1fr)"
+                                                                  (string-append (number->string (list-col-width (car (car ps)))) "ch"))
+                                                              out))))
+                                            " "))))
+          'children (map (lambda (p) (list-grid-cell buf (car p) (cdr p) row)) shown))))
+
+(define-style! 'list-grid "
+.lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
+.lg-row > .lg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lg-title { font-weight: 600; color: var(--default-fg); }
+.lg-dim, .lg-date { color: var(--dim-fg); }
+.lg-number, .lg-date { font-variant-numeric: tabular-nums; }
+.lg-number { text-align: right; }
+.lg-stars { color: var(--warn-fg); letter-spacing: -1px; font-size: 11px; }
+.lg-badge { display: flex; align-items: center; }
+.lg-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em; line-height: 17px; text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.lg-pill.c-badge.good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
+.lg-pill.c-badge.warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
+.lg-pill.c-badge.bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
+.lg-pill.c-badge.info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
+")
 
 ;; Semantic text records keep the existing text, faces and line geometry.
 (define (list-composml-text! buf rows &optional prepared destination)
@@ -2401,7 +2422,7 @@
       ;; the draw's own context and field fn, read once: a row that asked
       ;; for them itself cost this pass twice its time (docs/LISTS.md).
       (let* ((ctx (list-row-ctx buf))
-             (fields (or (list-opt buf 'composml-fields) (list-cell-fields buf ctx)))
+             (fields (list-opt buf 'composml-fields))
              (key-of (list-ctx-key ctx)))
         (list-set-locals! (or destination buf)
           ;; rows-click: a click on a row opens it (list-mouse-open), and
@@ -2447,7 +2468,7 @@
 
 (define (list-composml! buf rows head &optional destination)
   (let ((render (list-own-composml buf))
-        (collection (list-opt buf 'collection)))
+        (collection (or (list-opt buf 'collection) "c-list")))
     (when (and render collection)
       (desktop-skip! (or destination buf) 'render-blocks)
       (desktop-skip! (or destination buf) 'render-root)
@@ -2826,11 +2847,6 @@
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           ;; the bare view is the text and its faces, nothing drawn over it
           (unless (list-bare? buf)
-            ;; a mode that draws some views itself and leaves others to the
-            ;; table drops what the other kind of view left behind
-            (let ((stale (if (list-own-composml buf) '(render-text-root render-records) '(render-mode render-root render-blocks))))
-              (when (and (list-opt buf 'composml-when) (buffer-local-value (cadr stale) buf))
-                (for-each (lambda (k) (buffer-set-local! buf k #f)) stale)))
             (list-composml! buf shown head)
             (list-composml-text! buf shown prepared))
           (list-anchors! buf shown)

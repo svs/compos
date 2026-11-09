@@ -1,8 +1,8 @@
-;;; do-test.scm --- the Do prompt: phrase in, one catalog command out.
+;;; do-test.scm --- the palette's local backend: phrase in, one catalog command out.
 ;;;
 ;;; The model is a seam. These tests rebind *do--ask* and read what the
-;;; resolver does around it: the free paths that skip the model, the
-;;; memory, the reply parser, and the confirm rule.
+;;; pick does around it: the catalog prompt, the reply parser, and the
+;;; name the palette gets.
 
 (domain! 'testing)
 (effects! '(write))
@@ -13,45 +13,6 @@
   (lambda (phrase k)
     (set! *do-test-asked* (cons phrase *do-test-asked*))
     (k (list 'ok answer))))
-
-(define (do-test-resolve phrase)
-  (let ((got #f))
-    (do--resolve phrase (lambda (r) (set! got r)))
-    got))
-
-(define-command "zz-do-test-destroyer" "A test command that destroys" (lambda () #f))
-(catalog-meta! 'command "zz-do-test-destroyer" 'effects '(destroy))
-
-(deftest 'do-runs-an-exact-command-name-without-the-model
-  "a phrase that is a command name resolves as exact and asks nothing"
-  (lambda ()
-    (set! *do--ask* (do-test-stub "undo"))
-    (set! *do-test-asked* '())
-    (check-equal! (do-test-resolve "kill-buffer") (list 'exact "kill-buffer") "the name is the answer")
-    (check-equal! *do-test-asked* '() "the model was not asked")
-    (set! *do--ask* #f)))
-
-(deftest 'do-asks-the-model-for-a-sentence
-  "a sentence goes to the model and its name comes back as model"
-  (lambda ()
-    (set! *do--ask* (do-test-stub "undo"))
-    (set! *do-test-asked* '())
-    (do-forget! "take that back")
-    (check-equal! (do-test-resolve "take that back") (list 'model "undo") "the model's pick")
-    (check-equal! *do-test-asked* (list "take that back") "the model saw the phrase")
-    (set! *do--ask* #f)))
-
-(deftest 'do-remembers-a-phrase-and-skips-the-model-next-time
-  "a remembered phrase resolves from memory, case and spaces aside"
-  (lambda ()
-    (set! *do--ask* (do-test-stub "undo"))
-    (set! *do-test-asked* '())
-    (do-remember! "take that back" "undo")
-    (check-equal! (do-test-resolve "  Take That Back ") (list 'memory "undo") "memory answers")
-    (check-equal! *do-test-asked* '() "the model was not asked")
-    (do-forget! "take that back")
-    (check-equal! (do-recall "take that back") #f "forget clears it")
-    (set! *do--ask* #f)))
 
 (deftest 'do-catalog-prompt-lists-every-command-with-a-short-doc
   "the system prompt names each command with its doc, and the names list matches"
@@ -95,30 +56,14 @@
       (check-true! (string-contains? p "<|im_start|>user\nclose it<|im_end|>") "the phrase is the user turn")
       (check-true! (string-suffix? "{\"command\": \"" p) "the assistant turn is opened"))))
 
-(deftest 'do-asks-before-a-destroying-command
-  "only a command whose effects include a confirm effect needs confirmation"
+(deftest 'do-pick-answers-the-models-command-or-false
+  "do-pick hands the palette the model's command, and #f when it has none"
   (lambda ()
-    (check-true! (do--needs-confirm? "zz-do-test-destroyer") "destroy asks")
-    (check-false! (do--needs-confirm? "undo") "undo runs at once")))
-
-(deftest 'do-row-is-a-labelled-candidate
-  "a proposal row carries the command as its label, so RET runs it"
-  (lambda ()
-    (let ((row (do--row "undo" 'model)))
-      (check-equal! (car row) "undo" "the label is the command")
-      (check-equal! (length row) 3 "label, hint, kind"))))
-
-;; desktop-clear resets every global. This reset raised on an unbound
-;; list?, and the clear stopped with the groups gone and no buffer killed.
-(deftest 'the-do-memory-reset-accepts-any-value
-  "the do-memory global keeps a list and turns anything else into an empty list"
-  (lambda ()
-    (let ((put (caddr (assoc 'do-memory *desktop-globals*))))
-      (with-stub '*do-memory* *do-memory*
-        (lambda ()
-          (put '(("open mail" "notmuch")))
-          (check-equal! *do-memory* '(("open mail" "notmuch")) "a list stays")
-          (put #f)
-          (check-equal! *do-memory* '() "anything else is empty")
-          (put '())
-          (check-equal! *do-memory* '() "the empty list stays"))))))
+    (let ((got 'unset))
+      (set! *do--ask* (do-test-stub "undo"))
+      (do-pick "take that back" (lambda (n) (set! got n)))
+      (check-equal! got "undo" "the pick is the command")
+      (set! *do--ask* (lambda (phrase k) (k (list 'error "no command for that"))))
+      (do-pick "nonsense" (lambda (n) (set! got n)))
+      (check-equal! got #f "an error is no pick")
+      (set! *do--ask* #f))))

@@ -388,7 +388,12 @@
       (k #f)))
 
 (define (command-palette--model-pick text cands k)
-  (if (and (equal? command-palette-decide-backend 'jev) (boundp 'jev-systemone))
+  (cond
+    ;; the small model on this machine reads the whole catalog and names one
+    ;; command; it reads no arguments, so it answers commands only
+    ((and (equal? command-palette-decide-backend 'local) (boundp 'do-pick))
+     (do-pick text (lambda (name) (k (and name (list "command" name '() 'local))))))
+    ((and (equal? command-palette-decide-backend 'jev) (boundp 'jev-systemone))
       ;; JEV picks among them; it reads no arguments, so a recipe asks for them
       (task-run!
         (lambda ()
@@ -409,13 +414,14 @@
                           (lambda (reply)
                             (let ((r (command-palette--parse-pick reply (list c))))
                               (k (list (plist-get c 'kind) name (if r (caddr r) '()) 'jev+model))))
-                          (lambda (_) (k (list (plist-get c 'kind) name '() 'jev)))))))))
+                          (lambda (_) (k (list (plist-get c 'kind) name '() 'jev))))))))))
+    (else
       (llm-with-model (command-palette--pick-prompt text cands)
                       (llm-model-for command-palette-pick-role)
         (lambda (reply)
           (let ((r (command-palette--parse-pick reply cands)))
             (k (and r (append r (list 'model))))))
-        (lambda (_) (k #f)))))
+        (lambda (_) (k #f))))))
 
 ;; run what resolve found, and remember it for the words
 (define (command-palette--apply! text r)
@@ -483,7 +489,7 @@
   'group 'interaction)
 
 (defcustom 'command-palette-decide-backend 'jev
-  "What picks the command for words you type in the palette: jev asks JEV, and the command-palette-pick-role model reads the arguments of a recipe it picks; model asks that model to pick and read them in one call."
+  "What picks the command for words you type in the palette: jev asks JEV, and the command-palette-pick-role model reads the arguments of a recipe it picks; model asks that model to pick and read them in one call; local asks the small model on this machine (do-endpoint), which picks a command and reads no arguments."
   'group 'interaction)
 
 (defcustom 'command-palette-pick-role 'fast

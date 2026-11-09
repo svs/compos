@@ -140,17 +140,17 @@ then the saved `~/.compos/custom.scm`. All three are optional.
 
 ## Say what you want
 
-`s-k` opens the Do prompt. Type a sentence, for example "split this window
-vertically". A small local model reads the whole command catalog and answers
-with one command name. The editor runs that command. The model never writes
-Scheme: it picks, and the editor acts.
+Type a sentence in the command palette, for example "split this window
+vertically", and press `RET`. The palette picks the command and runs it, and
+it learns the words, so the same sentence runs again without asking.
 
-The model is `qwen3:4b` on this machine, served by llama.cpp's
+`command-palette-decide-backend` says what picks: `jev`, a `model`, or
+`local`. With `local`, a small model on this machine reads the whole command
+catalog and answers with one command name: `qwen3:4b`, served by llama.cpp's
 `llama-server` on port 8089 (`do-backend`, `do-endpoint`; Ollama on 11434
 works too). The editor checks the reply against the catalog, so the model
-cannot invent a command. A phrase that ran once runs again without the
-model; `M-x do-forget` clears that memory. A command with a `destroy` effect
-asks before it runs.
+cannot invent a command. The model never writes Scheme: it picks, and the
+editor acts.
 
 ## Drive it from outside
 

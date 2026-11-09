@@ -2026,6 +2026,9 @@
       (list-refresh! buf)
       (message (string-append "Todos by " next)))))
 
+;; moving does not open the page, so the highlighted row says RET does
+(define-style! 'todo-list ".window[data-buffer^=\"*Todos*\"] c-line.hl-line::after { content: \"\\23CE\"; margin-left: auto; padding: 0 0.6em; opacity: 0.55; }")
+
 (define-list-mode! "todo-mode"
   (list
     'buffer *todo-buffer*

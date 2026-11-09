@@ -874,18 +874,78 @@
 
 ;; the smallest node that spans the one occurrence of ANCHOR, widened by
 ;; LEVELS parents. A string result is the error to show the caller.
+;; Without a grammar the indent backend answers whole lines: its smallest
+;; node for "(vector y y)" is "  (vector y y))", indentation and the
+;; parent's closer included. Brackets answer better. The chain is the
+;; anchor itself when it is a whole balanced expression, then every
+;; bracket pair around it, smallest first. Offsets are bytes.
+(define (code--char-bytes c)
+  (let ((i (char->integer c)))
+    (cond ((< i 128) 1) ((< i 2048) 2) ((< i 65536) 3) (else 4))))
+
+(define (code--word-char? c)
+  (and c (or (char-alphabetic? c) (char-numeric? c)
+             (memv c '(#\- #\_ #\? #\! #\* #\+ #\< #\> #\= #\/ #\:)))))
+
+(define (code--bracket-chain text s e)
+  (let ((n (string-length text)))
+    (let loop ((i 0) (b 0) (stack '()) (pairs '()) (in-str #f)
+               (before #f) (at #f) (depth 0) (low 0))
+      (if (>= i n)
+          (let* ((at (if (= b e) #f at))
+                 (around (filter (lambda (p) (and (<= (car p) s) (>= (cdr p) e)
+                                                  (not (and (= (car p) s) (= (cdr p) e)))))
+                                 pairs))
+                 (sorted (map (lambda (r) (cons (cadr r) (caddr r)))
+                              (sort (map (lambda (p) (list (- (cdr p) (car p)) (car p) (cdr p))) around))))
+                 (self (and (< s e) (= depth 0) (>= low 0)
+                            (not (code--word-char? before))
+                            (not (code--word-char? at)))))
+            (map (lambda (p) (list "sexp" (car p) (cdr p)))
+                 (if self (cons (cons s e) sorted) sorted)))
+          (let* ((c (string-ref text i))
+                 (b2 (+ b (code--char-bytes c)))
+                 (before (if (= b2 s) c before))
+                 (at (if (= b e) c at))
+                 (inside (and (>= b s) (< b e)))
+                 (next (lambda (stack pairs in-str depth)
+                         (loop (+ i 1) b2 stack pairs in-str before at depth (min low depth)))))
+            (cond (in-str
+                   (cond ((char=? c #\\)
+                          (if (< (+ i 1) n)
+                              (loop (+ i 2) (+ b2 (code--char-bytes (string-ref text (+ i 1))))
+                                    stack pairs #t before at depth low)
+                              (next stack pairs #t depth)))
+                         ((char=? c #\") (next stack pairs #f depth))
+                         (else (next stack pairs #t depth))))
+                  ((char=? c #\") (next stack pairs #t depth))
+                  ((memv c '(#\( #\[ #\{))
+                   (next (cons b stack) pairs #f (if inside (+ depth 1) depth)))
+                  ((memv c '(#\) #\] #\}))
+                   (let ((d (if inside (- depth 1) depth)))
+                     (if (null? stack)
+                         (next stack pairs #f d)
+                         (next (cdr stack) (cons (cons (car stack) b2) pairs) #f d))))
+                  (else (next stack pairs #f depth))))))))
+
 (define (code--sexp-node buf anchor levels)
   (let ((pos (buffer--one-hit buf anchor "anchor")))
     (if (string? pos)
         pos
-        (let ((n (code--ask buf "" pos (+ pos (string-byte-length anchor)) 'at)))
-          (if (not n)
-              "error: no expression spans the anchor"
-              (let loop ((n n) (k (or levels 0)))
-                (if (<= k 0)
-                    n
-                    (let ((up (code--ask-node buf n 'parent)))
-                      (if up (loop up (- k 1)) n)))))))))
+        (let* ((end (+ pos (string-byte-length anchor)))
+               (chain (and (not (equal? (code--backend buf) "ts"))
+                           (code--bracket-chain (buffer-text buf) pos end))))
+          (if (and chain (pair? chain))
+              (let ((k (min (or levels 0) (- (length chain) 1))))
+                (list-ref chain k))
+              (let ((n (code--ask buf "" pos end 'at)))
+                (if (not n)
+                    "error: no expression spans the anchor"
+                    (let loop ((n n) (k (or levels 0)))
+                      (if (<= k 0)
+                          n
+                          (let ((up (code--ask-node buf n 'parent)))
+                            (if up (loop up (- k 1)) n)))))))))))
 
 (define (code-sexp buf anchor &optional levels)
   (code--structurally buf

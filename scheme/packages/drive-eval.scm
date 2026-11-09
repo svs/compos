@@ -1,7 +1,7 @@
 ;;; drive-eval.scm --- replay real chat tasks and score models on rounds, time and success.
 ;;;
-;;; (drive-eval) gives each case to a fresh chat, once a model, one run
-;;; after another, and waits for the turn end. A case is a task a user
+;;; (drive-eval) gives each case to a fresh chat, once a model, up to
+;;; drive-eval-parallel runs at once, and waits for each turn end. A case is a task a user
 ;;; really asked: its source is the prompt from the chat log, its start
 ;;; state is a fixture (a scratch buffer, a file in /tmp, a test group) or
 ;;; none, and its check reads the end state and the reply. A row says
@@ -27,6 +27,20 @@
     (deepseek-driver "opencode-go" "opencode-go/deepseek-v4.1-flash" "Driver")))
 
 (define drive-eval-timeout-s 300)
+
+(defcustom 'drive-eval-parallel 4
+  "How many drive-eval runs go at once. Runs on an OpenCode connector still go one at a time."
+  'group 'chat 'type 'number)
+
+(defcustom 'drive-eval-prompts 'original
+  "Which prompts drive-eval gives each case: original, the prompt as written; reworded, the two held-out rewordings; all, the three."
+  'group 'chat 'type 'symbol)
+
+;; the two models the gap lines of the report compare, the driver first
+(define drive-eval-gap-pair '(haiku-driver opus))
+
+;; set by drive-eval-cancel!; a worker reads it before each run
+(define *drive-eval-cancel* #f)
 
 (define *drive-eval-rows* '())
 
@@ -74,6 +88,68 @@
     (list 'check "see these cardboard todos check which are done" "- [ ] write the copy\n- [ ] ship the build\n- [ ] tell the team\n"
           (lambda (b) (string-append "In the buffer " b ", the item ship the build is done. Change its [ ] to [x] and change nothing else."))
           (lambda (text reply . _) (equal? text "- [ ] write the copy\n- [x] ship the build\n- [ ] tell the team\n")))))
+
+;; Held-out prompts: two rewordings of each case, the same task and the same
+;; check, so a recipe learned from one wording cannot just match the words.
+;; (NAME PROMPT1 PROMPT2), each PROMPT taking the fixture buffer name.
+(define *drive-eval-rewordings*
+  (list
+    (list 'setting
+          (lambda (b) "Tell me the number the setting tool-result-max-bytes holds now. Reply with the number and nothing else.")
+          (lambda (b) "I need the value of tool-result-max-bytes. Give only the number."))
+    (list 'package
+          (lambda (b) "Some package defines app-dismiss. Name that package and nothing more.")
+          (lambda (b) "Find the package where the function app-dismiss is defined. Reply with its name only."))
+    (list 'count
+          (lambda (b) (string-append "Count the lines in the buffer " b ". Reply with the count only."))
+          (lambda (b) (string-append "What is the line count of buffer " b "? Just the number.")))
+    (list 'quote
+          (lambda (b) (string-append "Find the line of the buffer " b " that begins with Quote: and give me the text after Quote:, nothing more."))
+          (lambda (b) (string-append "What does the Quote: line in " b " say? Reply with only the words that follow Quote:.")))
+    (list 'logo
+          (lambda (b) (string-append "The buffer " b " shows images/old-logo.png as its logo. Point it at images/compos-logo.png instead. The buffer has no file; change the buffer only."))
+          (lambda (b) (string-append "Swap the logo path in " b " for images/compos-logo.png. Do not save anything; " b " is not a file.")))
+    (list 'check
+          (lambda (b) (string-append "Mark ship the build as done in the buffer " b ": its [ ] becomes [x]. Leave every other line as it is."))
+          (lambda (b) (string-append "Tick off the item ship the build in " b " by changing its box to [x]. Touch no other line.")))
+    (list 'lines
+          (lambda (b) (string-append "Count the lines of text in the buffer " b " and reply with that number only."))
+          (lambda (b) (string-append "How many lines long is " b "? Only the number, please.")))
+    (list 'line-of
+          (lambda (b) (string-append "In the buffer " b ", on which line is the word needle? The first line is line 1. Reply with the line number only."))
+          (lambda (b) (string-append "Find needle in " b " and tell me its line number, counting from 1. Only the number.")))
+    (list 'save
+          (lambda (b) (string-append "The file " (drive-eval--file b) " has the line version = 1. Make it version = 2, save the file, then check that the file on disk shows version = 2."))
+          (lambda (b) (string-append "Bump version = 1 to version = 2 in " (drive-eval--file b) ", write it to disk, and verify the saved file.")))
+    (list 'local
+          (lambda (b) (string-append "Give the buffer " b " its own fill-column of 72 and check that it took. Only that buffer: no global change and no saved setting."))
+          (lambda (b) (string-append "Set fill-column to 72 locally in " b " and read it back. Leave the global value and the saved settings alone.")))
+    (list 'move
+          (lambda (b) (string-append "Put the buffer " b " in the group " (drive-eval--group b) " and check that this is now its only group."))
+          (lambda (b) (string-append "Take " b " out of its group and into " (drive-eval--group b) ", then verify it belongs to that group alone.")))
+    (list 'prune
+          (lambda (b) (string-append "Remove every line that begins with # from the buffer " b ", then reply with how many lines remain. The number only."))
+          (lambda (b) (string-append "Strip the # comment lines out of " b " and tell me how many lines are left. Just the number.")))))
+
+;; the case a variant came from: lines.r2 gives lines
+(define (drive-eval--base name)
+  (let ((s (symbol->string name)))
+    (string->symbol (car (string-split s ".")))))
+
+;; CASE as the prompts drive-eval-prompts picks: the original keeps its name,
+;; rewording N is the same case named NAME.rN with that prompt
+(define (drive-eval--variants c which)
+  (let* ((rw (assq (car c) *drive-eval-rewordings*))
+         (re (if rw
+                 (map (lambda (p i)
+                        (append (list (string->symbol (string-append (symbol->string (car c)) ".r" (number->string i)))
+                                      (cadr c) (caddr c) p)
+                                (list-tail c 4)))
+                      (cdr rw) '(1 2))
+                 '())))
+    (cond ((eq? which 'reworded) re)
+          ((eq? which 'all) (cons c re))
+          (else (list c)))))
 
 (define drive-eval--needle-text
   (string-join
@@ -179,14 +255,16 @@
     (when f (ignore-errors (lambda () (f fb))))))
 
 ;; one case on one model:
-;; (CASE MODEL OK ROUNDS TOOLS MS STOP-REASON STEPS REPLY)
-;; STEPS is the chat-perf view of the turn, (LABEL MS) per round and tool
-(define (drive-eval--run c m)
+;; (CASE MODEL OK ROUNDS TOOLS MS STOP-REASON STEPS REPLY BYTES SLUG FRICTION REP)
+;; STEPS is the chat-perf view of the turn, (LABEL MS) per round and tool.
+;; REP, from 1, names the fixture and the chat, so runs at once share nothing.
+(define (drive-eval--run c m &optional rep)
   (let* ((name (symbol->string (car c)))
          (label (symbol->string (car m)))
+         (n (number->string (or rep 1)))
          (fixture (list-ref c 2))
-         (fb (string-append "*drive-eval:" name ":" label "*"))
-         (title (string-append "drive-eval " name " " label)))
+         (fb (string-append "*drive-eval:" name ":" label ":" n "*"))
+         (title (string-append "drive-eval " name " " label " " n)))
     (when fixture
       (unless (buffer-known? fb) (buffer-create fb))
       (buffer-set-text! fb fixture))
@@ -217,7 +295,7 @@
       (drive-eval--hook c 'cleanup fb)
       (when (and fixture (buffer-known? fb)) (buffer-kill! fb))
       (list (car c) (car m) ok (car counts) (cadr counts) ms
-            (and r (plist-get r 'stop-reason)) steps reply bytes slug friction))))
+            (and r (plist-get r 'stop-reason)) steps reply bytes slug friction (or rep 1)))))
 
 (define (drive-eval--of rows label) (filter (lambda (r) (eq? (cadr r) label)) rows))
 (define (drive-eval--fmt x) (number->string (/ (round (* 10 x)) 10)))
@@ -269,6 +347,48 @@
                         (or (list-ref r 7) '()))
                    ", "))))
 
+;; one side of a gap line: (PASS-RATE ROUNDS SECONDS WASTED), the medians of ROWS
+(define (drive-eval--side rows)
+  (let ((fs (filter (lambda (r) (and (> (length r) 11) (list-ref r 11))) rows)))
+    (list (if (null? rows) 0 (/ (* 100.0 (length (filter (lambda (r) (list-ref r 2)) rows))) (length rows)))
+          (drive-eval--median (map (lambda (r) (list-ref r 3)) rows))
+          (/ (drive-eval--median (map (lambda (r) (list-ref r 5)) rows)) 1000.0)
+          (drive-eval--median (map (lambda (r) (drive-eval-wasted (list-ref r 11))) fs)))))
+
+(define (drive-eval--signed x)
+  (string-append (if (> x 0) "+" "") (drive-eval--fmt x)))
+
+(define (drive-eval--side-text s)
+  (string-append (drive-eval--fmt (car s)) "% " (drive-eval--fmt (cadr s)) "r "
+                 (drive-eval--fmt (caddr s)) "s " (drive-eval--fmt (cadddr s)) "w"))
+
+;; per case, the original and its rewordings together, the driver against the
+;; strong model of drive-eval-gap-pair: pass rate, median rounds, seconds and
+;; wasted rounds, then driver minus strong. Empty unless both models ran.
+(define (drive-eval--gap rows cases)
+  (let* ((a (car drive-eval-gap-pair)) (b (cadr drive-eval-gap-pair))
+         (ra (drive-eval--of rows a)) (rb (drive-eval--of rows b)))
+    (if (or (null? ra) (null? rb))
+        ""
+        (let* ((bases (fold (lambda (acc c) (let ((x (drive-eval--base (car c)))) (if (memq x acc) acc (append acc (list x))))) '() cases))
+               (line (lambda (label xa xb)
+                       (let ((sa (drive-eval--side xa)) (sb (drive-eval--side xb)))
+                         (string-append
+                           (string-pad-right label 10)
+                           (string-pad-right (drive-eval--side-text sa) 28)
+                           (string-pad-right (drive-eval--side-text sb) 28)
+                           (drive-eval--signed (- (car sa) (car sb))) "% "
+                           (drive-eval--signed (- (cadr sa) (cadr sb))) "r "
+                           (drive-eval--signed (- (caddr sa) (caddr sb))) "s "
+                           (drive-eval--signed (- (cadddr sa) (cadddr sb))) "w"))))
+               (of-base (lambda (rs x) (filter (lambda (r) (eq? (drive-eval--base (car r)) x)) rs))))
+          (string-append
+            "\nGap: " (symbol->string a) " against " (symbol->string b)
+            ", each case with its rewordings: pass rate, median rounds, seconds, wasted rounds; then the gap\n"
+            (string-pad-right "case" 10) (string-pad-right (symbol->string a) 28) (string-pad-right (symbol->string b) 28) "gap\n"
+            (string-join (map (lambda (x) (line (symbol->string x) (of-base ra x) (of-base rb x))) bases) "\n")
+            "\n" (line "all" ra rb) "\n")))))
+
 (define (drive-eval--text rows models cases)
   (let ((labels (map car models))
         (failed (filter (lambda (r) (not (list-ref r 2))) rows)))
@@ -276,13 +396,13 @@
       "drive-eval: "
       (string-join (map (lambda (l) (string-append (symbol->string l) " " (drive-eval--score (drive-eval--of rows l))
                                                      " prompt " (number->string (fold (lambda (acc r) (if (> (length r) 9) (max acc (list-ref r 9)) acc)) 0 (drive-eval--of rows l))) "B")) labels) "; ")
-      "\n\n" (string-pad-right "case" 10)
+      "\n\n" (string-pad-right "case" 12)
       (string-join (map (lambda (l) (string-pad-right (symbol->string l) 28)) labels) "")
       "\n"
       (string-join
         (map (lambda (c)
                (string-append
-                 (string-pad-right (symbol->string (car c)) 10)
+                 (string-pad-right (symbol->string (car c)) 12)
                  (string-join
                    (map (lambda (l)
                           (let ((rs (filter (lambda (r) (and (eq? (car r) (car c)) (eq? (cadr r) l))) rows)))
@@ -291,7 +411,8 @@
                    "")))
              cases)
         "\n")
-      "\n\npassed/runs, then medians. r: model replies in the turn; t: tool calls; s: send to turn end; w: tool rounds wasted on the harness.\n"
+      "\n\npassed/runs, then medians. r: model replies in the turn; t: tool calls; s: send to turn end; w: tool rounds wasted on the harness. NAME.rN is a held-out rewording.\n"
+      (or (ignore-errors (lambda () (drive-eval--gap rows cases))) "")
       (if (null? failed)
           ""
           (string-append "\nFailures, with the steps of each turn (ms)\n"
@@ -306,9 +427,10 @@
       (or (assq x *drive-eval-cases*) (assq x *drive-eval-hard-cases*))
       x))
 
-;; Run every case on every model REPS times, one run at a time, in a task,
-;; so each time is its own. MODELS and CASES take names or whole entries;
-;; CASES 'hard is the harness set.
+;; Run every case on every model REPS times, drive-eval-parallel runs at
+;; once, in a task. MODELS and CASES take names or whole entries; CASES
+;; 'hard is the harness set, 'all both sets. PROMPTS picks original,
+;; reworded or all, and defaults to drive-eval-prompts.
 (define drive-eval-results-file (string-append (getenv "HOME") "/.compos/drive-eval/results.txt"))
 
 ;; the table so far, after each run: into *drive-eval* and into
@@ -323,48 +445,119 @@
                      (buffer-set-text! "*drive-eval*" text)))
     text))
 
-(define (drive-eval &optional models cases reps)
+(define *drive-eval--queue* '())
+(define *drive-eval--done* '())
+(define *drive-eval--opencode* 0)
+(define *drive-eval-running* #f)
+
+(define (drive-eval--opencode? m) (string-prefix? "opencode" (cadr m)))
+
+(define (drive-eval--range from to)
+  (if (> from to) '() (cons from (drive-eval--range (+ from 1) to))))
+
+;; (JOB . REST) for the first job of Q a worker may start, or #f: an OpenCode
+;; job waits while another OpenCode run goes
+(define (drive-eval--pick q)
+  (let loop ((xs q) (before '()))
+    (cond ((null? xs) #f)
+          ((or (not (drive-eval--opencode? (cadr (car xs)))) (= 0 *drive-eval--opencode*))
+           (cons (car xs) (append (reverse before) (cdr xs))))
+          (else (loop (cdr xs) (cons (car xs) before))))))
+
+;; the next job, (CASE MODEL REP), taken off the queue; #f after a cancel or
+;; when none may start. A worker that gets #f stops: the queue only shrinks,
+;; and a held OpenCode job goes to the worker that runs OpenCode now.
+(define (drive-eval--take!)
+  (with-scheme-lock 'drive-eval
+    (lambda ()
+      (and (not *drive-eval-cancel*)
+           (let ((hit (drive-eval--pick *drive-eval--queue*)))
+             (and hit
+                  (begin
+                    (set! *drive-eval--queue* (cdr hit))
+                    (when (drive-eval--opencode? (cadr (car hit)))
+                      (set! *drive-eval--opencode* (+ *drive-eval--opencode* 1)))
+                    (car hit))))))))
+
+(define (drive-eval--worker ms cs)
+  (let loop ()
+    (let ((j (drive-eval--take!)))
+      (when j
+        (let ((row (or (ignore-errors (lambda () (drive-eval--run (car j) (cadr j) (caddr j))))
+                       (list (car (car j)) (car (cadr j)) #f 0 0 0 'error '() "the run raised an error" 0 #f '() (caddr j)))))
+          (with-scheme-lock 'drive-eval
+            (lambda ()
+              (when (drive-eval--opencode? (cadr j))
+                (set! *drive-eval--opencode* (- *drive-eval--opencode* 1)))
+              (set! *drive-eval--done* (cons row *drive-eval--done*))
+              (drive-eval--progress! (reverse *drive-eval--done*) ms cs))))
+        (loop)))))
+
+(define (drive-eval &optional models cases reps prompts)
+  (when *drive-eval-running*
+    (error "drive-eval: a run is going; (drive-eval-cancel!) stops it"))
   (let* ((ms (map (lambda (x) (if (symbol? x) (assq x *drive-eval-models*) x)) (or models *drive-eval-models*)))
-         (cs (cond ((eq? cases 'hard) *drive-eval-hard-cases*)
-                   (cases (map drive-eval--case cases))
-                   (else *drive-eval-cases*)))
-         (n (or reps 1)))
+         (base (cond ((eq? cases 'hard) *drive-eval-hard-cases*)
+                     ((eq? cases 'all) (append *drive-eval-cases* *drive-eval-hard-cases*))
+                     (cases (map drive-eval--case cases))
+                     (else *drive-eval-cases*)))
+         (cs (apply append (map (lambda (c) (drive-eval--variants c (or prompts drive-eval-prompts))) base)))
+         (n (or reps 1))
+         ;; repeat 1 of every case first, so a cancelled run still covers the set
+         (jobs (apply append
+                 (map (lambda (i) (apply append (map (lambda (c) (map (lambda (m) (list c m i)) ms)) cs)))
+                      (drive-eval--range 1 n))))
+         (p (max 1 (min drive-eval-parallel (length jobs))))
+         (limit (* 1000 (+ 120 (* drive-eval-timeout-s (length jobs))))))
+    (set! *drive-eval-cancel* #f)
+    (set! *drive-eval--queue* jobs)
+    (set! *drive-eval--done* '())
+    (set! *drive-eval--opencode* 0)
+    (set! *drive-eval-running* #t)
     (task-run!
       (lambda ()
-        (let ((done '()))
-          (drive-eval--progress! '() ms cs)
-          (for-each
-            (lambda (c)
-              (for-each
-                (lambda (m)
-                  (let loop ((i 0))
-                    (when (< i n)
-                      (set! done (cons (drive-eval--run c m) done))
-                      (drive-eval--progress! (reverse done) ms cs)
-                      (loop (+ i 1)))))
-                ms))
-            cs)
-          (reverse done)))
+        (drive-eval--progress! '() ms cs)
+        (let ((ws (map (lambda (k) (task-spawn (lambda () (drive-eval--worker ms cs)))) (drive-eval--range 1 p))))
+          (for-each (lambda (w) (ignore-errors (lambda () (task-await w limit)))) ws)
+          (reverse *drive-eval--done*)))
       (lambda (ok? rows)
+        (set! *drive-eval-running* #f)
         (if (not ok?)
             (let ((why (string-append "drive-eval failed: " (value->string rows))))
+              (set! *drive-eval-cancel* #t)
               (message why)
               (event-publish! "drive-eval" 'done why))
             ;; the rows land first, and a report that throws still wakes the
             ;; listener: a silent callback looked like a dead run
-            (let ((text (begin
-                          (set! *drive-eval-rows* rows)
-                          (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
-                              "drive-eval: the report failed; the rows are in *drive-eval-rows*"))))
+            (let* ((text (begin
+                           (set! *drive-eval-rows* rows)
+                           (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
+                               "drive-eval: the report failed; the rows are in *drive-eval-rows*")))
+                   (head (string-append (if *drive-eval-cancel*
+                                            (string-append "cancelled after " (number->string (length rows)) " of "
+                                                           (number->string (length jobs)) " runs: ")
+                                            "")
+                                        (car (string-split text "\n")))))
               (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
               (buffer-set-text! "*drive-eval*" text)
               (ignore-errors (lambda () (write-file! drive-eval-results-file text)))
-              (message (car (string-split text "\n")))
-              (event-publish! "drive-eval" 'done (car (string-split text "\n"))))))
-      (* 1000 (+ 60 (* drive-eval-timeout-s n (length ms) (length cs)))))))
+              (message head)
+              (event-publish! "drive-eval" 'done head))))
+      (+ limit 60000))))
+
+;; stop a run between runs: the runs going now end, no new one starts, and
+;; drive-eval done says cancelled with the table so far
+(define (drive-eval-cancel!)
+  (if (not *drive-eval-running*)
+      "drive-eval: no run is going"
+      (begin
+        (set! *drive-eval-cancel* #t)
+        "drive-eval: cancelled; the runs going now finish, then drive-eval done reports")))
 
 (public! 'drive-eval
-  "(drive-eval [MODELS CASES REPS]) -- give each case, a real chat task, to a fresh chat on each model REPS times and score passes, median rounds, tool calls and seconds; CASES 'hard is the harness set; the table goes to *drive-eval*, the event drive-eval done says the score")
+  "(drive-eval [MODELS CASES REPS PROMPTS]) -- give each case, a real chat task, to a fresh chat on each model REPS times, drive-eval-parallel at once, and score passes, median rounds, tool calls and seconds; CASES 'hard is the harness set, 'all both; PROMPTS original, reworded (two held-out rewordings) or all, default drive-eval-prompts; the table and the haiku-driver/opus gap go to *drive-eval*, the event drive-eval done says the score")
+(public! 'drive-eval-cancel!
+  "(drive-eval-cancel!) -- stop the drive-eval run between runs: the runs going now end, no new one starts, and drive-eval done says cancelled")
 
 ;;; Friction: the tool calls of a run that did no work, and why.
 ;;; A passing run can still lose rounds to the harness; the score hides it.
@@ -517,7 +710,7 @@
              (let* ((r (ignore-errors (lambda () (chat-log-read f))))
                     (title (or (and r (plist-get (plist-get r 'header) 'title)) ""))
                     (ws (string-split title " ")))
-               (and (string-prefix? "drive-eval " title) (= (length ws) 3)
+               (and (string-prefix? "drive-eval " title) (>= (length ws) 3)
                     (list (string->symbol (cadr ws)) (string->symbol (caddr ws))
                           (drive-eval-friction (or (plist-get r 'record) '()))))))
            (map cadr (sort (map (lambda (f) (list (or (drive-eval--number (last (string-split f "/"))) 0) f)) fs)))))))

@@ -1581,6 +1581,43 @@
 (public! 'todo-reap-chats! "(todo-reap-chats! [WHO]) — archive every live chat of a done task, except a chat an open task names, a running chat and the chat the user is on; answer (CLOSED KEPT)")
 (catalog-meta! 'function "todo-reap-chats!" 'domain 'writing 'effects '(destroy))
 
+;; Dismiss. Put a task away: close its page and the chats that work it.
+;; The state stays. A chat another open task still names stays open.
+(define (todo-dismiss! id &optional who)
+  "(todo-dismiss! ID [WHO]) — close the task's page and archive its chats, except a chat another open task names and the calling chat; answer the closed chats"
+  (let* ((t (todo--must id))
+         (others (apply append (map todo--task-chats
+                                    (remove (lambda (o) (equal? (plist-get o 'id) id)) (todo-list)))))
+         (self (current-buffer))
+         (closed '()))
+    (for-each
+     (lambda (b)
+       (unless (or (member b closed) (member b others) (equal? b self))
+         (agents-archive! b)
+         (set! closed (cons b closed))))
+     (todo--task-chats t))
+    (for-each
+     (lambda (b)
+       (when (and (equal? (buffer-local-value 'mode-name b) "todo-detail-mode")
+                  (equal? (buffer-local-value 'todo-id b) id))
+         (buffer-kill! b)))
+     (buffer-list))
+    (reverse closed)))
+
+(public! 'todo-dismiss! "(todo-dismiss! ID [WHO]) — close the task's page and archive its chats, except a chat another open task names; answer the closed chats")
+(catalog-meta! 'function "todo-dismiss!" 'domain 'writing 'effects '(destroy))
+
+(define (todo--dismiss-msg r)
+  (message (string-append "Dismissed; closed " (number->string (length r)) " chats")))
+
+(define-command "todo-dismiss" "Dismiss the task: close its page and the chats that work it; the state stays"
+  (lambda ()
+    (let ((t (if (equal? (buffer-local-value 'mode-name (current-buffer)) "todo-detail-mode")
+                 (todo--detail-task (current-buffer))
+                 (todo--at))))
+      (if t (todo--dismiss-msg (todo-dismiss! (plist-get t 'id))) (message "No task here"))))
+  'modes '(todo-mode todo-detail-mode))
+
 (define-command "todo-reap-chats" "Close every chat whose task is done; keep a chat an open task still uses, a running chat and the chat you are on"
   (lambda ()
     (let ((r (todo-reap-chats!)))
@@ -2181,6 +2218,7 @@
     ("X" "todo-detail-cancel")
     ("W" "todo-detail-wait")
     ("s" "todo-detail-start")
+    ("k" "todo-dismiss")
     ("q" "quit-window")))
 
 ;; the tabs: 6, 7 and 8 take one, as on every detail page
@@ -2188,7 +2226,7 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `s` starts, `d` closes, `X` cancels and `W` parks the task; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `s` starts, `d` closes, `X` cancels and `W` parks the task; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
@@ -2581,8 +2619,9 @@
             ("F" "todo-filter-project")
             (">" "todo-next-sort")
             ("g" "todo-refresh")
+            ("k" "todo-dismiss")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page, where `w` reaches the chat working it; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

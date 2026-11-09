@@ -1884,7 +1884,8 @@
       (move "cancelled" "todo-detail-cancel" "Cancel" "x" "bad")
       (move "inbox" "todo-detail-inbox" (if (equal? state "todo") "Unaccept" "To inbox") "i")
       (list (list "todo-detail-agent" "Agent" "M-o")
-            (list "todo-detail-visit" "File" "e")))))
+            (list "todo-detail-visit" "File" "e")
+            (list "todo-detail-dismiss" "Dismiss" "k")))))
 
 (define (todo--detail-render! buf)
   (let* ((t (todo--detail-task buf))

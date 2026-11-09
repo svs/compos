@@ -52,21 +52,26 @@
 ;; own, with the notes left since then; a note with no change behind it
 ;; belongs to nothing and goes
 (define (window-log--pre!)
+  ;; frame reads are free and frame writes cost ~1 ms each, so a key
+  ;; that leaves the windows alone writes nothing; post! compares with
+  ;; window-log-after, which is the state before this command
   (let ((now (window-log-snapshot))
         (last (frame-local 'window-log-after)))
-    (if (and last (not (equal? (window-log--shape last) (window-log--shape now))))
-        (window-log--record! "(between commands)" last now)
-        (set-frame-local! 'window-log-notes '()))
-    (set-frame-local! 'window-log-before now)))
+    (cond ((and last (not (equal? (window-log--shape last) (window-log--shape now))))
+           (window-log--record! "(between commands)" last now)
+           (set-frame-local! 'window-log-after now))
+          ((pair? (frame-local 'window-log-notes))
+           (set-frame-local! 'window-log-notes '())))))
 
 ;; after a command: a change is recorded as that command
 (define (window-log--post! &optional action)
-  (let ((before (frame-local 'window-log-before))
+  (let ((before (frame-local 'window-log-after))
         (now (window-log-snapshot)))
     (when (and before (not (equal? (window-log--shape before) (window-log--shape now))))
       (window-log--record! (or action (this-command) "?") before now))
-    (set-frame-local! 'window-log-after now)
-    (set-frame-local! 'window-log-before #f)))
+    ;; a frame write costs ~1 ms: write only when the windows changed
+    (unless (and before (equal? (window-log--shape before) (window-log--shape now)))
+      (set-frame-local! 'window-log-after now))))
 
 (add-hook! 'pre-command-hook 'window-log--pre!)
 (add-hook! 'post-command-hook 'window-log--post!)

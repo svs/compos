@@ -1665,3 +1665,5 @@
 ;; read lookups agents call from eval-scheme-read
 (public! 'agent-buf "(agent-buf SLUG) — the buffer of the agent SLUG")
 (catalog-meta! 'function "agent-buf" 'effects '(read))
+(public! 'agent-slug-of "(agent-slug-of BUF) — the agent slug of chat BUF, or #f")
+(catalog-meta! 'function "agent-slug-of" 'effects '(read))

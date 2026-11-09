@@ -85,6 +85,12 @@
                 (define-key (mode-keymap mode) (list-ref tab-bars-right-keys i) (string-append "tab-bars-detail-" n))))
             '(0 1 2 3 4))
   (define-key (mode-keymap mode) "/" "tab-bars-pick")
+  ;; the tab commands are offered in the modes that take the bars
+  (for-each (lambda (i)
+              (command-modes-add! (string-append "tab-bars-index-" (number->string i)) mode)
+              (command-modes-add! (string-append "tab-bars-detail-" (number->string i)) mode))
+            '(1 2 3 4 5))
+  (command-modes-add! "tab-bars-pick" mode)
   mode)
 
 (define (tab-bars-declare! mode fn)

@@ -624,6 +624,9 @@
 
 (transient-define-prefix "site-app-tabs" "Pick one of this buffer's tabs" site-app-tab-groups)
 (transient-define-prefix "site-app-sections" "Pick a section of this website app" site-app-section-groups)
+;; a page offers them; each index mode adds itself (site-app-index-list-mode!)
+(command-modes-add! "site-app-tabs" 'site-app-detail-mode)
+(command-modes-add! "site-app-sections" 'site-app-detail-mode)
 
 (define-command "site-app-refresh" "Read this website app tab again"
   (lambda ()
@@ -2343,7 +2346,8 @@
 (for-each (lambda (k)
             (define-command (string-append "site-app-detail-key-" k)
               (string-append "Press this page's button on " k)
-              (lambda () (site-app-detail-act! k))))
+              (lambda () (site-app-detail-act! k))
+              'modes '(site-app-detail-mode)))
           site-app-action-letters)
 
 ;; the page's buttons with keys: bound in its mode and listed in its keys bar
@@ -2769,6 +2773,10 @@
   ;; 1-5 take its tabs, 6-0 the page's, / any of them by name; the list
   ;; mode's own row filter stays on f
   (tab-bars-declare! mode (lambda (buf) (map (lambda (bar) (list (car bar) (caddr bar))) (site-app-index-bars buf))))
+  ;; its keys' commands are offered in it
+  (for-each (lambda (name) (command-modes-add! name mode))
+            (append (list "site-app-tabs" "site-app-sections")
+                    (map (lambda (n) (string-append "site-app-tab-" (number->string n))) '(1 2 3 4 5 6 7 8 9))))
   ;; The index keeps its own bindings; unclaimed detail-page keys run in the
   ;; adjacent detail, just as they do when focus is on the detail itself.
   (when (boundp 'app-detail-keys!)

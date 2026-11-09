@@ -205,7 +205,8 @@
   (lambda (n)
     (define-command (string-append "pane-overview-pick-" (number->string n))
       (string-append "Bring the window of tile " (number->string n) " to the front")
-      (lambda () (pane-overview--pick! (- n 1)))))
+      (lambda () (pane-overview--pick! (- n 1)))
+      'modes '(pane-overview-mode)))
   '(1 2 3 4 5 6 7 8 9))
 
 ;; C-g and ESC leave the overview, as q does

@@ -103,3 +103,22 @@
                  "the next command sees yank as last-command")
     (global-unset-key "<f9> y")
     (buffer-kill! "zz-command-test-buf")))
+
+(deftest 'a-command-names-its-modes-where-it-is-defined
+  "'modes offers a command only in those modes; a command a mode map binds is still offered everywhere"
+  (lambda ()
+    (define-command "zz-command-test-scoped" "Test: only in morg" (interactive 'p)
+      (lambda (n) (set! *command-test-got* n))
+      'modes '(morg-mode))
+    (define-command "zz-command-test-bound" "Test: bound in a mode map"
+      (lambda () #t))
+    (define-key (mode-keymap "morg-mode") "<f9> b" "zz-command-test-bound")
+    (let ((buf (command-test-buffer! "x")))
+      (check-false! (command-applicable? "zz-command-test-scoped" buf) "not offered in fundamental-mode")
+      (check-true! (command-applicable? "zz-command-test-bound" buf) "a mode map binding does not scope")
+      (with-current-buffer buf (lambda () (set-mode! "morg-mode")))
+      (check-true! (command-applicable? "zz-command-test-scoped" buf) "offered in morg-mode")
+      (command-call "zz-command-test-scoped" 4)
+      (check-equal! *command-test-got* 4 "the spec still reaches the function"))
+    (define-key (mode-keymap "morg-mode") "<f9> b" #f)
+    (buffer-kill! "zz-command-test-buf")))

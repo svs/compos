@@ -377,7 +377,7 @@
 
 (effects! '(write))
 
-(define (app--detail-shim! cmd)
+(define (app--detail-shim! cmd list-mode)
   ;; One command per mirrored key, named after what it runs, so C-h b in the
   ;; listing says where the key goes instead of hiding it behind a lambda.
   (let ((name (string-append "app-detail-" cmd)))
@@ -387,7 +387,9 @@
         (let ((page (app-detail-here)))
           (if page
               (with-current-buffer page (lambda () (run-command cmd)))
-              (message "No page is open beside this listing")))))
+              (message "No page is open beside this listing"))))
+      'modes (list list-mode))
+    (command-modes-add! name list-mode)
     name))
 
 ;; In an app the listing and the page are one surface. A key the listing does
@@ -411,7 +413,7 @@
                            (member keys app--listing-own-keys)
                            (string-prefix? "keymap:" cmd))
                        done
-                       (begin (define-key lmap keys (app--detail-shim! cmd))
+                       (begin (define-key lmap keys (app--detail-shim! cmd list-mode))
                               (cons keys done)))))
                '() (keymap-bindings dmap)))))
 

@@ -372,7 +372,8 @@
 (define (list-flag-command ch)
   (let ((name (string-append "list-flag-" ch)))
     (define-command name (string-append "Flag the entry at point with " ch)
-      (lambda () (list-mark-at-point! ch)))
+      (lambda () (list-mark-at-point! ch))
+      'modes '(list-mode))
     name))
 
 ;; Every flag that has something flagged, in the order the list declared

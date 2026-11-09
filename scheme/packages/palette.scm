@@ -340,7 +340,7 @@
   'group 'interaction)
 
 (defcustom 'command-mode-scoping #t
-  "M-x and the palette offer a mode's commands only in its buffers, as Emacs does with (interactive nil MODE). A command's modes are the ones command-modes! names, else the modes whose -mode-map binds it when no global map does."
+  "M-x and the palette offer a mode's commands only in its buffers, as Emacs does with (interactive nil MODE). A command names its modes where it is defined, with define-command's 'modes; a command with none is offered everywhere."
   'group 'interaction)
 
 (defcustom 'command-palette-decide-backend 'jev

@@ -5719,8 +5719,16 @@
   (set! *command-generation* (+ *command-generation* 1))
   name)
 
+;; a generated command a package binds in each mode it installs into
+(define (command-modes-add! name mode)
+  (let* ((row (assoc name *command-modes*))
+         (modes (if row (cadr row) '())))
+    (if (member mode modes) name (command-modes! name (append modes (list mode))))))
+
 (public! 'command-modes!
-  "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as Emacs's (interactive nil MODE ...); '() offers it in every buffer, even when only a mode map binds it")
+  "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as define-command's 'modes and Emacs's (interactive nil MODE ...) do; '() offers it in every buffer")
+(public! 'command-modes-add!
+  "(command-modes-add! NAME MODE) -- add MODE to the modes that offer command NAME; for a generated command a package binds in each mode it sets up")
 (public! 'command-applicable?
   "(command-applicable? NAME [BUF]) -- #t when command NAME is for BUF: no modes, or one of its modes is on there")
 (public! 'commands-out-of-scope

@@ -57,11 +57,11 @@
           (package-install! (string-trim spec)))))))
 
 (define-command "package-list" "Echo the installed user packages"
-  (lambda ()
-    (let ((ps (package-list)))
-      (message (if (null? ps)
-                   "no user packages installed"
-                   (string-join ps " · "))))))
+  package-list
+  'show (lambda (ps)
+          (message (if (null? ps)
+                       "no user packages installed"
+                       (string-join ps " · ")))))
 
 (category! 'packages)
 (public! 'package-install! "(package-install! SPEC) — fetch a .scm (github user/repo[/path] or url) into <compos-home>/packages and load it")
@@ -121,28 +121,30 @@
     (message "primitives rebound")))
 
 (define-command "reload-file" "Reload a Scheme package into the live session"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (here (let ((p (buffer-path buf)))
-                   (and p (string-suffix? ".scm" p) p)))
-           (files (reload--files)))
-      (minibuffer-read
-        (if here "Reload package (RET = this file): " "Reload package: ")
-        (map car files)
-        (lambda (name)
-          (let* ((n (string-trim name))
-                 (e (assoc n files))
-                 (path (cond ((and (equal? n "") here) here)
-                             (e (cadr e))
-                             ((and (string-suffix? ".scm" n) (file-exists? n)) n)
-                             (else #f))))
-            (if (not path)
-                (message (string-append "no package " n))
-                (begin
-                  ;; reloading the file being edited saves it first
-                  (when (and (equal? path here) (buffer-modified? buf))
-                    (run-command "save-buffer"))
-                  (reload-file path)))))))))
+  (interactive
+    (lambda (k)
+      (let* ((buf (current-buffer))
+             (here (let ((p (buffer-path buf)))
+                     (and p (string-suffix? ".scm" p) p)))
+             (files (reload--files)))
+        (minibuffer-read
+          (if here "Reload package (RET = this file): " "Reload package: ")
+          (map car files)
+          (lambda (name)
+            (let* ((n (string-trim name))
+                   (e (assoc n files))
+                   (path (cond ((and (equal? n "") here) here)
+                               (e (cadr e))
+                               ((and (string-suffix? ".scm" n) (file-exists? n)) n)
+                               (else #f))))
+              (if (not path)
+                  (message (string-append "no package " n))
+                  (begin
+                    ;; reloading the file being edited saves it first
+                    (when (and (equal? path here) (buffer-modified? buf))
+                      (run-command "save-buffer"))
+                    (k (list path))))))))))
+  reload-file)
 
 ;; effects stamps for the names declared above without one, so
 ;; eval-scheme-read takes or refuses them by what they do

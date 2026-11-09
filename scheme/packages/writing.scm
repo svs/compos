@@ -398,10 +398,8 @@
 (effects! '(read))
 
 (define-command "count-words" "Display the number of words in the buffer"
-  (lambda ()
-    (message (string-append "Buffer has "
-                            (number->string (count-words (current-buffer)))
-                            " words"))))
+  (interactive 'b) count-words
+  'show (lambda (n) (message (string-append "Buffer has " (number->string n) " words"))))
 
 (category! 'writing)
 ;; the rest of this file is writing-- internals; the surface is its commands,

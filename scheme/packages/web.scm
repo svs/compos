@@ -2471,10 +2471,12 @@ the tabs. C-s searches to any link.")
                     (open (string-trim url))))))))
 
 (define-command "browse" "Open a web page as readable text in a buffer"
-  (lambda () (web--read-url! "URL: " browse)))
+  (interactive (lambda (k) (web--read-url! "URL: " (lambda (url) (k (list url))))))
+  browse)
 
 (define-command "browse-other-window" "Open a web page as readable text in another window"
-  (lambda () (web--read-url! "URL in other window: " browse-other-window)))
+  (interactive (lambda (k) (web--read-url! "URL in other window: " (lambda (url) (k (list url))))))
+  browse-other-window)
 
 ;;; --- the history list -----------------------------------------------------------
 ;;; Every page read, newest first, from the file the visits keep. RET

@@ -1647,9 +1647,8 @@
            (subagent-children parent)))))
 
 (define-command "chat-open-children" "Read the archived children of this chat back, under it"
-  (lambda ()
-    (let ((bs (chat-open-children)))
-      (message (string-append (number->string (length bs)) " children open")))))
+  chat-open-children
+  'show (lambda (bs) (message (string-append (number->string (length bs)) " children open"))))
 
 (effects! '(destroy))
 

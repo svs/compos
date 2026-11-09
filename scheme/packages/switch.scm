@@ -34,7 +34,7 @@
 
 ;; group ids whose card can appear: every group and every pseudo group,
 ;; except the one you are in
-(define (switch-groups buf)
+(define (switch--group-names buf)
   (filter (lambda (g) (not (equal? g (buffer-local buf 'switch-group))))
           (group-names-all)))
 
@@ -66,7 +66,7 @@
 
 ;; the groups view: every other group's card, then the projects
 (define (switch-group-rows buf)
-  (append (map group-container-candidate (switch-groups buf))
+  (append (map group-container-candidate (switch--group-names buf))
           (map switch-project-candidate (switch-project-roots))))
 
 ;; a heading row: kind "separator". list-mode steps over it and drops

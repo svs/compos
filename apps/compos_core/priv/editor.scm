@@ -4844,17 +4844,18 @@
 (effects! '(read))
 
 (define-command "write-rules" "List the rules that decide which writes happen"
-  (lambda ()
-    (for-each
-      (lambda (r)
-        (message (string-append (symbol->string (write-rule-name r))
-                                (if (write-rule-confirmable? r)
-                                    " (a person can confirm past it): "
-                                    " (absolute): ")
-                                (write-rule-reason r))))
-      *write-rules*)
-    (message (string-append (number->string (length *write-rules*))
-                            " write rules; see *messages*"))))
+  write-rules
+  'show (lambda (rules)
+          (for-each
+            (lambda (r)
+              (message (string-append (symbol->string (write-rule-name r))
+                                      (if (write-rule-confirmable? r)
+                                          " (a person can confirm past it): "
+                                          " (absolute): ")
+                                      (write-rule-reason r))))
+            rules)
+          (message (string-append (number->string (length rules))
+                                  " write rules; see *messages*"))))
 
 ;; The end of every save path: the buffer matches the file, the hooks
 ;; run, and the echo area names the file.
@@ -5998,14 +5999,15 @@
                 (message "No sexp before point")))))))
 
 (define-command "eval-buffer" "Evaluate the current buffer as Scheme"
-  (lambda () (echo-value (eval-buffer (current-buffer)))))
+  (interactive 'b) eval-buffer 'show echo-value)
 (catalog-meta! 'command "eval-buffer" 'domain 'commands 'effects '(write execute))
 
 (define-command "eval-region" "Evaluate the region as Scheme"
-  (lambda ()
-    (if (mark)
-        (echo-value (eval-region (current-buffer) (region-beginning) (region-end)))
-        (message "No region — set the mark first (C-SPC)"))))
+  (interactive (lambda (k)
+                 (if (mark)
+                     (k (list (current-buffer) (region-beginning) (region-end)))
+                     (message "No region — set the mark first (C-SPC)"))))
+  eval-region 'show echo-value)
 
 ;; hot-reload a Scheme file into the live session (stdlib included)
 (define-command "load-file" "Load a Scheme file into the live session"

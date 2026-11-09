@@ -141,3 +141,28 @@
     (check-equal! (command-call "zz-command-test-held") 'command "command-call runs the command")
     (undefine-command "zz-command-test-held")
     (check-equal! (zz-command-test-held) 'function "undefine-command leaves it too")))
+
+(deftest 'a-command-defined-on-its-function
+  "define-command on the function its name holds makes that function the command: code passes the arguments, M-x collects them with a procedure spec, 'show gets the answer, a second define does not wrap it twice, undefine gives the function back"
+  (lambda ()
+    (define (zz-command-test-add a b) (+ a b))
+    (set-symbol-value! 'zz-command-test-add zz-command-test-add)
+    (set! *command-test-got* #f)
+    (define-command "zz-command-test-add" "Test: a command on its function"
+      (interactive (lambda (k) (k (list 2 3))))
+      (symbol-value 'zz-command-test-add)
+      'show (lambda (v) (set! *command-test-got* v)))
+    (let ((f (symbol-value 'zz-command-test-add)))
+      (check-true! (commandp f) "the function is the command")
+      (check-equal! (f 1 1) 2 "code passes its arguments, nothing shows")
+      (check-false! *command-test-got* "a code call does not show")
+      (check-equal! (command-call "zz-command-test-add" 4 4) 8 "command-call passes them too")
+      (run-command "zz-command-test-add")
+      (check-equal! *command-test-got* 5 "M-x collects the arguments and shows the answer")
+      (define-command "zz-command-test-add" "Test: a command on its function"
+        (interactive (lambda (k) (k (list 2 3))))
+        (symbol-value 'zz-command-test-add))
+      (check-true! (eq? (symbol-value 'zz-command-test-add) f) "a second define keeps the same function")
+      (undefine-command "zz-command-test-add")
+      (check-true! (eq? (symbol-value 'zz-command-test-add) f) "undefine leaves the function")
+      (check-false! (commandp "zz-command-test-add") "and it is no command"))))

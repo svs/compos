@@ -1027,23 +1027,26 @@
         (chat-title--first-summary buf))))
 
 (define-command "chat-title" "Set the current chat's title"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (chat-buffer? buf))
-          (message "not a chat buffer")
-          (minibuffer-read "Chat title: " '()
-            (lambda (title)
-              ;; empty input takes the chat's first running summary, the
-              ;; sentence that already names the work
-              (let ((name (if (equal? (string-trim title) "")
-                              (chat-title--first-summary buf)
-                              title)))
-                (cond ((not name)
-                       (message "No summary yet; type a title"))
-                      ((chat-title buf name)
-                       (message (string-append "Chat title: " (buffer-name buf))))
-                      (else
-                       (message "Chat title cannot be empty or is already taken")))))))))
+  (interactive
+    (lambda (k)
+      (let ((buf (current-buffer)))
+        (if (not (chat-buffer? buf))
+            (message "not a chat buffer")
+            (minibuffer-read "Chat title: " '()
+              (lambda (title)
+                ;; empty input takes the chat's first running summary, the
+                ;; sentence that already names the work
+                (let ((name (if (equal? (string-trim title) "")
+                                (chat-title--first-summary buf)
+                                title)))
+                  (if (not name)
+                      (message "No summary yet; type a title")
+                      (k (list buf name))))))))))
+  chat-title
+  'show (lambda (name)
+          (message (if name
+                       (string-append "Chat title: " name)
+                       "Chat title cannot be empty or is already taken")))
   'modes '(chat-mode))
 
 ;; the title names the chat, so the key that sets it lives on chat-mode's

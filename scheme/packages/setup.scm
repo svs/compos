@@ -607,7 +607,8 @@
   (lambda () (setup--ask-secrets)))
 
 (define-command "setup-report" "Open the secret-free setup status report"
-  (lambda () (setup--show-document! "compos setup" (setup-report))))
+  setup-report
+  'show (lambda (text) (setup--show-document! "compos setup" text)))
 
 (define-command "setup-bootstrap-gemini" "Set Gemini Nano as the default local connector"
   (lambda ()

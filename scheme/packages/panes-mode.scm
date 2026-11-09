@@ -1407,7 +1407,8 @@
 
 (define-command "panes-adopt"
   "Read this frame as it stands into the window model, and lay it out from the model"
-  (lambda () (panes-apply! (panes-fit-capacity (panes-adopt)))))
+  panes-adopt
+  'show (lambda (model) (panes-apply! (panes-fit-capacity model))))
 
 (public! 'panes-layout "(panes-layout) -> the window model of this frame's group, or #f")
 (catalog-meta! 'function "panes-layout" 'effects '(read))

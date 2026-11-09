@@ -1172,11 +1172,11 @@
               'initial (string-append (calendar--today) " "))))))) 
 
 (define-command "calendar-agent-status" "Report the calendar agent: loaded, last drain, pending"
-  (lambda ()
-    (let ((s (calendar-agent-status)))
-      (message (string-append "calendar agent " (calendar--prop s 'agent)
-                              ", last drain " (calendar--prop s 'last-drain)
-                              ", " (calendar--prop s 'pending) " pending")))))
+  calendar-agent-status
+  'show (lambda (s)
+          (message (string-append "calendar agent " (calendar--prop s 'agent)
+                                  ", last drain " (calendar--prop s 'last-drain)
+                                  ", " (calendar--prop s 'pending) " pending"))))
 
 (define-command "calendar-agent-install" "Install and start the calendar agent in the GUI session"
   (lambda ()

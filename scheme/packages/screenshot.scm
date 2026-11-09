@@ -254,10 +254,11 @@
           (message (string-append "Highlighted " (number->string (or n 0)))))))))
 
 (define-command "screenshot-path" "Show the path of the last screenshot"
-  (lambda ()
-    (message (if screenshot--last
-                 (string-append "Last screenshot: " (abbreviate-file-name screenshot--last))
-                 "No screenshot yet"))))
+  screenshot-path
+  'show (lambda (path)
+          (message (if path
+                       (string-append "Last screenshot: " (abbreviate-file-name path))
+                       "No screenshot yet"))))
 
 (define-command "screenshot-clear" "Remove every screenshot highlight"
   (lambda () (screenshot-clear!) (message "Highlights cleared")))

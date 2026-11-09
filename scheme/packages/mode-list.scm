@@ -333,9 +333,10 @@
 (effects! '(read write display))
 
 (define-command "mode-list" "List every buffer of one major mode"
-  (lambda ()
-    (minibuffer-read "Mode list: " (mode-list-modes)
-      (lambda (mode) (mode-list (string-trim mode))))))
+  (interactive (lambda (k)
+                 (minibuffer-read "Mode list: " (mode-list-modes)
+                   (lambda (mode) (k (list (string-trim mode)))))))
+  mode-list)
 
 (define-command "mode-list-visit"
   "Show the buffer at point in its group; on a heading, open the section"

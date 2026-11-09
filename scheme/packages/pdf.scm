@@ -953,7 +953,7 @@
           buf))))
 
 (define-command "pdf-open" "Open a local PDF document"
-  (lambda () (read-file-name "PDF file: " pdf-open)))
+  (interactive "fPDF file: ") pdf-open)
 
 ;; define-mode registers a default toggle command. Replace it with the safe
 ;; entry point: entering edit mode always creates a sibling copy first.

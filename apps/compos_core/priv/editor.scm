@@ -5216,6 +5216,30 @@
                                          (string-length path))))
           (else path))))
 
+;; Files compos can make again (fetched pages, etags, rendered PDFs, images)
+;; live apart from the user's state, as Emacs' no-littering puts them: one
+;; cache folder that is always safe to delete. COMPOS_CACHE_DIR names it;
+;; a daemon with its own home (a test, a worktree daemon) keeps its cache in
+;; that home; else it is $XDG_CACHE_HOME/compos, or ~/.cache/compos.
+(define (compos-cache-dir)
+  (let ((env (getenv "COMPOS_CACHE_DIR"))
+        (user (getenv "HOME"))
+        (home (compos-home)))
+    (cond (env env)
+          ((not (equal? home (string-append (or user "") "/.compos")))
+           (string-append home "/cache"))
+          (else (string-append (or (getenv "XDG_CACHE_HOME")
+                                   (string-append user "/.cache"))
+                               "/compos")))))
+
+;; REL under the cache folder, its parent folder made; a REL that ends in /
+;; is a folder and is made too.
+(define (compos-cache-file rel)
+  (let* ((path (string-append (compos-cache-dir) "/" rel))
+         (dir (car (path-split path))))
+    (unless (file-directory? dir) (make-directory! dir))
+    path))
+
 ;;; --- visiting a file --------------------------------------------------------
 ;;; visit is the one door: a path becomes a buffer, joins a group, and a
 ;;; path under /ssh: goes through tramp.scm. find-file is its prompt.
@@ -7207,12 +7231,16 @@
 (catalog-meta! 'function "debounce!" 'domain 'interaction 'effects '(write execute))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
+(public! 'compos-cache-dir "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete")
+(public! 'compos-cache-file "(compos-cache-file REL) — the path of REL in the cache folder, its parent folder made")
 ;; the buffer-name grammar: *strong* ~dim~ `mono` :icon:, and \x for a literal x
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"
   'domain 'interaction 'effects '(write display))
 (catalog-meta! 'function "message" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
+(catalog-meta! 'function "compos-cache-dir" 'domain 'files 'effects '(read))
+(catalog-meta! 'function "compos-cache-file" 'domain 'files 'effects '(write))
 
 (category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] [SPEC] FN ['modes '(MODE ...)]) — register an M-x command; DOC shows in M-x; 'modes offers it only in buffers of those modes, as Emacs's (interactive nil MODE ...)")

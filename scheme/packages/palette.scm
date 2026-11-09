@@ -108,13 +108,14 @@
                                    (substring (cadr row) (min 12 (string-length (cadr row))) (string-length (cadr row))))
                     (cddr row))))))
 
-;; The few commands a newcomer starts from. While nothing is typed, the
+;; The commands every user should know. While nothing is typed, the
 ;; palette shows them first, under a Start here heading; typing searches
 ;; every command as before. A heading is a separator row: it shows, and the
 ;; arrows step over it.
 (defcustom 'command-tutorial
-  '("help-with-tutorial" "project-find-file" "ibuffer" "window-layout" "chat-list")
-  "The commands the palette shows first, under Start here, while you have typed nothing."
+  '("help-with-tutorial" "find-file" "ibuffer-prompt" "save-buffer" "undo"
+    "chat-new" "chat-list" "window-layout" "keys")
+  "The commands every user should know: the palette shows them first, under Start here, while you have typed nothing."
   'group 'interaction)
 
 (define (command-section-heading label) (list label "" "separator"))

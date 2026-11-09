@@ -1,7 +1,7 @@
 ;;; fast-code.scm --- prose -> one Scheme expression, and functions learned.
 ;;; Entry point: a ! at the chat prompt. M-x fast-palette-install also
-;;; gives it the palette input that resolves to no command, bind or recipe;
-;;; by default the *recipes* chat takes that input.
+;;; gives it the palette input that resolves to no command or bind; by
+;;; default that input goes to the chat.
 ;;;
 ;;; A fast model on the API lane writes the expression, from the functions
 ;;; learned before, the catalog entries the intent's words recall, and the
@@ -128,12 +128,6 @@
     (fast-learned-save!)
     (apropos-warm!))
   name)
-
-;; A recipe someone wrote, asked for by its title and with no slot to fill,
-;; is that recipe: ! completion writes titles.
-(define (fast-recipe intent)
-  (let ((row (assoc (string-trim intent) *recipes*)))
-    (and row (not (string-contains? (cadr row) "{{")) (cadr row))))
 
 ;;; --- The prompt ------------------------------------------------------
 ;;; Theme and buffer names are values, not definitions, so no catalog
@@ -308,8 +302,7 @@
     "the language the editor is scripted in. It is not Emacs Lisp.\n\n"
     "Use only the names below and core Scheme (let, lambda, if, cond, begin, "
     "list, string-append and the like). An M-x command runs as "
-    "(run-command \"name\"). A recipe is a ready expression: fill each "
-    "{{slot}} with a quoted string. Buffers and themes are named by the "
+    "(run-command \"name\"). Buffers and themes are named by the "
     "strings below, and a BUF is one of those buffer names exactly. An argument that names one is that string, never a "
     "quoted symbol.\n\n"
     "Home is \"~\". It, this, and the one I am looking at are "
@@ -701,18 +694,17 @@
 
 ;;; --- Resolving ---------------------------------------------------------
 ;;; K gets a plist: 'code, or #f with a 'reason; 'defined names a function
-;;; the answer wrote; then 'source (recipe or the model's id) and 'ms. A
-;;; recipe calls K before this returns; the model calls it later, so
-;;; nothing here waits on the lane.
+;;; the answer wrote; then 'source (remembered, template or the model's id)
+;;; and 'ms. A remembered answer calls K before this returns; the model calls
+;;; it later, so nothing here waits on the lane.
 
 
 
 (define (fast-resolve intent k &optional model0)
   (let* ((model (or model0 fast-code-model))
          (t0 (fast-now-ms))
-         (authored (fast-recipe intent))
-         (remembered (and (not authored) (fast-remembered intent)))
-         (templated (and (not authored) (not remembered) (fast-template intent)))
+         (remembered (fast-remembered intent))
+         (templated (and (not remembered) (fast-template intent)))
          (steps '())
          (timing '())
          ;; the record M-x fast-trace reads: each stage adds what it saw
@@ -738,9 +730,6 @@
                        (k (list 'code (car (cdr r)) 'steps steps 'timing timing
                                 'trace trace 'source model 'ms ms))))))))
     (cond
-      (authored
-        (k (list 'code authored 'source 'recipe 'ms (- (fast-now-ms) t0)
-                 'trace (list 'path "recipe title"))))
       (remembered
         (k (list 'code remembered 'source 'remembered 'ms (- (fast-now-ms) t0)
                  'trace (list 'path "remembered"))))
@@ -873,60 +862,10 @@
                  (fast-short-reason (plist-get r 'reason))))
 
 (define (fast-run! intent)
-  (unless (or (fast-recipe intent) (fast-remembered intent) (fast-template intent))
+  (unless (or (fast-remembered intent) (fast-template intent))
     (message (string-append "fast: asking " fast-code-model "...")))
   (fast-resolve intent (lambda (r) (fast-run-resolved! intent r "palette"))))
 
-;; A clean call whose values are words of the request is kept as a recipe:
-;; "3 col layout" that ran (columns-layout! 3) becomes "{{n}} col layout" ->
-;; (columns-layout! {{n}}), so apropos answers "4 col layout" with no model.
-;; A slot is named after the function's parameter when fast-code wrote it.
-(define (fast-learn-recipe! intent code &optional defined)
-  (let* ((forms (ignore-errors (lambda () (scheme-read code))))
-         (form (and (pair? forms) (null? (cdr forms)) (pair? (car forms)) (car forms)))
-         (row (and defined (assoc defined *fast-learned*)))
-         (def (and row (ignore-errors (lambda () (car (scheme-read (car (cdr row))))))))
-         (params (if (and (pair? def) (pair? (cdr def)) (pair? (car (cdr def))))
-                     (cdr (car (cdr def)))
-                     '()))
-         (words (fast-words intent))
-         (word-of (lambda (a) (and (or (number? a) (string? a))
-                                   (find (lambda (w) (equal? (string-downcase w)
-                                                             (string-downcase (format "~a" a))))
-                                         words))))
-         ;; ((SLOT WORD NUMBER?) ...), and each value becomes a marker symbol
-         (slots '())
-         (slot-for (lambda (w a)
-                     (or (find (lambda (s) (equal? (cadr s) w)) slots)
-                         (let* ((i (length slots))
-                                (s (list (if (< i (length params))
-                                             (symbol->string (list-ref params i))
-                                             (string-append "p" (number->string (+ i 1))))
-                                         w (number? a))))
-                           (set! slots (append slots (list s)))
-                           s))))
-         (walk (lambda (walk x)
-                 (cond ((pair? x) (cons (walk walk (car x)) (walk walk (cdr x))))
-                       ((word-of x) (string->symbol (string-append "fast--slot-" (car (slot-for (word-of x) x)))))
-                       (else x))))
-         (marked (and form (walk walk form))))
-    (and marked
-         (pair? slots)
-         (let ((expr (fold (lambda (e s) (string-replace e (string-append "fast--slot-" (car s))
-                                                         (string-append "{{" (car s) "}}")))
-                           (format "~s" marked) slots))
-               (title (string-join
-                        (map (lambda (w)
-                               (let ((s (find (lambda (s) (equal? (cadr s) w)) slots)))
-                                 (if s (string-append "{{" (car s) "}}") w)))
-                             words)
-                        " ")))
-           (recipe-learn! title expr
-             (map (lambda (s) (if (car (cdr (cdr s)))
-                                  (list (string->symbol (car s)) (string-append (car s) ": ") 'number)
-                                  (list (string->symbol (car s)) (string-append (car s) ": "))))
-                  slots)
-             (list title))))))
 
 ;; run what fast-resolve gave for INTENT: a clean run keeps the function it
 ;; wrote and is remembered, so the same words come back without a model
@@ -941,8 +880,7 @@
                                     (with-current-buffer buf (lambda () (eval-string-safe code)))
                                     (eval-string-safe code))))))
           (if (equal? (car res) 'ok)
-              (begin (fast-keep-pending! intent)
-                     (fast-learn-recipe! intent code (plist-get r 'defined)))
+              (fast-keep-pending! intent)
               (set! *fast-pending* #f))
           (fast-trace-done! where intent r
                             (if (equal? (car res) 'ok)
@@ -988,8 +926,8 @@
         (fast-keep-pending! intent))))
 
 ;;; --- The palette -------------------------------------------------------
-;;; What the palette already resolves runs as before, and a learned recipe
-;;; is one of those. Everything else is natural language for fast-code.
+;;; What the palette already resolves runs as before. Everything else is
+;;; natural language for fast-code.
 
 ;; The originals live under symbols this file never re-defines, so a reload
 ;; of fast-code cannot wrap the wrapper.
@@ -998,8 +936,7 @@
 
 (define (fast-palette-known? choice)
   (or (command-fn choice)
-      (command-palette--bind-parse choice)
-      (assoc choice *recipes*)))
+      (command-palette--bind-parse choice)))
 
 ;; What you typed is a row. A sentence (three words or more) leads, so RET
 ;; hands your words to fast-code, the way ! completion does; a short query
@@ -1062,7 +999,7 @@
     (visit (fast-learned-path) (buffer-group (current-buffer)))))
 
 ;;;###autoload
-(define-command "fast-recipes" "Show the functions fast-code learned"
+(define-command "fast-learned" "Show the functions fast-code learned"
   (lambda () (with-frame-windows fast-show-learned)))
 
 ;; A wrong answer is forgotten: every record of the words goes, so the next
@@ -1097,88 +1034,6 @@
 ;;;###autoload
 (define-command "fast-toggle" "Toggle fast" (lambda () (set! fast-enabled? (not fast-enabled?)) (message (if fast-enabled? "fast: on" "fast: off"))))
 
-;;; --- Completion -----------------------------------------------------
-;;; ! is ( with a wider namespace. ( completes over bound Scheme names;
-;;; ! completes over every recipe in the catalog, so the phrase is chosen
-;;; from what exists instead of guessed at from what was typed.
-
-(define (fast-capf-terms text)
-  (filter (lambda (t) (not (equal? t "")))
-          (string-split (string-downcase text) " ")))
-
-(define (fast-capf-match? terms hay)
-  (let ((lower (string-downcase hay)))
-    (null? (filter (lambda (t) (not (string-contains? lower t))) terms))))
-
-(define (fast-recipe-entries)
-  (filter (lambda (e) (equal? (catalog--get e 'kind) "recipe")) (catalog)))
-
-;;; The popup shows the expression as the doc: what RET will run is the
-;;; only thing that separates two recipes with similar words.
-(define (fast-capf-row e)
-  (let ((name (catalog--get e 'name))
-        (use (catalog--get e 'use)))
-    (list name "recipe" "symbol" '() ""
-          (if (string? use) (list (list "Documentation" use)) '()))))
-
-;;; Aliases match but never display: accepting writes the title, so the
-;;; input line ends up naming a recipe that exists.
-(define (fast-capf-candidates query)
-  (let* ((es (fast-recipe-entries))
-         (terms (fast-capf-terms query))
-         (lower (string-downcase query))
-         (lead (filter (lambda (e)
-                         (string-prefix? lower (string-downcase (catalog--get e 'name))))
-                       es))
-         (led (map (lambda (e) (catalog--get e 'name)) lead))
-         (rest (filter (lambda (e)
-                         (and (not (member (catalog--get e 'name) led))
-                              (fast-capf-match?
-                                terms
-                                (string-append (catalog--get e 'name) " "
-                                               (or (catalog--get e 'aliases) "")))))
-                       es)))
-    (map fast-capf-row
-         (append lead
-                 (map caddr
-                      (sort (map (lambda (e)
-                                   (list (string-byte-length (catalog--get e 'name))
-                                         (catalog--get e 'name) e))
-                                 rest)))))))
-
-;;; The byte just past the leading !, skipping any space the input carries
-;;; before it. #f when this input is not a bang input at all.
-(define (fast-capf-start buf)
-  (let ((text (buffer-text buf))
-        (lim (buffer-size buf)))
-    (let loop ((i (chat-input-start buf)))
-      (cond ((>= i lim) #f)
-            ((equal? (substring-bytes text i (+ i 1)) "!") (+ i 1))
-            ((member (substring-bytes text i (+ i 1)) '(" " "\t")) (loop (+ i 1)))
-            (else #f)))))
-
-;;; What you typed is the first row, so RET keeps your own words and the
-;;; arrows reach a recipe. fast-code resolves any phrase, not only a title.
-(define (fast-capf-with-typed typed cands)
-  (let ((t (string-trim typed)))
-    (if (or (equal? t "")
-            (pair? (filter (lambda (c) (equal? (car c) t)) cands)))
-        cands
-        (cons (list t "as typed" "symbol" '() ""
-                    (list (list "Documentation" "your words; fast-code writes the Scheme")))
-              cands))))
-
-;;; Replaces the whole phrase after the !, not the word before point: a
-;;; recipe title is several words, and completing only the last would
-;;; leave the line saying something no recipe is called.
-(define (fast-chat-capf)
-  (let* ((buf (current-buffer))
-         (s (and fast-enabled? (fast-capf-start buf)))
-         (e (point)))
-    (and s (>= e s)
-         (let* ((typed (substring-bytes (buffer-text buf) s e))
-                (cands (fast-capf-candidates typed)))
-           (and (pair? cands) (list s e (fast-capf-with-typed typed cands)))))))
 
 (category! 'fast-code)
 (public! 'fast-resolve "(fast-resolve INTENT K) -- K gets (code CODE [defined NAME] source SOURCE ms MS), or code #f with a reason; the model writes a function when a job needs one")
@@ -1192,7 +1047,6 @@
 (public! 'fast-chat-ran! "(fast-chat-ran! TEXT PRINTED) -- a ! run printed PRINTED; a clean one keeps the function it wrote")
 (public! 'fast-chat-input? "(fast-chat-input? TEXT) -- #t when a chat input opens with !")
 (public! 'fast-chat-resolve "(fast-chat-resolve TEXT K) -- K gets the Scheme a !-input resolves to")
-(public! 'fast-chat-capf "(fast-chat-capf) -- completion over every recipe for a !-input")
 (public! 'fast-palette-install! "(fast-palette-install!) -- palette input falls through to fast-code")
 (public! 'fast-palette-remove! "(fast-palette-remove!) -- restore the plain palette")
 

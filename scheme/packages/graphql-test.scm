@@ -229,11 +229,3 @@
 
 ;;; --- the catalog --------------------------------------------------------------
 
-(deftest 'the-recipes-a-package-declares-reach-the-recipe-book
-  "a recipe is a line to run, so it lives in the book and not in the search"
-  (lambda ()
-    (check-true! (pair? (assoc "run a graphql query" *recipes*))
-                 "the recipe is in the book")
-    (check-false! (member "recipe" (map (lambda (e) (plist-get e 'kind))
-                                       (apropos "run a graphql query")))
-                  "and it does not ride the search")))

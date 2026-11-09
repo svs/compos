@@ -191,5 +191,3 @@ When this file is missing, python3 on PATH answers." 'group 'laya)
   "M-x laya-server - start the on-device decision model, or say where it stands")
 (public! 'laya-server-stop
   "M-x laya-server-stop - stop the laya daemon")
-
-(defrecipe! "start the on-device decision model" "(run-command \"laya-server\")")

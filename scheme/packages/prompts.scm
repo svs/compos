@@ -59,9 +59,7 @@
       (list "catalog"
         (string-append
           "Available areas: "
-          (string-join (map symbol->string (public-categories)) ", ") "."))
-      (list "recipes"
-        (if (boundp (quote recipes-text)) (recipes-text) "")))))
+          (string-join (map symbol->string (public-categories)) ", ") ".")))))
 
 (define (compos-direct-prompt-parts) (compos-shared-prompt-parts))
 (define (compos-acp-prompt-parts) (compos-shared-prompt-parts))
@@ -71,7 +69,7 @@
   (string-join (map (lambda (part) (car (cdr part))) parts) "\n\n"))
 
 ;; Every fragment is its own section: a prompt file, a generated part
-;; (catalog, recipes, mcp) or a part a mode or package added. An empty one is
+;; (catalog, mcp) or a part a mode or package added. An empty one is
 ;; dropped. Names are unique: the last fragment of a name wins, in the place
 ;; the name first took, so a buffer part overrides a prompt file.
 (define (prompt-section-parts fragments)

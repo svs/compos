@@ -64,7 +64,6 @@
 (require 'tools)
 ;; the catalog's pure rules: reasoning controls, live effort rows, staleness
 (require 'model-rules)
-(require 'recipes)
 (require 'components)
 ;; the hand keys and / over an index's and a detail's tab bars
 (require 'tab-bars)
@@ -79,7 +78,7 @@
 ; mode hook on the chats already open, and that hook watches for
 ; completion. A cold boot has no chat open then; a Session restart does.
 (require 'completion)
-;; s-p: intent search over commands, recipes and past asks
+;; s-p: intent search over commands and past asks
 (require 'palette)
 
 (require 'anchor)
@@ -133,7 +132,7 @@
 ;; retags them through group membership, so this follows groups
 (require 'apps)
 (require 'help)
-;; the task recipes for people (C-h h) and the generated manual
+;; the tasks for people (C-h h) and the generated manual
 (require 'howto)
 ;; the learn-by-doing tutorial (C-h t); its companion chat is the training app
 (require 'tutorial)

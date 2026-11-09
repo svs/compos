@@ -582,8 +582,8 @@
 ;; answers with nothing and stops the collect there, because dabbrev
 ;; popping up mid-sentence is worse than no completion at all.
 ;;; The chat input completes by its opening character. ( is the editor's
-;;; own vocabulary; ! is the same line over every recipe instead. Prose
-;;; still offers nothing, and does not fall through to dabbrev.
+;;; own vocabulary and / the skills. Prose, and a ! line for fast-code,
+;;; offer nothing, and do not fall through to dabbrev.
 (define (chat-scheme--capf)
   (let* ((buf (current-buffer))
          (nothing (list (point) (point) '()))
@@ -591,8 +591,6 @@
     (if (< (point) (chat-input-start buf))
         nothing
         (cond
-          ((and (string-prefix? "!" input) (boundp 'fast-chat-capf))
-           (or (fast-chat-capf) nothing))
           ((and (string-prefix? "/" input) (boundp 'skill-input-capf))
            (or (skill-input-capf) nothing))
           ((and chat-scheme-input

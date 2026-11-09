@@ -125,13 +125,3 @@
   "(endpoint-ask NAME TEXT UNTIL [TIMEOUT] CB) — send a query and collect the result frames up to the sentinel UNTIL; CB gets (OK FRAMES)")
 (public! 'endpoint-send!
   "(endpoint-send! NAME TEXT) — write one frame to the connection and do not wait")
-
-(effects! '(read external))
-(defrecipe! "open a client connection to a database, a repl, or a tcp socket"
-  "(endpoint-register! {{name}} '(command {{command}} framing \"line\"))"
-  (list (list 'name "Connection name: ") (list 'command "Program to run: ")))
-(defrecipe! "see the open connections"
-  "(conn-list 'endpoint)" '())
-(defrecipe! "see why a connection will not start"
-  "(conn-log 'endpoint {{name}})"
-  (list (list 'name "Connection name: ")))

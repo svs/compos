@@ -596,7 +596,7 @@
 (define code--name-keywords
   '("define-command" "define-mode" "define-tool!" "define-record" "define"
     "defmodule" "defmacrop" "defmacro" "defprotocol" "defimpl" "defcustom"
-    "defgroup" "defrecipe!" "defcomponent" "defp" "def" "defn-" "defn"
+    "defgroup" "defcomponent" "defp" "def" "defn-" "defn"
     "class" "interface" "trait" "struct" "enum" "impl" "type" "module"
     "function" "func" "fn" "sub" "proc" "method" "object"
     "public" "private" "protected" "static" "async" "export" "extern"

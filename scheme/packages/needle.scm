@@ -260,7 +260,3 @@
   "M-x needle-server-stop - stop the Needle daemon")
 (public! 'needle-index
   "M-x needle-index - embed the catalog so a sentence can reach it")
-
-(defrecipe! "ask the on-device model which command a sentence asks for"
-  "(needle-route {{query}} (lambda (r) (message (value->string (needle-calls r)))))"
-  '((query "What the user said: ")))

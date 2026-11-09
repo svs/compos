@@ -45,7 +45,7 @@
     (list "open a random md file" (lambda (c) (and (fast-eval-has c "random") (fast-eval-any c "directory-entries" "(ls" "project-files"))))
     (list "close every other window and put the scratch buffer beside this one" (lambda (c) (fast-eval-has c "*scratch*")))
     (list "open my downloads folder showing only pdf files" (lambda (c) (fast-eval-has c "Downloads" "pdf")))
-    (list "show me the functions fast-code learned" (lambda (c) (fast-eval-any c "fast-show-learned" "fast-recipes")))))
+    (list "show me the functions fast-code learned" (lambda (c) (fast-eval-any c "fast-show-learned" "fast-learned")))))
 
 (define (fast-eval-median xs)
   (if (null? xs) 0 (list-ref (sort xs) (quotient (length xs) 2))))

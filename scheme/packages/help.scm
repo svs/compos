@@ -82,9 +82,7 @@
     ;; select the popup the display rule opened, the way ibuffer does
     (let ((w (window-showing-other *help-buffer* from)))
       (if w (select-window! w) (switch-to-buffer! *help-buffer*)))
-    ;; the help buffer by name: from an agent's eval nothing is displayed,
-    ;; and the current buffer is still the caller's (a chat, a file)
-    (with-current-buffer *help-buffer* (lambda () (set-mode! "help-mode")))
+    (set-mode! "help-mode")
     ;; Opening a new help page starts in its reading view. Later runtime
     ;; reapplies preserve this mode membership exactly as the user left it.
     (unless (minor-mode-on? *help-buffer* "preview-mode")
@@ -330,11 +328,6 @@
   (let ((kind (plist-get h 'kind))
         (doc (or (plist-get h 'doc) "")))
     (cond
-      ((equal? kind "recipe")
-       ;; a recipe names its task and the call that does it; the catalog
-       ;; now writes them as name and use
-       (list "Recipes" (or (plist-get h 'task) (plist-get h 'name) "")
-             (or (plist-get h 'run) (plist-get h 'use) "") ""))
       ((equal? kind "howto")
        (list "How do I" (plist-get h 'name) "" ""))
       ((equal? kind "command")
@@ -379,7 +372,7 @@
       (if (equal? call "") "" (string-append " " (help--code call)))
       (if (equal? doc "") "" (string-append " — " (help--cell doc)))
       ;; who owns a name and what it may do matters to Scheme and agents
-      (if (member (car r) '("Functions" "Recipes" "Internal primitives" "Components"))
+      (if (member (car r) '("Functions" "Internal primitives" "Components"))
           (help--apropos-meta h)
           ""))))
 
@@ -389,7 +382,6 @@
   (cond ((equal? section "Commands")
          "`M-x` runs a command by name. The key after a name also runs it.\n\n")
         ((equal? section "Functions") "For Scheme and agents: call a function from Scheme.\n\n")
-        ((equal? section "Recipes") "For Scheme and agents: a task, and the Scheme that does it.\n\n")
         ((equal? section "How do I")
          "`C-h h` opens a task by its title.\n\n")
         ((equal? section "Modes")
@@ -403,7 +395,7 @@
 ;; order of its own hits.
 (define *help--apropos-order*
   '("How do I" "Commands" "Keys" "Settings" "Modes" "Components"
-    "Functions" "Recipes" "Internal primitives" "Closest names"))
+    "Functions" "Internal primitives" "Closest names"))
 
 (define (help--apropos-rank section)
   (let loop ((xs *help--apropos-order*) (i 0))
@@ -466,7 +458,7 @@
 (define *apropos-kinds*
   '(("All" #f) ("How do I" "howto") ("Commands" "command") ("Keys" "key")
     ("Settings" "variable") ("Modes" "mode") ("Components" "component")
-    ("Functions" "function") ("Recipes" "recipe")))
+    ("Functions" "function")))
 
 (define (apropos-filter!)
   "Show one kind of the apropos page's hits, or all of them again."
@@ -478,7 +470,7 @@
             (let ((hit (assoc choice *apropos-kinds*)))
               (apropos-page q (if (and hit (cadr hit)) (list 'kind (cadr hit)) '()))))))))
 
-(define-command "apropos-filter" "On an apropos page, show one kind of hits: commands, keys, functions, recipes"
+(define-command "apropos-filter" "On an apropos page, show one kind of hits: commands, keys, functions, modes"
   (lambda () (apropos-filter!)))
 
 (define-key "help-mode-map" "/" "apropos-filter")
@@ -538,10 +530,9 @@
 ;; A word that matches nothing is prose, not a name — most words in a diff
 ;; or a mail are. The page says nothing about it and goes straight to the
 ;; buffer, instead of opening with a heading that reports a dead end.
-;; A few hits from each section, in the order the sections rank. Ranking
-;; puts every recipe ahead of the functions, so a flat cap fills the page
-;; with recipes and never names a function. The page promises the closest
-;; matches, which means a spread.
+;; A few hits from each section, in the order the sections rank. A flat
+;; cap fills the page with the first section and never names a function.
+;; The page promises the closest matches, which means a spread.
 (define (help--apropos-spread hits per-section)
   (reverse
     (fold (lambda (out g)

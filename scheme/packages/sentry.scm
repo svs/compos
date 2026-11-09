@@ -910,6 +910,3 @@
   "(sentry-resolve-issue ISSUE-ID) — resolve one Sentry issue")
 (public! 'sentry
   "M-x sentry — list unresolved production issues and open full formatted details")
-
-(defrecipe! "inspect unresolved production errors"
-  "(sentry)")

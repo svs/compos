@@ -289,11 +289,3 @@
   "(http-request URL [OPTS] [CALLBACK]) — the one primitive under all of these; OPTS is a plist of method, headers, params, body, json, form, timeout, connect-timeout, redirect and max-bytes")
 (public! 'http
   "M-x http — fetch a URL and show the status, the headers and the body in a buffer")
-
-(defrecipe! "fetch a URL"
-  "(http-text {{url}})"
-  (list (list 'url "URL: ")))
-
-(defrecipe! "call a JSON API"
-  "(http-get-json {{url}} '(headers (authorization (\"Bearer \" \"@TOKEN\"))))"
-  (list (list 'url "URL: ")))

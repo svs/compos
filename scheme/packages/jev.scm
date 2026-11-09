@@ -255,8 +255,7 @@
 
 (define (jev-apropos query &optional buf)
   ;; the commands only, and only the ones for BUF (command-applicable?): a
-  ;; recipe is written for agents and answers data, and a mode's command does
-  ;; nothing outside its buffers. apropos runs its semantic pass, so a
+  ;; mode's command does nothing outside its buffers. apropos runs its semantic pass, so a
   ;; sentence finds the commands that do it and not the docs that hold its
   ;; words. JEV may answer none.
   (and (jev-api-key)

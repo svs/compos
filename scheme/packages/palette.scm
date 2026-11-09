@@ -1,20 +1,18 @@
 ;;; palette.scm --- s-p, the command palette
 ;;;
 ;;; The palette answers "how do I do this?" where M-x answers "what is
-;;; the command called?". It searches command docs and recipes by the
-;;; words typed, and puts first the past picks and asks that match them,
-;;; from the history it shares with M-x. Words a recipe's pattern reads
-;;; run that recipe with the arguments in them: "open notes.md" opens the
-;;; file. Words nothing reads go to the *recipes* chat, which writes the
-;;; recipe into <compos-home>/recipes.scm and runs it, so the next time
-;;; the palette knows them.
+;;; the command called?". It searches commands by the words typed, their
+;;; names, docs and the everyday words people use for them, and puts first
+;;; the past asks that match. Words no row is named for go to a model that
+;;; picks the command, and the same words run it at once next time. Words
+;;; no command does go to the chat of the buffer you were in.
 
 (domain! 'interaction)
 (effects! '(write execute))
 
 ;;; Cmd-p answers "how do I do this?" while M-x answers "what is the
 ;;; command called?". Apropos supplies task-language matches from command
-;;; docs and recipes; the palette projects that broad catalog down to things
+;;; docs and aliases; the palette projects that broad catalog down to things
 ;;; a reader can act on here.
 ;; A plain sentence can bind a key: "bind C-x C-g k to group-kill". The
 ;; palette recognizes it, offers it first, and runs it on RET.
@@ -56,14 +54,6 @@
          (list name
                (string-append (string-pad-right (key-symbols key) 12) " "
                               (or (plist-get hit 'doc) "")))))
-      ((equal? kind "recipe")
-       (let ((inputs (or (plist-get hit 'inputs) '())))
-         (list name
-               (if (null? inputs)
-                   "recipe  runs immediately"
-                   (string-append "recipe  asks for "
-                                  (number->string (length inputs))
-                                  (if (= (length inputs) 1) " input" " inputs"))))))
       ((equal? kind "intent")
        (list name
              (string-append "bind  " (plist-get hit 'keys)
@@ -84,25 +74,14 @@
                                   (member (plist-get h 'name) out))))
             hits)))
 
-;; The palette draws the commands and recipes apropos finds, in its order,
+;; The palette draws the commands apropos finds, in its order,
 ;; with the ones whose name holds every word first. Its semantic pass can
 ;; take a second, so the refresh runs it in a task after a pause in typing.
 (define (command-palette--search query)
   (let* ((words (apropos-query-words query))
-         (found (command-palette--for-user
-                  (append (apropos query 'kind "command") (apropos query 'kind "recipe"))
-                  (command-palette--origin)))
-         (hits (filter (lambda (h) h)
-                 (map (lambda (h)
-                        (let ((kind (plist-get h 'kind)))
-                          (cond ((equal? kind "command") h)
-                                ;; a recipe read with its arguments is the typed row
-                                ((plist-get h 'bindings) #f)
-                                ((and (equal? kind "recipe") (boundp (quote *recipes*))
-                                      (assoc (plist-get h 'name) *recipes*))
-                                 (command-palette--recipe-hit (assoc (plist-get h 'name) *recipes*)))
-                                (else #f))))
-                      found)))
+         (hits (filter (lambda (h) (equal? (plist-get h 'kind) "command"))
+                       (command-palette--for-user (apropos query 'kind "command")
+                                                  (command-palette--origin))))
          (named? (lambda (h) (apropos-text-hit? (plist-get h 'name) words)))
          ;; "undo" is undo and "split window right" is split-window-right:
          ;; the command the words name leads, before any that merely share one
@@ -140,10 +119,6 @@
              (named (filter named? rest)))
         (append (filter keyed? named) (filter (lambda (h) (not (keyed? h))) named)))
       (filter (lambda (h) (not (named? h))) rest))))
-
-;; A recipe the palette can draw, in apropos hit shape.
-(define (command-palette--recipe-hit recipe)
-  (list 'kind "recipe" 'name (car recipe) 'inputs (caddr recipe)))
 
 ;; The palette prints keys as the keyboard does, ⌃X ⌃S and ⇧⌘P, where M-x
 ;; keeps the Emacs spelling: the resting rows come from M-x's table, so their
@@ -215,61 +190,6 @@
                    (when (and ok? (current?))
                      (minibuffer-set-candidates! rows)))))))
 
-(define (command-palette--render-recipe expr bindings)
-  ;; Every input becomes a printed Scheme string, not source. Quotes,
-  ;; backslashes and newlines are escaped by value->string before the token is
-  ;; replaced, so a path or prompt value cannot turn into executable code.
-  (if (null? bindings)
-      expr
-      (let* ((binding (car bindings))
-             (token (string-append "{{" (symbol->string (car binding)) "}}"))
-             (rendered (string-join (string-split expr token)
-                                    (value->string (cadr binding)))))
-        (command-palette--render-recipe rendered (cdr bindings)))))
-
-;; "0.3" -> 0.3, "three" -> 3, else #f: string->number answers :error
-(define (command-palette--number s)
-  (let ((n (string->number s))
-        (word (assoc (string-downcase s)
-                     '(("one" 1) ("two" 2) ("three" 3) ("four" 4) ("five" 5) ("six" 6)
-                       ("seven" 7) ("eight" 8) ("nine" 9) ("ten" 10) ("eleven" 11) ("twelve" 12)))))
-    (cond ((number? n) n) (word (cadr word)) (else #f))))
-
-;; An input whose row ends in number takes a number: "0.3" is 0.3.
-(define (command-palette--typed recipe bindings)
-  (map (lambda (b)
-         (let ((input (assoc (car b) (caddr recipe))))
-           (if (and input (memq 'number (cddr input)) (string? (cadr b)) (command-palette--number (cadr b)))
-               (list (car b) (command-palette--number (cadr b)))
-               b)))
-       bindings))
-
-;; the result, as eval-string-safe gives it, and in the echo area
-(define (command-palette--eval-recipe recipe bindings)
-  (let ((result
-          (eval-string-safe
-            (command-palette--render-recipe
-              (cadr recipe) (command-palette--typed recipe bindings)))))
-    (if (equal? (car result) 'ok)
-        (message (value->string (cadr result)))
-        (message (string-append "Recipe error: " (value->string (cadr result)))))
-    result))
-
-(define (command-palette--collect-recipe recipe inputs bindings)
-  (if (null? inputs)
-      (command-palette--eval-recipe recipe bindings)
-      (let ((input (car inputs)))
-        (minibuffer-read (cadr input) '()
-          (lambda (value)
-            (command-palette--collect-recipe
-              recipe (cdr inputs) (append bindings (list (list (car input) value)))))))))
-
-(define (command-palette--run-recipe recipe &optional bindings)
-  (command-palette--collect-recipe
-    recipe
-    (filter (lambda (input) (not (assoc (car input) (or bindings '())))) (caddr recipe))
-    (or bindings '())))
-
 (define (command-palette--run choice)
   (let ((bind (command-palette--bind-parse choice)))
     (cond
@@ -278,16 +198,14 @@
        (run-command choice))
       ((and bind (boundp (quote keys-bind-intent)))
        (keys-bind-intent (car bind) (cadr bind)))
-      ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
-       (command-palette--run-recipe (assoc choice *recipes*)))
       ((equal? (string-trim choice) "") #f)
       ((command-palette--learned choice)
        (command-palette--run-learned (command-palette--learned choice)))
       (else (command-palette--pick! choice)))))
 
-;; Words no row is named for go to the *recipes* chat. It runs the command
-;; or recipe that does them; when none does, it writes a command. Either
-;; way it saves a recipe, so the same words run at once next time.
+;; Words no row is named for: a model picks the command that does them, and
+;; the same words run it at once next time. When none does, the words go to
+;; a chat.
 (define (command-palette--pick! text)
   ;; the answer comes seconds later, when the frame's current buffer can be
   ;; the prompt's own: it runs in the buffer you were in when you asked
@@ -296,10 +214,13 @@
     (message (string-append "Finding the command for: " text))
     (command-palette-resolve text origin
       (lambda (r)
-        (if r
-            (with-frame-windows
-              (lambda () (with-current-buffer origin (lambda () (command-palette--apply! text r)))))
-            (command-palette--ask-to-write! text))))))
+        (with-frame-windows
+          (lambda ()
+            (with-current-buffer origin
+              (lambda ()
+                (if r
+                    (command-palette--apply! text r)
+                    (command-palette-ask-chat! text))))))))))
 
 ;; the buffer the palette was opened from: its rows are that buffer's
 ;; commands, and what you pick runs there
@@ -314,51 +235,30 @@
         (or (find (lambda (v) (not (minibuffer-buffer? v))) (get-visible-buffers)) b)
         b)))
 
-;; The recipes the palette offers: the ones in your recipes file, written to
-;; be run from words. The bundled ones are written for agents: they answer data.
-(define (command-palette--own-recipes)
-  (let ((path (recipes-user-path)))
-    (if (not (file-exists? path))
-        '()
-        (filter (lambda (r) r)
-                (map (lambda (b) (assoc (car (string-split b "\n")) *recipes*))
-                     (cdr (string-split (read-file path) recipes--marker)))))))
-
 ;; What could do TEXT in BUF: the commands for BUF that apropos finds with its
-;; semantic pass, then your own recipes. Slow: run it in a task.
+;; semantic pass. Slow: run it in a task.
 (define (command-palette--candidates-for text buf)
   (let* ((out (commands-out-of-scope buf))
          (cmds (filter (lambda (h) (and (not (string-contains? (plist-get h 'name) "--"))
                                         (not (member (plist-get h 'name) out))))
                        (apropos text 'semantic #t 'kind "command"))))
-    (append (map (lambda (h) (list 'kind "command" 'name (plist-get h 'name)
-                                   'doc (or (plist-get h 'doc) "") 'inputs '()))
-                 (take cmds (min command-palette-candidate-count (length cmds))))
-            (map (lambda (r) (list 'kind "recipe" 'name (car r) 'doc (car r) 'inputs (caddr r)))
-                 (command-palette--own-recipes)))))
+    (map (lambda (h) (list 'kind "command" 'name (plist-get h 'name) 'doc (or (plist-get h 'doc) "")))
+         (take cmds (min command-palette-candidate-count (length cmds))))))
 
 (define (command-palette--candidate-line c)
   (string-append "- " (plist-get c 'name)
-    (if (equal? (plist-get c 'doc) (plist-get c 'name)) "" (string-append ": " (plist-get c 'doc)))
-    (if (null? (plist-get c 'inputs))
-        ""
-        (string-append "  [inputs: "
-          (string-join (map (lambda (i) (string-append (symbol->string (car i)) " (" (string-trim (cadr i)) ")"))
-                            (plist-get c 'inputs))
-                       ", ")
-          "]"))))
+    (if (equal? (plist-get c 'doc) "") "" (string-append ": " (plist-get c 'doc)))))
 
 (define (command-palette--pick-prompt text cands)
   (string-append
     "Someone typed a request into the command palette of an editor. It may have typos. "
-    "Pick the command or recipe below that does it, and read the recipe's inputs from the request. "
-    "Answer with JSON only:\n"
-    "{\"name\": \"NAME\", \"inputs\": {\"INPUT\": \"VALUE\"}} - leave out an input the request does not give\n"
+    "Pick the command below that does it. Answer with JSON only:\n"
+    "{\"name\": \"NAME\"}\n"
     "{\"name\": null} - none of them does it\n\n"
     (string-join (map command-palette--candidate-line cands) "\n")
     "\n\nRequest: " text))
 
-;; (KIND NAME BINDINGS) from a model's JSON reply, when NAME is a candidate
+;; ("command" NAME ()) from a model's JSON reply, when NAME is a candidate
 (define (command-palette--parse-pick reply cands)
   (let* ((from (string-index reply "{"))
          (to (string-rindex reply "}"))
@@ -366,78 +266,28 @@
                     (ignore-errors (lambda () (json-parse (substring reply from (+ to 1)))))))
          (name (and (pair? json) (plist-get json 'name)))
          (c (and (string? name) (find (lambda (c) (equal? (plist-get c 'name) name)) cands))))
-    (and c
-         (list (plist-get c 'kind) name
-               (filter (lambda (b) b)
-                       (map (lambda (i)
-                              (let ((v (plist-get (or (plist-get json 'inputs) '()) (car i))))
-                                (cond ((string? v) (list (car i) v))
-                                      ((number? v) (list (car i) (number->string v)))
-                                      (else #f))))
-                            (plist-get c 'inputs)))))))
+    (and c (list "command" name '()))))
 
-;; The answer to TEXT when a recipe pattern reads it: "3 col layout" against
-;; "{{count}} col layout" gives the recipe's expression with 3 in it. apropos
-;; puts it first, so a request a recipe knows is answered without a model.
-(define (recipe-answer text)
-  (let* ((m (recipe-match text))
-         (recipe (and m (assoc (car m) *recipes*))))
-    (and recipe
-         (list 'kind "recipe" 'name (car m) 'doc (car m) 'bindings (cadr m) 'answer #t
-               'use (command-palette--render-recipe
-                      (cadr recipe) (command-palette--typed recipe (cadr m)))))))
-
-;; words that carry a number: "3 col layout", "show four columns"
-(define (command-palette--has-number? text)
-  (any command-palette--number (string-split text " ")))
-
-;; What TEXT runs in BUF. K gets (KIND NAME BINDINGS STAGE), KIND "command"
-;; or "recipe", or #f when nothing does it. An exact name and words you
-;; ran before answer at once; the rest go to a model that picks among the
-;; candidates and reads the arguments, typos and all. FRESH? skips the
-;; words you ran before, as the eval does.
+;; What TEXT runs in BUF. K gets ("command" NAME BINDINGS STAGE), or #f when
+;; no command does it.
 (define (command-palette-resolve text buf k &optional fresh?)
-  (let ((learned (and (not fresh?) (command-palette--learned text)))
-        ;; your own recipes answer by pattern; the bundled ones are for agents
-        (answer (let ((a (recipe-answer text)))
-                  (and a (member (plist-get a 'name) (map car (command-palette--own-recipes))) a)))
-        (written (and (not fresh?) (boundp 'fast-remembered) (fast-remembered text)))
-        ;; a command takes no value, so words that carry a number ("3 col
-        ;; layout") are not done by one: fast-code writes the call with it
-        (write (lambda (r) (if (and r (not (and (equal? (car r) "command")
-                                                 (command-palette--has-number? text))))
-                               (k r)
-                               (command-palette--write text k)))))
+  (let ((learned (and (not fresh?) (command-palette--learned text))))
     (cond
       ((command-fn text) (k (list "command" text '() 'exact)))
-      ((and (boundp '*recipes*) (assoc text *recipes*)) (k (list "recipe" text '() 'exact)))
-      (learned (k (list (command-palette--row-kind learned) (cadr learned) (caddr learned) 'learned)))
-      (answer (k (list "recipe" (plist-get answer 'name) (plist-get answer 'bindings) 'pattern)))
-      (written (k (list "code" written '() 'remembered (list 'code written 'source 'remembered))))
+      (learned (k (list "command" (cadr learned) '() 'learned)))
       (else
         (task-run! (lambda () (command-palette--candidates-for text buf))
           (lambda (ok? cands)
             (if (or (not ok?) (null? cands))
-                (write #f)
-                (command-palette--model-pick text cands write))))))))
-
-;; No command fits TEXT: fast-code writes the code, one model call that
-;; composes what apropos finds and names a function when the job takes one.
-;; K gets ("code" CODE () written R), R being what fast-resolve gave, or #f.
-(define (command-palette--write text k)
-  (if (boundp 'fast-resolve)
-      (fast-resolve text
-        (lambda (r) (k (and (plist-get r 'code) (list "code" (plist-get r 'code) '() 'written r)))))
-      (k #f)))
+                (k #f)
+                (command-palette--model-pick text cands k))))))))
 
 (define (command-palette--model-pick text cands k)
   (cond
     ;; the small model on this machine reads the whole catalog and names one
-    ;; command; it reads no arguments, so it answers commands only
     ((and (equal? command-palette-decide-backend 'local) (boundp 'do-pick))
      (do-pick text (lambda (name) (k (and name (list "command" name '() 'local))))))
     ((and (equal? command-palette-decide-backend 'jev) (boundp 'jev-systemone))
-      ;; JEV picks among them; it reads no arguments, so a recipe asks for them
       (task-run!
         (lambda ()
           (jev-systemone text
@@ -449,15 +299,7 @@
         (lambda (ok? reply)
           (let* ((name (and ok? reply (jev-answer-choice reply 'which)))
                  (c (and name (find (lambda (c) (equal? (plist-get c 'name) name)) cands))))
-            (cond ((not c) (k #f))
-                  ((null? (plist-get c 'inputs)) (k (list (plist-get c 'kind) name '() 'jev)))
-                  ;; JEV reads no arguments: the model reads them for the one it picked
-                  (else (llm-with-model (command-palette--pick-prompt text (list c))
-                                        (llm-model-for command-palette-pick-role)
-                          (lambda (reply)
-                            (let ((r (command-palette--parse-pick reply (list c))))
-                              (k (list (plist-get c 'kind) name (if r (caddr r) '()) 'jev+model))))
-                          (lambda (_) (k (list (plist-get c 'kind) name '() 'jev))))))))))
+            (k (and c (list "command" name '() 'jev)))))))
     (else
       (llm-with-model (command-palette--pick-prompt text cands)
                       (llm-model-for command-palette-pick-role)
@@ -466,24 +308,13 @@
             (k (and r (append r (list 'model))))))
         (lambda (_) (k #f))))))
 
-;; run what resolve found, and remember it for the words
 (define (command-palette--apply! text r)
-  (let ((kind (car r)) (name (cadr r)) (bindings (caddr r)))
+  (let ((name (cadr r)))
     (set! *command-palette--request* #f)
-    (cond
-      ((equal? kind "code") (fast-run-resolved! text (list-ref r 4) "palette" (current-buffer)))
-      (else
-        (command-palette--learn! text name bindings kind)
-        (message (string-append text ": " name))
-        (if (equal? kind "command")
-            (begin (history-push! 'M-x name) (run-command name))
-            (command-palette--run-recipe (assoc name *recipes*) bindings))))))
-
-(define (command-palette--ask-to-write! text)
-  (command-palette-ask-recipes!
-    (string-append "No command the palette found does \"" text "\". Find one with apropos and run it; "
-                   "when none does, write one with (command-learn! NAME DOC \"(lambda () ...)\" \"" text "\") "
-                   "and run it with (run-command NAME).")))
+    (command-palette--learn! text name)
+    (message (string-append text ": " name))
+    (history-push! 'M-x name)
+    (run-command name)))
 
 ;; What you typed is always the top row, so RET runs your words; a hit is
 ;; picked only when you move down to it.
@@ -496,35 +327,16 @@
 
 ;; the typed row says what RET will do with the words
 (define (command-palette--typed-row q)
-  (let ((learned (command-palette--learned q))
-        (say (lambda (title bindings)
-               (string-append "recipe  " title
-                 (apply string-append
-                        (map (lambda (b) (string-append "  " (symbol->string (car b)) "="
-                                                        (if (string? (cadr b)) (cadr b) (value->string (cadr b)))))
-                             bindings))))))
-    (list q (cond ((and (boundp '*recipes*) (assoc q *recipes*)) (say q '()))
-                  ((and learned (equal? (command-palette--row-kind learned) "command"))
-                   (string-append "command  " (cadr learned)))
-                  (learned (say (cadr learned) (caddr learned)))
-                  (else "find  the command for this, or write one")))))
-
-
-;;; Words no recipe reads go to the *recipes* chat: an ordinary chat that
-;;; keeps every recipe you asked for, so it learns as it goes. It finds the
-;;; calls with apropos, as any chat does, saves the recipe to
-;;; <compos-home>/recipes.scm and runs it. The palette stays up and shows the
-;;; chat from your words on, the newest line first, until you put it away.
+  (let ((learned (command-palette--learned q)))
+    (list q (if learned
+                (string-append "command  " (cadr learned))
+                "find  the command for this, or ask the chat"))))
 
 (domain! 'interaction)
 (effects! '(write execute spend))
 
-(defcustom 'command-palette-recipes-role 'fast
-  "The model role the *recipes* chat starts on: llm-model-presets names its model. fast is the quickest."
-  'group 'interaction)
-
 (defcustom 'command-palette-learned '()
-  "What you typed in the palette and what ran for it: ((WORDS NAME BINDINGS KIND) ...), KIND \"command\" or \"recipe\". RET on the same words runs it at once, and apropos finds NAME by the words."
+  "What you typed in the palette and the command that ran for it: ((WORDS NAME BINDINGS KIND) ...). RET on the same words runs it at once, and apropos finds NAME by the words."
   'group 'interaction)
 
 (defcustom 'command-mode-scoping #t
@@ -532,7 +344,7 @@
   'group 'interaction)
 
 (defcustom 'command-palette-decide-backend 'jev
-  "What picks the command for words you type in the palette: jev asks JEV, and the command-palette-pick-role model reads the arguments of a recipe it picks; model asks that model to pick and read them in one call; local asks the small model on this machine (do-endpoint), which picks a command and reads no arguments."
+  "What picks the command for words you type in the palette: jev asks JEV; model asks the command-palette-pick-role model; local asks the small model on this machine (do-endpoint)."
   'group 'interaction)
 
 (defcustom 'command-palette-pick-role 'fast
@@ -540,44 +352,40 @@
   'group 'interaction)
 
 (defcustom 'command-palette-candidate-count 12
-  "How many commands apropos hands the picker, besides your own recipes."
+  "How many commands apropos hands the picker."
   'group 'interaction)
 
-;; the words of the request the *recipes* chat is on, or #f
+;; the words of the request the palette is finding a command for, or #f
 (define *command-palette--request* #f)
 
-;; the learned row for TEXT, while its recipe is still there, else #f
+;; the learned row for TEXT, while its command is still there, else #f.
+;; A row learned for a recipe, before recipes went, answers #f.
 (define (command-palette--learned text)
   (let ((row (assoc (string-downcase (string-trim text)) command-palette-learned)))
     (and row
-         (if (equal? (command-palette--row-kind row) "command")
-             (command-fn (cadr row))
-             (and (boundp '*recipes*) (assoc (cadr row) *recipes*)))
+         (equal? (command-palette--row-kind row) "command")
+         (command-fn (cadr row))
          row)))
 
 (define (command-palette--row-kind row)
   (if (> (length row) 3) (list-ref row 3) "recipe"))
 
 (define (command-palette--run-learned row)
-  (if (equal? (command-palette--row-kind row) "command")
-      (begin (history-push! 'M-x (cadr row))
-             (run-command (cadr row)))
-      (command-palette--run-recipe (assoc (cadr row) *recipes*) (caddr row))))
+  (history-push! 'M-x (cadr row))
+  (run-command (cadr row)))
 
 ;; the words join NAME's aliases, so apropos finds it by them
 (define (command-palette--alias! name kind words)
-  (let* ((k (if (equal? kind "command") 'command 'recipe))
-         (entry (catalog-entry k name))
+  (let* ((entry (and (equal? kind "command") (catalog-entry 'command name)))
          (old (or (and entry (catalog--get entry 'aliases)) "")))
     (when (and entry (not (string-contains? old words)))
-      (catalog-meta! k name 'aliases (string-trim (string-append old " " words))))))
+      (catalog-meta! 'command name 'aliases (string-trim (string-append old " " words))))))
 
-(define (command-palette--learn! text name bindings &optional kind)
-  (let ((key (string-downcase (string-trim text)))
-        (kind (or kind "recipe")))
-    (command-palette--alias! name kind key)
+(define (command-palette--learn! text name)
+  (let ((key (string-downcase (string-trim text))))
+    (command-palette--alias! name "command" key)
     (customize-save! 'command-palette-learned
-      (cons (list key name bindings kind)
+      (cons (list key name '() "command")
             (filter (lambda (r) (not (equal? (car r) key))) command-palette-learned)))))
 
 ;; the aliases are not saved with the catalog: put the learned words back
@@ -646,151 +454,19 @@
 
 (command-palette--everyday-words!)
 
-(define command-palette-recipes-chat "*recipes*")
+;; Words no command does go to a chat: the chat of the buffer you were in,
+;; the one M-o opens, or the chat itself when you asked from one. It shows,
+;; and the words are its next prompt.
+(define (command-palette-ask-chat! text)
+  (let ((origin (command-palette--origin)))
+    (set! *command-palette--request* #f)
+    (if (chat-buffer? origin)
+        (agent-continue! origin text)
+        (let ((chat (llm-companion-open! origin)))
+          (agent-continue! chat text)))))
 
-;; what a new *recipes* chat is for; after that it learns from its own turns
-(define (command-palette--recipes-intro)
-  (string-append
-    "You do what the user types in the command palette, and make it instant the next time. Each request reads "
-    "do \"WORDS\". In this order:\n"
-    "1. A command does it: find it with (apropos WORDS) and run it with (run-command NAME).\n"
-    "2. A recipe does it: find it in (recipes) and run it with (recipe-run! TITLE BINDINGS), BINDINGS ((slot \"value\") ...).\n"
-    "3. Neither: write a command with (command-learn! NAME DOC \"(lambda () ...)\"), from the calls apropos finds, "
-    "and run it with (run-command NAME). It is saved in " (recipes-commands-path) ".\n"
-    "After 1 or 3, save a recipe that runs the command, so the palette runs these words at once next time: "
-    "(recipe-learn! TITLE EXPR INPUTS PATTERNS). Write it for every value, not for this one: "
-    "\"use a dark theme\" is the command words \"use a ... theme\" with the argument dark, so TITLE is \"use a {{theme}} theme\". "
-    "TITLE and PATTERNS keep the command words and put a {{slot}} where each argument goes; EXPR has {{slot}} "
-    "where each argument goes; INPUTS ((slot \"Prompt: \" [number]) ...); PATTERNS the ways to say it, "
-    "as (\"use a {{theme}} theme\" \"{{theme}} theme\"). A recipe with no arguments is (run-command \"NAME\"). "
-    "When a recipe you find does one value of a command, make it general and drop the old one with (recipe-forget! TITLE). "
-    "Check (recipe-match WORDS). The recipes go to " (recipes-user-path) ". Reply in one line.\n\n"))
-
-;; the live chat, else the one kept for 'recipes read back, else #f
-(define (command-palette--recipes-chat)
-  (let ((name command-palette-recipes-chat))
-    (if (and (buffer-known? name) (chat-buffer? name))
-        name
-        (ignore-errors (lambda () (chat-for "recipes"))))))
-
-;; The Claude Code adapter names its models by family (sonnet, opus,
-;; haiku), not by id: claude-sonnet-5-5 is refused, and the chat would stay
-;; on its old model.
-(define (command-palette--chat-model model)
-  (cond ((not (and (string? model) (string-prefix? "claude-" model)
-                   (equal? (llm-connector-for-model model) "claude-code")))
-         model)
-        ((string-contains? model "sonnet") "sonnet")
-        ((string-contains? model "opus") "opus")
-        ((string-contains? model "haiku") "haiku")
-        (else model)))
-
-(define (command-palette-ask-recipes! text)
-  (let ((chat (command-palette--recipes-chat)))
-    (if chat
-        (begin (command-palette--watch! chat text)
-               (agent-continue! chat text))
-        (let* ((model (command-palette--chat-model (llm-model-for command-palette-recipes-role)))
-               (made (agent-buf (execute* (string-append (command-palette--recipes-intro) text)
-                                          (list 'title command-palette-recipes-chat 'notify #f
-                                                'connector (llm-connector-for-model model) 'model model)))))
-          ;; kept under 'recipes, so a restart reads the same chat back
-          (ignore-errors (lambda () (chat-for! "recipes" made)))
-          (command-palette--watch! made text)))))
-
-;;; The watch: the chat from your words on, the newest line first, kept up
-;;; to date as the chat writes. RET or C-g puts it away; the chat goes on.
-
-;; (CHAT START TEXT CHANGE-ID) of the watch that is up, or #f
-(define *command-palette--watch* #f)
-
-(define (command-palette--watch-prompt text) (string-append "*recipes*: " text "  "))
-
-(define (command-palette--clip line)
-  (if (> (string-length line) 160) (string-append (substring line 0 157) "...") line))
-
-(define (command-palette--watch-rows chat start)
-  (let* ((all (buffer-text chat))
-         (tail (if (< start (string-length all)) (substring all start (string-length all)) ""))
-         (lines (filter (lambda (l) (not (equal? (string-trim l) ""))) (string-split tail "\n")))
-         (slug (agent-slug-of chat))
-         (busy (and slug (equal? (agent-status slug) 'running))))
-    (cons (if busy
-              (list "working ..." "C-g puts this away; the chat goes on")
-              (list "done" "RET or C-g puts this away"))
-          (map (lambda (l) (list (command-palette--clip (string-trim-right l)) ""))
-               (reverse lines)))))
-
-(define (command-palette--watch-refresh _)
-  (let ((w *command-palette--watch*) (state (minibuffer-state)))
-    (when (and w state (equal? (plist-get state 'prompt) (command-palette--watch-prompt (caddr w))))
-      (let* ((all (buffer-text (car w)))
-             (tail (if (< (cadr w) (string-length all)) (substring all (cadr w) (string-length all)) ""))
-             (lines (filter (lambda (l) (not (equal? (string-trim l) ""))) (string-split tail "\n")))
-             (asked (let loop ((ls lines))
-                      (cond ((null? ls) #f)
-                            ((string-prefix? ">>>" (car ls)) (cdr ls))
-                            (else (loop (cdr ls))))))
-             (slug (agent-slug-of (car w)))
-             (busy (and slug (equal? (agent-status slug) 'running))))
-        ;; the turn has answered and stopped: put the watch away at once and
-        ;; say the answer; the summary lands later
-        (if (and (not busy) (pair? asked))
-            (begin (minibuffer-cancel!)
-                   (message (string-append "*recipes*: " (string-trim (car (reverse asked))))))
-            (minibuffer-set-candidates! (command-palette--watch-rows (car w) (cadr w))))))))
-
-(define (command-palette--unwatch!)
-  (let ((w *command-palette--watch*))
-    (when w
-      (remove-on-change! (cadddr w))
-      (set! *command-palette--watch* #f))))
-
-(define (command-palette--watch! chat text)
-  (command-palette--unwatch!)
-  (let* ((start (string-length (buffer-text chat)))
-         (id (on-change! chat
-               (lambda (pos inserted deleted source)
-                 (debounce! "command-palette:recipes" 120 command-palette--watch-refresh #t))
-               'eager)))
-    ;; the prompt shows the words you typed, not what the chat was sent
-    (set! *command-palette--watch* (list chat start (or *command-palette--request* text) id))
-    (minibuffer-read* (command-palette--watch-prompt (caddr *command-palette--watch*))
-                      (command-palette--watch-rows chat start)
-      (list (list 'confirm (lambda (_) (command-palette--unwatch!)))
-            (list 'cancel (lambda () (command-palette--unwatch!)))
-            (list 'filter #f)
-            (list 'style "palette")))))
-
-;; the end of a turn may write nothing new; its summary still lands. The
-;; turn is over, so the watch closes and the summary comes to the echo area.
-(define (command-palette--recipes-answered buf kind text)
-  (when (and (equal? buf command-palette-recipes-chat) (equal? kind 'summary) (string? text))
-    (let ((w *command-palette--watch*) (state (minibuffer-state)))
-      (when (and w state (equal? (plist-get state 'prompt) (command-palette--watch-prompt (caddr w))))
-        (minibuffer-cancel!))
-      (set! *command-palette--request* #f)
-      (message (string-append "*recipes*: " text)))))
-
-(add-hook! 'chat-summary-hook 'command-palette--recipes-answered)
-
-;; Run recipe TITLE with BINDINGS, ((SLOT VALUE) ...), on the frame you
-;; look at; answers what the recipe gave, or its error.
-(define (recipe-run! title &optional bindings)
-  (let ((recipe (and (boundp '*recipes*) (assoc title *recipes*))))
-    (if (not recipe)
-        (list 'error (string-append "no recipe named " title))
-        (let ((result (with-frame-windows
-                        (lambda () (command-palette--eval-recipe recipe (or bindings '()))))))
-          ;; the chat ran this for a palette request: the same words run it next time
-          (when (and *command-palette--request* (equal? (car result) 'ok))
-            (command-palette--learn! *command-palette--request* title (or bindings '())))
-          result))))
-
-(public! 'recipe-run!
-  "(recipe-run! TITLE '((slot \"value\") ...)) -- run a recipe with its arguments on the user's frame; answers (ok VALUE) or (error TEXT)")
-(public! 'command-palette-ask-recipes!
-  "(command-palette-ask-recipes! TEXT) -- the *recipes* chat writes a recipe for TEXT and runs it")
+(public! 'command-palette-ask-chat!
+  "(command-palette-ask-chat! TEXT) -- send TEXT to the chat of the buffer the palette was opened from, and show it")
 
 (domain! 'interaction)
 (effects! '(write execute))
@@ -813,7 +489,7 @@
         (message "Only a past row can be removed"))))
 
 (define-command "command-palette"
-  "Find an action by intent across command docs and recipes"
+  "Find a command by what it does"
   (lambda ()
     (set! *command-palette--from* (current-buffer))
     (command-palette--everyday-words!)

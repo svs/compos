@@ -163,16 +163,3 @@
 (public! 'db-with-transaction
   "(db-with-transaction NAME PROC) — call PROC with a scoped transaction handle; commit and return its value, or roll back on error")
 (public! 'db-adapters "(db-adapters) — the database adapters this build can open")
-
-(effects! '(read external))
-(defrecipe! "query a postgres database"
-  "(db-render-table (db-query {{name}} {{sql}}))"
-  (list (list 'name "Database name: ") (list 'sql "SQL: ")))
-(defrecipe! "connect to a postgres database"
-  "(db-register! {{name}} (list 'adapter \"postgres\" 'database {{database}}))"
-  (list (list 'name "Connection name: ") (list 'database "Database: ")))
-(defrecipe! "open a sqlite database file"
-  "(sqlite-open! {{path}})"
-  (list (list 'path "SQLite file: ")))
-(defrecipe! "see the open databases"
-  "(conn-list 'db)" '())

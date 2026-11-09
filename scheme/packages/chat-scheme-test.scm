@@ -49,9 +49,9 @@
 (deftest 'a-bang-run-is-told-to-the-agent
   "it spends no turn, but the next message says what it typed, ran and gave"
   (lambda ()
-    ;; a recipe's title resolves without the model
-    (begin
-      (defrecipe! "zz add two numbers" "(+ 1 2)")
+    ;; the words resolve without the model: fast-chat-resolve answers them
+    (let ((orig fast-chat-resolve))
+      (set! fast-chat-resolve (lambda (text k) (k "(with-frame-windows (lambda () (+ 1 2)))")))
       (let ((buf (t--cs-chat! "!zz add two numbers")))
         (with-current-buffer buf (lambda () (run-command "agent-send")))
         (let ((note (chat-fast-note buf)))
@@ -61,8 +61,7 @@
         (buffer-set-local! buf 'chat-fast-runs '())
         (check-equal! (chat-fast-note buf) "" "no runs, no note")
         (buffer-kill! buf))
-      (set! *recipes* (remove (lambda (r) (equal? (car r) "zz add two numbers")) *recipes*))
-      (catalog-forget! 'recipe "zz add two numbers"))))
+      (set! fast-chat-resolve orig))))
 
 (deftest 'malformed-scheme-goes-nowhere
   "an unbalanced expression is neither evaluated nor sent"
@@ -88,30 +87,6 @@
                    "\n name \"agent-send\"")
                  "a wide plist breaks, one key to a line")))
 
-(deftest 'a-bang-completes-over-every-recipe
-  "! completes the whole phrase from the catalog; ( and prose are unchanged"
-  (lambda ()
-    (let ((buf (t--cs-chat! "!spl")))
-      (with-current-buffer buf
-        (lambda ()
-          (chat-scheme--mode-hook!)
-          (end-of-buffer!)
-          (let ((r (chat-scheme--capf)))
-            (check-equal! (- (cadr r) (car r)) 3
-                          "the range is the phrase after the !, not the word before point")
-            (check-equal! (car (car (caddr r))) "spl"
-                          "what you typed comes first, so RET keeps it")
-            (check-equal! (car (cadr (caddr r))) "split the window side by side"
-                          "spl finds the recipe next, and accepting writes its title"))))
-      (buffer-kill! buf))
-    (let ((buf (t--cs-chat! "!dired")))
-      (with-current-buffer buf
-        (lambda ()
-          (chat-scheme--mode-hook!)
-          (end-of-buffer!)
-          (check-equal! (car (cadr (caddr (chat-scheme--capf)))) "open a directory"
-                        "an alias matches but the title is what gets written")))
-      (buffer-kill! buf))))
 
 (deftest 'completion-at-the-prompt-is-the-editors-own-vocabulary
   "inside an expression it completes orderless; in prose it offers nothing"

@@ -963,6 +963,3 @@
   "M-x models-serve - start the server or daemon this line's host is: ollama on this machine, or a registered model daemon")
 (public! 'models-unserve
   "M-x models-unserve - stop the daemon this line's host is")
-
-(defrecipe! "which local models are running" "(local-models)")
-(defrecipe! "install a local model" "(run-command \"models-install\")")

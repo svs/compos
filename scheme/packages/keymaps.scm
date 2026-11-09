@@ -447,12 +447,6 @@
 (public! 'keys-bind-intent
   "(keys-bind-intent KEYS COMMAND) — bind COMMAND to KEYS everywhere and persist; #f when the command does not exist")
 
-
-
-(defrecipe! "change a key" "(run-command \"keys\")")
-(defrecipe! "see every key in force here" "(run-command \"keys\")")
-
-
 ;; Keys as the keyboard prints them: C-x C-s is ⌃X ⌃S and s-<right> is ⌘→,
 ;; for the palette's key column and the tutorial's slides. The modifiers
 ;; come in the order macOS prints them: ⌃⌥⇧⌘.

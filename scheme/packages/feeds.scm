@@ -333,6 +333,3 @@
   "M-x feeds — list the items of every subscribed RSS/Atom feed, newest first; RET reads one as text in the other window")
 (public! 'feeds-subscribe
   "M-x feeds-subscribe — subscribe a feed URL, or a page URL whose feed link the subscribe finds")
-
-(defrecipe! "read my rss feeds"
-  "(feeds)")

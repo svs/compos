@@ -22,7 +22,7 @@ Decide everything you want to read first, then read it all at once in one eval:
 
 Search once, then act:
 
-1. Reuse known API names and recipes; do not rediscover them.
+1. Reuse known API names; do not rediscover them.
 2. Search each unknown once with the most specific catalog and shortest task-level query.
 3. Retry only after no hit, an unbound name, or an arity error. Never repeat an equivalent search after a usable hit.
 4. Stop when evidence is sufficient; make all required narrow edits.

@@ -768,10 +768,6 @@
 (public! 'webhooks-start! "(webhooks-start!) — start the webhook server on webhooks-host and webhooks-port; answers its URL")
 (public! 'webhooks-stop! "(webhooks-stop!) — stop the webhook server; the endpoints stay defined")
 
-(defrecipe! "define a webhook endpoint"
-  "(define-webhook! {{name}} (list 'token {{token}}) (lambda (request) (plist-get request 'json)))"
-  (list (list 'name "Webhook name: ") (list 'token "Shared token: ")))
-
 (webhooks--define-saved!)
 
 (when webhooks-enabled (webhooks--start-later!))

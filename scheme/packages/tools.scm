@@ -744,13 +744,11 @@
 ;; agent: no code behind it, just the words that answer the search
 ;; before someone rebuilds what was already decided
 (define (apropos--catalog-entry e words)
-  ;; A recipe is the catalog's answer to a task phrased the way a person
-  ;; phrases it, and it carries the expression that performs it. Search
-  ;; skipped recipes entirely, so every directive had to be answered by
-  ;; ranking identifiers instead. Its `use` expression is searched too:
-  ;; the operation it calls is the best name a task phrase can carry.
+  ;; A component, mode, note, fence kind or howto is searched by every word
+  ;; it carries, its `use` expression too: the operation it calls is the
+  ;; best name a task phrase can carry.
   (let ((kind (catalog--get e 'kind)))
-    (and (member kind '("component" "mode" "note" "fence-kind" "recipe" "howto"))
+    (and (member kind '("component" "mode" "note" "fence-kind" "howto"))
          (apropos--hit?
            (string-append (apropos--catalog-field e 'name) " "
                           (apropos--catalog-field e 'qualified-name) " "
@@ -1078,7 +1076,7 @@
              (not (member (catalog--string exclude-effect)
                           (or (plist-get hit 'effects) '())))))))
 
-;; Exact names and literal recipes remain ahead of vector results.
+;; Exact names and literal matches remain ahead of vector results.
 (define (apropos--rank hits query)
   ;; An empty query has no name to rank against, and the order it came in
   ;; is the answer. Leave before building the four buckets: the let* below
@@ -1176,8 +1174,6 @@
                        "declaration with explicit domain and effects.")))))))
 
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
-;; Recipes come first: a task-level hit beats four name-level ones, and it
-;; is the answer the caller actually wanted.
 ;; What a reader cannot work out from the rest of the row. The enrichment
 ;; appends the catalog entry to the hit, so a key the hit already carried
 ;; arrives twice and only the first is ever read; the qualified name is
@@ -1226,10 +1222,7 @@
          (hits (apropos--search query filters (apropos--index-cached) rows))
          (skills (filter (lambda (h) (apropos--filter-match? h filters))
                          (apropos--skill-hits query))))
-    ;; a recipe pattern that reads the query is the answer, filled in
-    (let ((answer (and (boundp 'recipe-answer) (recipe-answer query))))
-      (append (if (and answer (apropos--filter-match? answer filters)) (list answer) '())
-              (map apropos--public-hit (apropos--focus (append hits skills) query))))))
+    (map apropos--public-hit (apropos--focus (append hits skills) query))))
 
 ;; The skills the calling chat can load, as hits: its group's own and the
 ;; global ones. They are found by their name and description
@@ -1394,7 +1387,7 @@
 (catalog-meta! 'function "apropos" 'domain 'discovery 'effects '(read external))
 
 ;; The word test on its own. A surface that searches one narrow source -
-;; the command palette searches commands and recipes - matches the words
+;; the command palette searches commands - matches the words
 ;; the same way apropos does, without building the whole catalog index.
 (effects! '(pure))
 (public! 'apropos-query-words
@@ -1539,7 +1532,7 @@
     "you to inspect its source and add a durable declaration if you use it. Loading "
     "that declaration updates the live catalog immediately.")
   (list (list 'query "string" "intent words, e.g. \"open a file\" or \"remove document\"")
-        (list 'kind "string" "function, command, key, variable, recipe, mode, or component" 'optional)
+        (list 'kind "string" "function, command, key, variable, mode, or component" 'optional)
         (list 'package "string" "owning load unit" 'optional)
         (list 'namespace "string" "stable public vocabulary" 'optional)
         (list 'domain "string" "subject area, e.g. windows or buffers" 'optional)

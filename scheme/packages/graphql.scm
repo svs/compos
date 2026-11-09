@@ -577,27 +577,3 @@
 (effects! '(write external))
 (public! 'graphql-run
   "(graphql-run 'NAME QUERY [VARIABLES]) — run a query and show the answer in *graphql: NAME*")
-
-(effects! '(read external))
-(defrecipe! "run a graphql query"
-  "(graphql (string->symbol {{endpoint}}) {{query}})"
-  (list (list 'endpoint "Endpoint: ") (list 'query "GraphQL query: ")))
-(defrecipe! "search a graphql schema"
-  "(graphql-apropos (string->symbol {{endpoint}}) {{query}})"
-  (list (list 'endpoint "Endpoint: ") (list 'query "Schema search: ")))
-(defrecipe! "see one graphql type"
-  "(graphql-describe (string->symbol {{endpoint}}) {{type}})"
-  (list (list 'endpoint "Endpoint: ") (list 'type "Type: ")))
-(defrecipe! "see where graphql queries start"
-  "(graphql-roots (string->symbol {{endpoint}}))"
-  (list (list 'endpoint "Endpoint: ")))
-
-(effects! '(write))
-(defrecipe! "name a graphql endpoint"
-  "(graphql-register! (string->symbol {{name}}) {{url}})"
-  (list (list 'name "Endpoint name: ") (list 'url "GraphQL URL: ")))
-
-(effects! '(write external))
-(defrecipe! "show a graphql answer in a buffer"
-  "(graphql-run (string->symbol {{endpoint}}) {{query}})"
-  (list (list 'endpoint "Endpoint: ") (list 'query "GraphQL query: ")))

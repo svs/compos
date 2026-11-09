@@ -1,7 +1,7 @@
-;;; howto.scm --- "how do I ...?": task recipes for people, and the manual.
+;;; howto.scm --- "how do I ...?": tasks for people, and the manual.
 ;;;
-;;; A recipe in recipes.scm answers an agent: task -> expression. A howto
-;;; answers a person: task -> the keys and commands that do it, in words.
+;;; A howto answers a person: task -> the keys and commands that do it, in
+;;; words.
 ;;;
 ;;; A howto names a command as {{COMMAND}}, or {{MODE:COMMAND}} for a key
 ;;; that works in one mode only. The page draws the key that runs the
@@ -41,7 +41,7 @@
   title)
 
 (public! 'defhowto!
-  "(defhowto! TOPIC TITLE BODY) — register a task recipe for people; BODY is Markdown that names commands as {{COMMAND}} or {{MODE:COMMAND}}"
+  "(defhowto! TOPIC TITLE BODY) — register a task for people; BODY is Markdown that names commands as {{COMMAND}} or {{MODE:COMMAND}}"
   'learning)
 
 (define (howtos) *howtos*)
@@ -238,7 +238,7 @@
       "## Start here\n\n"
       "| Command | What it answers |\n|---|---|\n"
       (string-join
-        (list (row "how-do-i" "How do I do a task? Pick one from a list of recipes.")
+        (list (row "how-do-i" "How do I do a task? Pick one from a list of tasks.")
               (row "help-with-tutorial" "Teach me the editor, step by step.")
               (row "setup-welcome" "What is this editor? The short version.")
               (row "execute-extended-command" "Run any command by its name.")
@@ -274,7 +274,7 @@
       "\n\n---\n\n`q` closes this page\n")))
 
 (define-command "help-for-help"
-  "List every help command with its key, and every task recipe"
+  "List every help command with its key, and every task"
   (lambda () (help-doc! "help" (help-for-help-markdown))))
 
 (define-key "help-map" "h" "how-do-i")
@@ -429,7 +429,7 @@
     (manual--header "The Compos manual")
     "The editor writes these files from its own registries, so they describe "
     "the code that runs.\n\n"
-    "- [How do I ...?](HOW-DO-I.md): task recipes, by topic.\n"
+    "- [How do I ...?](HOW-DO-I.md): tasks, by topic.\n"
     "- [Commands](COMMANDS.md): every documented command, by domain.\n"
     "- [Global keys](KEYS.md): every key in the global map.\n\n"
     "Inside the editor, `C-h ?` lists every help command, and `C-h h` opens a task.\n"))
@@ -484,7 +484,7 @@
 
 Every action in the editor is a command. When you forget a key, you can always use its name.
 
-To search by what a command does, use {{command-palette}}. It also finds task recipes.")
+To search by what a command does, use {{command-palette}}.")
 
 (defhowto! "Getting started" "cancel what I started"
   "Press {{keyboard-quit}}. It closes a prompt, stops a key sequence, and clears the mark. Press it again if one press is not enough.")
@@ -508,7 +508,7 @@ To search by what a command does, use {{command-palette}}. It also finds task re
 In a list (buffers, files, chats, mail), press `?` to show the keys of the list.")
 
 (defhowto! "Getting started" "find the name of something"
-  "Press {{apropos}} and type some words. The page lists the commands, settings, functions, and recipes that match. Click a name to open its source.")
+  "Press {{apropos}} and type some words. The page lists the commands, settings, functions, and modes that match. Click a name to open its source.")
 
 ;;; --- Files -----------------------------------------------------------------------
 

@@ -352,7 +352,7 @@ async function onKey(e) {
   }
 
   // Cmd-p is the intent-oriented palette. Unlike M-x it searches command
-  // docs and task recipes, but the daemon still owns the prompt and matcher.
+  // docs and aliases, but the daemon still owns the prompt and matcher.
   if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === "KeyP") {
     e.preventDefault();
     e.stopPropagation();

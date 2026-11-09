@@ -85,14 +85,6 @@
           (fast-forget! "zz-fast-filtered!")
           (check-equal! (fast-learned-names) '() "and a forgotten one is gone"))))))
 
-(deftest 'a-bang-resolves-to-a-frame-call-or-an-error
-  "what the chat runs is well-formed either way"
-  (lambda ()
-    (let ((src #f))
-      (fast-chat-resolve "!one window again" (lambda (s) (set! src s)))
-      (check-equal! src "(with-frame-windows (lambda () (delete-other-windows!)))"
-                    "a recipe's title runs the recipe, against the frame")
-      (check-true! (chat-scheme-well-formed? src) "and it reads"))))
 
 (deftest 'the-palette-hands-a-sentence-to-fast-code
   "three words or more lead with your words; a short query keeps the palette's order"

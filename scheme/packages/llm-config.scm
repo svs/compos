@@ -990,11 +990,12 @@
     (when (and id (boundp 'group-config-ensure!)) (group-config-ensure! id))
     (and id (llm-bundle-resolve (group-setting id 'llm)))))
 
-(define (llm-default-bundle-apply! buf &optional g)
+(define (llm-default-bundle-apply! buf &optional g bundle)
   ;; the group's own defaults are the user's choice, so they apply even when
   ;; an agent starts the chat (a todo handed to a new chat): only presets
   ;; beyond them stay the user's act, as mcp-refuse-agent! keeps them
-  (let ((b (llm-chat-bundle (or g (buffer-group buf)))))
+  ;; BUNDLE, a preset or its name, is the caller's pick and wins
+  (let ((b (or (llm-bundle-resolve bundle) (llm-chat-bundle (or g (buffer-group buf))))))
     (with-edit-author "group-default"
       (lambda ()
         (cond ((not b) #f)

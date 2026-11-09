@@ -213,6 +213,23 @@
       (check-equal! (prompt-disabled-parts buf) '() "on again")
       (t--prompt-cleanup buf))))
 
+(deftest 'a-driver-chat-takes-the-driver-prompt-alone
+  "the driver profile keeps its own file and the task parts; every other chat leaves the driver file out"
+  (lambda ()
+    (let ((buf (test-buffer! "*prompt-driver*" ""))
+          (parts '(("identity" "i") ("scheme" "s") ("driver" "d") ("mcp" "m")
+                   ("preset:ats" "p") ("chat-preamble" "c") ("code" "k") ("todo" "t"))))
+      (check-equal! (map car (prompt-parts-enabled buf parts))
+                    '("identity" "scheme" "mcp" "preset:ats" "chat-preamble" "code" "todo")
+                    "the full prompt leaves the driver file out")
+      (buffer-set-local! buf 'prompt-profile "driver")
+      (check-equal! (map car (prompt-parts-enabled buf parts))
+                    '("driver" "mcp" "preset:ats" "chat-preamble" "todo")
+                    "the driver keeps its file, the presets and the task parts")
+      (prompt-section-off! buf "todo")
+      (check-false! (assoc "todo" (prompt-parts-enabled buf parts)) "a switch still turns a section off")
+      (t--prompt-cleanup buf))))
+
 (deftest 'a-direct-chat-keeps-its-first-prompt-until-refresh
   "source changes do not alter the wire prompt during a conversation"
   (lambda ()

@@ -2392,9 +2392,30 @@
   (lambda () *llm-config-history*)
   (lambda (v) (set! *llm-config-history* (map llm-bundle-normalize (or v '())))))
 
+;; The builtin presets ship with compos. A saved preset of the same name is
+;; the user's edit and wins; a builtin the saved list lacks comes back. The
+;; Driver drives the editor for a task (buffers, todos, groups, settings,
+;; mail): its preset section is the short driver prompt (the driver preset,
+;; mcp.scm) and its prompt-disabled list turns off the coding primer.
+(define *llm-builtin-bundles*
+  (list (list 'name "Driver" 'connector "claude-code" 'model "haiku"
+              'presets '(compos driver)
+              'prompt-disabled '("identity" "quiet-editor" "scope" "chat-context"
+                                 "scheme" "discovery" "reading" "repository"
+                                 "browser" "components" "catalog" "recipes"
+                                 "skills" "code" "code-agent"))))
+
+(define (llm-bundles-with-builtins bundles)
+  (append bundles
+          (filter (lambda (b)
+                    (not (member (llm-bundle-name b) (map llm-bundle-name bundles))))
+                  *llm-builtin-bundles*)))
+
+(set! *llm-bundles* (llm-bundles-assign-keys (llm-bundles-with-builtins *llm-bundles*)))
+
 (persist-global! 'llm-bundles
   (lambda () *llm-bundles*)
-  (lambda (v) (set! *llm-bundles* (llm-bundles-assign-keys (or v '())))))
+  (lambda (v) (set! *llm-bundles* (llm-bundles-assign-keys (llm-bundles-with-builtins (or v '()))))))
 
 ;; The three parts that are always cheap to read: buffer-locals, and no
 ;; walk to find the session. The menu redraws on every keystroke, so what

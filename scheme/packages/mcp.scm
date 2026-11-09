@@ -630,6 +630,10 @@
 (mcp-register! 'fetch (mcp-compos-surface-spec "fetch"))
 
 (define-preset! 'compos "Live compos editor tools" '(compos))
+;; the short prompt of a chat that drives the editor: the builtin Driver
+;; preset (chat-mode.scm *llm-builtin-bundles*) holds it
+(define-preset! 'driver "The short prompt of a chat that drives the editor" '()
+  (string-trim (or (read-file (string-append (compos-priv-dir) "/presets/driver.md")) "")))
 
 ;; a plist of string values -> ((NAME VALUE) ...). ACP asks for env and
 ;; headers in this shape, and the two differ only in name. The values are

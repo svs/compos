@@ -21,7 +21,9 @@
 (define *drive-eval-models*
   '((haiku "claude-code" "haiku")
     (sonnet "claude-code" "sonnet")
-    (opus "claude-code" "opus")))
+    (opus "claude-code" "opus")
+    ;; a fourth item is the chat's prompt profile (prompts.scm)
+    (haiku-driver "claude-code" "haiku" "driver")))
 
 (define drive-eval-timeout-s 300)
 
@@ -190,8 +192,10 @@
     (drive-eval--hook c 'setup fb)
     (let* ((t0 (monotonic-ms))
            (slug (execute* ((list-ref c 3) fb)
-                           (list 'connector (cadr m) 'model (caddr m) 'notify #f
-                                 'permission-mode 'auto 'title title)))
+                           (append
+                             (list 'connector (cadr m) 'model (caddr m) 'notify #f
+                                   'permission-mode 'auto 'title title)
+                             (if (> (length m) 3) (list 'prompt-profile (list-ref m 3)) '()))))
            (rs (drive-eval--await slug drive-eval-timeout-s))
            (ms (- (monotonic-ms) t0))
            (r (and (pair? rs) (car rs)))
@@ -200,13 +204,16 @@
            (counts (if (buffer-known? buf) (drive-eval--count (chat-record buf)) '(0 0)))
            (steps (if (boundp 'agent-perf-turn) (agent-perf-turn slug) '()))
            (text (and fixture (buffer-known? fb) (buffer-text fb)))
+           (bytes (if (buffer-known? buf)
+                      (string-byte-length (prompt-parts-text (chat-prompt-parts buf)))
+                      0))
            (ok (and r (ignore-errors (lambda () ((list-ref c 4) text reply fb))) #t)))
       (ignore-errors (lambda () (agent-kill! slug)))
       (when (buffer-known? buf) (buffer-kill! buf))
       (drive-eval--hook c 'cleanup fb)
       (when (and fixture (buffer-known? fb)) (buffer-kill! fb))
       (list (car c) (car m) ok (car counts) (cadr counts) ms
-            (and r (plist-get r 'stop-reason)) steps reply))))
+            (and r (plist-get r 'stop-reason)) steps reply bytes))))
 
 (define (drive-eval--of rows label) (filter (lambda (r) (eq? (cadr r) label)) rows))
 (define (drive-eval--fmt x) (number->string (/ (round (* 10 x)) 10)))
@@ -260,7 +267,8 @@
         (failed (filter (lambda (r) (not (list-ref r 2))) rows)))
     (string-append
       "drive-eval: "
-      (string-join (map (lambda (l) (string-append (symbol->string l) " " (drive-eval--score (drive-eval--of rows l)))) labels) "; ")
+      (string-join (map (lambda (l) (string-append (symbol->string l) " " (drive-eval--score (drive-eval--of rows l))
+                                                     " prompt " (number->string (apply max 0 (map (lambda (r) (if (> (length r) 9) (list-ref r 9) 0)) (drive-eval--of rows l)))) "B")) labels) "; ")
       "\n\n" (string-pad-right "case" 10)
       (string-join (map (lambda (l) (string-pad-right (symbol->string l) 22)) labels) "")
       "\n"

@@ -1548,6 +1548,45 @@
             (message (if (string? new) (string-append "Handed over to " new) "No chat"))))))
   'modes '(todo-mode todo-detail-mode))
 
+;; Reap. Close the chats of done tasks. A chat stays when an open task
+;; still names it, when it runs a turn, or when the user is on it.
+(define (todo--ref-buffer ref)
+  (cond ((not (string? ref)) #f)
+        ((string-prefix? "agent:chat-" ref)
+         (todo--live-chat (string-append "chat:" (string-join (cdr (string-split (substring ref 6 (string-length ref)) "-")) ":"))))
+        (else (todo--live-chat ref))))
+
+(define (todo--task-chats t)
+  (filter (lambda (b) (and (string? b) (buffer-exists? b)))
+          (map todo--ref-buffer (cons (plist-get t 'assignee) (or (plist-get t 'chats) '())))))
+
+(define (todo-reap-chats! &optional who)
+  "(todo-reap-chats! [WHO]) — archive every live chat of a done task; keep a chat an open task names, a chat that runs a turn, and the chat the user is on; answer (CLOSED KEPT)"
+  (let* ((open (apply append (map todo--task-chats (todo-list))))
+         (self (current-buffer))
+         (cands (apply append (map todo--task-chats (todo-list '(state "done")))))
+         (closed '()) (kept '()))
+    (for-each
+     (lambda (b)
+       (let ((slug (agent-slug-of b)))
+         (cond
+          ((or (member b closed) (member b kept)) #f)
+          ((or (member b open) (equal? b self) (chat-user-focused? b)
+                 (and slug (member (agent-status slug) '(running starting))))
+           (set! kept (cons b kept)))
+          (else (agents-archive! b) (set! closed (cons b closed))))))
+     cands)
+    (list (reverse closed) (reverse kept))))
+
+(public! 'todo-reap-chats! "(todo-reap-chats! [WHO]) — archive every live chat of a done task, except a chat an open task names, a running chat and the chat the user is on; answer (CLOSED KEPT)")
+(catalog-meta! 'function "todo-reap-chats!" 'domain 'writing 'effects '(destroy))
+
+(define-command "todo-reap-chats" "Close every chat whose task is done; keep a chat an open task still uses, a running chat and the chat you are on"
+  (lambda ()
+    (let ((r (todo-reap-chats!)))
+      (message (string-append "Closed " (number->string (length (car r))) " chats of done tasks"
+                              (if (pair? (cadr r)) (string-append ", kept " (number->string (length (cadr r)))) ""))))))
+
 (define (todo--chat-label c)
   ;; a live chat's name, else its archived title, else its id
   (or (todo--live-chat c)

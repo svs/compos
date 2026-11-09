@@ -6624,6 +6624,10 @@
         ;; a release of Cmd ends a walk of the window's stack
         ((member cmd '("dismiss-buffer" "listing-preview-dismiss" "load-theme" "window-walk-end"))
          (run-command cmd))
+        ;; a link in the echo area's hints runs its own command
+        ((and (string? cmd) (string-prefix? "echo:" cmd))
+         (let ((c (substring cmd 5 (string-length cmd))))
+           (when (echo-hint-command? c) (run-command c))))
         ;; a mode name in the modeline toggles that mode
         ((and (string? cmd) (string-prefix? "mode:" cmd))
          (modeline-toggle-mode! (string-join (cdr (string-split cmd ":")) ":")))

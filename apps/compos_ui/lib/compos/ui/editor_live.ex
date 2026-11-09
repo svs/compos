@@ -1377,7 +1377,7 @@ defmodule Compos.Ui.EditorLive do
       <c-text :for={{c, t} <- echo_status(@state)} class={c}>{t}</c-text>
       <c-text class="ml-rule"></c-text>
       <c-key-hints class="echo-hint">
-        <c-text :for={{k, v} <- echo_hints(@state)} class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text>
+        <%= for {k, v, cmd} <- echo_hints(@state) do %><%= if cmd do %><c-text class="ml-hint ml-link" role="link" title={cmd} phx-click="ui_cmd" phx-value-win={@state.active} phx-value-cmd={"echo:" <> cmd}>{k}</c-text><% else %><c-text class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text><% end %><% end %>
       </c-key-hints>
     </c-statusbar>
     """
@@ -1439,10 +1439,15 @@ defmodule Compos.Ui.EditorLive do
   defp keycast_pending(_state), do: nil
 
   # The echo area's key hints, as Scheme publishes them (echo-key-hints in
-  # appearance.scm): (KEY VERB) pairs. An empty verb draws the key alone.
+  # appearance.scm): (KEY VERB [COMMAND]). An empty verb draws the key alone;
+  # a hint with a COMMAND is a link that runs it.
   defp echo_hints(state) do
-    for [k, v] <- chrome(state, "echo-hints"), is_binary(k), is_binary(v), do: {k, v}
+    for h <- chrome(state, "echo-hints"), hint <- [echo_hint(h)], hint != nil, do: hint
   end
+
+  defp echo_hint([k, v]) when is_binary(k) and is_binary(v), do: {k, v, nil}
+  defp echo_hint([k, v, c]) when is_binary(k) and is_binary(v) and is_binary(c), do: {k, v, c}
+  defp echo_hint(_), do: nil
 
   # What Scheme keeps on the echo area while it is true, such as the chats
   # that need you: (CLASS TEXT) pairs, between the message and the keys.

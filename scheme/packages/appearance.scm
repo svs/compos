@@ -253,10 +253,19 @@
   (lambda (value) (frame-chrome-set! key value)))
 
 (defcustom 'echo-key-hints
-  '(("C-x C-f" "") ("C-x b" "") ("C-x d" "") ("C-c a" "agent") ("M-x" "") ("C-g" ""))
-  "The key hints in the echo area, as (KEY VERB) pairs. An empty verb draws the key alone."
+  '(("*Messages*" "" "view-messages"))
+  "The hints in the echo area, as (KEY VERB [COMMAND]) lists. An empty verb draws the key alone. A hint with a COMMAND is a link: a click runs it."
   'group 'appearance
   'set (chrome-publisher "echo-hints"))
+
+(domain! 'ui)
+(effects! '(read))
+(define (echo-hint-command? cmd)
+  "Is CMD the command of a hint in echo-key-hints? Only those run from an echo-area click."
+  (let loop ((hs echo-key-hints))
+    (cond ((null? hs) #f)
+          ((and (= (length (car hs)) 3) (equal? (caddr (car hs)) cmd)) #t)
+          (else (loop (cdr hs))))))
 
 ;; Emacs's mode-line-format, as constructs in order. (position SEGS
 ;; PTY-SEGS) draws (CLASS TEXT) segments, the PTY ones in a terminal; the

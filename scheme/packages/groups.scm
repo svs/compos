@@ -5257,3 +5257,42 @@ is forgotten and that group falls back to creation order in the switcher."
 (catalog-meta! 'function "group-resolve-id" 'effects '(read))
 (public! 'group-record-colors-restore "(group-record-colors-restore RECORDS) — RECORDS with each color turned into its palette slot")
 (catalog-meta! 'function "group-record-colors-restore" 'effects '(read))
+
+;; lookups a block stamp left write: they only read
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(group-name buffer-in-group? buffer-group-role group-parent
+    group-home-of group-here group-here? group-frame-owner
+    group-elsewhere-frame frame-by-label frame-label frame-name
+    frame-isolated? group-ids-mru group-ids-mru-all group-buffers-as
+    group-buffer-as group-window-as scene-window scene-buffer buffer-family
+    active-groups group-setting))
+
+;; group lookups agents call from eval-scheme-read
+(public! 'group-display-name "(group-display-name G) — G's name, or G itself when it names no group")
+(public! 'group-short-name "(group-short-name G) — G's name; a path name shows its last segment")
+(public! 'group-label "(group-label G) — G's short name, with the pin icon when G is pinned")
+(public! 'group-meta "(group-meta G) — G's description, or #f")
+(public! 'group-noise "(group-noise G) — G's noise level: off, quiet or loud")
+(public! 'group-dirty? "(group-dirty? G) — #t when a buffer of G has unsaved changes")
+(public! 'group-docs "(group-docs G) — G's user buffers that are not chats, newest first")
+(public! 'group-known-buffers "(group-known-buffers G) — every buffer of G, the dormant ones too")
+(public! 'group-user-buffers-mru "(group-user-buffers-mru G) — G's buffers without the context-only ones, newest first")
+(public! 'group-primary-chat "(group-primary-chat G) — G's primary chat buffer, or #f")
+(public! 'group-layout "(group-layout G) — G's saved window layout, or #f")
+(public! 'group-pinned? "(group-pinned? G) — #t when G is the group pinned in this frame")
+(public! 'group-record-by-name "(group-record-by-name NAME) — the group record named NAME, or #f")
+(public! 'group-record-id "(group-record-id RECORD) — the id of a group record")
+(public! 'group-record-name "(group-record-name RECORD) — the name of a group record")
+(public! 'group-visible-groups "(group-visible-groups) — the groups of the buffers the windows show")
+(public! 'group-visible-work-buffers "(group-visible-work-buffers) — the work and chat buffers the windows show")
+(public! 'group-work-buffer? "(group-work-buffer? BUF) — #t when BUF is a known buffer that is not a chat or hidden")
+(public! 'group-membership-buffer? "(group-membership-buffer? BUF) — #t when BUF can belong to a group")
+(public! 'group-scratch-buffer? "(group-scratch-buffer? BUF) — #t when BUF is its group's scratch")
+(public! 'group-id-string? "(group-id-string? VALUE) — #t when VALUE is a group id string")
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(group-display-name group-short-name group-label group-meta group-noise
+    group-dirty? group-docs group-known-buffers group-user-buffers-mru
+    group-primary-chat group-layout group-pinned? group-record-by-name
+    group-record-id group-record-name group-visible-groups
+    group-visible-work-buffers group-work-buffer? group-membership-buffer?
+    group-scratch-buffer? group-id-string?))

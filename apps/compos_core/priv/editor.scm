@@ -7083,6 +7083,7 @@
 (public! 'default-value "(default-value NAME) — the global value, or #f")
 (public! 'set-default! "(set-default! NAME VALUE) — the global value")
 (public! 'buffer-local-value "(buffer-local-value NAME [BUF]) — BUF's own value, else the default")
+(catalog-meta! 'function "buffer-local-value" 'effects '(read))
 (public! 'setq-local! "(setq-local! NAME VALUE) — the current buffer's own value")
 (public! 'kill-local-variable! "(kill-local-variable! NAME [BUF]) — forget the buffer's own value")
 (public! 'local-variable-p "(local-variable-p NAME [BUF]) — #t when the buffer holds its own value")

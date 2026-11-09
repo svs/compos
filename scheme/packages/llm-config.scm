@@ -995,6 +995,9 @@
   "(llm-group-bundle G) — G's 'llm setting as a bundle: it names a preset or is one; #f when unset")
 (public! 'llm-bundle-resolve
   "(llm-bundle-resolve V) — V as a bundle: a preset's name looks it up, a bundle stays; #f for anything else")
+(public! 'llm-default-bundle-record
+  "(llm-default-bundle-record) — the bundle every new chat starts with, resolved from llm-default-bundle; #f when none is set")
+(catalog-meta! 'function "llm-default-bundle-record" 'effects '(read))
 (catalog-meta! 'function "llm-bundle-resolve" 'effects '(read))
 (public! 'llm-default-save!
   "(llm-default-save! B) — make config B what every new chat starts with, unless its group names one")

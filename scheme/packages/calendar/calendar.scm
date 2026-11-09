@@ -943,7 +943,9 @@
           (task-run! (lambda () (calendar-events from to))
                      (lambda (ok? rows)
                        (let ((rows (if (and ok? (pair? rows)) rows '())))
-                         (when ok?
+                         ;; An empty answer is often a source that has not answered yet;
+                         ;; caching it would blank the week until a manual refresh.
+                         (when (and ok? (pair? rows))
                            (set! *calendar-view-cache* (cons (cons key rows) *calendar-view-cache*)))
                          (when (and (buffer-exists? buf)
                                     (equal? (buffer-local-value 'calendar-loading buf) key))

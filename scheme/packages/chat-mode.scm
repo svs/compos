@@ -1596,6 +1596,16 @@
 (define (chat-runtime-slug buf)
   (string-join (string-split (chat-stable-id! buf) ":") "-"))
 
+;; The chat resumes its session only when the same connector issued it and
+;; the adapter said it can load it again (ACP loadSession). An adapter that
+;; cannot load answers with a new, empty session; the chat must then replay
+;; the conversation into the first prompt, and it decides that before the
+;; adapter answers. No answer recorded (an older session) counts as yes.
+(define (chat-session-resumable? buf connector)
+  (and (buffer-local-value 'agent-session buf)
+       (equal? (buffer-local-value 'agent-session-connector buf) connector)
+       (not (eq? (buffer-local-value 'agent-session-loadable buf) 'no))))
+
 (define (chat-attach-agent! buf connector &optional model opts)
   (let ((slug (chat-runtime-slug buf))
         ;; a model pinned on the buffer (C-c m before the first send, or a
@@ -1640,12 +1650,9 @@
                     ;; the session this conversation already lives in, when
                     ;; the same connector issued it: the adapter loads it
                     ;; instead of starting empty
-                    (let ((sid (buffer-local-value 'agent-session buf)))
-                      (if (and sid
-                               (equal? (buffer-local-value 'agent-session-connector buf)
-                                       connector))
-                          (list 'resume-session sid)
-                          '()))
+                    (if (chat-session-resumable? buf connector)
+                        (list 'resume-session (buffer-local-value 'agent-session buf))
+                        '())
                     (list 'idle-seconds agent-idle-seconds)
                     (let ((effort (buffer-local-value 'agent-effort buf)))
                       (if effort (list 'effort effort) '()))
@@ -2000,7 +2007,8 @@
     ;; the backend session this conversation lives in, and the connector
     ;; that issued it: a parked adapter, a revive and a restart reopen the
     ;; same session (ACP session/load); a reset starts a new one
-    agent-session agent-session-connector
+    ;; and whether its adapter said it can load a session again
+    agent-session agent-session-connector agent-session-loadable
     ;; and the goal status the newest summary judged
     chat-goal-status chat-goal-why
     ;; this chat had a runtime and something took it away, so chats-start-all
@@ -2162,8 +2170,7 @@
     ;; connector issued before (agent-session) remembers the conversation
     ;; and loads instead; the api lane replays the record on every request
     ;; anyway
-    (let ((resume (and (buffer-local-value 'agent-session buf)
-                       (equal? (buffer-local-value 'agent-session-connector buf) cname))))
+    (let ((resume (chat-session-resumable? buf cname)))
       (buffer-set-local! buf 'agent-seed-context
         (and (not resume) (not (connector-can? cname 'stateless))
              (> mark 0) (not (equal? said ""))))

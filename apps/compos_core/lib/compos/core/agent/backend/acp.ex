@@ -311,6 +311,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
         state = Map.put(state, :session_params, params)
         can_load? = get_in(result, ["agentCapabilities", "loadSession"]) == true
+        # the chat plans its next reattach from this: an adapter that cannot
+        # load a session gets the conversation replayed instead
+        state = Map.put(state, :can_load, can_load?)
 
         cond do
           is_binary(state.resume) and can_load? ->
@@ -335,7 +338,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
         sid = state.resume
 
         %{state | session_id: sid, loading: false}
-        |> emit(type: :session, id: sid, resumed: true)
+        |> emit(type: :session, id: sid, resumed: true, loadable: true)
         |> session_ready(result || %{})
 
       {"session/load", %{"error" => err}} ->
@@ -350,7 +353,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
       {"session/new", %{"result" => %{"sessionId" => sid} = result}} ->
         %{state | session_id: sid}
-        |> emit(type: :session, id: sid, resumed: false)
+        |> emit(type: :session, id: sid, resumed: false, loadable: Map.get(state, :can_load, false))
         |> session_ready(result)
 
       {"session/set_model", %{"result" => _}} ->

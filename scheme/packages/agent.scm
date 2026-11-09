@@ -483,6 +483,9 @@
       ((equal? type 'session)
        (buffer-set-local! buf 'agent-session (plist-get e 'id))
        (buffer-set-local! buf 'agent-session-connector (buffer-local-value 'agent-connector buf))
+       ;; whether the adapter can load this session again; a reattach that
+       ;; cannot resume replays the conversation instead (chat-session-resumable?)
+       (buffer-set-local! buf 'agent-session-loadable (if (plist-get e 'loadable) 'yes 'no))
        (when (plist-get e 'resumed)
          (message (string-append "agent " slug ": session resumed"))))
 

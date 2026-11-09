@@ -432,29 +432,35 @@
 
 (command-palette--everyday-words!)
 
-;; Words no command does go to a chat: a new chat in the group of the buffer
-;; you were in, shown at once, or the chat itself when you asked from one.
-;; The words are its next prompt.
+;; Words no command does go to the group's palette chat, on Driver API, shown
+;; at once. The words are its next prompt.
 (define (command-palette-ask-chat! text)
   (let* ((origin (command-palette--origin))
-         (send! (lambda (chat)
-                  ;; your words, as you typed them: a prompt, not a wake
-                  (agent-prompt! (or (agent-slug-of chat) (chat-ensure-runtime! chat)) text))))
+         (g (or (buffer-group origin) (frame-group)))
+         (chat (and g (command-palette--driver-chat g))))
     (set! *command-palette--request* #f)
-    (if (chat-buffer? origin)
-        (send! origin)
-        ;; For now a new chat of its own, shown at once, as C-c n makes one:
-        ;; the buffer's M-o chat is a hidden one that answers into the
-        ;; document, so the words seemed to vanish. It runs on Driver API.
-        (let* ((g (or (buffer-group origin) (frame-group)))
-               (chat (and g (group-chat-new! g))))
-          (if (not chat)
-              (message "No group for a chat")
-              (begin (llm-bundle-apply! chat (llm-palette-bundle))
-                     (send! chat)))))))
+    (if (not chat)
+        (message "No group for a chat")
+        (begin
+          (unless (window-showing chat) (pop-to-buffer chat))
+          ;; your words, as you typed them: a prompt, not a wake
+          (agent-prompt! (or (agent-slug-of chat) (chat-ensure-runtime! chat)) text)))))
+
+;; The group's palette chat, on Driver API: the live one the palette made
+;; before, else a new one. Asked from a chat, the words still go here, not
+;; to the chat you were in: that one runs on its own model for its own work.
+(define (command-palette--driver-chat g)
+  (or (find (lambda (b) (and (buffer-local-value 'palette-chat b)
+                             (equal? (buffer-group b) (group-resolve-id g))))
+            (filter chat-buffer? (buffer-list)))
+      (let ((chat (group-chat-new! g)))
+        (when chat
+          (buffer-set-local! chat 'palette-chat #t)
+          (llm-bundle-apply! chat (llm-palette-bundle)))
+        chat)))
 
 (public! 'command-palette-ask-chat!
-  "(command-palette-ask-chat! TEXT) -- send TEXT to a new chat in the group of the buffer the palette was opened from, shown at once; from a chat, to that chat")
+  "(command-palette-ask-chat! TEXT) -- send TEXT to the group's palette chat, on Driver API, shown at once; made when the group has none")
 
 (domain! 'interaction)
 (effects! '(write execute))

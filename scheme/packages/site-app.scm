@@ -132,13 +132,33 @@
     (cond ((string? value) value) ((not value) "") (else (format "~a" value)))))
 
 (define (site-app-columns buf)
-  (map (lambda (col) (list (plist-get col 'label) (plist-get col 'width)))
-       (or (plist-get (site-app-current-page buf) 'columns) '())))
+  ;; a column's 'kind is its style in the formatted table: a name in bold,
+  ;; gold stars, a pill toned by its value from the spec's 'tones
+  (let ((tones (plist-get (site-app-get buf 'spec) 'tones)))
+    (map (lambda (col)
+           (let ((style (site-app-col-style col tones)))
+             (append (list (plist-get col 'label) (plist-get col 'width))
+                     (if style (list 'style style) '()))))
+         (or (plist-get (site-app-current-page buf) 'columns) '()))))
+
+(define (site-app-col-style col tones)
+  (let ((kind (plist-get col 'kind)) (field (plist-get col 'field)))
+    (cond ((eq? kind 'name) 'title)
+          ((eq? kind 'stars) 'stars)
+          ((eq? kind 'badge)
+           (lambda (buf row) (list 'badge (site-app-tone-class tones (site-app-field row field)))))
+          (else #f))))
 
 (define (site-app-cells buf row)
   (map (lambda (col)
-         (let ((text (site-app-field row (plist-get col 'field)))
-               (face (plist-get col 'face)))
+         (let* ((raw (site-app-field row (plist-get col 'field)))
+                ;; a rating reads as its stars in both views
+                (text (if (eq? (plist-get col 'kind) 'stars)
+                          (let* ((confirmed (plist-get col 'confirmed))
+                                 (s (site-app-stars-string raw (and confirmed (not (equal? (site-app-field row confirmed) ""))))))
+                            (if (equal? s "") raw s))
+                          raw))
+                (face (plist-get col 'face)))
            (if face (list text face) text)))
        (or (plist-get (site-app-current-page buf) 'columns) '())))
 
@@ -250,51 +270,10 @@
       (string-append (plist-get (site-app-get buf 'spec) 'base-url) src)
       src))
 
-(define (site-app-cell buf col row)
-  ;; one cell; a column's 'kind draws it as a status pill, gold stars, an
-  ;; avatar or a name. A cell draws its segs and text, never nested blocks, so
-  ;; a pill is a seg and an avatar is the cell itself
-  (let ((text (or (site-app-field row (plist-get col 'field)) ""))
-        (kind (plist-get col 'kind))
-        (class (if (plist-get col 'face) (string-append "sa-cell c-" (plist-get col 'face)) "sa-cell")))
-    (cond ((equal? text "") (list 'tag "span" 'class class 'text ""))
-          ((eq? kind 'badge)
-           (let ((tone (site-app-tone-class (plist-get (site-app-get buf 'spec) 'tones) text)))
-             (list 'tag "span" 'class (string-append class " sa-badge-cell")
-                   'segs (list (list (if tone (string-append "c-badge sa-pill " tone) "c-badge sa-pill") text)))))
-          ((eq? kind 'stars)
-           (let ((confirmed (plist-get col 'confirmed)))
-             (list 'tag "span" 'class (string-append class " sa-stars-cell")
-                   'segs (site-app-stars-segs text (and confirmed (not (equal? (site-app-field row confirmed) "")))))))
-          ((eq? kind 'avatar)
-           (list 'tag "img" 'class (string-append class " sa-avatar")
-                 'attrs (list (list "src" (site-app-avatar-url buf text)) (list "alt" "")
-                              (list "loading" "lazy") (list "referrerpolicy" "no-referrer"))))
-          ((eq? kind 'name) (list 'tag "span" 'class (string-append class " sa-name-cell") 'text text))
-          (else (list 'tag "span" 'class class 'text text)))))
-
 (define (site-app-composml buf row)
-  ;; a row as blocks: one cell per column, on the column widths. Its class
-  ;; names the width the fixed columns need with room left for the one that
-  ;; takes the rest; the stylesheet moves that one to a line of its own in a
-  ;; narrower window rather than squeezing it into a sliver. A page with a
-  ;; 'row (buf row) draws its rows itself
-  (let* ((page (site-app-current-page buf))
-         (cols (or (plist-get page 'columns) '()))
-         (fixed (fold (lambda (sum col) (+ sum 1 (or (plist-get col 'width) 0))) 0 cols))
-         (need (* 10 (quotient (+ fixed 30 9) 10))))
-    (if (plist-get page 'row)
-        ((plist-get page 'row) buf row)
-        (list 'tag "div" 'class (string-append "sa-row sa-need-" (number->string (min 140 (max 60 need))))
-              'attrs (list (list "style"
-                                 (string-append "grid-template-columns:"
-                                                (string-join (map (lambda (col)
-                                                                    (let ((w (plist-get col 'width)))
-                                                                      (if w (string-append (number->string w) "ch") "minmax(0,1fr)")))
-                                                                  cols)
-                                                             " "))))
-              'children (map (lambda (col) (site-app-cell buf col row))
-                             cols)))))
+  ;; a page with its own 'row (buf row) draws its rows as cards; the other
+  ;; pages are the shared table ('composml-when), styled by column 'kind
+  ((plist-get (site-app-current-page buf) 'row) buf row))
 
 (define (site-app-title buf)
   (let* ((spec (site-app-get buf 'spec))
@@ -1860,30 +1839,17 @@
           (else #f))))
 
 (define-style! 'site-app "
-.sa-row { display: grid; column-gap: 1ch; align-items: center; container-type: inline-size; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
-.sa-row > .sa-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sa-stars-cell { font-size: 11px; }
 /* one rating everywhere: gold stars, filled once met, hollow until then */
 .sa-stars { color: var(--warn-fg); letter-spacing: -1px; white-space: nowrap; }
 .sa-head-stars { font-size: .5em; vertical-align: middle; }
-.sa-row > img.sa-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--hl-line-bg); justify-self: center; }
 .sa-name-cell { font-weight: 600; color: var(--default-fg); }
-.sa-badge-cell { display: flex; align-items: center; }
 .sa-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em; line-height: 17px; text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* a toned pill keeps its tone: good, warn, bad, info from the spec's 'tones */
 .sa-pill.c-badge.good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
 .sa-pill.c-badge.warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
 .sa-pill.c-badge.bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
 .sa-pill.c-badge.info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
-@container (max-width: 60ch) { .sa-need-60 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 70ch) { .sa-need-70 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 80ch) { .sa-need-80 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 90ch) { .sa-need-90 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 100ch) { .sa-need-100 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 110ch) { .sa-need-110 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 120ch) { .sa-need-120 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 130ch) { .sa-need-130 > .sa-cell:last-child { grid-column: 1 / -1; } }
-@container (max-width: 140ch) { .sa-need-140 > .sa-cell:last-child { grid-column: 1 / -1; } }
 ")
 
 (define (site-app-render-detail! name row data)
@@ -2741,6 +2707,8 @@
         ;; rows and head as blocks, so the sections and status tabs are tabs
         'collection "c-list"
         'composml site-app-composml
+        ;; only a page with its own 'row draws cards; the rest are the table
+        'composml-when (lambda (b) (and (plist-get (site-app-current-page b) 'row) #t))
         ;; by name, so a reload of site-app reaches the modes already made
         'anchor (lambda (b row) (site-app-row-anchor b row))
         'composml-head site-app-composml-head

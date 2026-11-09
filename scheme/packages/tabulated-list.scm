@@ -2310,6 +2310,12 @@
 .list-cell-title { font-weight: 600; }
 .list-cell-badge { background: var(--hl-line-bg, rgba(128,128,128,.12)); border-radius: 3px; }
 .list-cell-chip { box-shadow: inset 0 0 0 1px var(--dim-fg, #8a857a); border-radius: 3px; }
+.list-cell-badge { color: var(--dim-fg); font-weight: 600; }
+.list-cell-badge.list-cell-good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
+.list-cell-badge.list-cell-warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
+.list-cell-badge.list-cell-bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }
+.list-cell-badge.list-cell-info { color: var(--accent-fg); background: color-mix(in srgb, var(--accent-fg) 16%, transparent); }
+.list-cell-stars { color: var(--warn-fg); }
 ")
 
 (public! 'list-format-template
@@ -2351,17 +2357,36 @@
 ;; cell: the spans come from the columns, so a mode supplies nothing more.
 ;; A column's 'style names the cell's look; a dropped column has no text,
 ;; so it has no span, and both views honour the same ranks.
-(define (list-cell-class c)
-  (let ((s (list-col-style c)))
-    (if s (string-append "list-cell list-cell-" (if (symbol? s) (symbol->string s) s)) "list-cell")))
+(define (list-style-name s) (if (symbol? s) (symbol->string s) s))
+
+;; STYLE is a name, a list of names (badge good), or a fn of (BUF ROW) that
+;; answers one: a badge whose tone follows its value. #f is no style.
+(define (list-cell-class c &optional buf row)
+  (let* ((s (list-col-style c))
+         (s (if (procedure? s) (s buf row) s))
+         (names (cond ((not s) '()) ((pair? s) s) (else (list s)))))
+    (string-join (cons "list-cell"
+                       (map (lambda (n) (string-append "list-cell-" (list-style-name n)))
+                            (filter (lambda (n) n) names)))
+                 " ")))
+
+(define (list-cell-desc c buf row)
+  (list 'tag "span" 'class (list-cell-class c buf row) 'attrs (list (list "col" (car c)))))
 
 (define (list-cell-fields buf ctx)
   (let ((cl (list-ctx-column-lines ctx)))
     (and (pair? cl)
-         (let ((descs (map (lambda (c) (list 'tag "span" 'class (list-cell-class c)
-                                             'attrs (list (list "col" (car c)))))
-                           (car cl))))
-           (lambda (buf row) descs)))))
+         (let ((cols (car cl)))
+           (if (any (lambda (c) (procedure? (list-col-style c))) cols)
+               (lambda (buf row) (map (lambda (c) (list-cell-desc c buf row)) cols))
+               (let ((descs (map (lambda (c) (list-cell-desc c buf #f)) cols)))
+                 (lambda (buf row) descs)))))))
+
+;; the mode's own row blocks, the escape hatch: 'composml, unless its
+;; 'composml-when (BUF) says this view is a plain table after all
+(define (list-own-composml buf)
+  (let ((f (list-opt buf 'composml)) (when? (list-opt buf 'composml-when)))
+    (and f (or (not when?) (when? buf)) f)))
 
 ;; Semantic text records keep the existing text, faces and line geometry.
 (define (list-composml-text! buf rows &optional prepared destination)
@@ -2370,7 +2395,7 @@
         (root (or (list-opt buf 'composml-root)
                   (lambda (b) (list 'tag "c-list" 'attrs
                     (list (list "mode" (list-mode-of b))))))))
-    (unless (list-opt buf 'composml)
+    (unless (list-own-composml buf)
       (desktop-skip! (or destination buf) 'render-text-root)
       (desktop-skip! (or destination buf) 'render-records)
       ;; the draw's own context and field fn, read once: a row that asked
@@ -2421,7 +2446,7 @@
                     (if a (cons (list (car a) (car os) end #f (cadr a)) out) out))))))))
 
 (define (list-composml! buf rows head &optional destination)
-  (let ((render (list-opt buf 'composml))
+  (let ((render (list-own-composml buf))
         (collection (list-opt buf 'collection)))
     (when (and render collection)
       (desktop-skip! (or destination buf) 'render-blocks)
@@ -2801,6 +2826,11 @@
           (overlay-set! buf 'list (append base (list-row-overlays buf shown)))
           ;; the bare view is the text and its faces, nothing drawn over it
           (unless (list-bare? buf)
+            ;; a mode that draws some views itself and leaves others to the
+            ;; table drops what the other kind of view left behind
+            (let ((stale (if (list-own-composml buf) '(render-text-root render-records) '(render-mode render-root render-blocks))))
+              (when (and (list-opt buf 'composml-when) (buffer-local-value (cadr stale) buf))
+                (for-each (lambda (k) (buffer-set-local! buf k #f)) stale)))
             (list-composml! buf shown head)
             (list-composml-text! buf shown prepared))
           (list-anchors! buf shown)

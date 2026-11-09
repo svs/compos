@@ -142,10 +142,13 @@
 (effects! '(write execute))
 
 (define (shell-command->string cmd &rest more)
-  "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return at once; CALLBACK gets the output. An agent's command runs in its chat's sandbox when the sandbox is on."
-  (apply %shell-command->string-builtin
-         (cons (if (agent-sandbox--author-chat) (agent-sandbox-wrap cmd (agent-sandbox--author-chat)) cmd)
-               more)))
+  "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return at once; CALLBACK gets the output. An agent's command must pass decide-shell-policy, judged on CMD itself, and runs in its chat's sandbox when the sandbox is on."
+  (let* ((chat (agent-sandbox--author-chat))
+         (no (and chat (string? cmd) (boundp 'decide-shell-command-verdict)
+                  (decide-shell-command-verdict cmd))))
+    (when no (error no))
+    (apply %shell-command->string-builtin
+           (cons (if chat (agent-sandbox-wrap cmd chat) cmd) more))))
 
 (effects! '(write))
 

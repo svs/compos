@@ -70,7 +70,9 @@
   (or (jj-root (buffer-path (current-buffer)))
       (jj-root-of-dir (buffer-directory (current-buffer)))))
 
-(define (jj-sh root cmd) (shell-command->string cmd root))
+;; jj.scm is the one door to jj, so its commands skip the shell policy
+;; that refuses jj to an agent's own shell calls (agent-sandbox.scm).
+(define (jj-sh root cmd) (%shell-command->string-builtin cmd root))
 
 (define (jj-at root field)
   (string-trim

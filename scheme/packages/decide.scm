@@ -752,4 +752,30 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
               (or (decide-shell-read-answer code)
                   (decide-shell-verdict code))))))
 
+;; The text scan above reads the payload before it runs; a command the
+;; payload builds at run time (string-append, eval, a loaded file) never
+;; shows in that text. shell-command->string asks this on the final
+;; command string of every agent call. The jj test is a regex; the model
+;; is asked only when a model-judged kind is not allowed.
+(define (decide--shell-model-needed?)
+  (let loop ((rows decide-shell-policy))
+    (cond ((null? rows) #f)
+          ((and (not (equal? (car (car rows)) 'jj))
+                (not (equal? (cadr (decide--shell-rule (car (car rows)))) 'allow)))
+           #t)
+          (else (loop (cdr rows))))))
+
+(define (decide-shell-command-verdict cmd)
+  "(decide-shell-command-verdict CMD) — the refusal decide-shell-policy gives the final shell command CMD, or #f to let it run; an ask passes only inside a payload the user approved"
+  (and decide-shell-gate
+       (string? cmd)
+       (let* ((kind (if (re-match? decide--jj-command (string-append "\"" cmd))
+                        'jj
+                        (and (decide--shell-model-needed?) (decide--shell-kind-seen cmd))))
+              (rule (decide--shell-rule kind)))
+         (cond ((not rule) #f)
+               ((equal? (cadr rule) 'refuse) (decide-refusal kind))
+               ((and (equal? (cadr rule) 'ask) (not decide--shell-approved)) (decide-refusal kind))
+               (else #f)))))
+
 (add-hook! 'tool-call-hook 'decide-shell-gate-hook)

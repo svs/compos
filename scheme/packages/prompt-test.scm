@@ -213,21 +213,21 @@
       (check-equal! (prompt-disabled-parts buf) '() "on again")
       (t--prompt-cleanup buf))))
 
-(deftest 'a-driver-chat-takes-the-driver-prompt-alone
-  "the driver profile keeps its own file and the task parts; every other chat leaves the driver file out"
+(deftest 'the-driver-preset-takes-its-short-prompt-alone
+  "the builtin Driver preset holds the driver section and turns the primer off"
   (lambda ()
-    (let ((buf (test-buffer! "*prompt-driver*" ""))
-          (parts '(("identity" "i") ("scheme" "s") ("driver" "d") ("mcp" "m")
-                   ("preset:ats" "p") ("chat-preamble" "c") ("code" "k") ("todo" "t"))))
+    (let* ((buf (test-buffer! "*prompt-driver*" ""))
+           (d (llm-bundle-named "Driver"))
+           (parts (append (compos-acp-prompt-parts)
+                          (preset-prompt-parts (llm-bundle-presets d))
+                          (list (list "todo" "t")))))
+      (check-true! d "Driver is a preset")
+      (check-false! (assoc "preset:driver" (preset-prompt-parts '(compos)))
+                    "no other preset carries the driver text")
+      (chat-prompt-sections-set! buf (llm-bundle-prompt-disabled d))
       (check-equal! (map car (prompt-parts-enabled buf parts))
-                    '("identity" "scheme" "mcp" "preset:ats" "chat-preamble" "code" "todo")
-                    "the full prompt leaves the driver file out")
-      (buffer-set-local! buf 'prompt-profile "driver")
-      (check-equal! (map car (prompt-parts-enabled buf parts))
-                    '("driver" "mcp" "preset:ats" "chat-preamble" "todo")
-                    "the driver keeps its file, the presets and the task parts")
-      (prompt-section-off! buf "todo")
-      (check-false! (assoc "todo" (prompt-parts-enabled buf parts)) "a switch still turns a section off")
+                    '("preset:driver" "todo")
+                    "the driver keeps its section and the task parts")
       (t--prompt-cleanup buf))))
 
 (deftest 'a-direct-chat-keeps-its-first-prompt-until-refresh

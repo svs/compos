@@ -124,6 +124,17 @@ or whose package or domain is, one of the chat's preset focus names:
 is hidden; the focus only orders. So a preset prompt can say "run apropos
 first" and trust the answer to lead with that preset's code and skills.
 
+An LLM preset (`C-c b`) bundles the connector, model, tool presets and the
+sections it turns off. `Driver` is a builtin preset (`*llm-builtin-bundles*`,
+`chat-mode.scm`): a chat that drives the editor for a task, on Haiku. It
+holds the tool preset `driver`, whose prompt is `priv/presets/driver.md`, so
+only Driver chats get that text as `preset:driver`. Its `prompt-disabled`
+list turns off the full primer (every default file, `catalog`, `recipes`,
+`skills`, `code`, `code-agent`). A saved preset of the same name is the
+user's edit and wins; a builtin the saved list lacks comes back.
+`agent-driver-bundle` names the preset an agent's spawn starts on, and
+`(execute* PROMPT '(bundle NAME ...))` picks one for a single spawn.
+
 A project's `compos.scm`, or a `group-on-chat` hook in a group's `group.scm`,
 runs with the chat current, and turns one section off or on:
 

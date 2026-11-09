@@ -2021,13 +2021,15 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
     ;; spawner's group stands in for it here.
     (let ((g (or (buffer-group buf) spawner-group)))
      (when (and g (boundp 'llm-default-bundle-apply!))
-      (llm-default-bundle-apply! buf g)
+      (llm-default-bundle-apply! buf g (plist-get opts 'bundle))
       (let ((ps (plist-get opts 'presets)))
         (when ps (buffer-set-local! buf 'chat-presets ps)))
       (let ((pm (plist-get opts 'permission-mode)))
         (when pm (buffer-set-local! buf 'chat-permission-mode pm)))))
     (chat-task-init! buf name)
-    (let* ((bundle (llm-chat-bundle (or (buffer-group buf) spawner-group)))
+    ;; 'bundle NAME picks the preset; else the driver or the group's
+    (let* ((bundle (or (llm-bundle-resolve (plist-get opts 'bundle))
+                       (llm-chat-bundle (or (buffer-group buf) spawner-group))))
            (connector (or (plist-get opts 'connector) (and bundle (plist-get bundle 'connector)) *default-connector*))
            (model (or (plist-get opts 'model)
                       (and bundle (equal? connector (plist-get bundle 'connector)) (plist-get bundle 'model))))

@@ -22,8 +22,9 @@
   '((haiku "claude-code" "haiku")
     (sonnet "claude-code" "sonnet")
     (opus "claude-code" "opus")
-    ;; a fourth item is the chat's prompt profile (prompts.scm)
-    (haiku-driver "claude-code" "haiku" "driver")))
+    ;; a fourth item names the preset the chat starts on
+    (haiku-driver "claude-code" "haiku" "Driver")
+    (deepseek-driver "opencode-go" "opencode-go/deepseek-v4.1-flash" "Driver")))
 
 (define drive-eval-timeout-s 300)
 
@@ -195,7 +196,7 @@
                            (append
                              (list 'connector (cadr m) 'model (caddr m) 'notify #f
                                    'permission-mode 'auto 'title title)
-                             (if (> (length m) 3) (list 'prompt-profile (list-ref m 3)) '()))))
+                             (if (> (length m) 3) (list 'bundle (list-ref m 3)) '()))))
            (rs (drive-eval--await slug drive-eval-timeout-s))
            (ms (- (monotonic-ms) t0))
            (r (and (pair? rs) (car rs)))
@@ -268,7 +269,7 @@
     (string-append
       "drive-eval: "
       (string-join (map (lambda (l) (string-append (symbol->string l) " " (drive-eval--score (drive-eval--of rows l))
-                                                     " prompt " (number->string (apply max 0 (map (lambda (r) (if (> (length r) 9) (list-ref r 9) 0)) (drive-eval--of rows l)))) "B")) labels) "; ")
+                                                     " prompt " (number->string (fold (lambda (acc r) (if (> (length r) 9) (max acc (list-ref r 9)) acc)) 0 (drive-eval--of rows l))) "B")) labels) "; ")
       "\n\n" (string-pad-right "case" 10)
       (string-join (map (lambda (l) (string-pad-right (symbol->string l) 22)) labels) "")
       "\n"
@@ -319,8 +320,12 @@
             (let ((why (string-append "drive-eval failed: " (value->string rows))))
               (message why)
               (event-publish! "drive-eval" 'done why))
-            (let ((text (drive-eval--text rows ms cs)))
-              (set! *drive-eval-rows* rows)
+            ;; the rows land first, and a report that throws still wakes the
+            ;; listener: a silent callback looked like a dead run
+            (let ((text (begin
+                          (set! *drive-eval-rows* rows)
+                          (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
+                              "drive-eval: the report failed; the rows are in *drive-eval-rows*"))))
               (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
               (buffer-set-text! "*drive-eval*" text)
               (message (car (string-split text "\n")))

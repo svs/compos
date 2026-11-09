@@ -2060,6 +2060,7 @@
     ("<left>" "todo-detail-tab-prev")
     ("RET" "todo-detail-open-child")
     ("u" "todo-detail-parent")
+    ("+" "todo-detail-new-subtask")
     ("t" "todo-detail-accept")
     ("d" "todo-detail-done")
     ("X" "todo-detail-cancel")
@@ -2071,7 +2072,7 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, `d` closes, `X` cancels and `W` parks the task; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent. `a` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, `d` closes, `X` cancels and `W` parks the task; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `a` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
@@ -2202,6 +2203,34 @@
           (message (string-append "Filed " id)))))))
 ;; filing a task is for every buffer, not just the todo list
 (app-entry! "todo-new")
+
+(define (todo--new-subtask! parent after)
+  "ask for a title and file it as a sub-task of PARENT, in its group and project; AFTER runs once it is filed"
+  (read-string (string-append "Sub-task of " (plist-get parent 'title) ": ")
+    (lambda (s)
+      (let ((id (todo-create s (list 'state "todo"
+                                     'parent (plist-get parent 'id)
+                                     'group (plist-get parent 'group)
+                                     'project (plist-get parent 'project)
+                                     'by todo-user))))
+        (todo--refresh-all!)
+        (when after (after))
+        (message (string-append "Filed sub-task " id))))))
+
+(define-command "todo-new-subtask" "File a new sub-task under the task at point"
+  (lambda ()
+    (let ((t (todo--at)))
+      (if t (todo--new-subtask! t #f) (message "No task at point"))))
+  'modes '(todo-mode))
+
+(define-command "todo-detail-new-subtask" "File a new sub-task under this task"
+  (lambda ()
+    (let* ((buf (current-buffer)) (t (todo--detail-task buf)))
+      (if t
+          (todo--new-subtask! t (lambda ()
+                                  (todo--detail-tab-set! buf "children")))
+          (message "The task is gone"))))
+  'modes '(todo-detail-mode))
 
 ;; a chat files its own card: the task is the chat's, in doing, so the
 ;; board can tell a chat that finished from one that stopped halfway
@@ -2421,7 +2450,7 @@
     'footer (lambda (buf)
               '(("←→" "status") ("RET" "open") ("TAB" "fold") ("e" "file") ("t" "accept") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
                 ("a" "assign") ("C" "attach chat") ("D" "deadline") ("P" "project") ("!" "priority") ("T" "urgent")
-                ("c" "capture") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
+                ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own
     ;; arrow remap misses it at open; the mode states it
@@ -2445,6 +2474,7 @@
             ("!" "todo-cycle-priority")
             ("T" "todo-toggle-urgent")
             ("c" "todo-new")
+            ("+" "todo-new-subtask")
             ("v" "todo-next-view")
             ("<right>" "todo-next-view")
             ("<left>" "todo-prev-view")
@@ -2452,7 +2482,7 @@
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `a` hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, or approve it from review), `d` closes it, `x` cancels, `W` parks it, `w` goes to the chat it is assigned to, or asks which when several are attached, `s` starts it. `a` hands it to a new chat in a group, `C` attaches another open chat to it, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `d`, `x`, `W`, `s`, `a`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page, where `w` reaches the chat working it; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

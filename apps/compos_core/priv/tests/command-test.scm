@@ -70,7 +70,10 @@
     (kill-push! "zz-marker")
     (dispatch-keys (list "<f9>" "k"))
     (check-true! (wait-until (lambda () (equal? (kill-top) "aa")) 3000 20) "the first kill is an entry")
-    (check-equal! (last-command) "kill-word" "last-command names the kill")
+    ;; the kill ring changes while the command runs; last-command only
+    ;; when it has finished
+    (check-true! (wait-until (lambda () (equal? (last-command) "kill-word")) 3000 20)
+                 "last-command names the kill")
     (dispatch-keys (list "<f9>" "k"))
     (check-true! (wait-until (lambda () (equal? (kill-top) "aa bb")) 3000 20)
                  "the second kill grew the entry")

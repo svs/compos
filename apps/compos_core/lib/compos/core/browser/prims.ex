@@ -27,13 +27,15 @@ defmodule Compos.Core.Browser.Prims do
         # queries the browser and only then prompts must prompt in the frame
         # it came from, not in whichever was last active when the reply landed
         fid = Frame.current()
+        # and the buffer that asked, so a failed callback reaches that chat
+        buffer = Frame.buffer_context()
 
         Compos.Core.Browser.call(
           s(op),
           browser_args(args),
           fn reply ->
             try do
-              Session.apply_callback(callback, [browser_reply(reply)], fid)
+              Session.apply_callback(callback, [browser_reply(reply)], fid, nil, buffer)
             after
               Roots.drop(key)
             end

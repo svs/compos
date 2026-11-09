@@ -66,12 +66,16 @@ defmodule Compos.Core.MCP.Prims do
             key = {:mcp_call, make_ref()}
             Roots.put(key, callback)
             {server, tool, args} = {s(server), s(tool), mcp_args(args)}
+            # the callback comes back to the frame and buffer that asked, as a
+            # task-run! callback does; a failure then reaches that chat
+            fid = Compos.Core.Frame.current()
+            buffer = Compos.Core.Frame.buffer_context()
 
             Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
               result = Compos.Core.MCP.call_when_ready(server, tool, args, @mcp_wait)
 
               try do
-                Session.apply_callback(callback, mcp_callback_args(result))
+                Session.apply_callback(callback, mcp_callback_args(result), fid, nil, buffer)
               after
                 Roots.drop(key)
               end

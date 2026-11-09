@@ -5986,11 +5986,17 @@
 (define *command-rows-cache* '())
 
 (define (command-rows--key buf)
-  (let ((ro (and (buffer-exists? buf) (buffer-read-only? buf))))
+  ;; the editing state adds and drops its maps on every landing and every
+  ;; first command after it; the key leaves them out, so a return to a
+  ;; buffer does not rebuild the list once per state
+  (let* ((ro (and (buffer-exists? buf) (buffer-read-only? buf)))
+         (es (map keymap--key *editing-state-maps*))
+         (facts (keymap--facts buf))
+         (minor (plist-get facts 'minor-maps)))
    (list (let ((own (keymap--key buf)))
           (map (lambda (m) (if (equal? (car m) own) (list 'own (cadr m)) m))
-               (keymap--ladder buf ro)))
-        (keymap--facts buf)
+               (remove (lambda (m) (member (car m) es)) (keymap--ladder buf ro))))
+        (plist-put facts 'minor-maps (remove (lambda (m) (member m es)) (or minor '())))
         (length (keymap-names))
         (buffer-local-value 'mode-name buf)
         ro

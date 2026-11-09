@@ -101,12 +101,20 @@
 ;; take TAB of BUF as a click on it would
 (define (tab-bars-take! buf tab)
   (with-current-buffer buf
-    (lambda () (run-hook-with-args-until-success 'block-click buf (car tab)))))
+    (lambda ()
+      (or (run-hook-with-args-until-success 'block-click buf (car tab))
+          ;; a tab whose click is a command, as a task page's tabs are:
+          ;; no click handler claims it, so the command runs here
+          (and (string? (car tab)) (command-fn (car tab))
+               (begin (run-command (car tab)) #t))))))
 
 ;; the Nth tab (from 1) of the first bar on SIDE of the pair at BUF
 (define (tab-bars-nth! buf side n)
   (let* ((pair (tab-bars-pair buf))
-         (target (if (eq? side 'detail) (cadr pair) (car pair)))
+         ;; a page with tabs and nothing beside it, such as a task page whose
+         ;; list has no bars, answers both sides itself: its tabs show the keys
+         (target (or (if (eq? side 'detail) (cadr pair) (car pair))
+                     (and (tab-bars-provider buf) buf)))
          (bars (if target (tab-bars target) '()))
          (tabs (if (pair? bars) (cadr (car bars)) '())))
     (cond ((not target) (message (if (eq? side 'detail) "No page with tabs beside this list" "No list with tabs here")))

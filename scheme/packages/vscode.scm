@@ -51,15 +51,15 @@
     ("s-w" "vscode-close-buffer")
     ("C-s-<left>" "window-previous-pane")
     ("C-s-<right>" "window-next-pane")
-    ;; Cmd-K opens M-x, as the Cmd-K bar of a web app does: the tutorial
-    ;; commands come first while nothing is typed
-    ("s-k" "execute-extended-command")))
+    ;; Cmd-K opens the palette, as the Cmd-K bar of a web app does: Start
+    ;; here comes first while nothing is typed
+    ("s-k" "command-palette")))
 
 (define-keymap! "vscode-mode-map")
 ;; Shift with a letter arrives as the capital: s-P, never s-S-p
 (for-each (lambda (k) (keymap-unset! "vscode-mode-map" k))
           '("s-S-p" "s-S-f" "s-S-e" "C-<tab>"
-            ;; Cmd-K was a prefix before it opened M-x
+            ;; Cmd-K was a prefix before it opened the palette
             "s-k s-<left>" "s-k s-<right>" "s-k s-<up>" "s-k s-<down>" "s-k s-\\" "s-k s-w"
             "s-k <left>" "s-k <right>" "s-k <up>" "s-k <down>" "s-k s-s" "s-k l" "s-k b" "s-k c"))
 (for-each (lambda (k) (define-key "vscode-mode-map" (car k) (cadr k))) vscode--keys)
@@ -111,7 +111,7 @@
     (message (if vscode-mode "VSCode keys on" "VSCode keys off"))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K opens M-x, with the tutorial commands first. Cmd-Shift-P or F1 opens the command palette. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts.")
+  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts.")
 
 (vscode--apply! vscode-mode)
 

@@ -108,32 +108,31 @@
                                    (substring (cadr row) (min 12 (string-length (cadr row))) (string-length (cadr row))))
                     (cddr row))))))
 
-;; The commands a newcomer starts from. While nothing is typed, M-x and the
-;; palette show them first, under a Tutorial heading; typing searches every
-;; command as before. A heading is a separator row: it shows, and the
+;; The few commands a newcomer starts from. While nothing is typed, the
+;; palette shows them first, under a Start here heading; typing searches
+;; every command as before. A heading is a separator row: it shows, and the
 ;; arrows step over it.
 (defcustom 'command-tutorial
-  '("help-with-tutorial" "onboarding" "how-do-i" "window-layout" "ibuffer"
-    "chat-list" "ibuffer-prompt" "project-find-file" "chat-new" "keys" "load-theme")
-  "The commands M-x and the palette show first, under Tutorial, while you have typed nothing."
+  '("help-with-tutorial" "project-find-file" "ibuffer" "window-layout" "chat-list")
+  "The commands the palette shows first, under Start here, while you have typed nothing."
   'group 'interaction)
 
 (define (command-section-heading label) (list label "" "separator"))
 
 ;; ROWS, (NAME HINT ...) in their order, with the tutorial commands among
-;; them lifted into a Tutorial section ahead of the rest. A command ROWS
+;; them lifted into a Start here section ahead of the rest. A command ROWS
 ;; does not hold (out of scope here) is left out.
 (define (command-sections rows &optional rest-label)
   (let ((tut (filter (lambda (r) r) (map (lambda (n) (assoc n rows)) command-tutorial))))
     (if (null? tut)
         rows
-        (append (list (command-section-heading "Tutorial"))
+        (append (list (command-section-heading "Start here"))
                 tut
                 (list (command-section-heading (or rest-label "All commands")))
                 (filter (lambda (r) (not (member (car r) command-tutorial))) rows)))))
 
 (public! 'command-sections
-  "(command-sections ROWS [REST-LABEL]) -- ROWS with the command-tutorial commands first, under a Tutorial heading")
+  "(command-sections ROWS [REST-LABEL]) -- ROWS with the command-tutorial commands first, under a Start here heading")
 
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
@@ -149,7 +148,7 @@
                           (map (lambda (h)
                                  (if (command-fn h) (assoc h rows) (list h "past  ask")))
                                recent))))
-        ;; Tutorial, then what you ran or asked, then every other command
+        ;; Start here, then what you ran or asked, then every other command
         (command-sections (append top (filter (lambda (r) (not (member (car r) recent))) rows))))
       (let ((lead (command-palette--past query)))
         (command-palette--with-ask query

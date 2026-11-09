@@ -5939,10 +5939,7 @@
       (set! *mb-history-key* 'M-x)
       (set! *mb-history-pos* -1)
       (minibuffer-read* "M-x "
-        ;; the palette package lifts the tutorial commands into a section of
-        ;; their own; the core list stands without it
-        (let ((rows (command-rows-by-history 'M-x (command-rows))))
-          (if (boundp 'command-sections) (command-sections rows) rows))
+        (command-rows-by-history 'M-x (command-rows))
         (list (list 'confirm
                 (lambda (cmd)
                   (set! *mb-history-key* #f)

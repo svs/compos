@@ -56,6 +56,44 @@
           (check-equal! (length (filter (lambda (l) (string-contains? l "sub-task ")) (plist-get (todo-get parent) 'log))) 1
                         "progress without a state change stays on the sub-task"))))))
 
+(deftest 'todo-handover-archives-the-chat-and-a-new-one-takes-the-task
+  "the old chat goes, a new chat is the assignee, and the task no longer names the old one"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (let* ((old (t--todo-assign id g))
+               (old-ref (chat-stable-id! old))
+               (new (with-stubs (list (list 'agent-continue!
+                                            (lambda (c text) (buffer-set-local! c 'agent-slug (string-append "zz-slug-" c))))
+                                      (list 'agent-status (lambda (slug) 'idle))
+                                      ;; the test chat runs no agent to stop
+                                      (list 'agents-kill-runtime! (lambda (c) #f)))
+                      (lambda () (todo-handover! id "agent:zz"))))
+               (t (todo-get id)))
+          ;; the new chat takes the task's title, so it may reuse the old name: compare ids
+          (check-true! (and (string? new) (buffer-exists? new) (not (equal? (chat-stable-id! new) old-ref)))
+                       "a new chat took the task")
+          (check-false! (find (lambda (b) (equal? (buffer-local-value 'chat-id b) old-ref)) (buffer-list))
+                        "the old chat is archived")
+          (check-equal! (plist-get t 'assignee) (chat-stable-id! new) "the task names the new chat")
+          (check-false! (member old-ref (or (plist-get t 'chats) '())) "the old chat is off the task")
+          (check-true! (any (lambda (l) (string-contains? l (string-append "handed over: " old-ref))) (plist-get t 'log))
+                       "the log says who handed over")
+          (buffer-kill! new))))))
+
+(deftest 'todo-handover-of-a-running-chat-waits-for-its-turn-end
+  "a chat that hands over its own task finishes its turn first"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (let* ((old (t--todo-assign id g))
+               (said (with-stubs (list (list 'agent-status (lambda (slug) 'running)))
+                       (lambda () (todo-handover! id "agent:zz")))))
+          (check-true! (string? said) "it answers a note, not a chat")
+          (check-true! (buffer-exists? old) "the chat stays until its turn ends")
+          (check-equal! (buffer-local-value 'todo-handover old) (list id "agent:zz") "the handover waits on the chat")
+          (buffer-kill! old))))))
+
 (deftest 'todo-assign-chat-shows-the-new-chat-in-no-window
   "the chat starts quiet, in no frame of its group or another, until someone shows it"
   (lambda ()

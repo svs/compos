@@ -1422,6 +1422,59 @@
 (public! 'todo-attach-chat! "(todo-attach-chat! ID CHAT [WHO]) — attach a chat, its buffer or id, to the task beside its assignee")
 (public! 'todo-detach-chat! "(todo-detach-chat! ID CHAT [WHO]) — take a chat off the task's attached chats")
 
+;; Handover. The chat working a task is archived and a new chat in the
+;; task's group takes it, with the task's notes as its brief: the task is
+;; the record, so nothing else crosses. The new chat keeps the old one's
+;; parent, so its reports reach the same coordinator. A chat that hands
+;; over its own task is archived when its turn ends, not in the middle.
+(define (todo--handover-now! id who)
+  (let* ((t (todo--must id))
+         (old-ref (plist-get t 'assignee))
+         (g (or (plist-get t 'group) (todo--home-group t)))
+         ;; the chat index is a second old at most; the chat the task keeps is not
+         (old (or (todo--live-chat old-ref) (todo--kept-live t g)))
+         (parent (and old (subagent-parent old))))
+    (when old (agents-archive! old))
+    (todo-update id (list 'assignee #f
+                          'chats (remove (lambda (c) (equal? c old-ref)) (or (plist-get t 'chats) '()))
+                          'log (string-append "handed over: " (or old-ref "no chat") (if old " archived" ""))
+                          'by who))
+    (todo-assign-chat! id g (if parent (string-append "agent:" parent) todo-user))))
+
+(define (todo-handover! id &optional who)
+  "(todo-handover! ID [WHO]) — archive the chat working the task, start a new chat in the task's group with the task as its brief, and make it the assignee; answers the new chat, or a note when the calling chat hands over its own task (that runs when its turn ends)"
+  (let* ((t (todo--must id))
+         (who (or who todo-user))
+         (old (or (todo--live-chat (plist-get t 'assignee))
+                  (todo--kept-live t (or (plist-get t 'group) (todo--home-group t)))))
+         (slug (and old (agent-slug-of old))))
+    (if (and slug (member (agent-status slug) '(running starting)))
+        (begin (buffer-set-local! old 'todo-handover (list id who))
+               "the handover runs when this chat's turn ends")
+        (todo--handover-now! id who))))
+
+(add-hook! (list 'agent-turn-end "todo-handover")
+  (lambda (slug stop-reason ok?)
+    (let* ((buf (agent-buf slug))
+           (job (and (string? buf) (buffer-exists? buf) (buffer-local-value 'todo-handover buf))))
+      (when job
+        (buffer-set-local! buf 'todo-handover #f)
+        (todo--handover-now! (car job) (cadr job))))))
+
+(public! 'todo-handover! "(todo-handover! ID [WHO]) — archive the task's chat, start a new one with the task as its brief, and make it the assignee")
+(catalog-meta! 'function "todo-handover!" 'domain 'writing 'effects '(destroy spend))
+
+(define-command "todo-handover" "Hand the task to a new chat: archive the chat working it, start a new one with the task as its brief"
+  (lambda ()
+    (let ((t (if (equal? (buffer-local-value 'mode-name (current-buffer)) "todo-detail-mode")
+                 (todo--detail-task (current-buffer))
+                 (todo--at))))
+      (if (not t)
+          (message "No task here")
+          (let ((new (todo-handover! (plist-get t 'id))))
+            (message (if (string? new) (string-append "Handed over to " new) "No chat"))))))
+  'modes '(todo-mode todo-detail-mode))
+
 (define (todo--chat-label c)
   ;; a live chat's name, else its archived title, else its id
   (or (todo--live-chat c)
@@ -2160,6 +2213,7 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
 - Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress. RESULT and SUMMARY go to the task's notes and to its parent's log by themselves; do not add them again. They are the handover: what changed, where, the numbers, and what is left, complete without the chat. Work after review goes in with `todo-review` again and a new summary, not as a log line.
 - The task is the record. Findings, numbers, decisions, where the work stands and the next step go on the task with `(todo-update ID (list 'note TEXT 'by WHO))` as you learn them, never only in the chat, a side file or a memory. Whoever takes the task next reads only the task.
 - A chat that coordinates a parent task keeps the parent's notes current: when a sub-task goes to review or done, add what it changed for the goal.
+- Handover: `(todo-handover! ID WHO)` archives the chat working the task, starts a new chat in the task's group with the task as its brief, and makes it the assignee. Bring the notes up to date first: they are all the new chat gets. A chat that hands over its own task is archived when its turn ends.
 - Waiting on someone: after `todo-wait`, call `(agent-listen! '(topic \"whatsapp:PHONE\" kind received task ID) NOTE)`. The event comes to you as a message; decide whether it answers, then carry on or listen again. `mail:ACCOUNT` topics need `match` with the sender.
 - WHO, and 'by in PROPS, is `agent:` and your agent id from `(chat-context)`.
 - A task that needs the user's OK, such as a draft before it goes out, goes to review. Do not continue it until the user approves.")

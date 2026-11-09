@@ -1061,6 +1061,8 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
 (public! 'fast-chat-resolve "(fast-chat-resolve TEXT K) -- K gets the Scheme a !-input resolves to")
 (public! 'fast-palette-install! "(fast-palette-install!) -- palette input falls through to fast-code")
 (public! 'fast-palette-remove! "(fast-palette-remove!) -- restore the plain palette")
+(public! 'fast-learned-path "(fast-learned-path) -- the file that keeps the functions fast-code learned")
+(catalog-meta! 'function "fast-learned-path" 'effects '(read))
 
 ;; learned functions come back first; safe to re-run after a reload
 (fast-learned-load!)

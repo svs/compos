@@ -103,12 +103,35 @@
                                  (command-palette--recipe-hit (assoc (plist-get h 'name) *recipes*)))
                                 (else #f))))
                       found)))
-         (named? (lambda (h) (apropos-text-hit? (plist-get h 'name) words))))
+         (named? (lambda (h) (apropos-text-hit? (plist-get h 'name) words)))
+         ;; "undo" is undo and "split window right" is split-window-right:
+         ;; the command the words name leads, before any that merely share one
+         (exact (let ((n (string-join (filter (lambda (w) (not (equal? w "")))
+                                              (string-split (string-downcase (string-trim query)) " "))
+                                      "-")))
+                  (and (command-fn n)
+                       (command-applicable? n (command-palette--origin))
+                       n)))
+         (exact? (lambda (h) (and exact (equal? (plist-get h 'name) exact))))
+         ;; then the everyday commands and the ones you ran before: save-buffer
+         ;; before llm-config-save-bundle
+         (ran (history-items 'M-x))
+         (common? (lambda (h) (and (equal? (plist-get h 'kind) "command")
+                                   (or (command-palette--everyday? (plist-get h 'name))
+                                       (member (plist-get h 'name) ran)))))
+         (rest (filter (lambda (h) (not (or (exact? h) (common? h)))) hits)))
     (append
       (let ((bind (command-palette--bind-hit query)))
         (if bind (list bind) '()))
-      (filter named? hits)
-      (filter (lambda (h) (not (named? h))) hits))))
+      (if exact (list (command-palette--command-hit exact)) '())
+      (let* ((common (filter (lambda (h) (and (common? h) (not (exact? h)))) hits))
+             ;; "zoom in" is the phrase of text-scale-increase, not reset
+             (q (string-downcase (string-trim query)))
+             (says? (lambda (h) (let ((row (assoc (plist-get h 'name) command-palette-everyday)))
+                                  (and row (string-contains? (cadr row) q))))))
+        (append (filter says? common) (filter (lambda (h) (not (says? h))) common)))
+      (filter named? rest)
+      (filter (lambda (h) (not (named? h))) rest))))
 
 ;; A recipe the palette can draw, in apropos hit shape.
 (define (command-palette--recipe-hit recipe)
@@ -543,6 +566,62 @@
               (lambda () (command-palette--alias! (cadr row) (command-palette--row-kind row) (car row)))))
           command-palette-learned)
 
+;; A new user types the words of the editor they came from: "close tab",
+;; "split editor", "settings". These are those words for the commands
+;; that do it, and these commands lead the palette over rarer ones that
+;; share a word: "save" is save-buffer before llm-config-save-bundle.
+(define command-palette-everyday
+  '(("save-buffer" "save file")
+    ("write-file" "save as")
+    ("revert-buffer" "revert file reload from disk")
+    ("undo" "undo")
+    ("kill-buffer" "close tab close editor close file")
+    ("find-file" "open file")
+    ("project-find-file" "go to file quick open find file in project")
+    ("buffer-new" "new file new untitled")
+    ("switch-to-buffer" "switch tab switch editor open editors")
+    ("ibuffer" "open editors list tabs")
+    ("split-window-right" "split editor split right side by side")
+    ("split-window-below" "split editor down split down")
+    ("delete-window" "close pane close split close window")
+    ("delete-other-windows" "close other panes single pane maximize")
+    ("other-window" "focus next pane next split")
+    ("customize" "settings preferences options")
+    ("load-theme" "color theme dark mode light mode")
+    ("text-scale-increase" "zoom in font size bigger text")
+    ("text-scale-decrease" "zoom out font size smaller text")
+    ("text-scale-reset" "reset zoom font size")
+    ("describe-bindings" "keyboard shortcuts keybindings keymap")
+    ("describe-key" "what does this key do shortcut")
+    ("shell" "terminal console command line")
+    ("visual-line-mode" "word wrap line wrap")
+    ("display-line-numbers-mode" "line numbers")
+    ("goto-line" "go to line")
+    ("isearch-forward" "find search in file")
+    ("query-replace" "find and replace")
+    ("project-ripgrep" "find in files search project search all files")
+    ("imenu" "go to symbol outline")
+    ("code-goto-definition" "go to definition")
+    ("cua-select-all" "select all")
+    ("dired" "file explorer folder")
+    ("chat-new" "new chat ask ai assistant")
+    ("vscode-mode" "vscode keys keymap")
+    ("keyboard-quit" "cancel escape")))
+
+(define (command-palette--everyday? name)
+  (and (assoc name command-palette-everyday) #t))
+
+;; idempotent: a word a command already answers to changes nothing, so the
+;; index rebuilds only when a command first gets its words
+(define (command-palette--everyday-words!)
+  (for-each (lambda (row)
+              (ignore-errors
+                (lambda () (when (command-fn (car row))
+                             (command-palette--alias! (car row) "command" (cadr row))))))
+            command-palette-everyday))
+
+(command-palette--everyday-words!)
+
 (define command-palette-recipes-chat "*recipes*")
 
 ;; what a new *recipes* chat is for; after that it learns from its own turns
@@ -713,6 +792,7 @@
   "Find an action by intent across command docs and recipes"
   (lambda ()
     (set! *command-palette--from* (current-buffer))
+    (command-palette--everyday-words!)
     (set! *mb-row-delete-fn* command-palette--delete-row!)
     ;; every pick and every ask goes on 'M-x, the one history the palette
     ;; and M-x share, so M-p in either walks them back

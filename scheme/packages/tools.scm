@@ -493,7 +493,12 @@
                               'namespace (catalog--get e 'namespace)
                               'domain (catalog--get e 'domain)
                               'effects (catalog--get e 'effects)
-                              'use (catalog--get e 'use)))
+                              'use (catalog--get e 'use)
+                              ;; the words people say for it: a command
+                              ;; row is searched by its enrichment, so
+                              ;; without them "split editor" never
+                              ;; found split-window-right
+                              'aliases (catalog--get e 'aliases)))
                       (row (list (apropos--bucket-key name)
                                  (string-append kind " " name) enrichment)))
                    (if (or (equal? qual "") (equal? qual name))
@@ -516,7 +521,8 @@
         'namespace (catalog--get e 'namespace)
         'domain (catalog--get e 'domain)
         'effects (catalog--get e 'effects)
-        'use (catalog--get e 'use)))
+        'use (catalog--get e 'use)
+        'aliases (catalog--get e 'aliases)))
 
 ;; the six enrichment fields for KIND and NAME, already built when the
 ;; index holds them. With no index it reads the catalog and builds them,

@@ -5586,8 +5586,11 @@
                                       (append (list "global") (global-minor-maps) maps))))
              (derived (names-less (command--mode-map-commands)
                                   (append open (map car *command-modes*))))
+             ;; no modes is everywhere: a command a mode map binds that
+             ;; still works in any buffer says so with (command-modes! NAME '())
              (named (map car (remove (lambda (row)
-                                       (any (lambda (m) (command--mode-on? m buf maps)) (cadr row)))
+                                       (or (null? (cadr row))
+                                           (any (lambda (m) (command--mode-on? m buf maps)) (cadr row))))
                                      *command-modes*))))
         ;; an app's commands are offered in the app alone (apps.scm)
         (append named derived
@@ -5724,7 +5727,7 @@
   name)
 
 (public! 'command-modes!
-  "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as Emacs's (interactive nil MODE ...)")
+  "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as Emacs's (interactive nil MODE ...); '() offers it in every buffer, even when only a mode map binds it")
 (public! 'command-applicable?
   "(command-applicable? NAME [BUF]) -- #t when command NAME is for BUF: no modes, or one of its modes is on there")
 (public! 'commands-out-of-scope

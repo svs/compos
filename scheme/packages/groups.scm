@@ -3530,6 +3530,13 @@ is forgotten and that group falls back to creation order in the switcher."
               (frame-group-label-refresh!)
               (message (string-append "Renamed group " before " to " clean)))))))
 
+;; These act on the current group in any buffer, and on the marked groups
+;; in the board. The board's map binds them, which would hide them from
+;; M-x everywhere else.
+(for-each (lambda (name) (command-modes! name '()))
+          '("group-rename" "group-add" "group-describe" "group-dissolve"
+            "group-kill" "group-members"))
+
 (define-command "group-rename" "Rename the current group; in the board, the group at point"
   (lambda ()
     (let ((g (if (in-groups-board?) (groups--current) (frame-group))))

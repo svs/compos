@@ -889,6 +889,11 @@
                 (or (report-errors "chat-finish: read the open todos" (lambda () (todo-list))) '()))
         '())))
 
+(define (chat-user-focused? buf)
+  "#t when the frame's active window shows BUF: the user is on that chat, so nothing closes it"
+  (let ((w (with-frame-windows (lambda () (active-window)))))
+    (and w (equal? (window-buffer w) buf))))
+
 (define (chat-finish--blockers buf slug ok? stop-reason)
   (let ((info (and slug (agent-info slug)))
         (work (report-errors "chat-finish: read the work state" (lambda () (chat-work-state buf)))))
@@ -897,6 +902,7 @@
          '()
          (list (string-append "the run ended: " (if (string? stop-reason) stop-reason "error"))))
      (if (and (pair? info) (plist-get info 'permission)) (list "a permission request waits") '())
+     (if (chat-user-focused? buf) (list "the user is on it") '())
      (if (and (pair? work) (eq? (plist-get work 'verdict) 'unsaved)) (list "it has unsaved edits") '())
      (map (lambda (t) (string-append "todo " (plist-get t 'id) " is " (plist-get t 'state)))
           (chat-finish--open-todos buf)))))

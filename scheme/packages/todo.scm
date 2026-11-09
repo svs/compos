@@ -1443,10 +1443,13 @@
          ;; the chat index is a second old at most; the chat the task keeps is not
          (old (or (todo--live-chat old-ref) (todo--kept-live t g)))
          (parent (and old (subagent-parent old))))
-    (when old (agents-archive! old))
+    ;; never close the chat the user is on; it stays, off the task
+    (define kept? (and old (chat-user-focused? old)))
+    (when (and old (not kept?)) (agents-archive! old))
     (todo-update id (list 'assignee #f
                           'chats (remove (lambda (c) (equal? c old-ref)) (or (plist-get t 'chats) '()))
-                          'log (string-append "handed over: " (or old-ref "no chat") (if old " archived" ""))
+                          'log (string-append "handed over: " (or old-ref "no chat")
+                                              (cond (kept? " kept open, the user is on it") (old " archived") (else "")))
                           'by who))
     (todo-assign-chat! id g (if parent (string-append "agent:" parent) todo-user))))
 

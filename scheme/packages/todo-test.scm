@@ -40,6 +40,22 @@
                     (list 'agent-status (lambda (slug) (or status 'idle))))
     (lambda () (todo-assign-chat! id g))))
 
+(deftest 'todo-a-sub-task-result-lands-on-the-task-and-its-parent
+  "the task is the record: a review summary goes to the sub-task's notes and the parent's log"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g parent)
+        (let ((sub (todo-create "zz sub-task" (list 'group g 'project "zz" 'parent parent))))
+          (todo-review sub "zz measured 3 rounds\nmore detail" "agent:zz")
+          (check-true! (string-contains? (plist-get (todo-get sub) 'notes) "Result: zz measured 3 rounds")
+                       "the summary is in the sub-task's notes")
+          (check-true! (any (lambda (l) (string-contains? l (string-append "sub-task " sub " zz sub-task -> review: zz measured 3 rounds")))
+                            (plist-get (todo-get parent) 'log))
+                       "the parent's log names the sub-task, its state and the summary's first line")
+          (todo-log sub "zz progress" "agent:zz")
+          (check-equal! (length (filter (lambda (l) (string-contains? l "sub-task ")) (plist-get (todo-get parent) 'log))) 1
+                        "progress without a state change stays on the sub-task"))))))
+
 (deftest 'todo-assign-chat-shows-the-new-chat-in-no-window
   "the chat starts quiet, in no frame of its group or another, until someone shows it"
   (lambda ()

@@ -587,6 +587,23 @@
                 (list 'note (string-trim text)))
         props)))
 
+;; A sub-task that goes to review, done, waiting or cancelled says so in its
+;; parent's log, with the first line of what it said, so whoever works the
+;; parent sees the result without reading the sub-task's chat.
+(define (todo--tell-parent! old new who text)
+  (let ((parent (plist-get new 'parent))
+        (state (plist-get new 'state)))
+    (when (and (string? parent) (not (todo--blank? parent))
+               (not (equal? state (plist-get old 'state)))
+               (member state '("review" "done" "waiting" "cancelled"))
+               (todo-get parent))
+      (let* ((said (if (todo--blank? text) "" (car (string-split text "\n"))))
+             (said (if (> (string-length said) 300) (string-append (substring said 0 300) "...") said)))
+        (todo-update parent
+          (list 'log (string-append "sub-task " (plist-get new 'id) " " (plist-get new 'title) " -> " state
+                                    (if (todo--blank? said) "" (string-append ": " said)))
+                'by who))))))
+
 (define (todo-update id props)
   "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, urgent (#t or #f), deadline, scheduled, tags, source, parent, depends, notes (#f or blank clears one), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
   (let* ((t (todo--must id))
@@ -621,6 +638,7 @@
                       (todo--write-span! t (todo--render new))
                       (begin (todo--write-span! t #f)
                              (todo--append! (todo--project-file (plist-get new 'project)) (todo--render new))))
+                  (todo--tell-parent! t new who text)
                   (todo-get id))))))))
 
 ;; What a log, done, wait or review call answers: the task's state after
@@ -647,9 +665,14 @@
           ((not (todo--ready? t (todo--all))) #f)
           (else (todo-update id (list 'state "doing" 'assignee who 'by who))))))
 
+;; the result of a task is part of the task: it goes to the notes as well as
+;; the log, so the page alone hands the task over
+(define (todo--result-note text)
+  (if (todo--blank? text) #f (string-append "Result: " text)))
+
 (define (todo-done id &optional result who)
   "(todo-done ID [RESULT] [WHO]) — close the task as done; RESULT goes to the log"
-  (todo--answer (todo-update id (list 'state "done" 'log result 'by (or who todo-user)))))
+  (todo--answer (todo-update id (list 'state "done" 'log result 'note (todo--result-note result) 'by (or who todo-user)))))
 
 (define (todo-cancel id &optional reason who)
   "(todo-cancel ID [REASON] [WHO]) — close the task as cancelled"
@@ -661,7 +684,7 @@
 
 (define (todo-review id summary &optional who)
   "(todo-review ID SUMMARY [WHO]) — hand the task to a human to approve, e.g. a draft before it is sent"
-  (todo--answer (todo-update id (list 'state "review" 'log summary 'by (or who todo-user)))))
+  (todo--answer (todo-update id (list 'state "review" 'log summary 'note (todo--result-note summary) 'by (or who todo-user)))))
 
 (define (todo-approve id &optional text who)
   "(todo-approve ID [TEXT] [WHO]) — approve a task in review: back to todo for its assignee, logged as approved"
@@ -2134,7 +2157,9 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
 - Read: `(todo-list [SPEC])` gives open tasks, most urgent first. SPEC is a plist: state, project, assignee (\"none\" is unassigned), tag, text, overdue, ready. `(todo-next WHO)`, `(todo-get ID)` and `(todo-projects)` answer the rest.
 - File: `(todo-create TITLE PROPS)` gives the new id. PROPS must hold 'group: \"put a todo in X\" means group X, by name or id, not a project and not your own chat's group. Without it the call errors and lists the groups; pick one and call again. A task you find goes in as inbox, for the user to triage.
 - Kick off: when the user asks for a todo, file it and start an agent on it in the same turn with `(todo-assign-chat! ID GROUP WHO)`, GROUP being the todo's group. It starts the chat on the group's own backend and sends it the brief. Do not stop at filing, and do not ask whether to start it. When your own chat is clean, that is, the todo request is its first task, do not start a new chat: file the todo with 'assignee `(chat-stable-id! CHAT)` and 'state \"doing\", CHAT being your chat buffer, and work it in this chat.
-- Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress.
+- Work: `(todo-claim ID WHO)`, then `(todo-done ID RESULT WHO)`, `(todo-wait ID REASON WHO)` or `(todo-review ID SUMMARY WHO)`. `(todo-log ID TEXT WHO)` records progress. RESULT and SUMMARY go to the task's notes and to its parent's log by themselves; do not add them again.
+- The task is the record. Findings, numbers, decisions, where the work stands and the next step go on the task with `(todo-update ID (list 'note TEXT 'by WHO))` as you learn them, never only in the chat, a side file or a memory. Whoever takes the task next reads only the task.
+- A chat that coordinates a parent task keeps the parent's notes current: when a sub-task goes to review or done, add what it changed for the goal.
 - Waiting on someone: after `todo-wait`, call `(agent-listen! '(topic \"whatsapp:PHONE\" kind received task ID) NOTE)`. The event comes to you as a message; decide whether it answers, then carry on or listen again. `mail:ACCOUNT` topics need `match` with the sender.
 - WHO, and 'by in PROPS, is `agent:` and your agent id from `(chat-context)`.
 - A task that needs the user's OK, such as a draft before it goes out, goes to review. Do not continue it until the user approves.")

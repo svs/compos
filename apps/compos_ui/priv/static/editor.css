@@ -1070,6 +1070,9 @@ body.unfocused .window.active .cursor {
    The picker itself is .dash-verbosity, drawn in the dashboard
    headline (editor.scm); only these reader rules live here. */
 .ag-thought { display: none; }
+/* an agent's message (a task brief, a listener wake) wears ag-thought for
+   its look, but it is a turn of the conversation: it stays, folded */
+.ag-thought.ag-event { display: block; }
 .ag-scroll.ag-verbosity-info > c-toolcall:has(+ c-toolcall) { display: none; }
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool {
   margin: 2px 0; border-color: transparent; background: transparent; opacity: .76;

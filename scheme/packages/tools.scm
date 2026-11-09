@@ -1476,6 +1476,19 @@
   "(apropos-category 'windows) — every public function in one category")
 (public! 'public-categories "(public-categories) — the category names")
 
+;; An exact name always answers, display effects or not: a model that asks
+;; for app-dismiss by name must not get () and spend rounds looking for it.
+(define (apropos--with-exact q rows include-display)
+  (let* ((name (string-trim q))
+         (exact? (lambda (r) (let ((n (plist-get r 'name)))
+                               (or (equal? n name) (equal? n (string-append name "!"))))))
+         (have (map (lambda (r) (plist-get r 'name)) rows))
+         (more (if (or include-display (equal? name "") (not (list? rows)))
+                   '()
+                   (filter (lambda (r) (and (exact? r) (not (member (plist-get r 'name) have))))
+                           (apropos name)))))
+    (if (null? more) rows (append more rows))))
+
 (define-tool! 'apropos
   (string-append
     "Search the editor by intent, not by regex: public functions with their "
@@ -1531,7 +1544,7 @@
                                         (apropos--internal
                                           n (primitive-doc n) words catalogued-names))
                                       (global-names)))))
-              (apply apropos (cons q filters)))))))
+              (apropos--with-exact q (apply apropos (cons q filters)) include-display))))))
   '(read external))
 
 (define-tool! 'apropos-categories

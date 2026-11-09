@@ -634,7 +634,8 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (define (group-frame-context-state)
   (let ((live (frame-list)))
-    (let loop ((entries *frame-locals*) (out '()))
+    (let loop ((entries (map (lambda (f) (list f (frame-locals-in f))) live))
+               (out '()))
       (if (null? entries)
           (reverse out)
           (let* ((entry (car entries))
@@ -684,54 +685,32 @@ is forgotten and that group falls back to creation order in the switcher."
                          '())
                      (if (and pinned (string? (car (cdr pinned))))
                          (list (list 'pinned-group (car (cdr pinned))))
-                         '())))
-                 (old (assoc frame *frame-locals*))
-                 (locals (if old (car (cdr old)) '()))
-                 (runtime
-                   (filter
-                     (lambda (item)
-                       (not (and (pair? item)
-                                 (member (car item) *group-frame-context-keys*))))
-                     locals))
-                 (others
-                   (filter (lambda (item)
-                             (not (and (pair? item)
-                                       (equal? (car item) frame))))
-                           *frame-locals*)))
-            (set! *frame-locals*
-              (cons (list frame (append restored runtime)) others)))))
+                         '()))))
+            (for-each (lambda (k) (frame-local-remove-in! frame k))
+                      *group-frame-context-keys*)
+            (for-each (lambda (kv) (set-frame-local-in! frame (car kv) (cadr kv)))
+                      restored))))
       saved)
     ;; every restored frame stands in its group again, so each modeline
     ;; must say so without waiting for the next switch
     (for-each
       (lambda (entry)
         (when (and (pair? entry) (member (car entry) (frame-list)))
-          (let* ((frame (car entry))
-                 (fr (assoc frame *frame-locals*))
-                 (locals (if fr (car (cdr fr)) '()))
-                 (kv (assoc 'current-group locals)))
-            (group-frame-style-set! frame (and kv (car (cdr kv)))))))
+          (let ((frame (car entry)))
+            (group-frame-style-set! frame (frame-local-in frame 'current-group)))))
       saved)))
 
 
 (define (group-frame-context-remove-id! id)
-  (set! *frame-locals*
-    (map
-      (lambda (entry)
-        (if (and (pair? entry)
-                 (pair? (cdr entry))
-                 (pair? (car (cdr entry))))
-            (list (car entry)
-              (filter
-                (lambda (item)
-                  (not
-                    (and (pair? item)
-                         (pair? (cdr item))
-                         (member (car item) *group-frame-context-keys*)
-                         (equal? (group-resolve-id (car (cdr item))) id))))
-                (car (cdr entry))))
-            entry))
-      *frame-locals*)))
+  (for-each
+    (lambda (frame)
+      (for-each
+        (lambda (k)
+          (let ((v (frame-local-in frame k)))
+            (when (and v (equal? (group-resolve-id v) id))
+              (frame-local-remove-in! frame k))))
+        *group-frame-context-keys*))
+    (map car *frame-local-keys*)))
 
 ;; the groups this session went to, newest first, then the ones the last
 ;; session ended with; a deleted group drops out
@@ -1423,7 +1402,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (group-frame-style-set! (selected-frame) (frame-local 'current-group))
   (modeline-groups-refresh!))
 
-;; a reattached frame keeps its group in *frame-locals*, but the Elixir
+;; a reattached frame keeps its group in its frame-locals, but the Elixir
 ;; frame behind it is new and its label is empty — so push it on attach
 ;; A group's colour is a slot, so a theme switch changes the hex the frame
 ;; style and the modeline locals hold. Both are caches; re-derive them.

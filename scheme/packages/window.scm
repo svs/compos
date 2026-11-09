@@ -118,14 +118,48 @@
 ;; frame-local policy state: values keyed by the selected frame — each
 ;; browser gets its own look, its own ibuffer home window. Pruned when a
 ;; frame is deleted.
-(define *frame-locals* '())   ; ((frame ((key val) ...)) ...)
+;;
+;; Each value lives in a global cell of its own. A global write copies
+;; the whole value into the shared world, so one alist of every frame's
+;; values made each write copy all of them: window-log and
+;; panes-histories are hundreds of KB, and a write of one small key cost
+;; ~1.5 ms. Now a write copies its own value and, for a new key, the
+;; small key index. Read and write through the calls below, never the
+;; index.
+(defvar '*frame-local-keys* '())   ; ((frame (key ...)) ...)
+
+(define (frame-local--cell frame key)
+  (string->symbol (string-append "frame-local:" (format "~a" frame)
+                                 ":" (format "~a" key))))
+
+;; the keys FRAME holds a value for
+(define (frame-local-keys-in frame)
+  (let ((fr (assoc frame *frame-local-keys*)))
+    (if fr (cadr fr) '())))
+
+(define (frame-local--index! frame keys)
+  (let ((rest (filter (lambda (e) (not (equal? (car e) frame)))
+                      *frame-local-keys*)))
+    (set! *frame-local-keys*
+      (if (null? keys) rest (cons (list frame keys) rest)))))
 
 (define (frame-local-in frame key)
-  (let ((fr (assoc frame *frame-locals*)))
-    (if fr
-        (let ((kv (assoc key (cadr fr))))
-          (if kv (cadr kv) #f))
-        #f)))
+  (if (member key (frame-local-keys-in frame))
+      (symbol-value (frame-local--cell frame key))
+      #f))
+
+;; every value FRAME holds, as ((key val) ...)
+(define (frame-locals-in frame)
+  (map (lambda (k) (list k (symbol-value (frame-local--cell frame k))))
+       (frame-local-keys-in frame)))
+
+;; FRAME holds no value for KEY any more
+(define (frame-local-remove-in! frame key)
+  (let ((keys (frame-local-keys-in frame)))
+    (when (member key keys)
+      (set-symbol-value! (frame-local--cell frame key) #f)
+      (frame-local--index! frame
+        (filter (lambda (k) (not (equal? k key))) keys)))))
 
 (define (frame-local key)
   (frame-local-in (selected-frame) key))
@@ -133,19 +167,21 @@
 ;; set-frame-local! writes the SELECTED frame. This one names its frame, so
 ;; a fact that is true of every frame can be written into each one.
 (define (set-frame-local-in! frame key val)
-  (let* ((fr (assoc frame *frame-locals*))
-         (locals (if fr (cadr fr) '()))
-         (rest (filter (lambda (e) (not (equal? (car e) frame))) *frame-locals*))
-         (others (filter (lambda (e) (not (equal? (car e) key))) locals)))
-    (set! *frame-locals* (cons (list frame (cons (list key val) others)) rest))))
+  (set-symbol-value! (frame-local--cell frame key) val)
+  (let ((keys (frame-local-keys-in frame)))
+    (unless (member key keys)
+      (frame-local--index! frame (cons key keys)))))
 
 (define (set-frame-local! key val)
   (set-frame-local-in! (selected-frame) key val))
 
 (define (prune-frame-locals!)
   (let ((live (frame-list)))
-    (set! *frame-locals*
-      (filter (lambda (e) (member (car e) live)) *frame-locals*))))
+    (for-each
+      (lambda (e)
+        (unless (member (car e) live)
+          (for-each (lambda (k) (frame-local-remove-in! (car e) k)) (cadr e))))
+      *frame-local-keys*)))
 
 ;;; --- the float -------------------------------------------------------------------
 ;;; A window floats while its buffer wears the float class. Two surfaces

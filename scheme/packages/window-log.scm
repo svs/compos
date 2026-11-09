@@ -52,8 +52,8 @@
 ;; own, with the notes left since then; a note with no change behind it
 ;; belongs to nothing and goes
 (define (window-log--pre!)
-  ;; frame reads are free and frame writes cost ~1 ms each, so a key
-  ;; that leaves the windows alone writes nothing; post! compares with
+  ;; a key that leaves the windows alone writes nothing (the window log
+  ;; is large, and a write copies it); post! compares with
   ;; window-log-after, which is the state before this command
   (let ((now (window-log-snapshot))
         (last (frame-local 'window-log-after)))

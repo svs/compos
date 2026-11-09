@@ -1085,10 +1085,8 @@
           (list (plist-get t 'title) (if (member s *todo-closed*) "f-dim" "ibuffer-name"))
           (list (todo--short-project t) "f-dim")
           ;; a chat that closed leaves only its id behind, which says nothing
-          (list (let* ((w (todo--who t))
-                       (w (if (string-prefix? "chat:" w) "chat closed" w))
-                       (n (length (todo--attached t))))
-                  (if (> n 0) (string-append w " +" (number->string n)) w))
+          (list (let* ((w (todo--who t)))
+                  (if (string-prefix? "chat:" w) "chat closed" w))
                 (if (todo--stalled? t) "todo-overdue" "f-dim"))
           (todo--when t)))))
 
@@ -1139,7 +1137,6 @@
         (list (list (todo--dot t) (list (plist-get t 'title) "todo-title"))
               (list "" meta (todo--tag-text t))
               (list "" (todo--chips (list (if (pair? who) (todo--chip (car who) (cadr who)) "")
-                                        (todo--chip (todo--attached-text t) "todo-date")
                                         (todo--chip (todo--last-update t) "org-meta"))))
               (list "")))))
 
@@ -1297,7 +1294,6 @@
                     ;; the caller hears when the new chat stops
                     (when caller (buffer-set-local! chat 'subagent-notify #t))
                     (todo-update id (list 'assignee (chat-stable-id! chat)
-                                          'chats (todo--chats-keeping t (plist-get t 'assignee))
                                           'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
                                           'log (string-append "assigned to a chat in " (group-name g))
                                           'by (or who todo-user)))
@@ -1465,37 +1461,12 @@
         ((buffer-known? chat) (chat-stable-id! chat))
         (else #f)))
 
-(define (todo--chats-keeping t c)
-  ;; the task's attached chats with C among them, when C is a chat
-  (let ((cs (or (plist-get t 'chats) '())))
-    (if (and (string? c) (string-prefix? "chat:" c) (not (member c cs)))
-        (append cs (list c))
-        cs)))
-
 (define (todo-chats t)
-  "(todo-chats TASK) — the ids of the task's chats: the assignee first, then the attached ones"
+  "(todo-chats TASK) — the task's chat as a list: its assignee chat id, or empty. A task has one chat"
   (let ((a (plist-get t 'assignee)))
-    (fold (lambda (acc c) (if (member c acc) acc (append acc (list c))))
-          '()
-          (append (if (and (string? a) (string-prefix? "chat:" a)) (list a) '())
-                  (or (plist-get t 'chats) '())))))
+    (if (and (string? a) (string-prefix? "chat:" a)) (list a) '())))
 
-(define (todo-attach-chat! id chat &optional who)
-  "(todo-attach-chat! ID CHAT [WHO]) — attach CHAT, a chat buffer or its id, to the task beside its assignee; return the task"
-  (let* ((t (todo--must id)) (c (todo--chat-ref chat)))
-    (cond ((not c) (todo--fail "not a chat: " chat))
-          ((member c (todo-chats t)) t)
-          (else (todo-update id (list 'chats (todo--chats-keeping t c) 'by (or who todo-user)))))))
-
-(define (todo-detach-chat! id chat &optional who)
-  "(todo-detach-chat! ID CHAT [WHO]) — take CHAT off the task's attached chats; the assignee stays; return the task"
-  (let* ((t (todo--must id)) (c (todo--chat-ref chat)))
-    (todo-update id (list 'chats (remove (lambda (x) (equal? x c)) (or (plist-get t 'chats) '()))
-                          'by (or who todo-user)))))
-
-(public! 'todo-chats "(todo-chats TASK) — the ids of the task's chats: the assignee first, then the attached ones")
-(public! 'todo-attach-chat! "(todo-attach-chat! ID CHAT [WHO]) — attach a chat, its buffer or id, to the task beside its assignee")
-(public! 'todo-detach-chat! "(todo-detach-chat! ID CHAT [WHO]) — take a chat off the task's attached chats")
+(public! 'todo-chats "(todo-chats TASK) — the task's chat as a list: its assignee chat id, or empty. A task has one chat")
 
 ;; Handover. The chat working a task is archived and a new chat in the
 ;; task's group takes it, with the task's notes as its brief: the task is
@@ -1636,73 +1607,7 @@
         (and path (string-append (or title c) "  (archived)")))
       (string-append c "  (gone)")))
 
-(define (todo--pick-chat! t)
-  ;; one chat goes straight there; several ask which
-  (let ((cs (todo-chats t)) (g (or (todo--home-group t) (frame-group))))
-    (define (go! c)
-      (let ((buf (todo--open-chat c g)))
-        (if buf (todo--show-chat! buf) (message "That chat is gone"))))
-    (cond ((null? cs) (message "The task has no chat"))
-          ((null? (cdr cs)) (go! (car cs)))
-          (else
-            (let ((labels (map (lambda (c) (list (todo--chat-label c) c)) cs)))
-              (minibuffer-read* "Chat: " (map car labels)
-                (list (list 'confirm (lambda (l) (let ((hit (assoc l labels))) (when hit (go! (cadr hit)))))))))))))
-
-(define (todo--attach-read! t after)
-  ;; ask for an open chat not yet on the task, and attach it
-  (let* ((have (todo-chats t))
-         (open (filter (lambda (row) (not (member (car row) have))) (todo--chat-index))))
-    (if (null? open)
-        (message "No other open chat")
-        (minibuffer-read* "Attach chat: " (map cadr open)
-          (list (list 'confirm
-                      (lambda (name)
-                        (let ((row (find (lambda (r) (equal? (cadr r) name)) open)))
-                          (when row
-                            (todo-attach-chat! (plist-get t 'id) (car row))
-                            (after)
-                            (message (string-append "Attached " name)))))))))))
-
-(define-command "todo-attach-chat" "Attach another open chat to the task at point, beside the one it is assigned to"
-  (lambda ()
-    (let ((t (todo--at)))
-      (if t (todo--attach-read! t (lambda () #t)) (message "No task at point"))))
-  'modes '(todo-mode))
-
-(define-command "todo-detail-attach-chat" "Attach another open chat to this task, beside the one it is assigned to"
-  (lambda ()
-    (let* ((buf (current-buffer)) (t (todo--detail-task buf)))
-      (if t (todo--attach-read! t (lambda () (todo--detail-render! buf))) (message "The task is gone"))))
-  'modes '(todo-detail-mode))
-
-(define-command "todo-attach-this-chat" "Attach the chat you are in to an open task"
-  (lambda ()
-    (let* ((chat (current-buffer))
-           (c (and (buffer-local-value 'agent-slug chat) (todo--chat-ref chat)))
-           (rows (map (lambda (t) (list (string-append (plist-get t 'title) "  ·  " (plist-get t 'id)) (plist-get t 'id)))
-                      (todo-list))))
-      (if (not c)
-          (message "Not in a chat")
-          (minibuffer-read* "Attach this chat to task: " (map car rows)
-            (list (list 'confirm
-                        (lambda (l)
-                          (let ((hit (assoc l rows)))
-                            (when hit
-                              (todo-attach-chat! (cadr hit) c)
-                              (message (string-append "Attached to " (car hit)))))))))))))
-
 (define (todo--who t) (or (todo--chat-of t) (plist-get t 'assignee) ""))
-
-(define (todo--attached t)
-  ;; the chats attached beside the assignee, by title while they live
-  (map (lambda (c) (or (todo--live-chat c) "chat closed"))
-       (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
-
-(define (todo--attached-text t)
-  (let ((more (todo--attached t)))
-    (if (null? more) ""
-        (string-append "+ " (string-join (map (lambda (c) (format-elide c 24)) more) ", ")))))
 
 ;; a card says how its chat is doing. The event log's chat-status view
 ;; knows it; the todo file does not hold it.
@@ -1747,15 +1652,6 @@
           (pane (display-buffer-in-window! pane chat) (select-window! pane))
           (else (switch-to-buffer! chat)))
     chat))
-
-(define-command "todo-goto-chat" "Go to the chat the task is assigned to; with several, ask which"
-  (lambda ()
-    (let* ((t (todo--at)) (chat (and t (todo--chat-of t))))
-      (cond ((not t) (message "No task at point"))
-            ((pair? (todo-chats t)) (todo--pick-chat! t))
-            (chat (todo--show-chat! chat))
-            (else (message "The task is not with a live chat")))))
-  'modes '(todo-mode))
 
 ;; one task as its own page beside the list. Its chat is the assignee, the
 ;; chat that works the task, never the one that filed it
@@ -1891,11 +1787,7 @@
                                       (component 'ui/kv
                                         (list 'pairs
                                           (append
-                                            (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
-                                            (pair "Also" (let ((more (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
-                                                           (if (null? more) ""
-                                                               (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
-                                                                              "  ·  w picks, C attaches"))))
+                                            (pair "Chat" (if chat (string-append chat "  ·  M-o goes there") (plist-get t 'assignee)))
                                             (pair "Chat state" (todo--status t))
                                             (pair "Goal" (todo--goal t))
                                             (pair "Parent" (let ((p (and (plist-get t 'parent) (todo-get (plist-get t 'parent)))))
@@ -2002,7 +1894,6 @@
       (move "cancelled" "todo-detail-cancel" "Cancel" "x" "bad")
       (move "inbox" "todo-detail-inbox" (if (equal? state "todo") "Unaccept" "To inbox") "i")
       (list (list "todo-detail-agent" "Agent" "M-o")
-            (list "todo-detail-goto-chat" "Chat" "w")
             (list "todo-detail-visit" "File" "e")))))
 
 (define (todo--detail-render! buf)
@@ -2089,16 +1980,6 @@
       (if t (todo-show-detail! (plist-get t 'id)) (message "No task at point"))))
   'modes '(todo-mode))
 
-(define-command "todo-detail-goto-chat" "Go to the chat working this task; with several, ask which"
-  (lambda ()
-    (let* ((t (todo--detail-task (current-buffer))) (chat (and t (todo--chat-of t))))
-      (cond ((not t) (message "The task is gone"))
-            ((pair? (todo-chats t)) (todo--pick-chat! t))
-            (chat (todo--show-chat! chat))
-            ((plist-get t 'assignee) (message "The task's chat is not live"))
-            (else (message "The task is not assigned to a chat")))))
-  'modes '(todo-detail-mode))
-
 (define-command "todo-detail-agent" "Go to the agent working this task; start one in the group that filed it, else the group you are in, when none is live"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -2107,7 +1988,6 @@
            (here (or (and t (todo--home-group t)) (group-here))))
       (define (start! g)
         (let ((new (todo-assign-chat! (plist-get t 'id) g)))
-          (when (plist-get t 'parent) (todo-attach-chat! (plist-get t 'parent) new))
           (todo--detail-render! buf)
           (todo--show-chat! new)
           (message (string-append "Assigned to " new))))
@@ -2261,8 +2141,6 @@
 
 (mode-keys! "todo-detail-mode"
   '(("M-o" "todo-detail-agent")
-    ("w" "todo-detail-goto-chat")
-    ("C" "todo-detail-attach-chat")
     ("e" "todo-detail-visit")
     ("g" "todo-detail-refresh")
     ("<right>" "todo-detail-tab-next")
@@ -2289,7 +2167,7 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `x` cancels and `W` parks the task, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority and `T` marks it urgent or not, the same keys as the list; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `x` cancels and `W` parks the task, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority and `T` marks it urgent or not, the same keys as the list; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live. A task has one chat. `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
@@ -2312,7 +2190,6 @@
       (define (assign! t g)
         (let ((chat #f))
           (todo--keep-place! (lambda () (set! chat (todo-assign-chat! (plist-get t 'id) g))))
-          (when (plist-get t 'parent) (todo-attach-chat! (plist-get t 'parent) chat))
           chat))
       (define (assign-one! g)
         (let ((chat (assign! t g)))
@@ -2650,8 +2527,8 @@
     'parent (lambda (buf t) (and (not (todo--sep? t)) (plist-get t 'parent)))
     'nest-cell 2
     'footer (lambda (buf)
-              '(("←→" "status") ("RET" "open") ("TAB" "fold") ("e" "file") ("t" "accept") ("i" "inbox") ("d" "done") ("x" "cancel") ("W" "wait") ("w" "chat")
-                ("M-o" "agent") ("C" "attach chat") ("D" "deadline") ("P" "project") ("!" "priority") ("T" "urgent")
+              '(("←→" "status") ("RET" "open") ("TAB" "fold") ("e" "file") ("t" "accept") ("i" "inbox") ("d" "done") ("x" "cancel") ("W" "wait")
+                ("M-o" "agent") ("D" "deadline") ("P" "project") ("!" "priority") ("T" "urgent")
                 ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own

@@ -669,10 +669,47 @@ defmodule Compos.Core.Session do
         # a stale frame is the transient apply_reply_callback retries away.
         # Reporting each attempt put up to ten identical lines in *Messages*
         # for one reply that then succeeded; the exhausted case reports there.
-        unless stale_frame?(msg), do: message("error: " <> msg)
+        unless stale_frame?(msg) do
+          message("error: " <> msg)
+          report_callback_error(buffer, closure, msg)
+        end
+
         {:reply, {:error, msg}}
     end
   end
+
+  # An async callback that raises dies after the eval that started it
+  # returned; *Messages* alone left an agent waiting forever on a listener
+  # the callback never fired. BUFFER is the buffer that started the work
+  # (task-run!, shell, http, git and run-on-lane! carry it); Scheme decides
+  # whether it is a chat and wakes it. A failing report stays a no-op.
+  defp report_callback_error(buffer, closure, msg) when is_binary(buffer) and buffer != "" do
+    exec_call_named(
+      "callback-error-report!",
+      [buffer, apply_label(closure), msg, callback_topic(closure) || false],
+      nil
+    )
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp report_callback_error(_buffer, _closure, _msg), do: :ok
+
+  # the first literal topic the callback publishes to, if its source names one
+  defp callback_topic({:closure, _params, body, _env}) do
+    src = body |> Compos.Scheme.Eval.source() |> Compos.Scheme.Printer.print()
+
+    case Regex.run(~r/\(event-publish! "([^"]+)"/, src) do
+      [_, topic] -> topic
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp callback_topic(_), do: nil
 
   @doc false
   def exec_call_fn(closure, args, fid) do

@@ -155,6 +155,26 @@
           (check-false! (agent-wake-source "[note] typed by the user") "an unknown bracket is the user's text")))
       (buffer-kill! buf))))
 
+(deftest 'a-failed-background-callback-wakes-the-chat-that-started-it
+  "the error, the callback and its unpublished topic reach the chat; other buffers stay quiet"
+  (lambda ()
+    (let ((buf (t--as-chat! '()))
+          (sent #f))
+      (buffer-set-local! buf 'agent-slug "zz-agent-origin")
+      (with-stubs
+        (list (list 'agent-status (lambda (slug) 'idle))
+              (list 'agent-send-msg! (lambda (slug text) (set! sent text))))
+        (lambda ()
+          (callback-error-report! buf "apply (report rows)" "max: no arguments" "job:drive")
+          (check-equal! sent
+                        "[callback] a background callback you started failed: max: no arguments\ncallback: apply (report rows)\nits event topic: job:drive"
+                        "the chat hears the error, the callback and the topic")
+          (check-equal! (agent-wake-source sent) "callback" "it folds as a callback notice")
+          (set! sent #f)
+          (callback-error-report! "*scratch*" "apply (x)" "boom" #f)
+          (check-false! sent "a buffer that is not a chat wakes nobody")))
+      (buffer-kill! buf))))
+
 (deftest 'typed-messages-stay-human-while-agent-notices-fold
   "ordinary human input retains its label and an agent body remains expandable"
   (lambda ()

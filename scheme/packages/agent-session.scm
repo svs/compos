@@ -243,7 +243,7 @@
 ;; envelope, "[SOURCE] ", so queues, both connectors, replay and .chat files
 ;; keep it without side-channel state. A subagent's wake is "[subagent SLUG ...]".
 (define agent-wake-sources
-  '("agent" "event" "orchestrator" "hook" "todo" "cron" "handover" "watcher"))
+  '("agent" "event" "orchestrator" "hook" "todo" "cron" "handover" "watcher" "callback"))
 
 (define (agent-wake-source text)
   (and (string? text)
@@ -277,12 +277,29 @@
 (define (agent-continue! thread text)
   (agent-wake! thread "agent" text))
 
+;; A background callback that raises dies on its own lane, after the eval
+;; that started it returned. The core (session.ex exec_apply) calls this
+;; with the buffer that started the work; when that buffer is a chat, the
+;; chat hears it, so a listener it waits on cannot hang without a word.
+;; The *Messages* line stays the core's.
+(define (callback-error-report! buf label msg topic)
+  (when (and (string? buf) (buffer-known? buf) (chat-buffer? buf))
+    (agent-wake! buf "callback"
+      (string-append "a background callback you started failed: " msg
+                     "\ncallback: " label
+                     (if (and (string? topic) (not (equal? topic "")))
+                         (string-append "\nits event topic: " topic)
+                         "")))
+    #t))
+
 (category! 'chat)
 
 (public! 'agent-wake!
-  "(agent-wake! CHAT SOURCE TEXT) — wake any chat buffer or live slug with a turn the system starts; SOURCE is one of agent-wake-sources (orchestrator, hook, event, todo, cron, handover, watcher, agent). Revives a dead chat and wakes a sleeping one; the transcript folds it as a notice under its source, and M-p history skips it")
+  "(agent-wake! CHAT SOURCE TEXT) — wake any chat buffer or live slug with a turn the system starts; SOURCE is one of agent-wake-sources (orchestrator, hook, event, todo, cron, handover, watcher, callback, agent). Revives a dead chat and wakes a sleeping one; the transcript folds it as a notice under its source, and M-p history skips it")
 (public! 'agent-wake-source
   "(agent-wake-source TEXT) — the source of a wake message as a string, or #f for text the user typed")
+(public! 'callback-error-report!
+  "(callback-error-report! BUF LABEL MSG TOPIC) — wake the chat BUF with the error of a background callback it started; TOPIC is the event the callback would have published, or #f. Does nothing when BUF is not a chat")
 (public! 'agent-continue!
   "(agent-continue! THREAD TEXT) — (agent-wake! THREAD 'agent TEXT)")
 

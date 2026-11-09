@@ -83,6 +83,17 @@
 ;; the whole 15s boot.
 (define *catalog-keys* '())
 
+;; What catalog-meta! declared, by catalog key. A redefinition registers the
+;; name again from the scope in force; these declarations go back on top, so
+;; a partial reload that skips the trailing catalog-meta! keeps the stamp.
+(define *catalog-overrides* '())
+
+(define (catalog--source entry)
+  (catalog--put entry 'metadata-source
+    (if (and (not (equal? (catalog--get entry 'domain) "unknown"))
+             (not (member "unknown" (catalog--get entry 'effects))))
+        "declared" "unknown")))
+
 (define (catalog--key k n qualified)
   (string-append k ":" (if (equal? k "component") qualified n)))
 
@@ -131,7 +142,9 @@
                         'metadata-source (if declared? "declared" "unknown")
                         'doc doc)
                   (catalog--strip-computed meta))))
-    (let ((key (catalog--key k n qualified)))
+    (let* ((key (catalog--key k n qualified))
+           (override (assoc key *catalog-overrides*))
+           (entry (if override (catalog--source (catalog--merge entry (cdr override))) entry)))
       (if (member key *catalog-keys*)
           (set! *catalog*
             (cons entry
@@ -140,8 +153,8 @@
                       (remove-plists *catalog* 'kind k 'name n))))
           (begin
             (set! *catalog* (cons entry *catalog*))
-            (set! *catalog-keys* (cons key *catalog-keys*)))))
-    (catalog--changed! entry)))
+            (set! *catalog-keys* (cons key *catalog-keys*))))
+      (catalog--changed! entry))))
 
 ;; every write ends here: the generation moves and apropos hears about it
 (define (catalog--changed! entry)
@@ -159,6 +172,9 @@
           (remove (lambda (x) (equal? x (catalog--key k (catalog--get e 'name)
                                                         (catalog--get e 'qualified-name))))
                   *catalog-keys*))
+        (let ((key (catalog--key k (catalog--get e 'name) (catalog--get e 'qualified-name))))
+          (set! *catalog-overrides*
+            (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
         (set! *catalog*
           (remove-plists *catalog* 'kind k 'qualified-name (catalog--get e 'qualified-name)))
         (catalog--changed! #f)))
@@ -197,11 +213,14 @@
   (let ((old (catalog-entry kind name)))
     (if (not old)
         #f
-        (let* ((merged (catalog--merge old (catalog--normalise-meta meta)))
-               (updated (catalog--put merged 'metadata-source
-                          (if (and (not (equal? (catalog--get merged 'domain) "unknown"))
-                                   (not (member "unknown" (catalog--get merged 'effects))))
-                              "declared" "unknown"))))
+        (let* ((meta (catalog--normalise-meta meta))
+               (updated (catalog--source (catalog--merge old meta)))
+               (key (catalog--key (catalog--get old 'kind) (catalog--get old 'name)
+                                  (catalog--get old 'qualified-name)))
+               (before (assoc key *catalog-overrides*)))
+          (set! *catalog-overrides*
+            (cons (cons key (catalog--merge (if before (cdr before) '()) meta))
+                  (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
           (set! *catalog*
             (cons updated
                   (remove-plists *catalog* 'kind (catalog--get old 'kind)

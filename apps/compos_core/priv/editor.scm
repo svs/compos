@@ -7087,6 +7087,7 @@
 (public! 'setq-local! "(setq-local! NAME VALUE) — the current buffer's own value")
 (public! 'kill-local-variable! "(kill-local-variable! NAME [BUF]) — forget the buffer's own value")
 (public! 'local-variable-p "(local-variable-p NAME [BUF]) — #t when the buffer holds its own value")
+(catalog-meta! 'function "local-variable-p" 'effects '(read))
 (public! 'variable-value "(variable-value NAME) — the current buffer's own value, else the default")
 (catalog-meta! 'function "variable-value" 'domain 'customize 'effects '(read))
 (public! 'variable-set! "(variable-set! NAME VALUE) — locally for a defvar-local, else globally")

@@ -1224,8 +1224,6 @@
   (let ((buf (current-buffer)))
     (when (buffer-derived-mode? buf "morg-mode") (morg-point-map! buf))))
 
-(add-hook! 'post-command-hook 'morg--post-command-point-map!)
-
 ;; the older name: the keys are the keymap at point now
 (define (morg-arm-block-keys! buf) (morg-point-map! buf))
 
@@ -1239,6 +1237,7 @@
     (morg-install-keys (current-buffer))
     (morg-arm-block-keys! (current-buffer))
     (morg-ensure-hook! (current-buffer))
+    (add-hook! 'post-command-hook 'morg--post-command-point-map! #f #t)
     ;; Hidden ranges die with the daemon; the 'morg-folds local survives.
     ;; Re-derive them here, or a restored buffer comes back unfolded.
     (morg-apply-folds! (current-buffer))

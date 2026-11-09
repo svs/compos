@@ -1796,6 +1796,8 @@
     (anchor-sync! buf)
     ;; the page's keys: the same keys bar a list carries
     (site-app-bind-action-keys! buf)
+    ;; the keys bar follows point in this page only
+    (with-current-buffer buf (lambda () (add-hook! 'post-command-hook 'site-app-footer-sync! #f #t)))
     (desktop-skip! buf 'footer-line-blocks)
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar (list 'main (site-app-detail-keys buf)))))
@@ -2527,8 +2529,6 @@
           (site-app-set! buf 'footer-map at)
           (buffer-set-local! buf 'footer-line-blocks
             (list (component 'ui/keys-bar (list 'main (site-app-detail-keys buf))))))))))
-
-(add-hook! 'post-command-hook 'site-app-footer-sync!)
 
 (define (site-app-href-page spec href)
   ;; the page whose items live under HREF's path, when compos can draw them

@@ -1137,6 +1137,10 @@
     (hook--alist-put *local-hooks* buf
       (hook--alist-put (hook--alist-get *local-hooks* buf) hook fns))))
 
+;; a killed buffer takes its local hooks with it
+(define (hook--forget-buffer! buf)
+  (set! *local-hooks* (filter (lambda (e) (not (equal? (car e) buf))) *local-hooks*)))
+
 ;; a name resolves when the hook runs; an unbound name runs nothing
 (define (hook--fn f)
   (cond ((procedure? f) f)
@@ -5780,6 +5784,7 @@
          (release (and (boundp 'window-records-release!) (window-records-release! name))))
     (buffer-kill-raw! name)
     (keymap--forget-buffer! name)
+    (hook--forget-buffer! name)
     (when release (release))
     (when repair (repair))))
 

@@ -93,6 +93,7 @@
   (let ((id (and (buffer-exists? source) (buffer-local-value 'slides-watch source))))
     (when id
       (remove-on-change! id)
+      (with-current-buffer source (lambda () (remove-hook! 'post-command-hook 'slides--follow-point! #t)))
       (buffer-set-local! source 'slides-watch #f))))
 
 ;; A live edit reaches the running page as a message, with no reload: the
@@ -126,6 +127,7 @@
 (define (slides--watch! source)
   (unless (buffer-local-value 'slides-watch source)
     (desktop-skip! source 'slides-watch)
+    (with-current-buffer source (lambda () (add-hook! 'post-command-hook 'slides--follow-point! #f #t)))
     (buffer-set-local! source 'slides-watch
       (on-change! source
         (lambda (pos inserted deleted origin)
@@ -154,7 +156,6 @@
       (let ((at (slides--at source)))
         (app-post! app (list 'goto (list 'slide (car at) 'step (cadr at))))))))
 
-(add-hook! 'post-command-hook 'slides--follow-point!)
 ;; the editing state moves point with the client's caret, not a command
 (add-hook! 'point-motion-hook 'slides--follow-point!)
 

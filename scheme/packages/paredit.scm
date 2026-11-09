@@ -831,9 +831,11 @@ farther apart than this is not lit and not found.")
       (filter (lambda (k) (member k '("(" ")" "[" "]" "\"" "DEL" "RET")))
               (map car *paredit-keys*)))))
 
-(define (paredit--setup! buf) #t)
+(define (paredit--setup! buf)
+  (with-current-buffer buf (lambda () (add-hook! 'post-command-hook 'paredit--show-paren! #f #t))))
 
 (define (paredit--teardown! buf)
+  (with-current-buffer buf (lambda () (remove-hook! 'post-command-hook 'paredit--show-paren! #t)))
   (par--ppss-forget! buf)
   (overlay-clear! buf 'paren))
 
@@ -864,8 +866,6 @@ farther apart than this is not lit and not found.")
               (list (list (car pair) (+ (car pair) 1) "paren-match")
                     (list (cadr pair) (+ (cadr pair) 1) "paren-match")))
             (overlay-clear! buf 'paren))))))
-
-(add-hook! 'post-command-hook 'paredit--show-paren!)
 
 (define-style! 'paredit "
 .f-paren-match{background:color-mix(in srgb, var(--accent-fg,#4a6a8a) 32%, transparent);border-radius: 0}

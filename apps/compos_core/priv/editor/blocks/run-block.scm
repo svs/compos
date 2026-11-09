@@ -410,6 +410,12 @@
 (public! 'fence-arg-run!
   "(fence-arg-run! ARG FN) — FN (BUF BLOCK LANG BODY) runs a block whose fence carries the word ARG, ahead of the language's runner")
 
+;; eval-string-safe is a builtin that Scheme blocks run through. It evaluates
+;; any source, so it writes and executes code, as eval-buffer does.
+(effects! '(write execute))
+(public! 'eval-string-safe
+  "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG)")
+
 ;; Do not leak this extension's catalog context into the next package.
 (domain! 'unknown)
 (effects! '(unknown))

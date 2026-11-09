@@ -1740,8 +1740,19 @@
           (buffer-set-local! buf 'list-width w)
           (list-render! buf 'cached))))
     (list-restamp! buf)
-    (list-snap-point! buf)
-    (list-update-selection! buf)))
+    ;; a key moves nothing in most lists: the list in another window, or
+    ;; this one while a key types elsewhere. Point, rows and geometry the
+    ;; same as the last pass means the snap and the selection are the same.
+    (let ((p (buffer-point buf))
+          (e (list-entries buf))
+          (o (list-offsets buf))
+          (seen (buffer-local-value 'list-post-seen buf)))
+      (unless (and seen (eqv? p (car seen)) (eq? e (cadr seen)) (eq? o (caddr seen)))
+        (list-snap-point! buf)
+        (list-update-selection! buf)
+        (desktop-skip! buf 'list-post-seen)
+        (buffer-set-local! buf 'list-post-seen
+          (list (buffer-point buf) (list-entries buf) (list-offsets buf)))))))
 
 (defcustom 'debounce-delay 250
   "How long the highlight rests on a row before a list shows that row's page beside it, in milliseconds. A held arrow reaches the row you want before one page is drawn or read. 0 shows the page on every move."

@@ -935,6 +935,7 @@
                c
                (list-col-resize c rest)))
          cols)))
+(public! 'list-fit-columns "(list-fit-columns COLS W) — COLS fitted to width W: drop what does not fit, give the rest to the columns without a width" 'ui)
 (catalog-meta! 'function "list-fit-columns" 'effects '(pure))
 
 ;; a mode says its columns once per line of a row. A one-line list says

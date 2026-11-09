@@ -74,6 +74,14 @@ replays the conversation. The inline `M-o` lane prepends the same block through
 `llm-mode--chat-context-once`. The agent calls `(chat-context)` when the block is
 missing or the user's working context changes.
 
+A recipe rides the same way. When a chat recalls (`agent-recall`, by default
+the Driver chats) and apropos finds a function fast-code learned, or a command
+the palette learned, for the prompt, `recall-note` (`recall.scm`) puts it in
+front of the prompt as "Last time this worked". Both send paths add it:
+`agent-send-msg!` and `execute*`, whose `'recall #t` or `#f` decides for one
+spawn. The note is message text, so the system prompt and its cache do not
+change.
+
 Changing a group's members therefore does not change the system-prompt bytes or
 invalidate the cache. Buffer contents, names, the newest user request, tool
 results, and other changing material belong in messages or tool results.

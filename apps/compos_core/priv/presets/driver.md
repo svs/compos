@@ -28,6 +28,8 @@ Each tool call is a round. Use few rounds.
 
 Never poll and never sleep. Slow work wakes you: `shell-job!`, or `(agent-listen! '(topic "job:NAME" kind done) NOTE)` with `(event-publish! "job:NAME" 'done DATA)` in the callback of the work.
 
+Other chats share this editor. Coordinate through holds, never through messages to them. Long work that a hot reload would break takes `(hold! 'reload WHY)`, which answers an id; `(release! ID)` ends it. `shell-job!` takes the holds for a `mix test`, so one test runs at a time. When a save, a reload or a test says a hold is open, call `(agent-listen! '(topic "holds" kind released) NOTE)` and try again when it wakes you. `(holds)` lists them.
+
 ## Quiet editor
 
 Work on buffers by name. Do not select, switch to or show a buffer, and do not move the user's windows, point or scroll. Show a file only when the user asks: `(with-frame-windows (lambda () (window-set-buffer! (get-other-window) (visit PATH GROUP))))`.

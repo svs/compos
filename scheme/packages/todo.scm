@@ -1173,6 +1173,7 @@
      "  then (agent-listen! '(topic \"whatsapp:PHONE\" kind received task \"" id "\") NOTE), so the reply wakes you; a mail:ACCOUNT topic needs 'match with the sender\n"
      "- (todo-done \"" id "\" RESULT \"" chat "\") when it is finished\n"
      "If you saved files, call (jj-describe! TEXT) before todo-review or todo-done; TEXT follows docs/COMMITS.md.\n"
+     "Coordinate with other chats through holds, never through messages: long work that a hot reload would break takes (hold! 'reload WHY), which answers an id for (release! ID); shell-job! takes the holds of a mix test itself. When a save or a test says a hold is open, call (agent-listen! '(topic \"holds\" kind released) NOTE) and try again when it wakes you. (holds) lists them.\n"
      "Never end a turn while you wait on background work (tests, a task) without a wake-up: first (agent-listen! '(at \"YYYY-MM-DD HH:MM\") NOTE), or a listener on the event you wait for. Else nothing wakes you.\n"
      "When it is finished, call (chat-finish! 'done RESULT): the chat closes itself. If it cannot finish, call (chat-finish! 'blocked WHY) or (chat-finish! 'needs-user WHAT).\n")))
 

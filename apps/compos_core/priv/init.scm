@@ -215,6 +215,7 @@
 ;; the agents' shell commands in the sandbox: it reads the chat's llm-config
 ;; and its group, and the shell gate in decide.scm asks it
 (require 'agent-sandbox)
+(require 'holds)
 ;; a group's shared config lives in its home and reaches its buffers as they
 ;; join it; it may name a bundle, so it loads after llm-config
 (require 'group-config)

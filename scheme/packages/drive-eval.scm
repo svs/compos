@@ -701,6 +701,8 @@
       (lambda ()
         (set! *drive-eval-runs* (alist-put *drive-eval-runs* id (list 'queue jobs 'done '() 'cancel #f 'jobs (length jobs))))
         (set! *drive-eval-running* #t)))
+    ;; a hot reload in the middle of a run breaks the runs going: agent saves wait
+    (drive-eval--locked (lambda () (drive-eval--put! id 'hold (hold! 'reload (string-append "drive-eval " id)))))
     (task-run!
       (lambda ()
         (drive-eval--progress! '() ms cs id)
@@ -708,7 +710,9 @@
           (for-each (lambda (w) (ignore-errors (lambda () (task-await w limit)))) ws)
           (reverse (plist-get (drive-eval--state id) 'done))))
       (lambda (ok? rows)
-        (let ((cancelled (plist-get (or (drive-eval--state id) '()) 'cancel)))
+        (let ((cancelled (plist-get (or (drive-eval--state id) '()) 'cancel))
+              (hold (plist-get (or (drive-eval--state id) '()) 'hold)))
+          (when hold (release! hold))
           (drive-eval--locked
             (lambda ()
               (if ok?

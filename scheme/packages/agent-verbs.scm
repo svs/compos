@@ -4,6 +4,8 @@
 ;;; verb here does one such chain in one call. (agent-call-chains) counts
 ;;; the chains again from the logs, so the next ones can follow.
 
+(require 'holds)
+
 (domain! 'code)
 (effects! '(read))
 
@@ -93,12 +95,21 @@
 
 ;;;###autoload
 (define (shell-job! topic cmd note &optional dir)
-  "(shell-job! TOPIC CMD NOTE [DIR]) - run a long shell command in the background and wake this chat with its output when it ends, in one call; answer the listener id. TOPIC gets job: in front when it has no prefix, so it is private to this chat. Write CMD so its output is the answer."
-  (let ((topic (if (string-contains? topic ":") topic (string-append "job:" topic))))
-    (let ((l (agent-listen! (list 'topic topic 'kind 'done) note)))
-      (shell-command->string cmd (or dir (default-directory))
-        (lambda (out) (event-publish! topic 'done out)))
-      l)))
+  "(shell-job! TOPIC CMD NOTE [DIR]) - run a long shell command in the background and wake this chat with its output when it ends, in one call; answer the listener id. TOPIC gets job: in front when it has no prefix, so it is private to this chat. Write CMD so its output is the answer. A mix test takes a test hold and a reload hold until it ends: one mix test at a time, and agent saves wait for it. While another chat's test runs, it refuses and names the holder; wait with (agent-listen! '(topic \"holds\" kind released) NOTE)."
+  (let* ((topic (if (string-contains? topic ":") topic (string-append "job:" topic)))
+         (why (string-append "mix test: " (if (> (string-length cmd) 80) (substring cmd 0 80) cmd)))
+         (hs (if (string-contains? cmd "mix test")
+                 (let ((t (hold! 'test why))) (list t (hold! 'reload why)))
+                 '()))
+         (l (agent-listen! (list 'topic topic 'kind 'done) note))
+         (r (try (lambda ()
+                   (shell-command->string cmd (or dir (default-directory))
+                     (lambda (out) (for-each release! hs) (event-publish! topic 'done out)))))))
+    (when (and (pair? r) (eq? (car r) 'err))
+      (for-each release! hs)
+      (agent-unlisten! l)
+      (error (cadr r)))
+    l))
 
 (public! 'shell-job! "(shell-job! TOPIC CMD NOTE [DIR]) — run a long shell command in the background and wake this chat with its output when it is done, in one call: listen, run, publish" 'chat)
 

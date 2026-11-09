@@ -84,6 +84,11 @@
 (effects! '(write execute))
 
 (define (reload-file path)
+  ;; an agent's reload waits for the reload holds (holds.scm); the user's goes
+  (let ((why (and (boundp 'holds-reload-refusal)
+                  (let ((a (current-edit-author))) (and (string? a) (string-prefix? "agent:" a)))
+                  (holds-reload-refusal))))
+    (when why (error (string-append "reload-file: " why))))
   (let* ((file (car (reverse (string-split path "/"))))
          (result (reload-files! (list path))))
     (message (string-append "reloaded " file " · "

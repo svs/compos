@@ -2026,6 +2026,27 @@
       "Record the progress since the last log line with (todo-log \"" id "\" TEXT WHO). "
       "WHO is agent: and your agent id. Change nothing else.")))
 
+(define (todo--chat-tasks chat)
+  ;; the tasks CHAT works, as assignee or attached: open ones, else any
+  (let* ((who (chat-stable-id! chat))
+         (mine (lambda (ts) (filter (lambda (t) (member who (todo-chats t))) ts)))
+         (open (mine (todo-list))))
+    (if (pair? open) open (mine (todo-list (list 'all #t))))))
+
+(define-command "chat-goto-todo" "Show the task this chat works as its own page; with several, ask which"
+  (lambda ()
+    (let ((chat (current-buffer)))
+      (if (not (chat-buffer? chat))
+          (message "Not a chat")
+          (let ((ts (todo--chat-tasks chat)))
+            (cond ((null? ts) (message "This chat holds no task; C-c t files one"))
+                  ((null? (cdr ts)) (todo-show-detail! (plist-get (car ts) 'id)))
+                  (else
+                    (let ((labels (map (lambda (t) (list (string-append (plist-get t 'id) "  " (plist-get t 'title)) (plist-get t 'id))) ts)))
+                      (minibuffer-read* "Task: " (map car labels)
+                        (list (list 'confirm (lambda (l) (let ((hit (assoc l labels))) (when hit (todo-show-detail! (cadr hit)))))))))))))))
+  'modes '(chat-mode))
+
 (define-command "chat-todo" "Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes. The chat's agent then writes the task's notes, status and log; when the chat already holds a task, it brings that one up to date"
   (lambda ()
     (let* ((chat (current-buffer))

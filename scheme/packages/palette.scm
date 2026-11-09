@@ -133,7 +133,12 @@
       (if exact (list (command-palette--command-hit exact)) '())
       (filter (lambda (h) (and (says? h) (not (exact? h)))) hits)
       (filter (lambda (h) (and (common? h) (named? h) (not (exact? h)) (not (says? h)))) hits)
-      (filter named? rest)
+      ;; among the rest, a command with a key is a main one: window-layout
+      ;; (C-x l) before layout-backward for "layout"
+      (let* ((keyed? (lambda (h) (and (equal? (plist-get h 'kind) "command")
+                                      (not (equal? (key-for-command (plist-get h 'name) (command-palette--origin)) "")))))
+             (named (filter named? rest)))
+        (append (filter keyed? named) (filter (lambda (h) (not (keyed? h))) named)))
       (filter (lambda (h) (not (named? h))) rest))))
 
 ;; A recipe the palette can draw, in apropos hit shape.
@@ -601,6 +606,7 @@
     ("delete-window" "close pane close split close window")
     ("delete-other-windows" "close other panes single pane maximize")
     ("other-window" "focus next pane next split")
+    ("window-layout" "layout change layout choose layout arrange panes")
     ("customize" "settings preferences options")
     ("load-theme" "color theme dark mode light mode")
     ("text-scale-increase" "zoom in font size bigger text")

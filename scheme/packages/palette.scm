@@ -119,17 +119,20 @@
          (common? (lambda (h) (and (equal? (plist-get h 'kind) "command")
                                    (or (command-palette--everyday? (plist-get h 'name))
                                        (member (plist-get h 'name) ran)))))
-         (rest (filter (lambda (h) (not (or (exact? h) (common? h)))) hits)))
+         (q (string-downcase (string-trim query)))
+         ;; "save" is the word of save-buffer and write-file: they lead
+         (says? (lambda (h) (let ((row (assoc (plist-get h 'name) command-palette-everyday)))
+                              (and row (string-contains? (cadr row) q)))))
+         ;; a common command leads only when its name has the words: customize
+         ;; mentions saving in its doc, and that is no reason to rank it first
+         (first? (lambda (h) (or (exact? h) (says? h) (and (common? h) (named? h)))))
+         (rest (filter (lambda (h) (not (first? h))) hits)))
     (append
       (let ((bind (command-palette--bind-hit query)))
         (if bind (list bind) '()))
       (if exact (list (command-palette--command-hit exact)) '())
-      (let* ((common (filter (lambda (h) (and (common? h) (not (exact? h)))) hits))
-             ;; "zoom in" is the phrase of text-scale-increase, not reset
-             (q (string-downcase (string-trim query)))
-             (says? (lambda (h) (let ((row (assoc (plist-get h 'name) command-palette-everyday)))
-                                  (and row (string-contains? (cadr row) q))))))
-        (append (filter says? common) (filter (lambda (h) (not (says? h))) common)))
+      (filter (lambda (h) (and (says? h) (not (exact? h)))) hits)
+      (filter (lambda (h) (and (common? h) (named? h) (not (exact? h)) (not (says? h)))) hits)
       (filter named? rest)
       (filter (lambda (h) (not (named? h))) rest))))
 
@@ -170,12 +173,11 @@
                          (let ((l (string-downcase h)))
                            (null? (filter (lambda (w) (not (string-contains? l w))) words))))
                        (history-items 'M-x))))
-    ;; a command you ran before reads like any command row, key first
-    (map (lambda (h)
-           (if (command-fn h)
-               (command-palette--candidate (command-palette--command-hit h))
-               (list h "past  ask")))
-         (take hits *command-palette-past-max*))))
+    ;; a command you ran before is ranked with the rest, ahead of the rare
+    ;; ones (command-palette--search): leading here, llm-config-save-bundle
+    ;; once run beat save-buffer for "save". What you asked in words leads.
+    (map (lambda (h) (list h "past  ask"))
+         (take (filter (lambda (h) (not (command-fn h))) hits) *command-palette-past-max*))))
 
 (define *command-palette-debounce-ms* 250)
 

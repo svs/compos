@@ -2030,7 +2030,11 @@ defmodule Compos.Core.SchemeAPI do
           # a symbol or a number is never a buffer: the call put KEY first
           match?({:sym, _}, buf) or is_number(buf) ->
             raise Compos.Scheme.Eval.Error,
-              message: "buffer-local: BUF comes first: (buffer-local BUF KEY); got #{inspect(buf)} as BUF"
+              message:
+                "buffer-local: BUF comes first: (buffer-local BUF KEY); got #{case buf do
+                  {:sym, s} -> "'" <> s
+                  other -> inspect(other)
+                end} as BUF"
 
           is_binary(k) and not Buffer.exists?(buf) and Buffer.exists?(k) ->
             raise Compos.Scheme.Eval.Error,

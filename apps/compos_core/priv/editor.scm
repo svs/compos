@@ -6999,6 +6999,7 @@
 (effects! '(read))
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
+(public! 'buffer-saved-version "(buffer-saved-version NAME) -> the version at the last save; buffer-edit-log entries after it are unsaved")
 (public! 'buffer-local "(buffer-local BUF KEY) -> BUF's own value or #f; the old order of buffer-local-value, which new code uses")
 (public! 'buffer-locals "(buffer-locals BUF) -> ((KEY VALUE) ...) for every buffer-local, sorted by name")
 (effects! '(write))

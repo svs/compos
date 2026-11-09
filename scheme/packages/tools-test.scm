@@ -120,6 +120,20 @@
     (check-equal! (plist-get (car (apropos "chat buffer from stable id" 'lexical #t)) 'name)
                   "chat-stable-id!" "the partial match comes first")))
 
+(deftest 'a-tool-call-with-wrong-arguments-names-the-real-ones
+  "a model that guesses argument names gets one line back, never a reader crash and never the whole catalog"
+  (lambda ()
+    (let ((wrong (llm-tool-call "eval-scheme" '(query "(+ 1 2)")))
+          (none (llm-tool-call "eval-scheme" '()))
+          (aprop (llm-tool-call "apropos" '(code "x")))
+          (blank (llm-tool-call "apropos" '(query "  "))))
+      (check-true! (string-prefix? "error: eval-scheme takes {code}; you sent {query}" wrong)
+                   "a wrong name is named beside the real one")
+      (check-true! (string-contains? none "missing code") "a missing argument is named")
+      (check-true! (string-prefix? "error: apropos takes {query}" aprop) "apropos names its arguments")
+      (check-true! (< (string-length blank) 200) "a blank query never answers the catalog")
+      (check-equal! (llm-tool-call "eval-scheme" '(code "(+ 1 2)")) "3" "a right call runs"))))
+
 (deftest 'a-failed-embedding-sync-tells-the-user-once
   "each retry fails again, and the user hears it one time"
   (lambda ()

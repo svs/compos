@@ -90,19 +90,47 @@
                     (cons (car a) out)
                     out))))))
 
+(define (llm-tool--missing-keys params args)
+  ;; a param without 'optional is required; a key whose value is the
+  ;; JSON null (json-parse gives #f) counts as missing
+  (let loop ((ps params) (out '()))
+    (if (null? ps)
+        (reverse out)
+        (loop (cdr ps)
+              (if (or (memq 'optional (cdar ps))
+                      (let ((v (plist-get (if (list? args) args '()) (caar ps))))
+                        v))
+                  out
+                  (cons (caar ps) out))))))
+
+(define (llm-tool--arg-error name params stray missing args)
+  ;; one line: the real arguments, and what the call sent
+  (let* ((names (lambda (ps) (string-join (map (lambda (p) (symbol->string (car p))) ps) ", ")))
+         (req (filter (lambda (p) (not (memq 'optional (cdr p)))) params))
+         (opt (filter (lambda (p) (memq 'optional (cdr p))) params))
+         (sent (let loop ((a (if (list? args) args '())) (out '()))
+                 (if (or (null? a) (null? (cdr a)))
+                     (reverse out)
+                     (loop (cddr a) (if (symbol? (car a)) (cons (symbol->string (car a)) out) out))))))
+    (string-append "error: " name " takes {" (names req) "}"
+                   (if (pair? opt) (string-append ", optionally {" (names opt) "}") "")
+                   "; you sent {" (string-join sent ", ") "}"
+                   (if (pair? missing)
+                       (string-append ", missing " (string-join (map symbol->string missing) ", "))
+                       "")
+                   ". Send the call again with those argument names.")))
+
 (define (llm-tool-call name args)
   (let ((veto (run-hook-with-args-until-success 'tool-call-hook name args)))
     (if veto
         (if (string? veto) veto (value->string veto))
         (let* ((t (assoc (string->symbol name) *llm-tools*))
                (params (and t (or (plist-get (cadr t) 'params) '())))
-               (stray (if t (llm-tool--stray-keys params args) '())))
+               (stray (if (and t (pair? params) (list? params)) (llm-tool--stray-keys params args) '()))
+               (missing (if (and t (list? params)) (llm-tool--missing-keys params args) '())))
           (cond ((not t) (string-append "no such tool: " name))
-                ((and (pair? stray) (pair? params))
-                 (string-append "error: " name " takes "
-                                (string-join (map (lambda (p) (symbol->string (car p))) params) ", ")
-                                ", not " (string-join (map symbol->string stray) ", ")
-                                ". Send the call again with those argument names."))
+                ((or (pair? stray) (pair? missing))
+                 (llm-tool--arg-error name params stray missing args))
                 (else ((plist-get (cadr t) 'handler) args)))))))
 
 (define (llm-tool-read-only? name)
@@ -1571,6 +1599,9 @@
                       (if (or domain cat) (list 'domain (or domain cat)) '())
                       (if effect (list 'effect effect) '())
                       (if include-display '() (list 'exclude-effect 'display)))))
+        (if (not (and (string? q) (not (equal? (string-trim q) ""))))
+            ;; an empty query matched every entry: the whole catalog
+            "error: apropos needs a query of intent words, e.g. {\"query\": \"split window\"}."
         (value->string
           (if (equal? scope "all")
               (let ((words (apropos--words q))
@@ -1582,7 +1613,7 @@
                                         (apropos--internal
                                           n (primitive-doc n) words catalogued-names))
                                       (global-names)))))
-              (apropos--with-exact q (apply apropos (cons q filters)) include-display))))))
+              (apropos--with-exact q (apply apropos (cons q filters)) include-display)))))))
   '(read external))
 
 (define-tool! 'apropos-categories
@@ -2217,12 +2248,25 @@
 ;; blocks". A NUL never starts a text result, so plain text passes as is.
 (define mcp-proxy-content-prefix "\x00;compos-content\n")
 
+(defcustom 'mcp-proxy-max-chars 100000
+  "An MCP tool result longer than this many characters goes to a file, and the model gets the path, the shape and a call that reads a part. 0 sends every result whole."
+  'group 'chat 'type 'integer)
+
+(define (mcp-proxy--cap name text)
+  ;; one result never floods the model: a long one becomes a reference
+  (if (and (> mcp-proxy-max-chars 0)
+           (> (string-length text) mcp-proxy-max-chars)
+           (boundp 'tool-result-store))
+      (let ((buf (and (agent-slug-of (current-buffer)) (current-buffer))))
+        (tool-result-store buf name text))
+      text))
+
 (define (mcp-proxy-dispatch name args-json)
   (let ((r (llm-tool-call name (json-parse args-json))))
-    (cond ((string? r) r)
+    (cond ((string? r) (mcp-proxy--cap name r))
           ((tool-content? r)
            (string-append mcp-proxy-content-prefix (json-encode (cadr r))))
-          (else (value->string r)))))
+          (else (mcp-proxy--cap name (value->string r))))))
 
 (category! 'chat)
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")

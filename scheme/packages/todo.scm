@@ -1870,8 +1870,12 @@
     (anchor-sync! buf)
     ;; the tabs head the window; the arrows step them
     (unless (buffer-local-value 'arrow-keys buf) (buffer-set-local! buf 'arrow-keys #t))
-    (buffer-set-local! buf 'header-line-blocks
-      (list (component 'ui/tabs (list 'class "todo-detail-tabs" 'tabs (todo--detail-tab-row buf)))))
+    ;; the header line is cached: a new tab row has to say so, or the old
+    ;; active tab stays lit
+    (let ((head (list (component 'ui/tabs (list 'class "todo-detail-tabs" 'tabs (todo--detail-tab-row buf))))))
+      (unless (equal? head (buffer-local-value 'header-line-blocks buf))
+        (buffer-set-local! buf 'header-line-blocks head)
+        (dashboard--sync! buf)))
     ;; the page's keys: the same keys bar the list carries
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar

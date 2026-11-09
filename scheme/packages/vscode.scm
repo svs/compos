@@ -31,13 +31,13 @@
 ;; the VSCode chords on macOS: Cmd is s-, Ctrl is C-
 (define vscode--keys
   '(;; the palette
-    ("s-S-p" "command-palette")
+    ("s-P" "command-palette")
     ("<f1>" "command-palette")
     ;; files
     ("s-p" "project-find-file")
     ("s-o" "find-file")
-    ("s-S-f" "project-ripgrep")
-    ("s-S-e" "project-dired")
+    ("s-F" "project-ripgrep")
+    ("s-E" "project-dired")
     ;; switch between buffers and windows
     ("C-<tab>" "ibuffer-prompt")
     ("s-{" "window-previous-buffer")
@@ -62,6 +62,8 @@
     ("s-k s-s" "keys")))
 
 (define-keymap! "vscode-mode-map")
+;; Shift with a letter arrives as the capital: s-P, never s-S-p
+(for-each (lambda (k) (keymap-unset! "vscode-mode-map" k)) '("s-S-p" "s-S-f" "s-S-e"))
 (for-each (lambda (k) (define-key "vscode-mode-map" (car k) (cadr k))) vscode--keys)
 
 (define (vscode--others)

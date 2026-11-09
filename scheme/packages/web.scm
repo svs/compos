@@ -243,10 +243,20 @@
 ;; read each other's page.
 (define *web--read-seq* 0)
 
+;; A fetch file lives for one read: a few seconds. Some paths delete it
+;; and some do not, so the names go round a fixed ring in a folder of
+;; their own. The folder never holds more than *web--fetch-slots* files,
+;; and the top of the home stays short.
+(define *web--fetch-slots* 64)
+
+(define (web--fetch-dir) (string-append (compos-home) "/tmp/browse-fetch"))
+
 (define (web--body-file! extension)
   (set! *web--read-seq* (+ *web--read-seq* 1))
-  (string-append (compos-home) "/browse-fetch-"
-                 (number->string *web--read-seq*) "." extension))
+  (make-directory! (web--fetch-dir))
+  (string-append (web--fetch-dir) "/"
+                 (number->string (modulo *web--read-seq* *web--fetch-slots*))
+                 "." extension))
 
 ;; A script is never read, and it breaks the parse of everything that is.
 ;; libxml2 starts a tag at a `<` before a letter, and `i<linkKeys.length`

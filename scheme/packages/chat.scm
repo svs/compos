@@ -1196,6 +1196,8 @@
 ;; the directory by age; the suffix loop keeps two same-second chats with
 ;; the same title in two files.
 (define (chat-log-id! buf)
+  ;; the file is written later, so a chat minted in the same second as another
+  ;; finds no file yet: an id a live chat holds is taken too
   (or (buffer-local-value 'chat-log-id buf)
       (let ((base (string-append
                     (number->string (current-time)) "-"
@@ -1206,7 +1208,8 @@
           (let ((id (if (= n 0)
                         base
                         (string-append base "-" (number->string n)))))
-            (if (file-exists? (string-append (chat-log-dir-for buf) "/" id ".chat"))
+            (if (or (file-exists? (string-append (chat-log-dir-for buf) "/" id ".chat"))
+                    (find (lambda (b) (equal? (buffer-local-value 'chat-log-id b) id)) (buffer-list)))
                 (loop (+ n 1))
                 (begin (buffer-set-local! buf 'chat-log-id id) id)))))))
 

@@ -596,12 +596,17 @@
     chat))
 
 (define (chat-for--keep-file! c path)
-  ;; a chat read back goes on writing the file it came from, not a new one
-  (unless (buffer-local-value 'chat-log-id c)
-    (let ((leaf (car (reverse (string-split path "/")))))
-      (when (and (string-suffix? ".chat" leaf)
-                 (equal? (string-append (chat-log-dir-for c) "/" leaf) path))
-        (buffer-set-local! c 'chat-log-id (substring leaf 0 (- (string-length leaf) 5)))))))
+  ;; a chat read back goes on writing the file it came from, not a new one,
+  ;; and only through the chat log: a buffer still visiting its .chat file
+  ;; is saved like a file, and the save guard then refuses every agent call
+  (let ((leaf (car (reverse (string-split path "/")))))
+    (when (and (string-suffix? ".chat" leaf)
+               (equal? (string-append (chat-log-dir-for c) "/" leaf) path)
+               (or (not (buffer-local-value 'chat-log-id c))
+                   (equal? (buffer-file-name c) path)))
+      (buffer-set-local! c 'chat-log-id (substring leaf 0 (- (string-length leaf) 5)))))
+  (when (equal? (buffer-file-name c) path)
+    (buffer-detach! c)))
 
 (define (chat-for--open key path g)
   ;; the chat whose file is PATH: live, else the live chat the file's header

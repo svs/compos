@@ -935,6 +935,7 @@
                c
                (list-col-resize c rest)))
          cols)))
+(catalog-meta! 'function "list-fit-columns" 'effects '(pure))
 
 ;; a mode says its columns once per line of a row. A one-line list says
 ;; 'columns and means one line; a two-line list says 'row-columns.

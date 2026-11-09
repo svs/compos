@@ -2015,6 +2015,9 @@
           (todo--refresh-all!)
           (message (string-append "Filed " id)))))))
 
+(define-command "todo-new" "File a new task, from anywhere; the same as todo-capture"
+  (lambda () (run-command "todo-capture")))
+
 ;; a chat files its own card: the task is the chat's, in doing, so the
 ;; board can tell a chat that finished from one that stopped halfway
 (define (todo--ask-update! chat id)

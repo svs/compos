@@ -185,6 +185,7 @@
 (require 'morg)
 (require 'markdown-mode)
 (require 'cua)
+(require 'vscode)
 (require 'notmuch)
 (require 'occur)
 (require 'org)

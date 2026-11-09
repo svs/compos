@@ -179,27 +179,85 @@
     (list (component 'wizard/nav
             (list 'next (list "wizard:next" "Next: set up embeddings →"))))))
 
-;; The search step: one card for each backend of apropos-embedding-backends.
+;; The local embedding backend: Ollama on this machine. Its state is
+;; absent, stopped, no-model or ready. A card draw asks the server off the
+;; lane and redraws only when the answer changes.
+(define *setup-wizard--ollama-state* 'unknown)
+
+(define (setup-wizard--ollama-binary)
+  (let loop ((ps '("/opt/homebrew/bin/ollama" "/usr/local/bin/ollama")))
+    (cond ((null? ps) #f) ((file-exists? (car ps)) (car ps)) (else (loop (cdr ps))))))
+
+(define (setup-wizard--ollama-model)
+  (list-ref (assq 'ollama *apropos-embedding-backend-specs*) 4))
+
+(define (setup-wizard--ollama-check!)
+  (if (not (setup-wizard--ollama-binary))
+      (setup-wizard--ollama-note! 'absent)
+      (http-get "http://localhost:11434/api/tags" '(timeout 2000)
+        (lambda (r)
+          (setup-wizard--ollama-note!
+            (cond ((not (plist-get r 'ok)) 'stopped)
+                  ((string-contains? (or (plist-get r 'body) "") (setup-wizard--ollama-model)) 'ready)
+                  (else 'no-model)))))))
+
+(define (setup-wizard--ollama-note! state)
+  (unless (eq? state *setup-wizard--ollama-state*)
+    (set! *setup-wizard--ollama-state* state)
+    (setup-wizard-redraw-open!)))
+
+(define (setup-wizard-install-ollama!)
+  "Install or upgrade Ollama with brew, start it and pull the embedding
+   model, in a terminal in the other column."
+  (let ((buf "*install:ollama*"))
+    (buffer-create buf)
+    (buffer-set-local! buf 'mode-name "term-mode")
+    (buffer-set-local! buf 'terminal-command
+      (string-append "(brew upgrade ollama 2>/dev/null || brew install ollama)"
+                     " && (brew services restart ollama || (nohup ollama serve >/dev/null 2>&1 &))"
+                     " && until curl -s localhost:11434/api/version >/dev/null; do sleep 1; done"
+                     " && ollama pull " (setup-wizard--ollama-model)
+                     " && " setup--done-signal
+                     " && printf '\\nOllama is ready.\\n'"
+                     "; exec \"${SHELL:-/bin/sh}\" -l"))
+    (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
+    (buffer-set-local! buf 'terminal-command #f)
+    (display-buffer-other-window! buf)
+    buf))
+
+;; The search step: one card for each backend, in a fixed order.
 ;; The backend in use is the first one that has a key.
 (define (setup-wizard--embed-card b)
   (let* ((spec (assq b *apropos-embedding-backend-specs*))
          (name (symbol->string b))
-         (key (llm-key (list-ref spec 2)))
-         (ready? (and key (not (equal? key ""))))
+         (local? (not (list-ref spec 2)))
+         (key (apropos-embedding-spec-key spec))
+         (ollama (and local? (begin (setup-wizard--ollama-check!) *setup-wizard--ollama-state*)))
+         (ready? (if local? (eq? ollama 'ready) (and key (not (equal? key "")))))
          (active (apropos-embedding-backend))
          (chosen? (and active (eq? (car active) b))))
     (component 'wizard/choice
       (list 'title (list-ref spec 1)
-            'detail (string-append (list-ref spec 4) " · " (if ready? "key found" "no key"))
-            'badge (cond (chosen? "in use") (ready? "ready") (else "needs a key"))
+            'detail (string-append (list-ref spec 4) " · " (cond ((not local?) (if ready? "key found" "no key"))
+                                                                      ((eq? ollama 'absent) "not installed")
+                                                                      ((eq? ollama 'stopped) "installed, not running")
+                                                                      ((eq? ollama 'no-model) "running, model not pulled")
+                                                                      ((eq? ollama 'ready) "on this machine")
+                                                                      (else "checking…")))
+            'badge (cond (chosen? "in use") (ready? "ready") (local? "needs setup") (else "needs a key"))
             'tone (cond (chosen? "accent") (ready? "good") (else "plain"))
             'selected? chosen?
             'actions (append
                        (if (and ready? (not chosen?))
                            (list (list (string-append "wizard:embed-use:" name) "Use this"))
                            '())
-                       (list (list (string-append "wizard:embed-key:" name)
-                                   (if ready? "Change the key" "Add a key"))))))))
+                       (if local?
+                           (cond ((eq? ollama 'absent) '(("wizard:ollama-install" "Install")))
+                                 ((eq? ollama 'stopped) '(("wizard:ollama-install" "Start")))
+                                 ((eq? ollama 'no-model) '(("wizard:ollama-install" "Pull the model")))
+                                 (else '()))
+                           (list (list (string-append "wizard:embed-key:" name)
+                                       (if ready? "Change the key" "Add a key")))))))))
 
 (define (setup-wizard--search-blocks)
   (list (list 'tag "div" 'class "wizard-title" 'text "Set up embeddings")
@@ -209,7 +267,7 @@
                       "An embedding model lets it find them by their meaning, not only by their words. "
                       "Choose the service that makes the embeddings. The first index costs less than one cent."))
         (list 'tag "div" 'class "wizard-grid"
-              'children (map setup-wizard--embed-card apropos-embedding-backends))
+              'children (map setup-wizard--embed-card (map car *apropos-embedding-backend-specs*)))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
                 'next (list "wizard:next" "Next: decision model →")))))
@@ -707,6 +765,7 @@
     ((string-prefix? "wizard:embed-key:" id)
      (setup-wizard-embed-key! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((equal? id "wizard:laya-install") (setup-wizard-install-laya!) #t)
+    ((equal? id "wizard:ollama-install") (setup-wizard-install-ollama!) #t)
     ((string-prefix? "wizard:decide-use:" id)
      (let ((d (string->symbol (substring-bytes id 18 (string-byte-length id)))))
        (customize-save! 'decide-backends (cons d (filter (lambda (x) (not (eq? x d))) decide-backends)))
@@ -727,7 +786,7 @@
      #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
-    ((equal? id "wizard:rescan") (laya-rescan!) (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
+    ((equal? id "wizard:rescan") (laya-rescan!) (setup-wizard--ollama-check!) (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
     (else (setup-model-card-click! buf id))))
 
 (add-hook! (list 'block-click 'setup-wizard)

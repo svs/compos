@@ -671,7 +671,18 @@
   '((openrouter "OpenRouter" "openrouter"
                 "https://openrouter.ai/api/v1/embeddings" "openai/text-embedding-3-small")
     (openai "OpenAI" "openai"
-            "https://api.openai.com/v1/embeddings" "text-embedding-3-small")))
+            "https://api.openai.com/v1/embeddings" "text-embedding-3-small")
+    ;; a local Ollama server: no provider, so it needs no key
+    (ollama "Ollama (local)" #f
+            "http://localhost:11434/v1/embeddings" "qwen3-embedding:0.6b")))
+
+;; The key of backend SPEC: a local backend has no provider and answers
+;; "local"; any other answers its provider's key, or #f.
+(define (apropos-embedding-spec-key spec)
+  (cond ((not spec) #f)
+        ((not (list-ref spec 2)) "local")
+        ((boundp (quote llm-key)) (llm-key (list-ref spec 2)))
+        (else #f)))
 
 (defcustom 'apropos-semantic-limit 24
   "The maximum semantic results that apropos reads from the embedding index."
@@ -925,15 +936,14 @@
 ;; The first backend of apropos-embedding-backends that has a key, as
 ;; (BACKEND KEY ENDPOINT MODEL); #f when none has one.
 (define (apropos-embedding-backend)
-  (and (boundp (quote llm-key))
-       (let loop ((bs apropos-embedding-backends))
-         (if (null? bs)
-             #f
-             (let* ((spec (assq (car bs) *apropos-embedding-backend-specs*))
-                    (key (and spec (llm-key (list-ref spec 2)))))
-               (if (and key (not (equal? key "")))
-                   (list (car spec) key (list-ref spec 3) (list-ref spec 4))
-                   (loop (cdr bs))))))))
+  (let loop ((bs apropos-embedding-backends))
+    (if (null? bs)
+        #f
+        (let* ((spec (assq (car bs) *apropos-embedding-backend-specs*))
+               (key (apropos-embedding-spec-key spec)))
+          (if (and key (not (equal? key "")))
+              (list (car spec) key (list-ref spec 3) (list-ref spec 4))
+              (loop (cdr bs)))))))
 
 ;; What the embedding primitives take as KEY: (KEY ENDPOINT MODEL).
 (define (apropos--embedding-key)

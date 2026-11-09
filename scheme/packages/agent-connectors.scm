@@ -86,6 +86,19 @@ nonstandard install out of the built-in connector catalog."
     description "OpenCode — multi-provider ACP agent"
     model-config #t))
 
+;; OpenCode Go is a subscription provider inside OpenCode, apart from the
+;; pay-as-you-go `opencode/` models. Its own row lets Setup choose it: the
+;; same agent, started on a Go model, taking only `opencode-go/` ids.
+;; `opencode auth login` keeps its key in OpenCode's auth.json.
+(define-connector! "opencode-go"
+  '(cmd "opencode acp"
+    title "OpenCode Go"
+    description "OpenCode Go — the Go subscription's models through OpenCode"
+    model-config #t
+    model "opencode-go/deepseek-v4.1-flash"
+    accepts "^opencode-go/"
+    signin "opencode auth login"))
+
 (define-connector! "deepseek"
   ;; DeepSeek Harness over ACP. The direct API lane bills every request for
   ;; the whole prefix; the harness keeps one session, so DeepSeek's context

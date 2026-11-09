@@ -2428,12 +2428,16 @@
 (public! 'define-key
   "(define-key KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.")
 (define (define-key name seq command)
-  (keymap--update! name (lambda (b) (alist-put b (keymap--seq seq) (keymap--value command)))))
+  (let ((r (keymap--update! name (lambda (b) (alist-put b (keymap--seq seq) (keymap--value command))))))
+    (cmd-keys--touched! name seq)
+    r))
 
 (public! 'keymap-unset!
   "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.")
 (define (keymap-unset! name seq)
-  (keymap--update! name (lambda (b) (alist-delete b (keymap--seq seq)))))
+  (let ((r (keymap--update! name (lambda (b) (alist-delete b (keymap--seq seq))))))
+    (cmd-keys--touched! name seq)
+    r))
 
 (public! 'keymap-parent!
   "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.")
@@ -2511,11 +2515,87 @@
   "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps.")
 (define (global-minor-maps! names)
   (keymap--changed!)
-  (set! *global-minor-maps* (map keymap--key names)))
+  (set! *global-minor-maps* (map keymap--key names))
+  (cmd-keys-publish!))
 
 (effects! '(read))
 (public! 'global-minor-maps "(global-minor-maps) — the keymaps in force in every buffer.")
 (define (global-minor-maps) *global-minor-maps*)
+
+;; The browser keeps a Cmd chord unless a keymap binds it. app.js sends
+;; a Cmd key only when its base rides the frame chrome as cmd-keys: s-P
+;; gives P, s-k s-\\ gives k, C-s-<left> gives <left>. The maps that
+;; count are the ones that can answer in some buffer: global, the global
+;; minor maps, the editing-state maps and every major mode's map. A map
+;; a global toggle puts in force, such as vscode-mode-map, counts only
+;; while it is in force. Nothing publishes until the kernel has loaded
+;; the editing-state maps (*cmd-keys-live*), and a publish that finds
+;; the same keys sends nothing.
+(define *cmd-keys-live* #f)
+(define *cmd-keys-last* #f)
+
+(define (cmd-keys--base key)
+  (if (and (> (string-length key) 2)
+           (member (substring key 0 2) '("C-" "M-" "S-" "s-")))
+      (cmd-keys--base (substring key 2 (string-length key)))
+      key))
+
+;; a key that holds Cmd: s- among its modifiers
+(define (cmd-keys--chord? key)
+  (and (string? key)
+       (> (string-length key) 2)
+       (let ((m (substring key 0 2)))
+         (cond ((equal? m "s-") #t)
+               ((member m '("C-" "M-" "S-"))
+                (cmd-keys--chord? (substring key 2 (string-length key))))
+               (else #f)))))
+
+(define (cmd-keys--counted? name)
+  (or (equal? name "global")
+      (and (member name *global-minor-maps*) #t)
+      (and (member name *editing-state-maps*) #t)
+      (and (string? name)
+           (string-suffix? "-map" name)
+           (eq? (mode-get (substring name 0 (- (string-length name) 4)) 'kind) 'major))))
+
+(define (cmd-keys--maps)
+  (append (list "global") *global-minor-maps* *editing-state-maps*
+          (map mode-keymap (mode-names 'major))))
+
+(define (cmd-keys--add rows out)
+  (if (null? rows)
+      out
+      (let ((first (car (keymap--seq (car (car rows))))))
+        (cmd-keys--add (cdr rows)
+          (let ((base (cmd-keys--base first)))
+            (if (and (cmd-keys--chord? first) (not (member base out)))
+                (cons base out)
+                out))))))
+
+(effects! '(read))
+(public! 'cmd-keys "(cmd-keys) — the base keys of the Cmd chords a keymap binds: global, the global minor maps, the editing-state maps and the major modes' maps; the browser hands these over")
+(define (cmd-keys)
+  (let loop ((maps (cmd-keys--maps)) (out '()))
+    (if (null? maps)
+        (reverse out)
+        (loop (cdr maps) (cmd-keys--add (keymap-bindings (car maps)) out)))))
+
+(effects! '(write display))
+(public! 'cmd-keys-publish! "(cmd-keys-publish!) — send cmd-keys to every frame when they changed; the keymap writes call it")
+(define (cmd-keys-publish!)
+  (when *cmd-keys-live*
+    (let ((keys (cmd-keys)))
+      (unless (equal? keys *cmd-keys-last*)
+        (set! *cmd-keys-last* keys)
+        (frame-chrome-set! "cmd-keys" keys)))))
+
+;; a write to map NAME at SEQ: publish when SEQ starts with a Cmd key in a
+;; map that counts
+(define (cmd-keys--touched! name seq)
+  (when (and *cmd-keys-live*
+             (let ((ks (keymap--seq seq))) (and (pair? ks) (cmd-keys--chord? (car ks)))))
+             (cmd-keys--counted? name))
+    (cmd-keys-publish!)))
 
 (effects! '(write))
 (public! 'buffer-at-point-map!
@@ -2681,6 +2761,10 @@
     (cond (minor (let ((map (mode-get name 'keymap))) (when map (define-keymap! map))))
           (else
             (define-keymap! (mode-keymap name))
+            ;; a map bound before its mode was: its Cmd keys count now
+            (when (and *cmd-keys-live*
+                       (pair? (cmd-keys--add (keymap-bindings (mode-keymap name)) '())))
+              (cmd-keys-publish!))
             ;; every mode is an M-x command, like Emacs, and like Emacs the
             ;; command puts the buffer in the mode; running it again keeps
             ;; it there. The modeline click is the toggle.
@@ -6306,11 +6390,18 @@
   (for-each (lambda (n)
               (unless (member n *editing-state-maps*)
                 (set! *editing-state-maps* (append *editing-state-maps* (list n)))))
-            names))
+            names)
+  (cmd-keys-publish!))
 
 (define (editing-state-maps-drop! names)
   (set! *editing-state-maps*
-    (remove (lambda (m) (member m names)) *editing-state-maps*)))
+    (remove (lambda (m) (member m names)) *editing-state-maps*))
+  (cmd-keys-publish!))
+
+;; every map cmd-keys counts is defined from here: the keymap writes
+;; publish it now
+(set! *cmd-keys-live* #t)
+(cmd-keys-publish!)
 
 ;; A mode can refuse one of those maps, by name, for its buffers. The
 ;; marker map is not refusable: it is what says the buffer is in the state.

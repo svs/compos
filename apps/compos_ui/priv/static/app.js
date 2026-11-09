@@ -83,19 +83,12 @@
   }
 
   // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
-  // paste event) — except the arrows, claimed for window motion,
-  // and cmd-p, claimed for the command palette, and cmd-i for imenu,
-  // and cmd-[ and cmd-], which walk a window's buffers
-  // ...and the text-scale chords, claimed from the browser's
-  // whole-page zoom: cmd-=/-/0 scale the application (appearance.scm
-  // ui-scale), and their shifted shapes cmd-+/_/) scale ONE buffer.
-  // The list names the BASE the key travels as (baseKey), so a
-  // named key appears in its Emacs spelling: "<up>", not "ArrowUp".
-  const CMD_KEYS = ["<left>", "<right>", "<up>", "<down>",
-                    "a", "i", "p", "[", "]", "+", "=", "-", "0", "_", ")", "RET"];
-  // the Cmd keys a keymap binds now, as Scheme publishes them (cmd-keys in
-  // vscode.scm): the editor root carries them, space-separated, so a mode
-  // that binds Cmd-O or Cmd-Shift-P gets the key and the browser does not
+  // paste event) — except the Cmd keys a keymap binds now, as Scheme
+  // publishes them (cmd-keys in editor.scm): the editor root carries
+  // them, space-separated, each the BASE the key travels as (baseKey),
+  // so a named key appears in its Emacs spelling: "<up>", not "ArrowUp".
+  // A mode that binds Cmd-O or Cmd-Shift-P gets the key and the browser
+  // does not.
   function boundCmdKeys() {
     const root = document.getElementById("editor");
     const keys = root && root.dataset.cmdKeys;
@@ -107,7 +100,7 @@
     const base = baseKey(e);
     if (base === null) return null;
     // the claim reads the base, not e.key: Cmd-Shift-= is "+"
-    if (e.metaKey && !CMD_KEYS.includes(base) && !boundCmdKeys().includes(base)) return null;
+    if (e.metaKey && !boundCmdKeys().includes(base)) return null;
     let spec = base;
     // S- only for named keys (TAB, arrows, RET...): printable chars
     // already encode shift in the character itself, Emacs-style.

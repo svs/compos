@@ -67,38 +67,10 @@
 (define (vscode--others)
   (remove (lambda (m) (equal? m "vscode-mode-map")) (global-minor-maps)))
 
-;; the browser keeps a Cmd chord unless the client knows a keymap wants
-;; it. The base key of every Cmd chord the global maps bind rides the
-;; frame chrome as cmd-keys: s-P gives P, s-k s-\\ gives k, C-s-<left>
-;; gives <left>.
-(define (vscode--base key)
-  (if (and (> (string-length key) 2)
-           (member (substring key 0 2) '("C-" "M-" "S-" "s-")))
-      (vscode--base (substring key 2 (string-length key)))
-      key))
-
-;; the base of a chord that holds Cmd, else the chord itself
-(define (vscode--cmd-base key)
-  (if (string-contains? key "s-") (vscode--base key) key))
-
-(define (cmd-keys)
-  (let loop ((rows (apply append (map keymap-bindings (cons "global" (global-minor-maps)))))
-             (out '()))
-    (if (null? rows)
-        (reverse out)
-        (let* ((first (car (string-split (car (car rows)) " ")))
-               (base (vscode--cmd-base first)))
-          (loop (cdr rows)
-                (if (and (not (equal? base first)) (not (member base out)))
-                    (cons base out)
-                    out))))))
-
-(define (cmd-keys-publish!)
-  (frame-chrome-set! "cmd-keys" (cmd-keys)))
-
 (define (vscode--apply! on)
-  (global-minor-maps! (if on (cons "vscode-mode-map" (vscode--others)) (vscode--others)))
-  (cmd-keys-publish!))
+  ;; global-minor-maps! republishes cmd-keys, so Cmd-W and the rest reach
+  ;; the editor exactly while the mode is on
+  (global-minor-maps! (if on (cons "vscode-mode-map" (vscode--others)) (vscode--others))))
 
 (defcustom 'vscode-mode #f
   "Use the VSCode keys for the palette, files and windows, in every buffer."
@@ -131,6 +103,4 @@
 
 (catalog-meta! 'command "vscode-mode" 'domain 'commands 'effects '(write))
 (catalog-meta! 'command "toggle-frame-fullscreen" 'domain 'commands 'effects '(write display))
-(public! 'cmd-keys "(cmd-keys) — the base keys of the Cmd chords the global maps bind; the browser passes these through")
-(public! 'cmd-keys-publish! "(cmd-keys-publish!) — send cmd-keys to every frame")
 (public! 'vscode--keys "vscode--keys — the ((KEYS COMMAND) ...) vscode-mode puts in force")

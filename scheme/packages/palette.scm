@@ -114,7 +114,7 @@
 ;; arrows step over it.
 (defcustom 'command-tutorial
   '("help-with-tutorial" "onboarding" "how-do-i" "window-layout" "ibuffer"
-    "ichat" "ibuffer-prompt" "project-find-file" "chat-new" "keys" "load-theme")
+    "chat-list" "ibuffer-prompt" "project-find-file" "chat-new" "keys" "load-theme")
   "The commands M-x and the palette show first, under Tutorial, while you have typed nothing."
   'group 'interaction)
 

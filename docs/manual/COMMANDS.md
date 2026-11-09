@@ -209,7 +209,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `group-home` |  | Open Dired at the current group's home directory |
 | `help-chat` | `C-c h` | Pull the help chat into this group and show it; in it, go back |
 | `help-chat-mode` |  | Toggle the help chat's teaching prompt |
-| `ichat` |  | Open the chat buffer listing here |
 | `llm-ask` | `C-c q` | Ask the LLM from anywhere via the minibuffer |
 | `llm-companion-show` |  | Show this document's hidden chat in the other window |
 | `llm-costs` |  | Show LLM spend by day and model (the usage ledger) |

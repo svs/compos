@@ -1157,9 +1157,6 @@
 (define (chat-list-open! &optional standing)
   (mode-list "chat-mode" standing))
 
-(define-command "ichat" "Open the chat buffer listing here"
-  (lambda () (chat-list-open!)))
-
 (define-command "chat-list"
   "Switch to a chat, by its name or by a word somebody said in it"
   (lambda () (chat-list-open!)))

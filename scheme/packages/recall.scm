@@ -142,6 +142,80 @@
              (list (car best) (cadr best) (caddr best))))
          cases)))
 
+;; Real chats as a teacher: the first turn of a chat, when it ended in an
+;; answer and the user's next message did not correct it. Its dead ends are
+;; dropped like a drive-eval run's. A chat that opens with a source prompt of
+;; *drive-eval-unseen-cases* never teaches: recall is measured on those.
+(define recall--risky '("destroy" "external" "execute" "spend" "display" "unknown"))
+(define recall--corrections '("didn't" "doesn't work" "not working" "wrong" "broken" "still" "undo" "revert"))
+
+(define (recall--symbols x)
+  (cond ((symbol? x) (list x))
+        ((pair? x) (append (recall--symbols (car x)) (recall--symbols (cdr x))))
+        (else '())))
+
+(define (recall--safe? code)
+  ;; a recipe is offered to later chats: one that sends, runs, spends or
+  ;; deletes must not come from a chat the user watched
+  (let ((forms (ignore-errors (lambda () (scheme-read code)))))
+    (and (pair? forms)
+         (not (any (lambda (s)
+                     (let ((e (catalog-entry "function" (symbol->string s))))
+                       (and e (any (lambda (x) (member x recall--risky)) (or (plist-get e 'effects) '())))))
+                   (fast-distinct (recall--symbols forms)))))))
+
+(define (recall--said m)
+  (string-join (map cadr (filter (lambda (b) (and (pair? b) (equal? (car b) "text") (pair? (cdr b)) (string? (cadr b))))
+                                 (or (plist-get m 'blocks) '())))
+               "\n"))
+
+(define (recall--first-turn rec)
+  ;; REC oldest first: (TURN NEXT-USER-MESSAGE-OR-#f) after the first prompt
+  (let loop ((ms (if (pair? rec) (cdr rec) '())) (acc '()))
+    (cond ((null? ms) (list (reverse acc) #f))
+          ((equal? (plist-get (car ms) 'role) "user") (list (reverse acc) (car ms)))
+          (else (loop (cdr ms) (cons (car ms) acc))))))
+
+(define (recall--chat-run f held)
+  (let* ((r (ignore-errors (lambda () (chat-log-read f))))
+         (title (or (and r (plist-get (plist-get r 'header) 'title)) ""))
+         (ps (and r (plist-get r 'prompts)))
+         (p (if (pair? ps) (car ps) ps)))
+    (and (string? p) (<= (string-length p) 200)
+         (not (string-prefix? "drive-eval" title))
+         ;; another harness's runs (*hl:count:cc-haiku:2*) are not the user's
+         (not (string-contains? p "*hl:"))
+         (not (string-contains? p "*drive-eval"))
+         (not (member (string-trim p) held))
+         (let* ((ft (recall--first-turn (or (plist-get r 'record) '())))
+                (turn (car ft))
+                (next (cadr ft))
+                (last-msg (and (pair? turn) (list-ref turn (- (length turn) 1))))
+                (low (if next (string-downcase (recall--said next)) "")))
+           (and last-msg
+                (equal? (plist-get last-msg 'role) "assistant")
+                (= 0 (drive-eval--tool-uses last-msg))
+                (> (string-length (recall--said last-msg)) 0)
+                (not (string-prefix? "no" low))
+                (not (any (lambda (w) (string-contains? low w)) recall--corrections))
+                (let* ((fr (or (ignore-errors (lambda () (drive-eval-friction turn))) '()))
+                       (calls (recall--useful fr)))
+                  (and (pair? calls) (<= (length calls) 8)
+                       (any (lambda (c) (not (string-contains? (car c) "(apropos"))) calls)
+                       (every (lambda (c) (recall--safe? (car c))) calls)
+                       (list (car (string-split (last (string-split f "/")) ".")) p calls))))))))
+
+(define (recall-chat-runs &optional n)
+  "the first turns of the N newest chats (default 40) that ended well, as teacher runs ((NAME PROMPT CALLS) ...); never a drive-eval chat, never a source chat of the unseen set"
+  (let ((held (if (boundp '*drive-eval-unseen-cases*) (map (lambda (c) (string-trim (cadr c))) *drive-eval-unseen-cases*) '()))
+        (want (or n 40)))
+    (let loop ((fs (reverse (chat-log-files))) (acc '()))
+      (if (or (null? fs) (>= (length acc) want))
+          (reverse acc)
+          (let ((run (recall--chat-run (car fs) held)))
+            ;; one teacher per prompt: the newest that ended well
+            (loop (cdr fs) (if (and run (not (any (lambda (a) (equal? (cadr a) (cadr run))) acc))) (cons run acc) acc)))))))
+
 (define (recall--teach-prompt prompt calls &optional problems)
   (string-append
     "An agent did this request in the compos editor, a Scheme editor, by running the calls below. Dead ends are removed.\n\n"
@@ -171,7 +245,9 @@
   ;; runs in a task: the model call blocks
   (let loop ((tries 0) (problems #f))
     (let* ((text (app-await (lambda (k) (llm-with-model (recall--teach-prompt (cadr run) (caddr run) problems)
-                                                         recall-teacher-model k (lambda (e) (k #f))))))
+                                                         recall-teacher-model k (lambda (e) (k #f))))
+                             ;; a teacher answer takes longer than the 20 s default
+                             180))
            (r (if (string? text)
                   (or (recall--with-buffers (fast-unfence text) (lambda () (fast-learn! (fast-unfence text) (cadr run))))
                       (list 'no "fast-learn! failed"))
@@ -181,21 +257,26 @@
           (loop (+ tries 1) (cadr r))))))
 
 (define (recall-teach! &optional teacher cases)
-  "turn the teacher's best drive-eval run of each case into a learned function; the result goes to *recall-taught* and the event recall/taught"
-  (let ((runs (filter (lambda (r) (or (not cases) (memq (string->symbol (car r)) cases)))
-                      (recall-teacher-runs teacher))))
+  "turn the teacher's best drive-eval run of each case into a learned function; TEACHER 'chats takes real chats instead, CASES then their count; the result goes to *recall-taught* and the event recall/taught"
+  (let* ((chats? (eq? teacher 'chats))
+         (runs (if chats?
+                   #f
+                   (filter (lambda (r) (or (not cases) (memq (string->symbol (car r)) cases)))
+                           (recall-teacher-runs teacher))))
+         (n (if chats? (or cases 40) (length runs))))
     (task-run!
-      (lambda () (map recall--teach-one runs))
+      (lambda () (map recall--teach-one (or runs (recall-chat-runs n))))
       (lambda (ok? rows)
         (set! *recall-taught* (if ok? rows (list (list 'error rows))))
         (event-publish! "recall" 'taught
           (if ok?
               (string-join (map (lambda (x) (string-append (car x) ": " (value->string (cadr x)))) rows) "\n")
               (string-append "recall-teach! failed: " (value->string rows)))))
-      (* 1000 60 (+ 2 (* 2 (length runs)))))
-    (length runs)))
+      (* 1000 60 (+ 4 (* 2 n))))
+    n))
 
 (public! 'recall-teacher-runs "(recall-teacher-runs [TEACHER]) -- the teacher's best archived drive-eval run of each case, dead ends dropped: ((CASE PROMPT ((CODE RESULT) ...)) ...)")
-(public! 'recall-teach! "(recall-teach! [TEACHER CASES]) -- in a task, turn the teacher's runs (default opus) into learned functions; the event recall/taught reports")
+(public! 'recall-teach! "(recall-teach! [TEACHER CASES]) -- in a task, turn the teacher's runs (default opus) into learned functions; TEACHER 'chats learns from real chat logs, CASES then their count; the event recall/taught reports")
+(public! 'recall-chat-runs "(recall-chat-runs [N]) -- the first turns of the N newest chats that ended well, as teacher runs, dead ends and risky calls dropped, never a source chat of *drive-eval-unseen-cases*")
 
 (provide 'recall)

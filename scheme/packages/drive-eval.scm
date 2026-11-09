@@ -27,6 +27,9 @@
     ;; a fifth item adds execute* options: the Driver without recall.scm
     (haiku-driver-cold "claude-code" "haiku" "Driver" (recall #f))
     (haiku-driver-recall "claude-code" "haiku" "Driver" (recall #t))
+    ;; the palette's lane: Driver's tools and cuts on the direct API
+    (haiku-api "api" "claude-haiku-5-5" "Driver API" (recall #f))
+    (haiku-api-recall "api" "claude-haiku-5-5" "Driver API" (recall #t))
     (deepseek-driver "opencode-go" "opencode-go/deepseek-v4.1-flash" "Driver")))
 
 (define drive-eval-timeout-s 300)
@@ -201,6 +204,141 @@
           (lambda (b) (string-append "In the buffer " b ", delete every line that starts with #, then tell me how many lines are left. Answer with the number only."))
           (lambda (text reply . _) (and (equal? text "alpha\nbeta\ngamma\ndelta\n")
                                         (equal? (drive-eval--number reply) 4))))))
+
+;; a fixture as lines: each line ends in a newline
+(define (drive-eval--lines . xs) (apply string-append (map (lambda (x) (string-append x "\n")) xs)))
+(define (drive-eval--path fb suffix) (string-append "/tmp/drive-eval-" (drive-eval--tag fb) suffix))
+;; a fixture directory and all it holds: delete-file! takes only an empty one
+(define (drive-eval--rmdir d)
+  (when (file-directory? d)
+    (for-each (lambda (f) (let ((x (string-append d "/" f)))
+                            (if (file-directory? x) (drive-eval--rmdir x) (delete-file! x))))
+              (filter (lambda (f) (not (member f '("." "..")))) (directory-files d)))
+    (delete-file! d)))
+
+;; Held-out harness tasks from real user chats: SOURCE is the user's own first
+;; prompt, word for word. recall never learns from a chat that opens with one
+;; of them, and none of them is one of the 12 cases or their rewordings.
+(define *drive-eval-unseen-cases*
+  (list
+    (list 'unwrap "dear lord please get rid of the linebreaks in the document"
+          (drive-eval--lines "The editor runs on the BEAM." "It is scripted in Scheme," "and every command is a function.")
+          (lambda (b) (string-append "The buffer " b " holds one paragraph broken over three lines. Join them into one line, with one space where each line break was. Keep the final newline."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "The editor runs on the BEAM. It is scripted in Scheme, and every command is a function."))))
+    (list 'headings "rewrite those points as narrowable morg headings"
+          (drive-eval--lines "- research the visa" "- book the hotel" "- pack the bags")
+          (lambda (b) (string-append "In the buffer " b ", turn each bullet line that starts with a dash and a space into a heading that starts with a star and a space. Change nothing else."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "* research the visa" "* book the hotel" "* pack the bags"))))
+    (list 'apartment "hello pls add 601 as the apartment number"
+          (drive-eval--lines "Name: Siddharth" "Apartment:" "Building: Marina Tower" "City: Dubai")
+          (lambda (b) (string-append "The buffer " b " is a form. Fill in 601 as the apartment number, so that its line reads Apartment: 601. Change no other line."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "Name: Siddharth" "Apartment: 601" "Building: Marina Tower" "City: Dubai"))))
+    ;; the second compos.el must stay
+    (list 'title "change the title to compos, not compos.el"
+          (drive-eval--lines "# compos.el" "" "An editor on the BEAM. See compos.el/docs for more.")
+          (lambda (b) (string-append "In the buffer " b ", change the title on the first line to compos instead of compos.el. Change no other line."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "# compos" "" "An editor on the BEAM. See compos.el/docs for more."))))
+    (list 'today "how many emails did i get today?"
+          (drive-eval--lines "2026-11-09 10:02  Plane  Your weekly digest" "2026-11-08 18:40  Uber  Your trip receipt"
+                             "2026-11-09 08:15  Priya  Re: interview" "2026-11-07 09:00  GitHub  New PR"
+                             "2026-11-09 12:30  DMARC  Report for wrok.ae" "2026-11-08 07:10  Substack  New post")
+          (lambda (b) (string-append "The buffer " b " lists mails, one per line, each starting with its date. How many mails came on 2026-11-09? Answer with the number only."))
+          (lambda (text reply . _) (equal? (drive-eval--number reply) 3)))
+    (list 'dmarc "mark all the dmarc mails for deletion"
+          (drive-eval--lines "inbox  Plane  Your weekly digest" "inbox  google.com  DMARC aggregate report" "inbox  Priya  Re: interview"
+                             "inbox  yahoo.com  DMARC aggregate report" "inbox  Uber  Your trip receipt")
+          (lambda (b) (string-append "The buffer " b " lists mails, one per line, the tag first. Mark every DMARC mail for deletion: change its tag from inbox to delete. Leave the other lines as they are."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "inbox  Plane  Your weekly digest" "delete  google.com  DMARC aggregate report" "inbox  Priya  Re: interview"
+                                                                  "delete  yahoo.com  DMARC aggregate report" "inbox  Uber  Your trip receipt"))))
+    (list 'sender "can you find out who are the biggest senders clogging my inbox pls?"
+          (drive-eval--lines "From: news@substack.com" "From: priya@thine.ai" "From: deals@artstation.com" "From: news@substack.com"
+                             "From: deals@artstation.com" "From: news@substack.com" "From: alerts@github.com")
+          (lambda (b) (string-append "The buffer " b " has one From: line per mail. Which sender sent the most mails? Answer with the address only."))
+          (lambda (text reply . _) (and (drive-eval--has? reply "news@substack.com") (not (drive-eval--has? reply "artstation")))))
+    ;; a line of spaces is blank, and so is the last empty line
+    (list 'loc "how many loc in elixir?"
+          (drive-eval--lines "defmodule Demo do" "  " "  def a, do: 1" "" "  def b, do: 2" "end" "")
+          (lambda (b) (string-append "How many non-blank lines does the buffer " b " hold? A line of only spaces is blank. Answer with the number only."))
+          (lambda (text reply . _) (equal? (drive-eval--number reply) 4)))
+    (list 'csv "make a smaple csv that will serve as an example. you can make it reasonable complex."
+          (drive-eval--lines "| city | rain |" "|------|------|" "| Mumbai | 2400 |" "| Pune | 700 |")
+          (lambda (b) (string-append "The buffer " b " holds a markdown table. Replace it with the same table as CSV: the header line city,rain, then one line per row, no spaces around the commas and no separator line."))
+          (lambda (text reply . _) (equal? (string-trim (or text "")) (string-trim (drive-eval--lines "city,rain" "Mumbai,2400" "Pune,700")))))
+    (list 'rainfall "make a table with average rainfall in mumbai per month"
+          (drive-eval--lines "month,mm" "Jan,1" "Feb,0" "Mar,1" "Apr,2" "May,11" "Jun,505" "Jul,840" "Aug,585" "Sep,340" "Oct,64" "Nov,13" "Dec,3")
+          (lambda (b) (string-append "The buffer " b " holds Mumbai rainfall per month as CSV. Which month has the most rain? Answer with the month as the buffer writes it."))
+          (lambda (text reply . _) (and (drive-eval--has? reply "Jul") (not (drive-eval--has? reply "Jun")) (not (drive-eval--has? reply "Aug")))))
+    (list 'uber "uber should be marked as expenses now and in future."
+          (drive-eval--lines "2026-11-01  Uber  23.50  ?" "2026-11-02  Spotify  11.99  personal" "2026-11-03  Uber  41.00  ?" "2026-11-04  Careem  18.00  ?")
+          (lambda (b) (string-append "The buffer " b " is a ledger: date, payee, amount, category. Set the category of every Uber line to expenses. Change no other line."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "2026-11-01  Uber  23.50  expenses" "2026-11-02  Spotify  11.99  personal" "2026-11-03  Uber  41.00  expenses" "2026-11-04  Careem  18.00  ?"))))
+    (list 'due "how much to pay CNS?"
+          (drive-eval--lines "CNS Facility Services" "Invoice 2026-114" "" "Cleaning, October   AED 3,800" "Repairs             AED 450"
+                             "Paid on account     AED -1,000" "" "Total due: AED 3,250")
+          (lambda (b) (string-append "The buffer " b " is an invoice. How much is due? Answer with the amount as the invoice writes it."))
+          (lambda (text reply . _) (or (drive-eval--has? reply "3,250") (drive-eval--has? reply "3250"))))
+    ;; a second Yash is the trap
+    (list 'met "when did we meet yashowardhan?"
+          (drive-eval--lines "2026-10-03  call with Priya Raman" "2026-10-15  coffee with Yashowardhan Shinde" "2026-10-21  call with Yash Gupta" "2026-11-02  lunch with Kaustubh")
+          (lambda (b) (string-append "The buffer " b " is a meeting log. On which date did we meet Yashowardhan? Answer with the date only."))
+          (lambda (text reply . _) (and (drive-eval--has? reply "2026-10-15") (not (drive-eval--has? reply "2026-10-21")))))
+    (list 'latest "who did we recently apply to saral?"
+          (drive-eval--lines "2026-10-30  Saral  Ananya Rao" "2026-11-05  Thine  Megh Patel" "2026-11-06  Saral  Rohit Singh" "2026-10-12  Saral  Darshan Baid")
+          (lambda (b) (string-append "The buffer " b " logs who we put forward to which client, one per line, the date first. Who did we put forward to Saral most recently? Answer with the name only."))
+          (lambda (text reply . _) (and (drive-eval--has? reply "Rohit Singh") (not (drive-eval--has? reply "Megh")))))
+    (list 'rename "rename ats-ash mcp to ats-dev if it's on localhost."
+          (drive-eval--lines "(mcp-server 'ats-ash \"http://localhost:4001/mcp\")" "(mcp-server 'fireflies \"https://api.fireflies.ai/mcp\")" ";; ats-ash tools: ats-ash/search, ats-ash/approve")
+          (lambda (b) (string-append "In the buffer " b ", rename ats-ash to ats-dev everywhere it appears. Change nothing else."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "(mcp-server 'ats-dev \"http://localhost:4001/mcp\")" "(mcp-server 'fireflies \"https://api.fireflies.ai/mcp\")" ";; ats-dev tools: ats-dev/search, ats-dev/approve"))))
+    (list 'sort "we should have sort by mode here so same mode windows get grouped. secondary sort by name always"
+          (drive-eval--lines "chat-mode  zeta" "morg-mode  notes" "chat-mode  alpha" "dired-mode  src" "morg-mode  journal")
+          (lambda (b) (string-append "Each line of the buffer " b " is a mode and a name. Sort the lines by mode, and by name within one mode. Keep each line as it is."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "chat-mode  alpha" "chat-mode  zeta" "dired-mode  src" "morg-mode  journal" "morg-mode  notes"))))
+    (list 'drop-line "remove the ring from columns layout."
+          (drive-eval--lines "layout: columns" "- column left" "- ring" "- column middle" "- column right")
+          (lambda (b) (string-append "The buffer " b " lists the parts of the columns layout. Remove the ring from it: delete that whole line. Keep every other line."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "layout: columns" "- column left" "- column middle" "- column right"))))
+    (list 'visa "make a tab for visa info"
+          (drive-eval--lines "# Trip to Japan" "" "## Flights" "EK 318, 12 Dec" "" "## Hotels" "Park Hyatt, 3 nights")
+          (lambda (b) (string-append "In the buffer " b ", add a section at the end: the heading ## Visa, and under it the line Apply by 20 Nov. Keep everything above as it is."))
+          (lambda (text reply . _)
+            (let ((old (drive-eval--lines "# Trip to Japan" "" "## Flights" "EK 318, 12 Dec" "" "## Hotels" "Park Hyatt, 3 nights")))
+              (and (string? text) (string-prefix? old text)
+                   (string-suffix? (string-trim (drive-eval--lines "## Visa" "Apply by 20 Nov")) (string-trim text))))))
+    (list 'weather "we want weeather also on the itinerary."
+          (drive-eval--lines "## Day 1" "Arrive Tokyo" "" "## Day 2" "Kyoto by train" "" "## Day 3" "Fly home")
+          (lambda (b) (string-append "In the itinerary buffer " b ", add the line Weather: TBD right after each ## Day heading. Change nothing else."))
+          (lambda (text reply . _) (equal? text (drive-eval--lines "## Day 1" "Weather: TBD" "Arrive Tokyo" "" "## Day 2" "Weather: TBD" "Kyoto by train" ""
+                                                                  "## Day 3" "Weather: TBD" "Fly home"))))
+    ;; a file by what it holds, not by its name
+    (list 'statement "is there a mashreq bank statement recently in ~/Downloads? it'll be a pdf or spreadsheet" #f
+          (lambda (b) (string-append "Which file in the directory " (drive-eval--path b "-dl") " is a bank statement from Mashreq? Answer with the file name only."))
+          (lambda (text reply . _) (and (drive-eval--has? reply "doc-2") (not (drive-eval--has? reply "doc-3"))))
+          (list 'setup (lambda (b)
+                         (let ((d (drive-eval--path b "-dl")))
+                           (drive-eval--rmdir d)
+                           (make-directory! d)
+                           (write-file! (string-append d "/doc-1.txt") (drive-eval--lines "Uber" "Trip receipt, 2 Nov 2026" "Total AED 41.00"))
+                           (write-file! (string-append d "/doc-2.txt") (drive-eval--lines "Mashreq Bank" "Statement of account, October 2026" "Closing balance AED 12,400"))
+                           (write-file! (string-append d "/doc-3.txt") (drive-eval--lines "Emirates NBD" "A new credit card offer for you"))))
+                'cleanup (lambda (b) (drive-eval--rmdir (drive-eval--path b "-dl")))))
+    ;; a new file: a skipped save fails
+    (list 'journal "new-journal should add the date and time for disambiguation. we don't save it in the frontmatter do we?" #f
+          (lambda (b) (string-append "Create the file " (drive-eval--path b "-journal.md") " with two lines, # Journal 2026-11-09 and then Started the day. Save it to disk and confirm that the file is there."))
+          (lambda (text reply b)
+            (let ((p (drive-eval--path b "-journal.md")))
+              (and (file-exists? p)
+                   (equal? (string-trim (read-file p)) (string-trim (drive-eval--lines "# Journal 2026-11-09" "Started the day."))))))
+          (list 'setup (lambda (b) (let ((p (drive-eval--path b "-journal.md"))) (when (file-exists? p) (delete-file! p))))
+                'cleanup (lambda (b)
+                           (let ((p (drive-eval--path b "-journal.md")))
+                             (when (buffer-known? p) (buffer-kill! p))
+                             (when (file-exists? p) (delete-file! p))))))
+    (list 'mkdir "dired cant create directories?" #f
+          (lambda (b) (string-append "Create the directory " (drive-eval--path b "-mk") "/notes/2026, with any parent directory it needs, and confirm that it exists."))
+          (lambda (text reply b) (file-directory? (string-append (drive-eval--path b "-mk") "/notes/2026")))
+          (list 'setup (lambda (b) (drive-eval--rmdir (drive-eval--path b "-mk")))
+                'cleanup (lambda (b) (drive-eval--rmdir (drive-eval--path b "-mk")))))))
 
 (define (drive-eval--tool-uses m)
   (length (filter (lambda (b) (and (pair? b) (equal? (car b) "tool-use")))
@@ -436,7 +574,7 @@
 
 (define (drive-eval--case x)
   (if (symbol? x)
-      (or (assq x *drive-eval-cases*) (assq x *drive-eval-hard-cases*))
+      (or (assq x *drive-eval-cases*) (assq x *drive-eval-hard-cases*) (assq x *drive-eval-unseen-cases*))
       x))
 
 ;; Run every case on every model REPS times, drive-eval-parallel runs at
@@ -537,6 +675,7 @@
 (define (drive-eval &optional models cases reps prompts)
   (let* ((ms (map (lambda (x) (if (symbol? x) (assq x *drive-eval-models*) x)) (or models *drive-eval-models*)))
          (base (cond ((eq? cases 'hard) *drive-eval-hard-cases*)
+                     ((eq? cases 'unseen) *drive-eval-unseen-cases*)
                      ((eq? cases 'all) (append *drive-eval-cases* *drive-eval-hard-cases*))
                      (cases (map drive-eval--case cases))
                      (else *drive-eval-cases*)))

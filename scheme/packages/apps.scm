@@ -429,9 +429,14 @@
 ;; chains an app otherwise grows one per asynchronous call, each with its
 ;; own debounce key, its own countdown, and its own way of going quiet.
 (define (app-await starter &optional seconds)
-  (let ((done #f) (value #f))
+  (let ((done #f) (value #f)
+        (deadline (+ (monotonic-ms) (* 1000 (or seconds 20)))))
     (starter (lambda (v) (set! value v) (set! done #t)))
-    (wait-until (lambda () done) (* 1000 (or seconds 20)) 50)
+    ;; wait-until can stop before a long timeout: wait in steps to the deadline
+    (let loop ()
+      (unless (or done (>= (monotonic-ms) deadline))
+        (wait-until (lambda () done) (- deadline (monotonic-ms)) 50)
+        (loop)))
     value))
 
 ;; A pause inside a task. wait-until on a predicate that never answers is

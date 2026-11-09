@@ -891,6 +891,20 @@
 
 ;; the tool card: a controlled disclosure. The summary names the call; the
 ;; body is the call's own bytes, drawn with the tool result readable.
+;; an open card's result: all of it, or its first chat-tool-body-max-bytes
+;; and a button that draws the rest. The "full:ID" key in the open set
+;; says the user asked for all of it, and a change to the set redraws.
+(define (chat-view--tool-result id bs e shown open-cards)
+  (let* ((cap (or chat-tool-body-max-bytes 0))
+         (size (string-byte-length shown)))
+    (if (or (<= cap 0) (<= size cap) (member (string-append "full:" id) open-cards))
+        (list (append (list 'tag "pre" 'class "ag-body" 'range (list bs e))
+                      (chat-view--tool-body shown)))
+        (list (list 'tag "pre" 'class "ag-body" 'range (list bs e)
+                    'content (substring shown 0 (min (string-length shown) cap)) 'format "raw")
+              (chat-view--button "ag-btn earlier" (string-append "chat-card-full:" id)
+                                 (string-append "Show all (" (number->string (quotient size 1024)) " KB)"))))))
+
 (define (chat-view--tool-card buf b open-cards)
   (let* ((e (nth 1 b)) (id (nth 3 b)) (title (or (nth 4 b) "")) (verb (nth 5 b))
          (status (or (nth 6 b) "")) (bs (nth 7 b))
@@ -946,8 +960,7 @@
                     ;; tool result was 116k nodes behind a one-line summary
                     (if (or (not open) (equal? body "")) '()
                         (list (list 'tag "c-result"
-                                    'children (list (append (list 'tag "pre" 'class "ag-body" 'range (list bs e))
-                                                                (chat-view--tool-body (shown)))))))))))))
+                                    'children (chat-view--tool-result id bs e (shown) open-cards))))))))))
 
 ;; a card waits for the window to shape it: a long chat holds more cards
 ;; than it draws, and shaping parses each result's JSON
@@ -1243,6 +1256,10 @@
   "How many bytes of transcript text a rich chat draws. 0 draws all; a number keeps earlier blocks behind a row that reveals them."
   'group 'chat 'type 'integer)
 
+(defcustom 'chat-tool-body-max-bytes 65536
+  "How many bytes of a tool result an open card draws. A longer result shows its start and a button that draws all of it. 0 draws all."
+  'group 'chat 'type 'integer)
+
 ;; how many blocks of RAW (newest first) PAGES budgets draw. Each page
 ;; takes blocks up to PER bytes and at least one block, so a block larger
 ;; than the budget cannot stop a reveal.
@@ -1408,6 +1425,10 @@
 (add-hook! (list 'block-click 'chat)
   (lambda (buf id)
     (cond
+      ((string-prefix? "chat-card-full:" id)
+       (agent-card-set-open! buf (string-append "full:" (substring-bytes id 15 (string-byte-length id))) #t)
+       (chat-view-sync! buf)
+       #t)
       ((string-prefix? "chat-card:" id)
        (agent-card-toggle! buf (substring-bytes id 10 (string-byte-length id)))
        (chat-view-sync! buf)

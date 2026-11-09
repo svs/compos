@@ -7,7 +7,7 @@ Check the user's real page, not a mock. `(dom-measure SELECTOR [LIMIT])` gives t
 `(browse URL)` reads a page as text into its own buffer, `*browse:host/path*`, and gives the buffer name. From an agent it shows nothing.
 
 - The fetch runs in the background, so the buffer is empty at first. Read it with `(buffer-text NAME)` on a later call, not in the same call. A page with too little text stays empty.
-- `(buffer-local NAME 'browse-html)` gives the page source that the buffer holds.
+- `(buffer-local-value 'browse-html NAME)` gives the page source that the buffer holds.
 - Use `(browse-other-window URL)` only when the user asks to see the page.
 - For the raw body, use `(http-text URL)`. For status, headers and body, use `(http-get URL [OPTS])`.
 

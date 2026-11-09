@@ -63,6 +63,17 @@
     (check-true! (string-contains? (cadr (fast-accept "(define (zz-f x) (message x))\n(zz-f \"a\")")) "docstring")
                  "a function says what it does")))
 
+(deftest 'a-function-keeps-the-answer-of-an-edit
+  "an edit verb answers why it did nothing; a body that drops that answer is refused"
+  (lambda ()
+    (check-true! (string-contains?
+                   (cadr (fast-accept "(define (zz-tick! buf item) \"mark ITEM done in BUF and answer its text\" (buffer-replace! buf item (string-append item \"!\")) (buffer-text buf))\n(zz-tick! (fast-this-buffer) \"a\")"))
+                   "drops the answer of buffer-replace!")
+                 "an edit that goes on after a miss hides it")
+    (check-equal! (fast-dropped-edits '(define (f b i) "d" (let ((r (buffer-replace! b i "x"))) (if (string-prefix? "edited" r) (buffer-text b) (error r)))))
+                  '()
+                  "an edit whose answer is bound is fine")))
+
 (deftest 'a-function-is-kept-once-its-call-runs-clean
   "accepted, it is defined; run clean, it is saved as Scheme and joins the catalog"
   (lambda ()

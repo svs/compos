@@ -1340,9 +1340,18 @@
     (and e (cadr e) #t)))
 
 (define (buffer-local-value name &optional buf)
-  (let* ((b (or buf (current-buffer)))
-         (v (buffer-local b name)))
-    (if v v (default-value name))))
+  ;; the buffer first and the name second is the same question asked the
+  ;; other way round: a string and a symbol cannot be mistaken, so it gets
+  ;; the same answer. A buffer that does not exist is an error, not the
+  ;; default: the default would read as the buffer's own value.
+  (if (and (string? name) (symbol? buf))
+      (buffer-local-value buf name)
+      (let ((b (or buf (current-buffer))))
+        (when (and (string? b) (not (buffer-known? b)))
+          (error (string-append "buffer-local-value: no buffer is named " b
+                                "; call (buffer-local-value 'NAME BUF) with a name from (buffer-list)")))
+        (let ((v (buffer-local b name)))
+          (if v v (default-value name))))))
 
 (define (setq-local! name value)
   (buffer-set-local! (current-buffer) name value)

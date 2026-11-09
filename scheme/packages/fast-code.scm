@@ -519,6 +519,32 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
       ""
       (string-downcase (string-trim (string-join (string-split b "*") "")))))
 
+;; The edit verbs answer "edited ..." or a reason they did nothing, and never
+;; raise. A body that calls one and goes on hides the reason: the learned
+;; check-off-item answered the unchanged text for an item that was not there.
+(define fast-edit-verbs
+  '(buffer-replace! buffer-replace-all! buffer-insert-after! buffer-insert-before!
+    buffer-delete-text! code-replace! code-sexp-replace! markdown-replace!
+    markdown-insert-after!))
+
+(define (fast-body-of x)
+  (cond ((not (and (list? x) (pair? x))) #f)
+        ((eq? (car x) 'begin) (cdr x))
+        ((and (memq (car x) '(lambda let let* letrec when unless)) (pair? (cdr x))) (cdr (cdr x)))
+        (else #f)))
+
+;; the edit verbs FORM calls where their answer is thrown away: not last in a body
+(define (fast-dropped-edits x)
+  (if (not (and (list? x) (pair? x)))
+      '()
+      (let* ((body (fast-body-of x))
+             (dropped (if (and body (pair? body))
+                          (filter (lambda (e) (and (pair? e) (memq (car e) fast-edit-verbs)))
+                                  (reverse (cdr (reverse body))))
+                          '())))
+        (append (map car dropped)
+                (apply append (map fast-dropped-edits (filter pair? x)))))))
+
 (define (fast-accept-define form rest &optional intent)
   (let* ((head (car (cdr form)))
          (name (car head))
@@ -590,6 +616,11 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
                       ": take the buffer as a parameter, so the function serves any buffer"))
                (and echoed
                     "the docstring repeats the request: say what the function does for any value")
+               (let ((dropped (fast-dropped-edits (cons 'begin body))))
+                 (and (pair? dropped)
+                      (string-append "the body drops the answer of "
+                        (string-join (map symbol->string (fast-distinct dropped)) ", ")
+                        ", which says why nothing changed: bind it, and raise with it when it does not start with edited")))
                (and (not (equal? (car checked) 'ok)) (car (cdr checked)))))))
     (if (null? problems)
         (list 'ok (format "~s" call) form)

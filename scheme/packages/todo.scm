@@ -1701,15 +1701,20 @@
                                         (and (plist-get l 'keep) (list "" "keeps listening"))))))
                   (list 'tag "c-text" 'text (or (plist-get l 'note) "")))))))
 
-(define (todo--detail-blocks t)
-  ;; (TEXT BLOCKS): every part of the page is one line of TEXT and an anchor
-  ;; on it, so the arrows walk the page part by part and it scrolls along
-  (let* ((chat (todo--chat-of t))
+(define (todo--detail-blocks t &optional tab)
+  ;; (TEXT BLOCKS CHILD-LINES): every part of the page is one line of TEXT and an
+  ;; anchor on it, so the arrows walk the page part by part and it scrolls along.
+  ;; TAB picks the part: overview is status, notes and details, children the
+  ;; sub-tasks, log the log. CHILD-LINES is ((LINE . ID) ...) of the sub-task rows.
+  (let* ((tab (or tab "overview"))
+         (chat (todo--chat-of t))
          (logs (or (plist-get t 'log) '()))
          (notes (plist-get t 'notes))
          (tags (plist-get t 'tags))
          (state (or (plist-get t 'state) "inbox"))
+         (kids (todo--detail-children t))
          (lines '())
+         (child-lines '())
          (line! (lambda (text) (set! lines (cons text lines)) (length lines)))
          (stop (lambda (blk name first last) (append blk (list 'anchor-name name 'lines (list first last)))))
          (pair (lambda (k v) (if (todo--blank? v) '() (list (list k v)))))
@@ -1723,46 +1728,79 @@
                    (stop (component 'ui/group (list 'title title 'body body)) name first (length lines)))))
          (head (let ((n (line! (plist-get t 'title))))
                  (stop (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state))) "Title" n n)))
+         (actions (component 'ui/actions (list 'actions (todo--detail-actions tab))))
          ;; where the task stands: what is done and what is left
-         (status-part (let ((s (plist-get t 'status)))
-                        (if (todo--blank? s) '()
-                            (let ((n (line! "Status")))
-                              (list (stop (component 'ui/group
-                                            (list 'title "Status" 'body (list (list 'tag "c-group" 'class "c-prose c-lines" 'text s))))
-                                          "Status" n n))))))
-         (notes-part (if (todo--blank? notes) '()
-                         (let ((n (line! "Notes")))
-                           (list (stop (component 'ui/group
-                                         (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose c-lines" 'text notes))))
-                                       "Notes" n n)))))
-         (details (let ((n (line! "Details")))
-                    (stop (component 'ui/group
-                            (list 'title "Details"
-                                  'body
-                                  (list
-                                    (component 'ui/kv
-                                      (list 'pairs
-                                        (append
-                                          (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
-                                          (pair "Also" (let ((more (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
-                                                         (if (null? more) ""
-                                                             (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
-                                                                            "  ·  w picks, C attaches"))))
-                                          (pair "Chat state" (todo--status t))
-                                          (pair "Goal" (todo--goal t))
-                                          (pair "Group" (group-name (plist-get t 'group)))
-                                          (pair "Filed by" (plist-get t 'by))
-                                          (pair "Source" (plist-get t 'source))
-                                          (pair "Created" (plist-get t 'created))
-                                          (pair "Id" (plist-get t 'id))))))))
-                          "Details" n n)))
-         (listening (let ((ls (todo--listeners t)))
-                      (if (null? ls) '()
-                          (list (part (string-append "Listening  ·  " (number->string (length ls))) "Listening"
-                                      (map todo--detail-listener ls))))))
-         (log (if (null? logs) '()
-                  (list (part (string-append "Log  ·  " (number->string (length logs))) "Log"
-                              (map todo--detail-entry (reverse logs)))))))
+         (status-part (lambda ()
+                        (let ((s (plist-get t 'status)))
+                          (if (todo--blank? s) '()
+                              (let ((n (line! "Status")))
+                                (list (stop (component 'ui/group
+                                              (list 'title "Status" 'body (list (list 'tag "c-group" 'class "c-prose c-lines" 'text s))))
+                                            "Status" n n)))))))
+         (notes-part (lambda ()
+                       (if (todo--blank? notes) '()
+                           (let ((n (line! "Notes")))
+                             (list (stop (component 'ui/group
+                                           (list 'title "Notes" 'body (list (list 'tag "c-group" 'class "c-prose c-lines" 'text notes))))
+                                         "Notes" n n))))))
+         (details (lambda ()
+                    (let ((n (line! "Details")))
+                      (stop (component 'ui/group
+                              (list 'title "Details"
+                                    'body
+                                    (list
+                                      (component 'ui/kv
+                                        (list 'pairs
+                                          (append
+                                            (pair "Chat" (if chat (string-append chat "  ·  a goes there") (plist-get t 'assignee)))
+                                            (pair "Also" (let ((more (remove (lambda (c) (equal? c (plist-get t 'assignee))) (todo-chats t))))
+                                                           (if (null? more) ""
+                                                               (string-append (string-join (map (lambda (c) (or (todo--live-chat c) c)) more) ", ")
+                                                                              "  ·  w picks, C attaches"))))
+                                            (pair "Chat state" (todo--status t))
+                                            (pair "Goal" (todo--goal t))
+                                            (pair "Parent" (let ((p (and (plist-get t 'parent) (todo-get (plist-get t 'parent)))))
+                                                             (and p (plist-get p 'title))))
+                                            (pair "Group" (group-name (plist-get t 'group)))
+                                            (pair "Filed by" (plist-get t 'by))
+                                            (pair "Source" (plist-get t 'source))
+                                            (pair "Created" (plist-get t 'created))
+                                            (pair "Id" (plist-get t 'id))))))))
+                            "Details" n n))))
+         (listening (lambda ()
+                      (let ((ls (todo--listeners t)))
+                        (if (null? ls) '()
+                            (list (part (string-append "Listening  ·  " (number->string (length ls))) "Listening"
+                                        (map todo--detail-listener ls)))))))
+         ;; one row a sub-task: its state, its title, the first line of its status
+         (children (lambda ()
+                     (if (null? kids)
+                         (list (component 'ui/empty (list 'text "No sub-tasks")))
+                         (let loop ((ks kids) (i 1) (acc '()))
+                           (if (null? ks) (reverse acc)
+                               (let* ((k (car ks))
+                                      (s (plist-get k 'status))
+                                      (first (if (todo--blank? s) "" (car (string-split s "\n"))))
+                                      (n (line! (plist-get k 'title))))
+                                 (set! child-lines (cons (cons n (plist-get k 'id)) child-lines))
+                                 (loop (cdr ks) (+ i 1)
+                                       (cons (stop (component 'ui/row
+                                                     (list 'segs (append
+                                                                   (list (list (let ((tone (todo--detail-tone (or (plist-get k 'state) "inbox")))) (if (equal? tone "") "c-dim" (string-append "c-" tone)))
+                                                                               (string-append (or (plist-get k 'state) "inbox") "  "))
+                                                                         (list "" (or (plist-get k 'title) "")))
+                                                                   (if (equal? first "") '() (list (list "c-dim" (string-append "  ·  " first)))))))
+                                                   (string-append "Child " (number->string i)) n n)
+                                             acc))))))))
+         (log (lambda ()
+                (if (null? logs)
+                    (list (component 'ui/empty (list 'text "No log yet")))
+                    (list (part (string-append "Log  ·  " (number->string (length logs))) "Log"
+                                (map todo--detail-entry (reverse logs)))))))
+         (body (cond ((equal? tab "children") (children))
+                     ((equal? tab "log") (log))
+                     (else (let* ((s (status-part)) (n (notes-part)) (d (details)) (l (listening)))
+                             (append s n (list d) l))))))
     (list
       (string-join (reverse lines) "\n")
       (list
@@ -1770,16 +1808,49 @@
           (list 'body
             (append
               (list head (component 'ui/meta (list 'segs (todo--detail-facts t))))
-              (if (pair? tags) (list (component 'ui/chips (list 'items tags))) '())
-              status-part
-              notes-part
-              (list details)
-              listening
-              log)))))))
+              (if (and (pair? tags) (equal? tab "overview")) (list (component 'ui/chips (list 'items tags))) '())
+              (list actions)
+              body))))
+      child-lines)))
+
+(define *todo-detail-tabs* '(("overview" "Overview") ("children" "Children") ("log" "Log")))
+
+(define (todo--detail-tab buf) (or (buffer-local-value 'todo-tab buf) "overview"))
+
+(define (todo--detail-children t)
+  "the sub-tasks of T, open and closed"
+  (todo-list (list 'parent (plist-get t 'id) 'all #t)))
+
+(define (todo--detail-tab-row buf)
+  ;; the tabs as ui/tabs takes them, each with its count and its hand key
+  (let* ((t (todo--detail-task buf))
+         (tab (todo--detail-tab buf))
+         (count (lambda (name)
+                  (cond ((not t) "")
+                        ((equal? name "children") (string-append " " (number->string (length (todo--detail-children t)))))
+                        ((equal? name "log") (string-append " " (number->string (length (or (plist-get t 'log) '())))))
+                        (else "")))))
+    (tab-bars-keyed 'detail
+      (map (lambda (e) (list (string-append "todo-detail-tab-" (car e))
+                             (string-append (cadr e) (count (car e)))
+                             (equal? (car e) tab)))
+           *todo-detail-tabs*))))
+
+(define (todo--detail-actions tab)
+  ;; the page's actions, each with its key; on Children they act on the sub-task at point
+  (append
+    (if (equal? tab "children") (list (list "todo-detail-open-child" "Open" "RET")) '())
+    (list (list "todo-detail-accept" "Accept" "t")
+          (list "todo-detail-done" "Done" "d" "good")
+          (list "todo-detail-cancel" "Cancel" "X" "bad")
+          (list "todo-detail-wait" "Wait" "W")
+          (list "todo-detail-agent" "Agent" "a")
+          (list "todo-detail-goto-chat" "Chat" "w")
+          (list "todo-detail-visit" "File" "e"))))
 
 (define (todo--detail-render! buf)
   (let* ((t (todo--detail-task buf))
-         (page (and t (todo--detail-blocks t)))
+         (page (and t (todo--detail-blocks t (todo--detail-tab buf))))
          (text (if page (car page) ""))
          (line (car (buffer-line-at-point buf))))
     (buffer-set-read-only! buf #f)
@@ -1790,15 +1861,46 @@
       (if page
           (cadr page)
           (list (component 'ui/empty (list 'text "The task is gone")))))
+    (buffer-set-local! buf 'todo-child-lines (if page (caddr page) '()))
     (if page (anchor-set-blocks! buf text (cadr page)) (anchor-clear! buf))
     (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))
     (anchor-sync! buf)
+    ;; the tabs head the window; the arrows step them
+    (unless (buffer-local-value 'arrow-keys buf) (buffer-set-local! buf 'arrow-keys #t))
+    (buffer-set-local! buf 'header-line-blocks
+      (list (component 'ui/tabs (list 'class "todo-detail-tabs" 'tabs (todo--detail-tab-row buf)))))
     ;; the page's keys: the same keys bar the list carries
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar
-              (list 'main '(("a" "agent") ("e" "file") ("g" "refresh") ("q" "quit"))))))
+              (list 'main '(("←→" "tab") ("t" "accept") ("d" "done") ("X" "cancel") ("a" "agent") ("g" "refresh") ("q" "quit"))))))
     (buffer-set-read-only! buf #t)
     (if t (todo--detail-retitle! buf t) buf)))
+
+(define (todo--detail-tab-set! buf name)
+  (buffer-set-local! buf 'todo-tab name)
+  (todo--detail-render! buf)
+  (buffer-goto-line! buf 1))
+
+(define (todo--detail-tab-step! buf step)
+  (let* ((names (map car *todo-detail-tabs*))
+         (i (let loop ((ns names) (i 0)) (cond ((null? ns) 0) ((equal? (car ns) (todo--detail-tab buf)) i) (else (loop (cdr ns) (+ i 1))))))
+         (n (length names)))
+    (todo--detail-tab-set! buf (list-ref names (modulo (+ i step n) n)))))
+
+(define (todo--detail-target buf)
+  ;; on Children, the sub-task on point's row; elsewhere the page's task
+  (if (equal? (todo--detail-tab buf) "children")
+      (let ((hit (assv (car (buffer-line-at-point buf)) (or (buffer-local-value 'todo-child-lines buf) '()))))
+        (and hit (todo-get (cdr hit))))
+      (todo--detail-task buf)))
+
+(define (todo--detail-set! k v)
+  (let* ((buf (current-buffer)) (t (todo--detail-target buf)))
+    (if t
+        (begin (todo-update (plist-get t 'id) (list k v 'by todo-user))
+               (todo--detail-render! buf)
+               (message (string-append (plist-get t 'title) ": " v)))
+        (message "No sub-task at point"))))
 
 ;; the page wears its task's title; when a buffer already has that name, such
 ;; as the task's own chat, it adds " · todo". Answers the name it has now.
@@ -1865,7 +1967,65 @@
   (lambda () (todo--detail-render! (current-buffer)))
   'modes '(todo-detail-mode))
 
+(define-command "todo-detail-tab-overview" "Show the task's status, notes and details"
+  (lambda () (todo--detail-tab-set! (current-buffer) "overview"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-tab-children" "Show the task's sub-tasks"
+  (lambda () (todo--detail-tab-set! (current-buffer) "children"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-tab-log" "Show the task's log"
+  (lambda () (todo--detail-tab-set! (current-buffer) "log"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-tab-next" "Show the next tab of the task: overview, children, log"
+  (lambda () (todo--detail-tab-step! (current-buffer) 1))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-tab-prev" "Show the previous tab of the task"
+  (lambda () (todo--detail-tab-step! (current-buffer) -1))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-open-child" "Show the sub-task at point as its own page"
+  (lambda ()
+    (let ((t (todo--detail-target (current-buffer))))
+      (if (and t (equal? (todo--detail-tab (current-buffer)) "children"))
+          (begin (buffer-set-local! (current-buffer) 'todo-id (plist-get t 'id))
+                 (todo--detail-tab-set! (current-buffer) "overview"))
+          (message "No sub-task at point"))))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-parent" "Show the task this one is a sub-task of"
+  (lambda ()
+    (let* ((t (todo--detail-task (current-buffer))) (p (and t (plist-get t 'parent))))
+      (if p
+          (begin (buffer-set-local! (current-buffer) 'todo-id p)
+                 (todo--detail-tab-set! (current-buffer) "children"))
+          (message "This task has no parent"))))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-accept" "Mark the task todo: triage it, or approve it from review; on Children, the sub-task at point"
+  (lambda () (todo--detail-set! 'state "todo"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-done" "Mark the task done; on Children, the sub-task at point"
+  (lambda () (todo--detail-set! 'state "done"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-cancel" "Cancel the task; on Children, the sub-task at point"
+  (lambda () (todo--detail-set! 'state "cancelled"))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-wait" "Park the task as waiting; on Children, the sub-task at point"
+  (lambda () (todo--detail-set! 'state "waiting"))
+  'modes '(todo-detail-mode))
+
 (define (todo--detail-setup!)
+  ;; left and right step the tabs; anchor-mode's map sits in front of ours
+  (local-remap! "anchor-right" "todo-detail-tab-next")
+  (local-remap! "anchor-left" "todo-detail-tab-prev")
+  (desktop-skip! (current-buffer) 'header-line-blocks)
   (desktop-skip! (current-buffer) 'render-blocks)
   (desktop-skip! (current-buffer) 'footer-line-blocks)
   (todo--detail-render! (current-buffer)))
@@ -1889,10 +2049,22 @@
     ("e" "todo-detail-visit")
     ("M-o" "todo-detail-task-chat")
     ("g" "todo-detail-refresh")
+    ("<right>" "todo-detail-tab-next")
+    ("<left>" "todo-detail-tab-prev")
+    ("RET" "todo-detail-open-child")
+    ("u" "todo-detail-parent")
+    ("t" "todo-detail-accept")
+    ("d" "todo-detail-done")
+    ("X" "todo-detail-cancel")
+    ("W" "todo-detail-wait")
     ("q" "quit-window")))
 
+;; the tabs: 6, 7 and 8 take one, as on every detail page
+(tab-bars-declare! "todo-detail-mode"
+  (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
+
 (mode-doc! "todo-detail-mode"
-  "One task as its own page: state, the chat working it, notes and log. `a` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, `d` closes, `X` cancels and `W` parks the task; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent. `a` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live; `w` only goes. `e` opens the task's file, `g` reads it again, `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"

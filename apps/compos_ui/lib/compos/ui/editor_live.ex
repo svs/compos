@@ -1456,7 +1456,7 @@ defmodule Compos.Ui.EditorLive do
     for [c, t] <- chrome(state, "echo-status"), is_binary(c), is_binary(t), do: {c, t}
   end
 
-  # The Cmd keys a keymap binds (cmd-keys in vscode.scm): app.js sends
+  # The Cmd keys a keymap binds (cmd-keys in editor.scm): app.js sends
   # these chords to the editor, and leaves every other Cmd chord to the browser.
   defp cmd_keys(state) do
     state |> chrome("cmd-keys") |> Enum.filter(&is_binary/1) |> Enum.join(" ")

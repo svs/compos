@@ -12,6 +12,10 @@ defmodule Compos.Ui.KeySpecTest do
 
   @app_js Path.expand("../../../priv/static/app.js", __DIR__)
 
+  # the Cmd keys the editor publishes as cmd-keys (editor.scm) and the
+  # editor root carries as data-cmd-keys; a case may set its own
+  @cmd_keys "<left> <right> <up> <down> a i p [ ] + = - 0 _ ) RET"
+
   defp encoder_script do
     src = File.read!(@app_js)
     [_, rest] = String.split(src, "const NAMED = {", parts: 2)
@@ -30,6 +34,8 @@ defmodule Compos.Ui.KeySpecTest do
     const out = cases.map((c) => {
       globalThis.document = {
         documentElement: { classList: { contains: () => false } },
+        getElementById: (id) =>
+          id === "editor" ? { dataset: { cmdKeys: c.cmdKeys ?? "#{@cmd_keys}" } } : null,
         querySelector: (s) => s === ".window.active .cap-pop" && c.completion ? {} : null,
         activeElement: c.editable
           ? { closest: (s) => (
@@ -238,6 +244,17 @@ defmodule Compos.Ui.KeySpecTest do
 
       assert c["spec"] == nil
       assert v["spec"] == nil
+    end
+
+    test "the published cmd-keys alone decide: a bound key travels, an unbound one stays" do
+      [bound, unbound] =
+        run([
+          %{event: event("o", "KeyO", [:metaKey]), cmdKeys: "o"},
+          %{event: event("ArrowUp", "ArrowUp", [:metaKey]), cmdKeys: "o"}
+        ])
+
+      assert bound["spec"] == "s-o"
+      assert unbound["spec"] == nil
     end
   end
 end

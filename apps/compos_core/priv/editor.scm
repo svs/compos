@@ -2593,7 +2593,7 @@
 ;; map that counts
 (define (cmd-keys--touched! name seq)
   (when (and *cmd-keys-live*
-             (let ((ks (keymap--seq seq))) (and (pair? ks) (cmd-keys--chord? (car ks)))))
+             (let ((ks (keymap--seq seq))) (and (pair? ks) (cmd-keys--chord? (car ks))))
              (cmd-keys--counted? name))
     (cmd-keys-publish!)))
 

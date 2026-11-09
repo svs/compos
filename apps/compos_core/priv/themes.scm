@@ -2080,6 +2080,50 @@
   (let ((n (string-trim (car pick))))
     (when (assoc n *themes*) (theme--put! n (cadr pick)))))
 
+;; light-theme and dark-theme. A theme is dark by its own default
+;; background, as theme-dark? reads the theme on screen. The other theme of
+;; a family shares its name without -dark, -night or -light: paper-night
+;; and paper, compos-dark and compos. A theme with no such pair goes to the
+;; light or dark theme used last, else the first one there is.
+(define (theme-named-dark? name)
+  (let* ((spec (assoc 'default (theme-faces name)))
+         (bg (and spec (plist-get (cdr spec) 'bg))))
+    (and (string? bg)
+         (re-match "^#[0-9A-Fa-f]{6}$" bg)
+         (< (+ (* (theme--hex-byte bg 1) 299) (* (theme--hex-byte bg 3) 587) (* (theme--hex-byte bg 5) 114))
+            128000))))
+
+(define (theme--stem name)
+  (let loop ((sfx '("-dark" "-night" "-light")))
+    (cond ((null? sfx) name)
+          ((string-suffix? (car sfx) name)
+           (substring name 0 (- (string-length name) (string-length (car sfx)))))
+          (else (loop (cdr sfx))))))
+
+(define (theme-for-brightness dark?)
+  (let* ((current (theme-current))
+         (fits (filter (lambda (n) (equal? (and (theme-named-dark? n) #t) dark?)) (theme-names)))
+         (pair (and current
+                    (find (lambda (n) (equal? (theme--stem n) (theme--stem current))) fits))))
+    (or pair
+        (find (lambda (n) (member n fits)) (history-order 'theme (theme-names)))
+        (and (pair? fits) (car fits)))))
+
+(define (theme--switch-brightness! dark?)
+  (let ((name (theme-for-brightness dark?)))
+    (cond ((not name) (message (if dark? "No dark theme" "No light theme")))
+          ((equal? name (theme-current)) (message (string-append "Already on " name)))
+          (else (history-push! 'theme name) (load-theme name)))))
+
+(define-command "light-theme" "Switch to a light theme: this theme's light pair, else the light one used last"
+  (lambda () (theme--switch-brightness! #f)))
+
+(define-command "dark-theme" "Switch to a dark theme: this theme's dark pair, else the dark one used last"
+  (lambda () (theme--switch-brightness! #t)))
+
+(catalog-meta! 'command "light-theme" 'domain 'faces 'effects '(write) 'aliases "light mode day mode bright theme")
+(catalog-meta! 'command "dark-theme" 'domain 'faces 'effects '(write) 'aliases "dark mode night mode")
+
 (define-command "load-theme" "Choose a color theme, previewing each as you move; RET keeps it"
   (lambda ()
     (let* ((frame (selected-frame))

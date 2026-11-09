@@ -594,7 +594,7 @@
     ("describe-bindings" "keyboard shortcuts keybindings keymap")
     ("describe-key" "what does this key do shortcut")
     ("shell" "terminal console command line")
-    ("visual-line-mode" "word wrap line wrap")
+    ("visual-line-mode" "move by screen line visual lines")
     ("display-line-numbers-mode" "line numbers")
     ("goto-line" "go to line")
     ("isearch-forward" "find search in file")
@@ -605,8 +605,7 @@
     ("cua-select-all" "select all")
     ("dired" "file explorer folder")
     ("chat-new" "new chat ask ai assistant")
-    ("vscode-mode" "vscode keys keymap")
-    ("keyboard-quit" "cancel escape")))
+    ("vscode-mode" "vscode keys keymap")))
 
 (define (command-palette--everyday? name)
   (and (assoc name command-palette-everyday) #t))

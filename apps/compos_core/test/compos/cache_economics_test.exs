@@ -99,14 +99,17 @@ defmodule Compos.CacheEconomicsTest do
     # THE invariant: the cached prefix did not move
     assert first.system == second.system
 
-    # the document is named in the system prompt, never quoted there
-    assert first.system =~ "*doc1*"
+    # the system prompt holds no workspace: the document is named in the
+    # Chat context block of the first user message (docs/PROMPTS.md)
+    refute first.system =~ "*doc1*"
     refute first.system =~ "the first draft"
+    assert first.messages |> List.first() |> Map.get(:content) =~ "*doc1*"
 
-    # ...it rides the user message, where a change costs one turn
+    # the edit moved nothing cached: the new turn is the only new text, and
+    # the document's words reach the model through its tools, not the prompt
     last = second.messages |> List.last() |> Map.get(:content)
-    assert last =~ "a second paragraph appeared"
     assert last =~ "now read it again"
+    refute last =~ "a second paragraph appeared"
   end
 
   test "switching between two group buffers does not move the system prompt" do
@@ -154,9 +157,11 @@ defmodule Compos.CacheEconomicsTest do
     # the switch really reordered the members: the test is not vacuous
     refute order1 == order2
 
-    # both members are in the multi-doc branch of the prompt...
-    assert first.system =~ "*doc-a*"
-    assert first.system =~ "*doc-b*"
+    # the members ride the Chat context block of the first user message,
+    # never the system prompt (docs/PROMPTS.md)
+    refute first.system =~ "*doc-a*"
+    refute first.system =~ "*doc-b*"
+    assert first.messages |> List.first() |> Map.get(:content) =~ "*doc-a*"
 
     # THE invariant: the reorder did not move the cached prefix
     assert first.system == second.system

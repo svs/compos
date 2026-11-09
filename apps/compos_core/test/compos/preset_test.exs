@@ -106,7 +106,8 @@ defmodule Compos.PresetTest do
                    1_000
 
     assert Map.has_key?(mcp_servers, "compos")
-    assert thread_frame["params"]["ephemeral"] == false
+    # chats own their transcript: the Codex thread is ephemeral
+    assert thread_frame["params"]["ephemeral"] == true
 
     inject(agent, %{
       "id" => thread_request,

@@ -9,9 +9,11 @@ defmodule Compos.AgentTest do
   # the live input: everything past the mark. The input carries no marker
   # bytes, so an empty input means the buffer ends at the mark.
   defp input_text(buf) do
-    text = Buffer.text(buf)
-    mark = min(Buffer.get_local(buf, "agent-saved-mark") || byte_size(text), byte_size(text))
-    binary_part(text, mark, byte_size(text) - mark)
+    # the chat's own answer for where its input is (chat-input-region),
+    # not a mark the transcript writer keeps for itself
+    {:ok, region} = Session.eval(~s[(chat-input-region "] <> buf <> ~s[")])
+    [s, e] = ~r/-?\d+/ |> Regex.scan(region) |> List.flatten() |> Enum.map(&String.to_integer/1)
+    binary_part(Buffer.text(buf), s, e - s)
   end
   defp evict(name) do
     :ok = Buffer.checkpoint_now(name)
@@ -831,7 +833,9 @@ defmodule Compos.AgentTest do
     press(["RET"])
 
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid, "params" => p}}, 1_000
-    assert [%{"text" => "first message"}] = p["prompt"]
+    # the first message carries the Chat context block in front
+    assert [%{"text" => first}] = p["prompt"]
+    assert String.ends_with?(first, "\n\nfirst message")
     # input region cleared back to the mark; message echoed into the transcript
     assert eventually(fn -> input_text(buf) == "" end)
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: first message\n" end)
@@ -1945,9 +1949,10 @@ defmodule Compos.AgentTest do
 
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p}}, 1_000
     # an EMPTY conversation (meta card only) seeds nothing — the message
-    # goes out bare; seeding with history is covered by the restart test
+    # goes out with only its Chat context block in front; seeding with
+    # history is covered by the restart test
     [%{"text" => sent}] = p["prompt"]
-    assert sent == "are you alive"
+    assert String.ends_with?(sent, "\n\nare you alive")
     refute sent =~ "Context: this continues an earlier conversation"
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: are you alive\n" end)
   end
@@ -2183,14 +2188,15 @@ defmodule Compos.AgentTest do
 
     assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug_of("*chat:a2*"))) end)
 
-    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+    open_chat_list(["*chat:a1*", "*chat:a2*"])
     text = Buffer.text("*chat-list*")
-    assert text =~ slug_of("*chat:a2*")
+    # a live chat's row shows its name
+    assert text =~ "*chat:a2*"
     assert text =~ "your turn"
 
-    # point lands on the first table entry; answer through the real key path
+    # stand on the chat that asks; answer through the real key path
     focus("*chat-list*")
-    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chat-list*")])
+    goto_chat_row("*chat:a2*")
     press(["y"])
 
     assert_receive {:frame, %{"id" => 91, "result" => %{"outcome" => outcome}}}, 1_000
@@ -2201,20 +2207,21 @@ defmodule Compos.AgentTest do
     _ = agent1
   end
 
-  test "k stops the runtime and keeps the chat; a archives it and releases its windows" do
+  test "chats-kill-runtime stops the runtime and keeps the chat; a archives it and releases its windows" do
     {_slug, buf, _agent} = boot("")
 
     # show the thread in the main window, then open the chat list
     focus(buf)
-    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+    open_chat_list([buf])
     focus("*chat-list*")
     goto_chat_row(buf)
 
-    # the application acts on the chat at point: no flag, no x
-    press(["k"])
+    # the application acts on the chat at point: no flag, no x. k kills
+    # the buffer, as in ibuffer, so the stop is its command (M-x)
+    {:ok, _} = Session.eval(~s[(run-command "chats-kill-runtime")])
     assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
     assert eventually(fn -> Agent.list() == [] end)
-    # the transcript stays: k took the runtime, not the chat
+    # the transcript stays: the stop took the runtime, not the chat
     assert Buffer.exists?(buf)
 
     # the refresh re-sorted (dead ranks last) — find the row again
@@ -2240,12 +2247,12 @@ defmodule Compos.AgentTest do
     buf2 = "*chat:a2*"
     assert eventually(fn -> Buffer.exists?(buf2) end)
 
-    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+    open_chat_list([buf1, buf2])
     focus("*chat-list*")
 
-    # stand on the first chat: k stops that runtime and leaves the other
+    # stand on the first chat: the stop takes that runtime and leaves the other
     goto_chat_row(buf1)
-    press(["k"])
+    {:ok, _} = Session.eval(~s[(run-command "chats-kill-runtime")])
 
     assert eventually(fn -> Buffer.text(buf1) =~ "[agent stopped]" end)
     refute Buffer.text(buf2) =~ "[agent stopped]"
@@ -2253,7 +2260,7 @@ defmodule Compos.AgentTest do
 
     # then the other one, from its own row
     goto_chat_row(buf2)
-    press(["k"])
+    {:ok, _} = Session.eval(~s[(run-command "chats-kill-runtime")])
 
     assert eventually(fn -> Agent.list() == [] end)
     assert Buffer.text(buf2) =~ "[agent stopped]"
@@ -2261,14 +2268,28 @@ defmodule Compos.AgentTest do
 
   # put point on BUF's row in the chat list
   # a heading row is a list, and the mover skips it: count the chat rows only
+  # A chat born outside a command stays context-only until a command ends
+  # (chat-quiet!); these chats come from a bare eval, so list them the way
+  # that command end would, then open the list.
+  defp open_chat_list(bufs) do
+    Enum.each(bufs, fn b -> Session.eval(~s[(buffer-promote! "] <> b <> ~s[")]) end)
+    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+  end
+
   defp goto_chat_row(buf) do
-    rows = Buffer.get_local("*chat-list*", "list-entries") |> Enum.filter(&is_binary/1)
-    # a row is the chat's file, named after its slug
+    # a live chat's row shows its name; a saved one's its slug. Separator
+    # rows take lines too, so find the line, not an index into the entries
+    text = Buffer.text("*chat-list*")
     slug = slug_of(buf)
-    row = Enum.find_index(rows, &(&1 == buf or String.contains?(&1, slug)))
-    assert row, "chat #{buf} not listed in #{inspect(rows)}"
-    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chat-list*")])
-    press(List.duplicate("C-n", row))
+    i = text |> String.split("\n") |> Enum.find_index(&(String.contains?(&1, buf) or String.contains?(&1, slug)))
+    assert i, "chat " <> buf <> " not listed in:\n" <> text
+
+    {:ok, _} =
+      Session.eval(
+        ~s[(begin (switch-to-buffer! "*chat-list*") (goto-char! (line-start-position ] <>
+          Integer.to_string(i + 1) <> ")))"
+      )
+
     :ok
   end
 

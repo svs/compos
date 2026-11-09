@@ -6796,6 +6796,7 @@
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
 (public! 'buffer-local "(buffer-local NAME KEY) -> buffer-local value or #f")
+(public! 'buffer-locals "(buffer-locals BUF) -> ((KEY VALUE) ...) for every buffer-local, sorted by name")
 (effects! '(write))
 (public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
 (effects! '(read))

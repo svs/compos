@@ -68,9 +68,21 @@
       (map (lambda (b) (list 'buffer b)) open)
       (map (lambda (f) (list 'file f))
            (filter (lambda (f) (not (member f open)))
-                   (append (scheme-ide--dir-files (priv-path ""))
-                           (scheme-ide--dir-files (priv-path "packages"))
-                           (scheme-ide--dir-files (compos-config-dir))))))))
+                   (apply append (map scheme-ide--dir-files (scheme-ide--dirs))))))))
+
+;; the source dirs first, then every load-path dir: a package anywhere on
+;; the path is a source, and a build copy of a source dir is left out
+(define (scheme-ide--dirs)
+  (let loop ((ds (append (list (priv-path "") (priv-path "packages"))
+                         load-path
+                         (list (compos-config-dir))))
+             (seen '()) (out '()))
+    (if (null? ds)
+        (reverse out)
+        (let ((real (or (ignore-errors (lambda () (file-realpath (car ds)))) (car ds))))
+          (if (member real seen)
+              (loop (cdr ds) seen out)
+              (loop (cdr ds) (cons real seen) (cons (car ds) out)))))))
 
 (define (scheme-ide--search-text text pats)
   (let loop ((ps pats))
@@ -299,7 +311,7 @@
 ;; the Scheme catalog sources. A file target is a path; a file buffer is
 ;; named by its path, so the target is also the buffer name.
 (define (definition-locate name &optional kind)
-  (scheme-ide--find-def name kind))
+  (scheme-ide--find-def (if (symbol? name) (symbol->string name) name) kind))
 
 ;; the window of the last definition shown, while it still shows it
 (define (definition--window)
@@ -356,4 +368,4 @@
           '("definition-show" "definition-go"))
 
 (public! 'definition-locate
-  "(definition-locate NAME [KIND]) -- (SOURCE-KIND TARGET BYTE-POS) of NAME's definition, or #f")
+  "(definition-locate NAME [KIND]) -- NAME a string or symbol; (SOURCE-KIND TARGET BYTE-POS) of NAME's definition, or #f")

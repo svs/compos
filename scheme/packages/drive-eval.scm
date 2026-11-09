@@ -203,6 +203,9 @@
            (buf (or (and r (plist-get r 'buffer)) title))
            (reply (or (and r (plist-get r 'text)) ""))
            (counts (if (buffer-known? buf) (drive-eval--count (chat-record buf)) '(0 0)))
+           (friction (if (buffer-known? buf)
+                         (or (ignore-errors (lambda () (drive-eval-friction (drive-eval--turn (chat-record buf))))) '())
+                         '()))
            (steps (if (boundp 'agent-perf-turn) (agent-perf-turn slug) '()))
            (text (and fixture (buffer-known? fb) (buffer-text fb)))
            (bytes (if (buffer-known? buf)
@@ -214,7 +217,7 @@
       (drive-eval--hook c 'cleanup fb)
       (when (and fixture (buffer-known? fb)) (buffer-kill! fb))
       (list (car c) (car m) ok (car counts) (cadr counts) ms
-            (and r (plist-get r 'stop-reason)) steps reply bytes))))
+            (and r (plist-get r 'stop-reason)) steps reply bytes slug friction))))
 
 (define (drive-eval--of rows label) (filter (lambda (r) (eq? (cadr r) label)) rows))
 (define (drive-eval--fmt x) (number->string (/ (round (* 10 x)) 10)))
@@ -243,7 +246,10 @@
   (string-append (drive-eval--passed rows) " "
                  (drive-eval--fmt (drive-eval--median (map (lambda (r) (list-ref r 3)) rows))) "r "
                  (drive-eval--fmt (drive-eval--median (map (lambda (r) (list-ref r 4)) rows))) "t "
-                 (drive-eval--fmt (/ (drive-eval--median (map (lambda (r) (list-ref r 5)) rows)) 1000)) "s"))
+                 (drive-eval--fmt (/ (drive-eval--median (map (lambda (r) (list-ref r 5)) rows)) 1000)) "s"
+                 (let ((fs (filter (lambda (r) (> (length r) 11)) rows)))
+                   (if (null? fs) ""
+                       (string-append " " (drive-eval--fmt (drive-eval--median (map (lambda (r) (drive-eval-wasted (list-ref r 11))) fs))) "w")))))
 
 (define (drive-eval--short label)
   (let ((p "mcp__compos__"))
@@ -271,7 +277,7 @@
       (string-join (map (lambda (l) (string-append (symbol->string l) " " (drive-eval--score (drive-eval--of rows l))
                                                      " prompt " (number->string (fold (lambda (acc r) (if (> (length r) 9) (max acc (list-ref r 9)) acc)) 0 (drive-eval--of rows l))) "B")) labels) "; ")
       "\n\n" (string-pad-right "case" 10)
-      (string-join (map (lambda (l) (string-pad-right (symbol->string l) 22)) labels) "")
+      (string-join (map (lambda (l) (string-pad-right (symbol->string l) 28)) labels) "")
       "\n"
       (string-join
         (map (lambda (c)
@@ -280,16 +286,20 @@
                  (string-join
                    (map (lambda (l)
                           (let ((rs (filter (lambda (r) (and (eq? (car r) (car c)) (eq? (cadr r) l))) rows)))
-                            (string-pad-right (if (pair? rs) (drive-eval--cell rs) "-") 22)))
+                            (string-pad-right (if (pair? rs) (drive-eval--cell rs) "-") 28)))
                         labels)
                    "")))
              cases)
         "\n")
-      "\n\npassed/runs, then medians. r: model replies in the turn; t: tool calls; s: send to turn end.\n"
+      "\n\npassed/runs, then medians. r: model replies in the turn; t: tool calls; s: send to turn end; w: tool rounds wasted on the harness.\n"
       (if (null? failed)
           ""
           (string-append "\nFailures, with the steps of each turn (ms)\n"
-                         (string-join (map drive-eval--failure failed) "\n") "\n")))))
+                         (string-join (map drive-eval--failure failed) "\n") "\n"))
+      (let ((fr (filter (lambda (r) (> (length r) 11)) rows)))
+        (if (null? fr)
+            ""
+            (drive-eval-friction-text (map (lambda (r) (list (car r) (cadr r) (list-ref r 11))) fr)))))))
 
 (define (drive-eval--case x)
   (if (symbol? x)
@@ -355,3 +365,188 @@
 
 (public! 'drive-eval
   "(drive-eval [MODELS CASES REPS]) -- give each case, a real chat task, to a fresh chat on each model REPS times and score passes, median rounds, tool calls and seconds; CASES 'hard is the harness set; the table goes to *drive-eval*, the event drive-eval done says the score")
+
+;;; Friction: the tool calls of a run that did no work, and why.
+;;; A passing run can still lose rounds to the harness; the score hides it.
+
+(domain! 'chat)
+(effects! '(pure))
+
+(define drive-eval-friction-kinds
+  '((schema-load "ToolSearch: a round to load a tool schema")
+    (no-tool "a call to a tool that does not exist")
+    (wrong-args "wrong argument names")
+    (unbound "an unbound or guessed name")
+    (read-gate "the read eval refused the code")
+    (error "the call raised an error")
+    (repeated "the same call again")
+    (dead-discovery "a search whose answer the run did not use")
+    (oversized "a result over 20 KB")
+    (empty "an empty result")))
+
+(define (drive-eval--str x) (if (string? x) x (value->string x)))
+
+(define (drive-eval--discovery? call)
+  (let ((name (list-ref call 1)) (input (list-ref call 2)))
+    (or (string-contains? name "apropos") (string-contains? name "describe")
+        (string-contains? input "\"(apropos ") (string-contains? input "\"(describe-function "))))
+
+(define (drive-eval--calls rec)
+  "the tool calls of REC, oldest first, as (ROUND NAME INPUT RESULT ERROR?)"
+  (let ((results (filter (lambda (b) (and (pair? b) (equal? (car b) "tool-result")))
+                         (apply append (map (lambda (m) (or (plist-get m 'blocks) '())) rec)))))
+    (let loop ((ms rec) (round 0) (acc '()))
+      (if (null? ms)
+          (reverse acc)
+          (let ((uses (filter (lambda (b) (and (pair? b) (equal? (car b) "tool-use")))
+                              (or (plist-get (car ms) 'blocks) '()))))
+            (if (null? uses)
+                (loop (cdr ms) round acc)
+                (loop (cdr ms) (+ round 1)
+                      (append (reverse
+                                (map (lambda (u)
+                                       (let ((r (find (lambda (x) (equal? (cadr x) (cadr u))) results)))
+                                         (list round (caddr u) (drive-eval--str (cadddr u))
+                                               (if r (drive-eval--str (caddr r)) "")
+                                               (and r (> (length r) 3) (cadddr r) #t))))
+                                     uses))
+                              acc))))))))
+
+(define (drive-eval--names call)
+  "the names a discovery call answered: each name of an apropos row, and the name a describe asked for"
+  (let* ((parts (string-split (list-ref call 3) "name \""))
+         (found (map (lambda (p) (let ((i (string-index p "\""))) (if i (substring-bytes p 0 i) "")))
+                     (if (pair? parts) (cdr parts) '())))
+         (asked (let ((j (ignore-errors (lambda () (json-parse (list-ref call 2))))))
+                  (if (and (pair? j) (string? (plist-get j 'name))) (list (plist-get j 'name)) '()))))
+    (filter (lambda (s) (> (string-length s) 2)) (append asked found))))
+
+(define (drive-eval--kind call earlier later)
+  (let* ((name (list-ref call 1))
+         (input (list-ref call 2))
+         (t (string-trim (list-ref call 3)))
+         (low (string-downcase (substring t 0 (min 200 (string-length t))))))
+    (cond ((string-suffix? "ToolSearch" name) 'schema-load)
+          ((string-contains? t "No such tool available") 'no-tool)
+          ((or (string-contains? t "you sent {") (string-contains? t "InputValidationError")) 'wrong-args)
+          ((or (string-contains? low "is unbound") (string-contains? low "unbound variable")) 'unbound)
+          ((string-prefix? "refused:" t) 'read-gate)
+          ((or (list-ref call 4) (string-prefix? "error" low)) 'error)
+          ((any (lambda (c) (and (equal? (list-ref c 1) name) (equal? (list-ref c 2) input))) earlier) 'repeated)
+          ((and (drive-eval--discovery? call) (pair? later)
+                (let ((ns (drive-eval--names call)))
+                  (not (any (lambda (c) (any (lambda (n) (string-contains? (list-ref c 2) n)) ns)) later))))
+           'dead-discovery)
+          ((> (string-length t) 20000) 'oversized)
+          ((member t '("" "()" "\"\"")) 'empty)
+          (else #f))))
+
+(define (drive-eval-friction rec)
+  "each tool call of REC, oldest first, as (KIND ROUND NAME INPUT RESULT ERROR?); KIND #f is a useful call"
+  (let loop ((cs (drive-eval--calls rec)) (earlier '()) (acc '()))
+    (if (null? cs)
+        (reverse acc)
+        (let ((later (filter (lambda (x) (not (drive-eval--discovery? x))) (cdr cs))))
+          (loop (cdr cs) (cons (car cs) earlier)
+                (cons (cons (drive-eval--kind (car cs) earlier later) (car cs)) acc))))))
+
+(define (drive-eval--rounds fr)
+  (fold (lambda (acc f) (if (member (cadr f) acc) acc (cons (cadr f) acc))) '() fr))
+
+(define (drive-eval--lost fr)
+  "((KIND SHARE CALL) ...): each call of a round where every call was wasted, with its share of that round"
+  (apply append
+    (map (lambda (r)
+           (let ((in (filter (lambda (f) (= (cadr f) r)) fr)))
+             (if (every car in)
+                 (map (lambda (f) (list (car f) (/ 1.0 (length in)) f)) in)
+                 '())))
+         (drive-eval--rounds fr))))
+
+(define (drive-eval-wasted fr)
+  "the rounds of a friction list where every tool call was wasted"
+  (length (filter (lambda (r) (every car (filter (lambda (f) (= (cadr f) r)) fr))) (drive-eval--rounds fr))))
+
+(define (drive-eval--clip s n)
+  (let ((s (string-join (string-split (drive-eval--str s) "\n") " ")))
+    (if (> (string-length s) n) (string-append (substring s 0 n) "...") s)))
+
+(define (drive-eval-friction-text runs)
+  "RUNS is ((CASE LABEL FRICTION) ...): the rounds wasted, and the kinds ranked by rounds lost, each with one real call"
+  (let* ((frs (map caddr runs))
+         (rounds (apply + (map (lambda (fr) (length (drive-eval--rounds fr))) frs)))
+         (lost (apply append (map (lambda (run) (map (lambda (l) (cons run l)) (drive-eval--lost (caddr run)))) runs)))
+         (calls (apply append (map (lambda (run) (map (lambda (f) (cons run f)) (caddr run))) runs)))
+         (rows (filter (lambda (x) (> (cadr x) 0))
+                 (map (lambda (k)
+                        (let ((ls (filter (lambda (l) (eq? (cadr l) (car k))) lost)))
+                          (list (car k)
+                                (apply + (map caddr ls))
+                                (length (filter (lambda (c) (eq? (cadr c) (car k))) calls))
+                                (if (pair? ls) (car ls) (find (lambda (c) (eq? (cadr c) (car k))) calls))
+                                (cadr k))))
+                      drive-eval-friction-kinds)))
+         (ranked (map cadr (sort (map (lambda (r) (list (- (cadr r)) r)) rows)))))
+    (string-append
+      "\nFriction: " (number->string (apply + (map drive-eval-wasted frs))) " of " (number->string rounds)
+      " tool rounds wasted in " (number->string (length runs)) " runs\n"
+      "rounds lost, wasted calls, kind; then one real call -> its result\n"
+      (string-join
+        (map (lambda (x)
+               (let* ((ex (list-ref x 3))
+                      (run (car ex))
+                      (f (if (= (length ex) 4) (cadddr ex) (cdr ex))))
+                 (string-append
+                   (string-pad-right (drive-eval--fmt (cadr x)) 6) (string-pad-right (number->string (caddr x)) 5)
+                   (symbol->string (car x)) ": " (list-ref x 4) "\n      "
+                   (symbol->string (car run)) " " (symbol->string (cadr run)) ": "
+                   (list-ref f 2) " " (drive-eval--clip (list-ref f 3) 90)
+                   " -> " (drive-eval--clip (list-ref f 4) 110))))
+             ranked)
+        "\n")
+      "\n")))
+
+(domain! 'chat)
+(effects! '(read))
+
+(define (drive-eval-friction-logs since)
+  "((CASE LABEL FRICTION) ...), oldest first, from the archived drive-eval chats whose log began at or after SINCE, epoch seconds"
+  (let ((fs (filter (lambda (f) (>= (or (drive-eval--number (last (string-split f "/"))) 0) since)) (chat-log-files))))
+    (filter (lambda (x) x)
+      (map (lambda (f)
+             (let* ((r (ignore-errors (lambda () (chat-log-read f))))
+                    (title (or (and r (plist-get (plist-get r 'header) 'title)) ""))
+                    (ws (string-split title " ")))
+               (and (string-prefix? "drive-eval " title) (= (length ws) 3)
+                    (list (string->symbol (cadr ws)) (string->symbol (caddr ws))
+                          (drive-eval-friction (or (plist-get r 'record) '()))))))
+           (map cadr (sort (map (lambda (f) (list (or (drive-eval--number (last (string-split f "/"))) 0) f)) fs)))))))
+
+(define (drive-eval-friction-fill rows since)
+  "ROWS with the friction of each run that lacks it, from the archived chats since SINCE: the Nth run of a case on a model takes the Nth log of that title"
+  (let ((logs (drive-eval-friction-logs since)))
+    (let loop ((rs rows) (seen '()) (acc '()))
+      (if (null? rs)
+          (reverse acc)
+          (let* ((r (car rs))
+                 (key (list (car r) (cadr r)))
+                 (n (length (filter (lambda (k) (equal? k key)) seen)))
+                 (mine (filter (lambda (l) (and (eq? (car l) (car r)) (eq? (cadr l) (cadr r)))) logs))
+                 (fr (cond ((> (length r) 11) (list-ref r 11))
+                           ((> (length mine) n) (caddr (list-ref mine n)))
+                           (else #f))))
+            (loop (cdr rs) (cons key seen)
+                  (cons (if (and fr (<= (length r) 11))
+                            (append r (list-head '(#f #f #f #f #f #f #f #f #f #f) (- 10 (length r))) (list #f fr))
+                            r)
+                        acc)))))))
+
+(public! 'drive-eval-friction-fill
+  "(drive-eval-friction-fill ROWS SINCE) -- drive-eval rows, each with the friction of its run; a row from before friction takes it from the archived chat logs since SINCE, epoch seconds")
+(public! 'drive-eval-friction
+  "(drive-eval-friction REC) -- each tool call of a chat record, oldest first, as (KIND ROUND NAME INPUT RESULT ERROR?); KIND names why the call was wasted (schema-load, no-tool, wrong-args, unbound, read-gate, error, repeated, dead-discovery, oversized, empty) or is #f")
+(public! 'drive-eval-friction-text
+  "(drive-eval-friction-text RUNS) -- RUNS is ((CASE LABEL FRICTION) ...); the friction report: rounds wasted, kinds ranked by rounds lost, one real call each")
+(public! 'drive-eval-friction-logs
+  "(drive-eval-friction-logs SINCE) -- ((CASE LABEL FRICTION) ...) from the archived drive-eval chats whose log began at or after SINCE, epoch seconds")
+

@@ -1759,7 +1759,8 @@ defmodule Compos.Core.SchemeAPI do
         fn [paths | whole] ->
           opts = if whole in [[], [false], [nil]], do: [], else: [whole: true]
 
-          case Compos.Core.Session.reload_files(List.wrap(paths), opts) do
+          # the Session handler takes the options; its client takes none
+          case GenServer.call(Compos.Core.Session, {:reload_files, List.wrap(paths), opts}, 30_000) do
             {:ok, %{files: files, forms: forms}} ->
               [files, forms]
 

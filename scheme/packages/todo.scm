@@ -1942,12 +1942,29 @@
     (buffer-set-read-only! buf #t)
     (if t (todo--detail-retitle! buf t) buf)))
 
+;; the sub-task point was on in Children, kept per task: ((TASK-ID . CHILD-ID) ...)
+(define (todo--detail-remember-child! buf)
+  (when (equal? (todo--detail-tab buf) "children")
+    (let ((hit (assv (car (buffer-line-at-point buf)) (or (buffer-local-value 'todo-child-lines buf) '())))
+          (id (buffer-local-value 'todo-id buf)))
+      (when (and hit id)
+        (buffer-set-local! buf 'todo-child-at
+          (cons (cons id (cdr hit))
+                (remove (lambda (e) (equal? (car e) id)) (or (buffer-local-value 'todo-child-at buf) '()))))))))
+
 (define (todo--detail-tab-set! buf name)
+  (todo--detail-remember-child! buf)
   (buffer-set-local! buf 'todo-tab name)
   (todo--detail-render! buf)
-  ;; Children opens on its first row, so RET opens it at once
-  (let ((rows (map car (or (buffer-local-value 'todo-child-lines buf) '()))))
-    (buffer-goto-line! buf (if (and (equal? name "children") (pair? rows)) (apply min rows) 1)))
+  ;; Children opens on the sub-task last lit there, else on its first row,
+  ;; so RET opens it at once
+  (let* ((lines (or (buffer-local-value 'todo-child-lines buf) '()))
+         (last (let ((e (assoc (buffer-local-value 'todo-id buf) (or (buffer-local-value 'todo-child-at buf) '()))))
+                 (and e (find (lambda (l) (equal? (cdr l) (cdr e))) lines)))))
+    (buffer-goto-line! buf (cond ((not (equal? name "children")) 1)
+                                 (last (car last))
+                                 ((pair? lines) (apply min (map car lines)))
+                                 (else 1))))
   ;; the part point stands in is the lit one
   (anchor-sync! buf))
 
@@ -2051,7 +2068,8 @@
   (lambda ()
     (let ((t (todo--detail-target (current-buffer))))
       (if (and t (equal? (todo--detail-tab (current-buffer)) "children"))
-          (begin (buffer-set-local! (current-buffer) 'todo-id (plist-get t 'id))
+          (begin (todo--detail-remember-child! (current-buffer))
+                 (buffer-set-local! (current-buffer) 'todo-id (plist-get t 'id))
                  (todo--detail-tab-set! (current-buffer) "overview"))
           (message "No sub-task at point"))))
   'modes '(todo-detail-mode))
@@ -2478,7 +2496,8 @@
          (buffer-exists? buf)
          (let ((t (todo-get (substring id 11 (string-length id)))))
            (and t
-                (begin (buffer-set-local! buf 'todo-id (plist-get t 'id))
+                (begin (todo--detail-remember-child! buf)
+                       (buffer-set-local! buf 'todo-id (plist-get t 'id))
                        (todo--detail-tab-set! buf "overview")
                        #t))))))
 

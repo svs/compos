@@ -1997,6 +1997,10 @@
     ;; images the user pasted and did not send yet: same rule as the note,
     ;; they survive a restart and a reset drops them
     chat-pending-images
+    ;; messages queued behind a running turn, and the Up walk through
+    ;; them: same rule again; a restore with no runtime puts them back
+    ;; in the input, a reset drops them
+    chat-queued chat-queued-walk
     ;; the file this conversation logs itself to under <compos-home>/chats:
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive

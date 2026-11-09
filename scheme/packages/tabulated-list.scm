@@ -892,7 +892,7 @@
 (define (list-col-hidden? c) (equal? (list-col-width c) 0))
 
 (define (list-col-rank c i)
-  (if (and (> (length c) 4) (number? (nth 4 c))) (nth 4 c) (- 100 i)))
+  (let ((r (list-col-nth c 4 #f))) (if (number? r) r (- 100 i))))
 
 (define (list-columns-need cols)
   (fold (lambda (acc c)
@@ -919,7 +919,7 @@
                (if (null? cs) (reverse out)
                    (loop (cdr cs) (+ i 1)
                          (cons (if (= i victim)
-                                   (list (car (car cs)) 0 (list-col-align (car cs)) (list-col-trim (car cs)))
+                                   (list-col-resize (car cs) 0)
                                    (car cs))
                                out))))
              w)))))
@@ -933,7 +933,7 @@
     (map (lambda (c)
            (if (list-col-width c)
                c
-               (list (car c) rest (list-col-align c) (list-col-trim c))))
+               (list-col-resize c rest)))
          cols)))
 
 ;; a mode says its columns once per line of a row. A one-line list says
@@ -1086,11 +1086,26 @@
         (else (string-pad-right s w))))
 
 (define (list-col-width c) (car (cdr c)))
-(define (list-col-align c) (if (> (length c) 2) (nth 2 c) 'left))
+
+;; A column spec is (NAME WIDTH [ALIGN [TRIM [RANK]]]) and may end with
+;; 'style STYLE: how the formatted view draws the cell (badge, chip, dim,
+;; title, number, date). The bare view ignores it; both read the same text.
+(define (list-col-nth c i default)
+  (let loop ((cs c) (i i))
+    (cond ((or (null? cs) (eq? (car cs) 'style)) default)
+          ((= i 0) (car cs))
+          (else (loop (cdr cs) (- i 1))))))
+
+(define (list-col-style c)
+  (let ((t (memq 'style c))) (and t (pair? (cdr t)) (cadr t))))
+
+;; the same column at another width: its align, trim, rank and style stay
+(define (list-col-resize c w) (cons (car c) (cons w (cddr c))))
+(define (list-col-align c) (list-col-nth c 2 'left))
 
 ;; how the column gives up space: 'middle (the default), 'end, or a fn
 ;; the mode wrote
-(define (list-col-trim c) (if (> (length c) 3) (nth 3 c) 'middle))
+(define (list-col-trim c) (list-col-nth c 3 'middle))
 
 ;; how wide the table is: the rule and the right-hand chip measure
 ;; themselves against it, so nothing has to ask the window
@@ -2286,6 +2301,15 @@
 }
 ")
 
+;; the looks a column's 'style names, in the formatted view only
+(define-style! 'list-cells "
+.list-cell-dim, .list-cell-date { color: var(--dim-fg, #8a857a); }
+.list-cell-date, .list-cell-number { font-variant-numeric: tabular-nums; }
+.list-cell-title { font-weight: 600; }
+.list-cell-badge { background: var(--hl-line-bg, rgba(128,128,128,.12)); border-radius: 3px; }
+.list-cell-chip { box-shadow: inset 0 0 0 1px var(--dim-fg, #8a857a); border-radius: 3px; }
+")
+
 (public! 'list-format-template
   "(list-format-template FIELDS PRETTY?) — format (TEXT CLASS WIDTH TRIM PREFIX) fields as text and relative UTF-8 ranges; WIDTH #f leaves text natural")
 (define (list-format-template fields pretty?)
@@ -2321,6 +2345,22 @@
             (map (lambda (field)
                    (list (+ base (car field)) (+ base (cadr field)) (nth 2 field))) fields))))))
 
+;; The formatted view of a table is its bare text with a span over each
+;; cell: the spans come from the columns, so a mode supplies nothing more.
+;; A column's 'style names the cell's look; a dropped column has no text,
+;; so it has no span, and both views honour the same ranks.
+(define (list-cell-class c)
+  (let ((s (list-col-style c)))
+    (if s (string-append "list-cell list-cell-" (if (symbol? s) (symbol->string s) s)) "list-cell")))
+
+(define (list-cell-fields buf ctx)
+  (let ((cl (list-ctx-column-lines ctx)))
+    (and (pair? cl)
+         (let ((descs (map (lambda (c) (list 'tag "span" 'class (list-cell-class c)
+                                             'attrs (list (list "col" (car c)))))
+                           (car cl))))
+           (lambda (buf row) descs)))))
+
 ;; Semantic text records keep the existing text, faces and line geometry.
 (define (list-composml-text! buf rows &optional prepared destination)
   (let ((record (or (list-opt buf 'composml-record)
@@ -2334,7 +2374,7 @@
       ;; the draw's own context and field fn, read once: a row that asked
       ;; for them itself cost this pass twice its time (docs/LISTS.md).
       (let* ((ctx (list-row-ctx buf))
-             (fields (list-opt buf 'composml-fields))
+             (fields (or (list-opt buf 'composml-fields) (list-cell-fields buf ctx)))
              (key-of (list-ctx-key ctx)))
         (list-set-locals! (or destination buf)
           ;; rows-click: a click on a row opens it (list-mouse-open), and
@@ -2930,7 +2970,14 @@
 ;;; are in.
 (define *list-views* '("rendered" "bare" "source"))
 
-(define (list-bare? buf) (equal? (buffer-local-value 'list-view buf) "bare"))
+(defcustom 'list-default-view "rendered"
+  "The view a list opens in: \"rendered\" (the formatted table) or \"bare\" (the text table). A list mode may set its own 'default-view; C-c C-v changes one list."
+  'group 'list 'type 'string)
+
+(define (list-view-of buf)
+  (or (buffer-local-value 'list-view buf) (list-opt buf 'default-view) list-default-view "rendered"))
+
+(define (list-bare? buf) (equal? (list-view-of buf) "bare"))
 
 (define (list-drop-render! buf)
   (for-each (lambda (k) (buffer-set-local! buf k #f))
@@ -2987,7 +3034,7 @@
 
 (define (list-cycle-view! buf)
   (let* ((list-buf (or (buffer-local-value 'list-source-of buf) buf))
-         (now (or (buffer-local-value 'list-view list-buf) "rendered"))
+         (now (list-view-of list-buf))
          (next (list-cycle now *list-views* 1)))
     (cond ((equal? next "source") (list-show-source! list-buf))
           (else

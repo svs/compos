@@ -1094,6 +1094,8 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
 (public! 'fast-palette-remove! "(fast-palette-remove!) -- restore the plain palette")
 (public! 'fast-learned-path "(fast-learned-path) -- the file that keeps the functions fast-code learned")
 (catalog-meta! 'function "fast-learned-path" 'effects '(read))
+(public! 'fast-palette-installed? "(fast-palette-installed?) -- #t when palette input falls through to fast-code")
+(catalog-meta! 'function "fast-palette-installed?" 'effects '(read))
 
 ;; learned functions come back first; safe to re-run after a reload
 (fast-learned-load!)

@@ -1815,7 +1815,11 @@
          (children (lambda ()
                      (if (null? kids)
                          (list (component 'ui/empty (list 'text "No sub-tasks")))
-                         (let loop ((ks kids) (i 1) (acc '()))
+                         ;; a section heading over the rows names them
+                         (let loop ((ks kids) (i 1)
+                                    (acc (let ((h (line! "Children")))
+                                           (list (stop (component 'ui/section (list 'title "Children" 'count (length kids)))
+                                                       "Children" h h)))))
                            (if (null? ks) (reverse acc)
                                (let* ((k (car ks))
                                       (state (or (plist-get k 'state) "inbox"))

@@ -42,8 +42,6 @@
 ;; the two models the gap lines of the report compare, the driver first
 (define drive-eval-gap-pair '(haiku-driver opus))
 
-;; set by drive-eval-cancel!; a worker reads it before each run
-(define *drive-eval-cancel* #f)
 
 (define *drive-eval-rows* '())
 
@@ -313,20 +311,28 @@
             (list-ref s (quotient n 2))
             (/ (+ (list-ref s (- (quotient n 2) 1)) (list-ref s (quotient n 2))) 2)))))
 
-(define (drive-eval--passed rows)
-  (string-append (number->string (length (filter (lambda (r) (list-ref r 2)) rows)))
-                 "/" (number->string (length rows))))
+;; a run the harness broke, not the model: it counts in no pass rate and no median
+(define (drive-eval--harness? r) (and (memq (list-ref r 6) '(error harness-error)) #t))
+(define (drive-eval--real rows) (filter (lambda (r) (not (drive-eval--harness? r))) rows))
 
-(define (drive-eval--score rows)
+(define (drive-eval--passed rows)
+  (let ((real (drive-eval--real rows)) (bad (length (filter drive-eval--harness? rows))))
+    (string-append (number->string (length (filter (lambda (r) (list-ref r 2)) real)))
+                   "/" (number->string (length real))
+                   (if (> bad 0) (string-append " +" (number->string bad) "e") ""))))
+
+(define (drive-eval--score all)
+  (define rows (drive-eval--real all))
   (string-append
-    (drive-eval--passed rows) " ok, median "
+    (drive-eval--passed all) " ok, median "
     (drive-eval--fmt (drive-eval--median (map (lambda (r) (list-ref r 3)) rows))) " rounds, "
     (drive-eval--fmt (drive-eval--median (map (lambda (r) (list-ref r 4)) rows))) " tools, "
     (drive-eval--fmt (/ (drive-eval--median (map (lambda (r) (list-ref r 5)) rows)) 1000)) " s"))
 
 ;; the runs of one case on one model: passed/runs, then the medians
-(define (drive-eval--cell rows)
-  (string-append (drive-eval--passed rows) " "
+(define (drive-eval--cell all)
+  (define rows (drive-eval--real all))
+  (string-append (drive-eval--passed all) " "
                  (drive-eval--fmt (drive-eval--median (map (lambda (r) (list-ref r 3)) rows))) "r "
                  (drive-eval--fmt (drive-eval--median (map (lambda (r) (list-ref r 4)) rows))) "t "
                  (drive-eval--fmt (/ (drive-eval--median (map (lambda (r) (list-ref r 5)) rows)) 1000)) "s"
@@ -353,7 +359,8 @@
                    ", "))))
 
 ;; one side of a gap line: (PASS-RATE ROUNDS SECONDS WASTED), the medians of ROWS
-(define (drive-eval--side rows)
+(define (drive-eval--side all)
+  (define rows (drive-eval--real all))
   (let ((fs (filter (lambda (r) (and (> (length r) 11) (list-ref r 11))) rows)))
     (list (if (null? rows) 0 (/ (* 100.0 (length (filter (lambda (r) (list-ref r 2)) rows))) (length rows)))
           (drive-eval--median (map (lambda (r) (list-ref r 3)) rows))
@@ -416,7 +423,7 @@
                    "")))
              cases)
         "\n")
-      "\n\npassed/runs, then medians. r: model replies in the turn; t: tool calls; s: send to turn end; w: tool rounds wasted on the harness. NAME.rN is a held-out rewording.\n"
+      "\n\npassed/runs, then medians. +Ne: runs the harness broke, left out of every rate and median. r: model replies in the turn; t: tool calls; s: send to turn end; w: tool rounds wasted on the harness. NAME.rN is a held-out rewording.\n"
       (or (ignore-errors (lambda () (drive-eval--gap rows cases))) "")
       (if (null? failed)
           ""
@@ -441,19 +448,37 @@
 ;; the table so far, after each run: into *drive-eval* and into
 ;; drive-eval-results-file, so a buffer on that file in auto-revert shows the
 ;; rows as they come. A report that throws never stops the run.
-(define (drive-eval--progress! rows ms cs)
-  (let ((text (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
-                  "drive-eval: running")))
+(define (drive-eval--progress! rows ms cs &optional id)
+  (let ((text (string-append (if id (string-append "[" id "] ") "")
+                             (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
+                                 "drive-eval: running"))))
     (ignore-errors (lambda () (write-file! drive-eval-results-file text)))
+    (when id (ignore-errors (lambda () (write-file! (drive-eval-run-file id) text))))
     (ignore-errors (lambda ()
                      (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
                      (buffer-set-text! "*drive-eval*" text)))
     text))
 
-(define *drive-eval--queue* '())
-(define *drive-eval--done* '())
-(define *drive-eval--opencode* 0)
-(define *drive-eval-running* #f)
+;; ~/.compos/drive-eval/ID.txt: the table of one run, as results.txt holds the latest
+(define (drive-eval-run-file id)
+  (string-append (getenv "HOME") "/.compos/drive-eval/" id ".txt"))
+
+;; The runs going now, ((ID PLIST) ...): each its own queue, rows and cancel
+;; flag, so two chats can run drive-eval at once. Every write holds the lock
+;; drive-eval. A reload keeps them: the defines below read the old value.
+(define *drive-eval-runs* (if (boundp '*drive-eval-runs*) *drive-eval-runs* '()))
+;; OpenCode runs going now, over every run: one at a time
+(define *drive-eval--opencode* (if (boundp '*drive-eval--opencode*) *drive-eval--opencode* 0))
+;; counts the runs, so two that start in one millisecond still get two ids
+(define *drive-eval--serial* (if (boundp '*drive-eval--serial*) *drive-eval--serial* 0))
+;; #t while any run goes
+(define *drive-eval-running* (pair? *drive-eval-runs*))
+
+(define (drive-eval--state id) (let ((x (assoc id *drive-eval-runs*))) (and x (cadr x))))
+(define (drive-eval--put! id key val)
+  (let ((st (drive-eval--state id)))
+    (when st (set! *drive-eval-runs* (alist-put *drive-eval-runs* id (plist-put st key val))))))
+(define (drive-eval--locked thunk) (with-scheme-lock 'drive-eval thunk))
 
 (define (drive-eval--opencode? m) (string-prefix? "opencode" (cadr m)))
 
@@ -469,38 +494,47 @@
            (cons (car xs) (append (reverse before) (cdr xs))))
           (else (loop (cdr xs) (cons (car xs) before))))))
 
-;; the next job, (CASE MODEL REP), taken off the queue; #f after a cancel or
-;; when none may start. A worker that gets #f stops: the queue only shrinks,
-;; and a held OpenCode job goes to the worker that runs OpenCode now.
-(define (drive-eval--take!)
-  (with-scheme-lock 'drive-eval
+;; the next job of run ID, (CASE MODEL REP), taken off its queue; #f after a
+;; cancel or when none may start. A worker that gets #f stops: the queue only
+;; shrinks, and a held OpenCode job goes to the worker that runs OpenCode now.
+(define (drive-eval--take! id)
+  (drive-eval--locked
     (lambda ()
-      (and (not *drive-eval-cancel*)
-           (let ((hit (drive-eval--pick *drive-eval--queue*)))
-             (and hit
-                  (begin
-                    (set! *drive-eval--queue* (cdr hit))
-                    (when (drive-eval--opencode? (cadr (car hit)))
-                      (set! *drive-eval--opencode* (+ *drive-eval--opencode* 1)))
-                    (car hit))))))))
+      (let ((st (drive-eval--state id)))
+        (and st (not (plist-get st 'cancel))
+             (let ((hit (drive-eval--pick (plist-get st 'queue))))
+               (and hit
+                    (begin
+                      (drive-eval--put! id 'queue (cdr hit))
+                      (when (drive-eval--opencode? (cadr (car hit)))
+                        (set! *drive-eval--opencode* (+ *drive-eval--opencode* 1)))
+                      (car hit)))))))))
 
-(define (drive-eval--worker ms cs)
+;; one job; a run that raises gives a row marked harness-error, and the error
+;; goes to *Messages* under drive-eval
+(define (drive-eval--job j)
+  (or (report-errors "drive-eval" (lambda () (drive-eval--run (car j) (cadr j) (caddr j))))
+      (list (car (car j)) (car (cadr j)) #f 0 0 0 'harness-error '()
+            "the harness raised an error; see *Messages*" 0 #f '() (caddr j))))
+
+(define (drive-eval--worker id ms cs)
   (let loop ()
-    (let ((j (drive-eval--take!)))
+    (let ((j (drive-eval--take! id)))
       (when j
-        (let ((row (or (ignore-errors (lambda () (drive-eval--run (car j) (cadr j) (caddr j))))
-                       (list (car (car j)) (car (cadr j)) #f 0 0 0 'error '() "the run raised an error" 0 #f '() (caddr j)))))
-          (with-scheme-lock 'drive-eval
+        (let ((row (drive-eval--job j)))
+          (drive-eval--locked
             (lambda ()
               (when (drive-eval--opencode? (cadr j))
                 (set! *drive-eval--opencode* (- *drive-eval--opencode* 1)))
-              (set! *drive-eval--done* (cons row *drive-eval--done*))
-              (drive-eval--progress! (reverse *drive-eval--done*) ms cs))))
+              (let ((rows (cons row (plist-get (drive-eval--state id) 'done))))
+                (drive-eval--put! id 'done rows)
+                (drive-eval--progress! (reverse rows) ms cs id)))))
         (loop)))))
 
+;; Answers the run id: "de-", the clock and a count. The event drive-eval done says
+;; "ID ..." with the first line of the table, "ID cancelled after N of M
+;; runs: ..." after drive-eval-cancel!.
 (define (drive-eval &optional models cases reps prompts)
-  (when *drive-eval-running*
-    (error "drive-eval: a run is going; (drive-eval-cancel!) stops it"))
   (let* ((ms (map (lambda (x) (if (symbol? x) (assq x *drive-eval-models*) x)) (or models *drive-eval-models*)))
          (base (cond ((eq? cases 'hard) *drive-eval-hard-cases*)
                      ((eq? cases 'all) (append *drive-eval-cases* *drive-eval-hard-cases*))
@@ -513,56 +547,73 @@
                  (map (lambda (i) (apply append (map (lambda (c) (map (lambda (m) (list c m i)) ms)) cs)))
                       (drive-eval--range 1 n))))
          (p (max 1 (min drive-eval-parallel (length jobs))))
-         (limit (* 1000 (+ 120 (* drive-eval-timeout-s (length jobs))))))
-    (set! *drive-eval-cancel* #f)
-    (set! *drive-eval--queue* jobs)
-    (set! *drive-eval--done* '())
-    (set! *drive-eval--opencode* 0)
-    (set! *drive-eval-running* #t)
+         (limit (* 1000 (+ 120 (* drive-eval-timeout-s (length jobs)))))
+         (id (drive-eval--locked
+               (lambda ()
+                 (set! *drive-eval--serial* (+ *drive-eval--serial* 1))
+                 (string-append "de-" (number->string (abs (monotonic-ms))) "-" (number->string *drive-eval--serial*))))))
+    (drive-eval--locked
+      (lambda ()
+        (set! *drive-eval-runs* (alist-put *drive-eval-runs* id (list 'queue jobs 'done '() 'cancel #f 'jobs (length jobs))))
+        (set! *drive-eval-running* #t)))
     (task-run!
       (lambda ()
-        (drive-eval--progress! '() ms cs)
-        (let ((ws (map (lambda (k) (task-spawn (lambda () (drive-eval--worker ms cs)))) (drive-eval--range 1 p))))
+        (drive-eval--progress! '() ms cs id)
+        (let ((ws (map (lambda (k) (task-spawn (lambda () (drive-eval--worker id ms cs)))) (drive-eval--range 1 p))))
           (for-each (lambda (w) (ignore-errors (lambda () (task-await w limit)))) ws)
-          (reverse *drive-eval--done*)))
+          (reverse (plist-get (drive-eval--state id) 'done))))
       (lambda (ok? rows)
-        (set! *drive-eval-running* #f)
-        (if (not ok?)
-            (let ((why (string-append "drive-eval failed: " (value->string rows))))
-              (set! *drive-eval-cancel* #t)
-              (message why)
-              (event-publish! "drive-eval" 'done why))
-            ;; the rows land first, and a report that throws still wakes the
-            ;; listener: a silent callback looked like a dead run
-            (let* ((text (begin
-                           (set! *drive-eval-rows* rows)
-                           (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
-                               "drive-eval: the report failed; the rows are in *drive-eval-rows*")))
-                   (head (string-append (if *drive-eval-cancel*
-                                            (string-append "cancelled after " (number->string (length rows)) " of "
-                                                           (number->string (length jobs)) " runs: ")
-                                            "")
-                                        (car (string-split text "\n")))))
-              (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
-              (buffer-set-text! "*drive-eval*" text)
-              (ignore-errors (lambda () (write-file! drive-eval-results-file text)))
-              (message head)
-              (event-publish! "drive-eval" 'done head))))
-      (+ limit 60000))))
+        (let ((cancelled (plist-get (or (drive-eval--state id) '()) 'cancel)))
+          (drive-eval--locked
+            (lambda ()
+              (if ok?
+                  (set! *drive-eval-runs* (filter (lambda (x) (not (equal? (car x) id))) *drive-eval-runs*))
+                  ;; a timed-out run: its workers stop at their next take
+                  (drive-eval--put! id 'cancel #t))
+              (set! *drive-eval-running* (pair? *drive-eval-runs*))))
+          (if (not ok?)
+              (let ((why (string-append id " drive-eval failed: " (value->string rows))))
+                (message why)
+                (event-publish! "drive-eval" 'done why))
+              ;; the rows land first, and a report that throws still wakes the
+              ;; listener: a silent callback looked like a dead run
+              (let* ((text (begin
+                             (set! *drive-eval-rows* rows)
+                             (or (ignore-errors (lambda () (drive-eval--text rows ms cs)))
+                                 "drive-eval: the report failed; the rows are in *drive-eval-rows*")))
+                     (head (string-append id " "
+                                          (if cancelled
+                                              (string-append "cancelled after " (number->string (length rows)) " of "
+                                                             (number->string (length jobs)) " runs: ")
+                                              "")
+                                          (car (string-split text "\n")))))
+                (unless (buffer-known? "*drive-eval*") (buffer-create "*drive-eval*"))
+                (buffer-set-text! "*drive-eval*" (string-append "[" id "] " text))
+                (ignore-errors (lambda () (write-file! drive-eval-results-file (string-append "[" id "] " text))))
+                (ignore-errors (lambda () (write-file! (drive-eval-run-file id) (string-append "[" id "] " text))))
+                (message head)
+                (event-publish! "drive-eval" 'done head)))))
+      (+ limit 60000))
+    id))
 
-;; stop a run between runs: the runs going now end, no new one starts, and
-;; drive-eval done says cancelled with the table so far
-(define (drive-eval-cancel!)
-  (if (not *drive-eval-running*)
-      "drive-eval: no run is going"
-      (begin
-        (set! *drive-eval-cancel* #t)
-        "drive-eval: cancelled; the runs going now finish, then drive-eval done reports")))
+;; stop run ID between runs: the runs going now end, no new one starts, and
+;; drive-eval done says ID cancelled with the table so far. Without ID it
+;; stops the one run going, and names the runs when there are more.
+(define (drive-eval-cancel! &optional id)
+  (let ((ids (map car *drive-eval-runs*)))
+    (cond ((and id (not (member id ids))) (string-append "drive-eval: no run " id " is going"))
+          ((and (not id) (null? ids)) "drive-eval: no run is going")
+          ((and (not id) (> (length ids) 1))
+           (string-append "drive-eval: several runs go; name one: " (string-join ids " ")))
+          (else
+           (let ((k (or id (car ids))))
+             (drive-eval--locked (lambda () (drive-eval--put! k 'cancel #t)))
+             (string-append "drive-eval: " k " cancelled; the runs going now finish, then drive-eval done reports"))))))
 
 (public! 'drive-eval
-  "(drive-eval [MODELS CASES REPS PROMPTS]) -- give each case, a real chat task, to a fresh chat on each model REPS times, drive-eval-parallel at once, and score passes, median rounds, tool calls and seconds; CASES 'hard is the harness set, 'all both; PROMPTS original, reworded (two held-out rewordings) or all, default drive-eval-prompts; the table and the haiku-driver/opus gap go to *drive-eval*, the event drive-eval done says the score")
+  "(drive-eval [MODELS CASES REPS PROMPTS]) -- answers a run id; give each case, a real chat task, to a fresh chat on each model REPS times, drive-eval-parallel at once, and score passes, median rounds, tool calls and seconds; CASES 'hard is the harness set, 'all both; PROMPTS original, reworded (two held-out rewordings) or all, default drive-eval-prompts; the table and the haiku-driver/opus gap go to *drive-eval*, the event drive-eval done says the score")
 (public! 'drive-eval-cancel!
-  "(drive-eval-cancel!) -- stop the drive-eval run between runs: the runs going now end, no new one starts, and drive-eval done says cancelled")
+  "(drive-eval-cancel! [ID]) -- stop drive-eval run ID, or the one run going, between runs: the runs going now end, no new one starts, and drive-eval done says ID cancelled; each run's table is in ~/.compos/drive-eval/ID.txt")
 
 ;;; Friction: the tool calls of a run that did no work, and why.
 ;;; A passing run can still lose rounds to the harness; the score hides it.

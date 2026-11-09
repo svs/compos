@@ -1,4 +1,6 @@
 defmodule Compos.Scheme.Eval do
+  require Logger
+
   @moduledoc """
   Compiling evaluator. A form compiles once into tagged tuples, which `run`
   evaluates; proper tail calls come from the BEAM itself (all tail positions
@@ -449,6 +451,15 @@ defmodule Compos.Scheme.Eval do
       reraise Error,
               [message: "#{name}: #{Exception.message(e)}"],
               __STACKTRACE__
+
+    # Any other exception is a fault in the daemon, not in the caller's
+    # code. The text names the primitive and says so, and the caller can
+    # take another path. The log line reaches the error feed, and
+    # self-healing files the fault.
+    e ->
+      text = "#{name}: daemon fault (#{inspect(e.__struct__)}): #{Exception.message(e)}"
+      Logger.error(text)
+      reraise Error, [message: text], __STACKTRACE__
   end
 
   # --- helpers ---------------------------------------------------------------

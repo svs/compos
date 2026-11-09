@@ -92,3 +92,12 @@
                   "a slug with no chat is no agent chat")
     (check-false! (llm-tool-buffer) "nothing stays set after the call")
     (kill-buffer-confirm! "*t-ltb-chat*" #f)))
+
+(deftest 'error-hint-tells-a-daemon-fault-from-a-code-error
+  "a daemon fault gets a hint that the fault is not in the caller's code"
+  (lambda ()
+    (check-true! (string-contains? (tool--error-hint "zz-prim: daemon fault (UndefinedFunctionError): gone" "(zz-prim)")
+                                   "not in your code")
+                 "a daemon fault says the caller's code is not at fault")
+    (check-false! (string-contains? (tool--error-hint "zz-prim: bad value" "(zz-prim)") "daemon")
+                  "an ordinary error gets no daemon hint")))

@@ -182,6 +182,9 @@
 ;; the feedback that makes one-tool work: name the real API on a miss
 (define (tool--error-hint msg code)
   (cond
+    ;; a daemon fault is not in the caller's code: say so, and name the way out
+    ((re-match? "daemon fault" msg)
+     "\nThe fault is in the daemon, not in your code. Do not call this primitive again in this turn. Get the result with another function, or tell the user what is blocked. The daemon log has the fault, and self-healing files it.")
     ((re-match? "unbound variable: " msg)
      (let* ((name (string-trim (car (reverse (string-split msg "unbound variable: ")))))
             (hits (tool--suggest name)))

@@ -346,9 +346,14 @@
 
 ;; the records of the last turn, oldest first; REC is newest first
 (define (drive-eval--turn rec)
+  ;; the direct API lane records each tool result as a user message: only a
+  ;; user message that holds no tool result opens the turn
   (let loop ((rs rec) (acc '()))
     (cond ((null? rs) acc)
-          ((equal? (plist-get (car rs) 'role) "user") acc)
+          ((and (equal? (plist-get (car rs) 'role) "user")
+                (not (any (lambda (b) (and (pair? b) (equal? (car b) "tool-result")))
+                          (or (plist-get (car rs) 'blocks) '()))))
+           acc)
           (else (loop (cdr rs) (cons (car rs) acc))))))
 
 ;; (ROUNDS TOOLS) of the last turn of a chat record
@@ -489,7 +494,8 @@
   (let ((reply (string-trim (or (list-ref r 8) ""))))
     (string-append
       (symbol->string (car r)) " " (symbol->string (cadr r)) ": "
-      (number->string (list-ref r 3)) "r " (drive-eval--fmt (/ (list-ref r 5) 1000)) "s, replied "
+      (number->string (list-ref r 3)) "r " (drive-eval--fmt (/ (list-ref r 5) 1000)) "s, stop "
+      (value->string (list-ref r 6)) ", replied "
       (value->string (substring reply 0 (min 60 (string-length reply))))
       "\n    "
       (string-join (map (lambda (s) (string-append (drive-eval--short (car s)) " " (number->string (cadr s))))

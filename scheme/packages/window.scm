@@ -1744,3 +1744,11 @@ the focus; #f for a window or a buffer."
 
 (domain! 'unknown)
 (effects! '(unknown))
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
+  '(arrow-chord))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(buffer-default-keybindings focus-default-keybindings
+    window-default-keybindings))

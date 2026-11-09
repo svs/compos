@@ -3223,3 +3223,12 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 
 (domain! 'unknown)
 (effects! '(unknown))
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
+  '(list-format-template))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(list-source-text list-detail-off?))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(list-cycle-view!))

@@ -473,3 +473,12 @@
 
 (domain! 'unknown)
 (effects! '(unknown))
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
+  '(sh-quote))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(term-status term-var))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
+  '(tail-open))

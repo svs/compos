@@ -1482,3 +1482,11 @@
 (public! 'diff-show! "(diff-show! NAME TEXT) — open unified-diff TEXT as cards in a read-only buffer NAME")
 (public! 'diff-toggle-card! "(diff-toggle-card! BUF KEY) — fold or unfold one card; KEY is \"SECTION|FILE\"")
 (public! 'diff-toggle-hunk! "(diff-toggle-hunk! BUF SECTION FILE N) — fold or unfold one hunk")
+
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(diff-layout))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(define-diff-backend diff-refresh diff-show! diff-toggle-card!
+    diff-toggle-hunk!))

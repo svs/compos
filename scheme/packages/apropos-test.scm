@@ -490,9 +490,22 @@
       (let ((hit (car (filter (lambda (h) (equal? (plist-get h 'name) "string-repeat"))
                               hits))))
         (check-equal! (plist-get hit 'sig) "(string-repeat S N)" "the signature")
-        (check-equal! (plist-get hit 'package) "builtins" "the package")
-        (check-equal! (plist-get hit 'effects) '("unknown")
-                      "and it admits it cannot state its effects")))))
+        (check-equal! (plist-get hit 'effects) '("pure")
+                      "and it states its effects")))))
+
+(deftest 'every-primitive-carries-an-effects-stamp
+  "eval-scheme-read takes or refuses a name by its stamp; a primitive without one refuses an ordinary read"
+  (lambda ()
+    (let* ((allow (map (lambda (s) (if (symbol? s) (symbol->string s) s))
+                       (append *eval-read-builtins* *eval-read-forms*)))
+           (names (filter (lambda (n) (not (member n allow)))
+                          (map car (primitive-docs))))
+           (eff (eval-read--effects names)))
+      (check-equal!
+        (filter (lambda (n) (let ((e (assoc n eff)))
+                              (or (not e) (member "unknown" (cadr e)))))
+                names)
+        '() "every primitive is stamped"))))
 
 (deftest 'a-declared-primitive-keeps-its-declaration
   "a declaration states domain and effects, so the builtin row must not shadow it"

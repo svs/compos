@@ -7352,6 +7352,216 @@
 (public! 'text-property-spans "(text-property-spans BUF PROP) — every span of PROP as (START END VALUE), in order")
 (public! 'text-property-default-nonsticky "(text-property-default-nonsticky) — the property names that do not grow over text typed at their end")
 
+;; effects stamps for the names declared above without one, so
+;; eval-scheme-read takes or refuses them by what they do
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
+  '(chrome-after chrome-before mode-keymap))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
+  '(annotate auto-mode-for-buffer cache-age cache-age-label cache-stale?
+    target-at font-lock-keywords mode-link-syntax minor-mode-keymap
+    focus-key registry-list registry-lookup registry-names
+    globalized-minor-mode-on? editing-state? buffer-dirty? buffer-shown?
+    default-value fold-get llm-model))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read external spend)))
+  '(llm-with-model))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write execute)))
+  '(run-command))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
+  '(read-string read-file-name))
+(for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
+  '(add-paste-hook! remove-paste-hook! bind-prefix! buffer-at-point-map!
+    buffer-clear-dirty! buffer-mark-dirty! buffer-refresh-pending!
+    buffer-when-shown! cache-declare! cache-refresh! cache-stamp!
+    cache-wake! define-derived-mode define-globalized-minor-mode!
+    define-mode define-prefix-command defvar defvar-local editing-quit!
+    editing-state-maps-off! editing-state-off! editing-state-on!
+    fold-clear! fold-set! fold-toggle! font-lock-disable! font-lock-enable!
+    font-lock-refontify! font-lock-set-keywords! frame-attached!
+    global-set-key global-unset-key kill-all-local-variables!
+    kill-local-variable! local-remap! local-remap*! local-set-key
+    major-mode-set! marginalia! minor-mode-keymap! minor-mode-keys!
+    mode-focus-key! mode-keys! mode-link-syntax! mode-parent! mode-quit!
+    mode-setup! overlay-clear! overlay-set! overriding-map!
+    permanent-local! pop-to-mark! preview-goto! preview-select! push-mark!
+    register-actions! register-target-provider! registry-forget!
+    registry-register! run-hook-with-args run-hook-with-args-until-failure
+    run-hook-with-args-until-success set-default! set-llm-model! set-mode!
+    setq-local! unwatch-path! watch-path! variable-set!))
+
+;;; --- Elixir primitives: effects stamps -----------------------------------------
+;; Every primitive states what it does, so eval-scheme-read can take or
+;; refuse it by its stamp. The doc is the primitive's own line.
+(define (editor--public-primitives! names)
+  (for-each (lambda (n) (public! n (primitive-doc (symbol->string n)))) names))
+(domain! 'system)
+(effects! '(pure))
+(editor--public-primitives!
+  '(acos asin atan ceiling cos exp floor log modulo quotient remainder sin
+    sqrt tan truncate float float-pi float? integer? zero? eqv? error
+    unwind-protect))
+(domain! 'data)
+(effects! '(pure))
+(editor--public-primitives!
+  '(alist-delete alist-get alist-put plist-put find-plist remove-plists
+    base64-decode base64-encode bytes->integer bytes->string integer->bytes
+    common-prefix completion-match? content-hash diff-parse diff-word-range
+    format format-usd irc-format irc-parse re-groups re-match re-replace
+    re-replace-all string-byte string-bytes string-columns
+    string-edit-distance string-pad-left string-pad-right string-repeat
+    string-rindex string-valid-utf8? url-decode url-encode time+
+    tool-specs-json file-name-nondirectory))
+(domain! 'system)
+(effects! '(read))
+(editor--public-primitives!
+  '(cron-next cron-previous parts->time time->parts cron-running?
+    cron-scheduled cron-zone compos-config-dir compos-home
+    compos-project-dir compos-socket-path daemon-name daemon-registry-path
+    daemon-source-root daemon-workspace-root editor-url system-type
+    ssh-command socket-listeners vm-fds vm-ports telemetry-snapshot
+    client-memory-samples primitive-doc primitive-docs symbol-value
+    job-local wait-until profile-stop))
+(domain! 'syntax)
+(effects! '(read))
+(editor--public-primitives!
+  '(ts-highlight-string ts-highlight-lines ts-query-ranges ts-children
+    ts-node ts-nav ts-query))
+(domain! 'buffers)
+(effects! '(read))
+(editor--public-primitives!
+  '(buffer-anchor buffer-anchor-pos buffer-cols buffer-context?
+    buffer-hidden buffer-overlays buffer-persistent? buffer-read-only?
+    buffer-updates-since buffer-version buffer-version-token buffer-words
+    line-number-at-pos mark region-beginning region-end kill-nth
+    kill-ring-size kill-top meta-db-annotations meta-db-candidates
+    meta-query mru-groups mru-list process-list process-mark
+    process-running? terminal-foreground terminal-status terminal-tty
+    undo-exempt?))
+(domain! 'files)
+(effects! '(read))
+(editor--public-primitives!
+  '(autoload-cookies desktop-file-globals directory-entries file-directory?
+    file-mtime file-stat file-writable? list-dir read-file-source
+    local-directory-entries local-file-stat local-list-dir git-prefix))
+(domain! 'windows)
+(effects! '(read))
+(editor--public-primitives!
+  '(frame-clients frame-list frame-of-window selected-frame window-cols
+    window-point window-rects window-rows window-wrap-map key-context
+    key-routing minibuffer-buffer minibuffer-state))
+(domain! 'chat)
+(effects! '(read))
+(editor--public-primitives!
+  '(agent-info agent-list agent-mark backend-capabilities
+    llm-available-models llm-catalog-entries llm-context-limit
+    llm-cost-report llm-max-tokens llm-model-reasoning llm-price
+    mcp-tool-specs event-log-position event-log-read event-log-seq
+    workflow-in-batch? workflow-names workflow-once workflow-status))
+(domain! 'files)
+(effects! '(read external))
+(editor--public-primitives!
+  '(raw-find-file remote-read remote-list-dir mcp-await-ready
+    lsp-buffer-request))
+(domain! 'llm)
+(effects! '(read external spend))
+(editor--public-primitives!
+  '(llm-tools embedding-search))
+(domain! 'system)
+(effects! '(write))
+(editor--public-primitives!
+  '(display newline with-scheme-lock with-window-buffer with-selected-frame
+    with-buffer-display-update cron-schedule! cron-unschedule!
+    daemon-set-workspace-label! debounce-cancel! define-element!
+    desktop-dirty! event-log-append! event-log-forget! event-log-import!
+    event-log-position-set! finish-command! fs-on-change!
+    function-interpose! jit-lock-enable! job-local-set! listener-restart!
+    message-emit meta-db-groups! meta-db-labels! model-rules-install!
+    mru-note-group! on-change! remove-on-change! preview-run-langs!
+    profile-start! profile-cancel! refresh-primitives! set-symbol-value!
+    telemetry-reattach! unbind-global! undefine-command workflow-define!
+    workflow-emit! workflow-once-record! workflow-pause! workflow-resume!
+    workflow-rewind! workflow-step! workflow-stop! user-acted! run-on-lane!
+    eval-defer! eval-resolve! block-on-click! buffer-meta-handler!
+    browser-serve! undo-exempt! window-id-new! window-set-wrap-map!))
+(domain! 'buffers)
+(effects! '(write))
+(editor--public-primitives!
+  '(buffer-bury! buffer-detach! buffer-goto! buffer-insert-at-local!
+    buffer-mark-saved! buffer-marker-local! buffer-merge! buffer-rename!
+    buffer-replace-range! buffer-set-locals! buffer-set-read-only!
+    buffer-set-text! delete-region! exchange-point-and-mark! kill-append!
+    kill-push! undo! undo-boundary! undo-group! break-undo-chain!
+    raw-buffer-create raw-buffer-save! backward-char! backward-word!
+    beginning-of-line! end-of-line! forward-char! forward-word! next-line!
+    previous-line! process-send!))
+(domain! 'files)
+(effects! '(write))
+(editor--public-primitives!
+  '(copy-file! local-copy-file! make-directory! local-make-directory!
+    make-symlink! local-make-symlink! rename-file! local-rename-file!
+    set-file-mode! local-set-file-mode! touch-file! local-touch-file!
+    raw-write-file!))
+(domain! 'files)
+(effects! '(destroy))
+(editor--public-primitives!
+  '(delete-file! local-delete-file! trash-file! local-trash-file!
+    buffer-kill-raw! buffer-provenance-discard!
+    buffer-store-sweep-graveyard! buffer-store-sweep-redundant-history!
+    embedding-cache-clear! messages-clear! telemetry-clear! process-kill!
+    agent-kill!))
+(domain! 'windows)
+(effects! '(write display))
+(editor--public-primitives!
+  '(make-frame! select-frame! split-root! window-arrange!
+    raw-select-window! raw-window-set-buffer! raw-window-switch-buffer!
+    window-switch-buffer! scroll-window! recenter! redraw!
+    builtin-split-window! builtin-delete-window-id! window-set-point!
+    client-select! client-slide! transient-show! completion-show!
+    completion-dismiss! minibuffer-input! minibuffer-rail!
+    minibuffer-style! minibuffer-tabs! set-modeline-extra!
+    frame-chrome-set! set-frame-group-label! set-frame-group-style!
+    buffer-windows-follow-point! agent-ask-permission!))
+(domain! 'windows)
+(effects! '(destroy display))
+(editor--public-primitives!
+  '(raw-delete-frame!))
+(domain! 'web)
+(effects! '(write external display))
+(editor--public-primitives!
+  '(navigate-url! browser-call browser-call-sync))
+(domain! 'system)
+(effects! '(write external))
+(editor--public-primitives!
+  '(clipboard-put! raw-http-request remote-write mcp-tool-call
+    mcp-disconnect! lsp-close! lsp-notify! lsp-open! lsp-stop!
+    llm-catalog-install! llm-session-cancel! llm-session-close!))
+(domain! 'llm)
+(effects! '(write external spend))
+(editor--public-primitives!
+  '(embedding-sync! embedding-warm! llm-session-send! agent-prompt!
+    agent-steer! agent-start! llm-session-open!))
+(domain! 'chat)
+(effects! '(write))
+(editor--public-primitives!
+  '(agent-append! agent-context-fn! agent-dequeue! agent-on-event!
+    agent-on-turn-end! agent-permission-deadline! agent-permission-fn!
+    agent-permission-respond! agent-question-respond! agent-record-fn!
+    agent-set-mode! agent-set-model! llm-session-context-fn!
+    llm-session-dequeue! llm-session-on-event! llm-session-permission-fn!
+    llm-session-promote! llm-session-record-fn! llm-session-set-effort!
+    llm-session-set-mode! llm-session-set-model!))
+(domain! 'system)
+(effects! '(write execute))
+(editor--public-primitives!
+  '(eval-string eval-buffer eval-region builtin-load reload-files!
+    key-run-command dispatch-keys %shell-command->string-builtin
+    start-process! local-start-process! start-terminal!
+    local-start-terminal! process-restart! git-stage-file git-stage-patch
+    daemon-restart! daemon-provision-workspace! lsp-start!))
+(domain! 'system)
+(effects! '(write external execute))
+(editor--public-primitives!
+  '(peer-eval remote-sh mcp-connect!))
+
 ;; the prompt lives in its own file; it loads last, so every name its
 ;; forms call at load is bound
 (require 'minibuffer)

@@ -1198,8 +1198,12 @@ defmodule Compos.Ui.EditorLive do
           <%= if mb_geom(@state.minibuffer) == "modal" do %>
             <c-group class="mb-head">
               <c-text class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
+              <c-tabs :if={Map.get(@state.minibuffer, :tabs, []) != []} class="c-tabs mb-tabs">
+                <c-tab :for={t <- @state.minibuffer.tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}>{t.label}</c-tab>
+              </c-tabs>
               <c-text class="mb-head-spacer"></c-text>
               <c-text class="mb-head-legend">
+                <c-text :if={Map.get(@state.minibuffer, :tabs, []) != []} class="transient-legend"><c-action-key class="transient-legend-key">← →</c-action-key> tab</c-text>
                 <c-text :for={row <- palette_legend(@state.minibuffer)} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
               </c-text>
             </c-group>

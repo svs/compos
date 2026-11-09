@@ -112,10 +112,14 @@
 ;; palette shows them first, under a Start here heading; typing searches
 ;; every command as before. A heading is a separator row: it shows, and the
 ;; arrows step over it.
+(defcustom 'command-palette-recent-count 7
+  "How many of the commands you ran the palette shows above Start here while you have typed nothing."
+  'group 'interaction)
+
 (defcustom 'command-tutorial
   '("help-with-tutorial" "find-file" "ibuffer-prompt" "save-buffer" "undo"
     "chat-new" "chat-list" "window-layout" "keys")
-  "The commands every user should know: the palette shows them first, under Start here, while you have typed nothing."
+  "The commands every user should know: the palette shows them under Start here, below the commands you ran, while you have typed nothing."
   'group 'interaction)
 
 (define (command-section-heading label) (list label "" "separator"))
@@ -123,17 +127,22 @@
 ;; ROWS, (NAME HINT ...) in their order, with the tutorial commands among
 ;; them lifted into a Start here section ahead of the rest. A command ROWS
 ;; does not hold (out of scope here) is left out.
-(define (command-sections rows &optional rest-label)
-  (let ((tut (filter (lambda (r) r) (map (lambda (n) (assoc n rows)) command-tutorial))))
+(define (command-sections rows &optional rest-label lead)
+  ;; LEAD, the commands you ran, comes first; then the guide; then the rest
+  (let* ((lead (or lead '()))
+         (lead-names (map car lead))
+         (tut (filter (lambda (r) r) (map (lambda (n) (assoc n rows)) command-tutorial)))
+         (rest (filter (lambda (r) (not (member (car r) lead-names))) rows)))
     (if (null? tut)
-        rows
-        (append (list (command-section-heading "Start here"))
+        (append lead rest)
+        (append lead
+                (list (command-section-heading "Start here"))
                 tut
                 (list (command-section-heading (or rest-label "All commands")))
-                (filter (lambda (r) (not (member (car r) command-tutorial))) rows)))))
+                (filter (lambda (r) (not (member (car r) command-tutorial))) rest)))))
 
 (public! 'command-sections
-  "(command-sections ROWS [REST-LABEL]) -- ROWS with the command-tutorial commands first, under a Start here heading")
+  "(command-sections ROWS [REST-LABEL] [LEAD]) -- LEAD rows first, then the command-tutorial commands under a Start here heading, then the rest of ROWS")
 
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
@@ -142,9 +151,10 @@
       ;; takes over as soon as the user states intent.
       (let* ((rows (map command-palette--symbol-row (command-rows)))
              (recent (filter command-fn (history-items 'M-x)))
-             (top (filter (lambda (r) r) (map (lambda (h) (assoc h rows)) recent))))
-        ;; Start here, then what you ran, then every other command
-        (command-sections (append top (filter (lambda (r) (not (member (car r) recent))) rows))))
+             (ran (filter (lambda (r) r) (map (lambda (h) (assoc h rows)) recent)))
+             (top (list-head ran (min command-palette-recent-count (length ran)))))
+        ;; What you ran, then Start here, then every other command
+        (command-sections rows #f top))
       (command-palette--with-ask query
         (filter (lambda (c) c) (map command-palette--candidate (command-palette--search query))))))
 
@@ -482,6 +492,60 @@
           (message (string-append "Removed from the history: " name)))
         (message "Only a command you ran can be removed"))))
 
+;; The resting palette's sections as tabs. A tab does not filter: it moves
+;; the selection to the first row of its section, and the list stays whole.
+(define *command-palette--sections* '())
+(define *command-palette--tab* 0)
+(define *command-palette--total* 0)
+
+(define (command-palette--heading? row)
+  (and (pair? row) (pair? (cdr row)) (pair? (cddr row)) (equal? (caddr row) "separator")))
+
+(define (command-palette--sections cands)
+  ;; ((LABEL K) ...): each section that has rows, K the selectable rows above it.
+  ;; The rows before the first heading are the commands you ran
+  (let loop ((cs cands) (k 0) (out '()))
+    (if (null? cs)
+        (reverse out)
+        (let ((r (car cs)))
+          (if (command-palette--heading? r)
+              (loop (cdr cs) k
+                    (if (and (pair? (cdr cs)) (not (command-palette--heading? (cadr cs))))
+                        (cons (list (car r) k) out)
+                        out))
+              (loop (cdr cs) (+ k 1)
+                    (if (and (= k 0) (null? out)) (cons (list "Recent" 0) out) out)))))))
+
+(define (command-palette--tabs!)
+  ;; one section alone needs no tabs
+  (minibuffer-tabs!
+    (if (< (length *command-palette--sections*) 2)
+        '()
+        (let loop ((ss *command-palette--sections*) (i 0) (out '()))
+          (if (null? ss)
+              (reverse out)
+              (loop (cdr ss) (+ i 1) (cons (list (car (car ss)) (= i *command-palette--tab*)) out)))))))
+
+(define (command-palette--rest! cands)
+  ;; the resting list is up: note its sections and show their tabs
+  (set! *command-palette--sections* (command-palette--sections cands))
+  (set! *command-palette--total* (length cands))
+  (set! *command-palette--tab* 0)
+  (command-palette--tabs!))
+
+(define (command-palette--tab-step! step)
+  ;; left and right step the tabs only while nothing is typed
+  (let ((n (length *command-palette--sections*)))
+    (and (equal? (string-trim (minibuffer-input)) "")
+         (>= n 2)
+         (begin
+           (set! *command-palette--tab* (modulo (+ *command-palette--tab* step) n))
+           (command-palette--tabs!)
+           (minibuffer--move! (- *command-palette--total*))
+           (let ((k (cadr (nth *command-palette--tab* *command-palette--sections*))))
+             (when (> k 0) (minibuffer--move! k)))
+           #t))))
+
 (define-command "command-palette"
   "Find a command by what it does"
   (lambda ()
@@ -492,23 +556,29 @@
     ;; share, so M-p in either walks them back
     (set! *mb-history-key* 'M-x)
     (set! *mb-history-pos* -1)
-    (minibuffer-read* "Command: " (command-palette-candidates "")
+    (let ((rest (command-palette-candidates "")))
+    (minibuffer-read* "Command: " rest
       (list (list 'confirm
               (lambda (choice)
                 (set! *mb-history-key* #f)
                 (set! *mb-row-delete-fn* #f)
+                (set! *mb-tab-fn* #f)
                 ;; only a command that runs goes on the history: the run
                 ;; pushes it, and words that found none stay out
                 (command-palette--run choice)))
-            (list 'cancel (lambda () (set! *mb-history-key* #f) (set! *mb-row-delete-fn* #f)))
+            (list 'cancel (lambda () (set! *mb-history-key* #f) (set! *mb-row-delete-fn* #f) (set! *mb-tab-fn* #f)))
             (list 'change
               (lambda (input)
                 ;; RET must never pick a row the input has left behind: the
                 ;; typed words lead at once, and the search fills in after
-                (minibuffer-set-candidates!
-                  (if (equal? (string-trim input) "")
-                      (command-palette-candidates "")
-                      (command-palette--with-ask input '())))
+                (if (equal? (string-trim input) "")
+                    (let ((cands (command-palette-candidates "")))
+                      (minibuffer-set-candidates! cands)
+                      (command-palette--rest! cands))
+                    (begin
+                      ;; a search has no sections: the tabs go
+                      (minibuffer-tabs! '())
+                      (minibuffer-set-candidates! (command-palette--with-ask input '()))))
                 (debounce!
                   (string-append "command-palette:" (selected-frame))
                   *command-palette-debounce-ms*
@@ -517,7 +587,9 @@
             ;; Apropos already matched and ranked these results. In
             ;; particular, a doc match need not contain INPUT in its label.
             (list 'filter #f)
-            (list 'style "palette")))))
+            (list 'style "palette")))
+    (command-palette--rest! rest)
+    (set! *mb-tab-fn* command-palette--tab-step!))))
 
 ;; the eval that scores what RET runs for the words you type
 (load "palette-eval.scm")

@@ -2038,16 +2038,20 @@ c-action-key {
 .mb-label-row .mb-tabs {
   flex: 1 1 auto; margin: 0 0 -1px; padding: 0; border-bottom: none;
 }
-.mb-label-row .mb-tabs .c-tab { color: var(--text-faint); }
+.mb-label-row .mb-tabs .c-tab, .mb-head .mb-tabs .c-tab { color: var(--text-faint); }
 /* a tab with no label is a separator between groups of tabs */
 .mb-label-row .mb-tabs .c-tab:empty {
   width: 1px; min-width: 0; padding: 0; margin: 4px 8px 5px;
   align-self: stretch; background: var(--edge); border: none; pointer-events: none;
 }
-.mb-label-row .mb-tabs .c-tab-on {
+.mb-label-row .mb-tabs .c-tab-on, .mb-head .mb-tabs .c-tab-on {
   color: var(--text-strong); font-weight: 600;
   background: var(--surface-select); border-color: var(--edge);
   box-shadow: inset 0 -2px 0 var(--accent-fg, #26356b);
+}
+/* the palette's sections sit beside its title */
+.mb-head .mb-tabs {
+  flex: 0 1 auto; margin: 0 0 0 18px; padding: 0; border-bottom: none;
 }
 .mb-tabs-hint {
   padding-bottom: 5px; white-space: nowrap;

@@ -1090,7 +1090,7 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
         "the page's buttons are the same actions. Show a message to a candidate or client before it goes out."))))
 
 ;; what a new chat for an ATS page asks first; the page's own kind wins
-;; a case chat says whose case it is: "Approval: Diya Solanki (Backend Engineer @ Cardboard, Inc.)"
+;; a case chat says whose case it is: "Diya Solanki (Backend Engineer @ Cardboard, Inc.)"
 (define (ats-case-label src) (ats-row-label (or (site-app-get src 'row) '()) src))
 ;;;###autoload
 (define (ats-case-id src) (plist-get (or (site-app-get src 'row) '()) 'key))
@@ -1194,7 +1194,9 @@ work-experience > .c-fold-head > .c-fold-tag { font-size: .75em; line-height: 1.
           '("ats-detail-mode" "ats-approval-mode" "ats-candidate-mode"))
 
 (mode-chat-title! "ats-detail-mode" ats-case-label)
-(mode-chat-title! "ats-approval-mode" (lambda (src) (string-append "Approval: " (ats-case-label src))))
+(mode-chat-title! "ats-approval-mode" ats-case-label)
+;; an approval is one step of its application, so it shares the application's chat
+(mode-chat-key! "ats-approval-mode" (lambda (src) (or (ats-case-application-id src) (ats-case-id src))))
 (mode-chat-opening! "ats-detail-mode"
   (lambda (src) (string-append "Brief me on " (ats-case-label src) ": where it stands, what's open, and the next step you'd take." (ats-case-handle src "Page" "ats-case-text"))))
 (mode-chat-key! "ats-application-mode" (lambda (src) (ats-case-id src)))

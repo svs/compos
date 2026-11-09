@@ -7000,7 +7000,6 @@
 (effects! '(read))
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
-(public! 'buffer-saved-version "(buffer-saved-version NAME) -> the version at the last save; buffer-edit-log entries after it are unsaved")
 (public! 'buffer-local "(buffer-local BUF KEY) -> BUF's own value or #f; the old order of buffer-local-value, which new code uses")
 (public! 'buffer-locals "(buffer-locals BUF) -> ((KEY VALUE) ...) for every buffer-local, sorted by name")
 (effects! '(write))
@@ -7574,8 +7573,6 @@
   '(run-command))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
   '(read-string read-file-name))
-;; mru-groups and mru-list start the history store when a hot reload left
-;; none (Recent.ready), so their first call writes.
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(add-paste-hook! remove-paste-hook! bind-prefix! buffer-at-point-map!
     buffer-clear-dirty! buffer-mark-dirty! buffer-refresh-pending!
@@ -7589,7 +7586,7 @@
     kill-local-variable! local-remap! local-remap*! local-set-key
     major-mode-set! marginalia! minor-mode-keymap! minor-mode-keys!
     mode-focus-key! mode-keys! mode-link-syntax! mode-parent! mode-quit!
-    mode-setup! mru-groups mru-list overlay-clear! overlay-set! overriding-map!
+    mode-setup! overlay-clear! overlay-set! overriding-map!
     permanent-local! pop-to-mark! preview-goto! preview-select! push-mark!
     register-actions! register-target-provider! registry-forget!
     registry-register! run-hook-with-args run-hook-with-args-until-failure
@@ -7707,7 +7704,10 @@
     kill-push! undo! undo-boundary! undo-group! break-undo-chain!
     raw-buffer-create raw-buffer-save! backward-char! backward-word!
     beginning-of-line! end-of-line! forward-char! forward-word! next-line!
-    previous-line! process-send!))
+    previous-line! process-send!
+    ;; they start the history store when a hot reload left none
+    ;; (Recent.ready), so their first call writes
+    mru-groups mru-list))
 (domain! 'files)
 (effects! '(write))
 (editor--public-primitives!

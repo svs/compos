@@ -235,6 +235,18 @@
                        "ANTHROPIC_MODEL" "and the model env stays")
       (t--prompt-cleanup buf))))
 
+(deftest 'the-palette-chat-runs-on-driver-api
+  "Driver API is a builtin beside Driver; the palette's chat takes it, or Driver with no Anthropic key"
+  (lambda ()
+    (let ((a (llm-bundle-named "Driver API"))
+          (d (llm-bundle-named "Driver")))
+      (check-equal! (llm-bundle-connector a) "api" "Driver API runs on the direct API")
+      (check-equal! (llm-bundle-prompt-disabled a) (llm-bundle-prompt-disabled d)
+                    "with the Driver's prompt cuts")
+      (check-equal! (llm-bundle-name (llm-palette-bundle))
+                    (if (llm-key "anthropic") "Driver API" "Driver")
+                    "the palette's preset falls back to Driver without a key"))))
+
 (deftest 'a-direct-chat-keeps-its-first-prompt-until-refresh
   "source changes do not alter the wire prompt during a conversation"
   (lambda ()

@@ -2057,7 +2057,7 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
       (let ((pm (plist-get opts 'permission-mode)))
         (when pm (buffer-set-local! buf 'chat-permission-mode pm)))))
     (chat-task-init! buf name)
-    ;; 'bundle NAME picks the preset; else the driver or the group's
+    ;; 'bundle NAME picks the preset; else the group's, else the default
     (let* ((bundle (or (llm-bundle-resolve (plist-get opts 'bundle))
                        (llm-chat-bundle (or (buffer-group buf) spawner-group))))
            (connector (or (plist-get opts 'connector) (and bundle (plist-get bundle 'connector)) *default-connector*))

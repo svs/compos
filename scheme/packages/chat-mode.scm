@@ -791,10 +791,12 @@
          (chat (or (and title (chat-title made title) (llm-mode--companion-existing buf)) made)))
     (list chat new?)))
 
-(define (llm-companion-open! buf)
+(define (llm-companion-open! buf &optional bundle)
+  ;; BUNDLE, a preset, is the one a chat made here starts on
   (let* ((got (llm-companion-ensure! buf))
          (chat (car got))
          (opening (and (cadr got) (chat-opening-prompt buf))))
+    (when (and bundle (cadr got)) (llm-bundle-apply! chat bundle))
     (pop-to-buffer chat)
     (when opening (agent-continue! chat opening))
     chat))
@@ -2399,15 +2401,34 @@
 ;; Driver drives the editor for a task (buffers, todos, groups, settings,
 ;; mail): its preset section is the short driver prompt (the driver preset,
 ;; mcp.scm) and its prompt-disabled list turns off the coding primer.
+(define *llm-driver-prompt-cuts*
+  '("identity" "quiet-editor" "scope" "chat-context"
+    "scheme" "discovery" "reading" "repository"
+    "browser" "components" "catalog" "recipes"
+    "skills" "code" "code-agent"))
+
 (define *llm-builtin-bundles*
   (list (list 'name "Driver" 'connector "claude-code" 'model "haiku"
               'presets '(compos driver)
               ;; its few tools load up front: a tool search costs a round
               'env '(("ENABLE_TOOL_SEARCH" "false"))
-              'prompt-disabled '("identity" "quiet-editor" "scope" "chat-context"
-                                 "scheme" "discovery" "reading" "repository"
-                                 "browser" "components" "catalog" "recipes"
-                                 "skills" "code" "code-agent"))))
+              'prompt-disabled *llm-driver-prompt-cuts*)
+        ;; the palette's chats: Driver's tools and cuts on the direct API
+        (list 'name "Driver API" 'connector "api" 'model "claude-haiku-5-5"
+              'presets '(compos driver)
+              'prompt-disabled *llm-driver-prompt-cuts*)))
+
+(domain! 'llm)
+(effects! '(read external execute))
+(define (llm-palette-bundle)
+  ;; a chat the command palette starts: Driver API, else Driver when no
+  ;; Anthropic key is set
+  (or (and (boundp 'llm-key) (llm-key "anthropic") (llm-bundle-named "Driver API"))
+      (llm-bundle-named "Driver")))
+(public! 'llm-palette-bundle
+  "(llm-palette-bundle) — the preset a chat the command palette starts runs on: Driver API, or Driver when no Anthropic API key is set")
+(domain! 'chat)
+(effects! '(unknown))
 
 (define (llm-bundles-with-builtins bundles)
   ;; a saved builtin keeps the user's values and takes the keys it lacks

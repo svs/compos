@@ -463,7 +463,8 @@
     (set! *command-palette--request* #f)
     (if (chat-buffer? origin)
         (agent-continue! origin text)
-        (let ((chat (llm-companion-open! origin)))
+        ;; a chat the palette starts runs on Driver API
+        (let ((chat (llm-companion-open! origin (llm-palette-bundle))))
           (agent-continue! chat text)))))
 
 (public! 'command-palette-ask-chat!

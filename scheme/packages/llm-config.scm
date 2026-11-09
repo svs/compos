@@ -901,17 +901,11 @@
   "The config every new chat starts with, unless its group names one. Empty means no default."
   'group 'llm)
 
-(defcustom 'agent-driver-bundle ""
-  "The saved preset a chat that an agent starts runs on: a todo it hands to a new chat, or a subagent it spawns. Name a fast strong model here (Sonnet, or Opus in fast mode); the small models (JEV, laya, Haiku) answer only the narrow picks, through decide. Empty: the group's preset, else llm-default-bundle, as for any chat."
-  'group 'llm)
 
 (define (llm-chat-bundle g)
-  ;; one answer for every path that starts a chat: an agent's spawn takes
-  ;; the driver preset, every other chat its group's, else the default
-  (or (and (not (equal? agent-driver-bundle ""))
-           (boundp 'subagent-spawner) (subagent-spawner)
-           (llm-bundle-resolve agent-driver-bundle))
-      (and g (llm-group-bundle g))
+  ;; one answer for every path that starts a chat, an agent's spawn too:
+  ;; the group's preset, else the default
+  (or (and g (llm-group-bundle g))
       (llm-default-bundle-record)))
 
 (define (llm-default-bundle-record) (llm-bundle-resolve llm-default-bundle))
@@ -1004,7 +998,7 @@
               (else (llm-default--seed! buf b)))))))
 
 (public! 'llm-chat-bundle
-  "(llm-chat-bundle GROUP) — the preset a new chat in GROUP starts with: agent-driver-bundle when an agent starts it, else the group's 'llm, else llm-default-bundle; #f when none names one")
+  "(llm-chat-bundle GROUP) — the preset a new chat in GROUP starts with, an agent's spawn too: the group's 'llm, else llm-default-bundle; #f when none names one")
 
 (public! 'llm-default-bundle-apply!
   "(llm-default-bundle-apply! BUF [GROUP]) — put the group's 'llm bundle, else llm-default-bundle, on a new chat; #f when neither names one")

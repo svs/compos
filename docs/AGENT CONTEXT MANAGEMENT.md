@@ -76,7 +76,7 @@ A bundle is a whole chat config, saved under a name and a shortcut key:
 
 ### Which bundle a new chat gets
 
-`llm-default-bundle-apply!` runs when a chat is made. It uses `(llm-chat-bundle GROUP)`: `agent-driver-bundle` when an agent starts the chat, else the group's `'llm` setting, else `llm-default-bundle`, else nothing.
+`llm-default-bundle-apply!` runs when a chat is made. It uses `(llm-chat-bundle GROUP)`: the group's `'llm` setting, else `llm-default-bundle`, else nothing, for a chat an agent starts too.
 
 | Call | What it does |
 |---|---|

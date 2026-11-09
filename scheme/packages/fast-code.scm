@@ -119,6 +119,17 @@
       (apropos-warm!)))
   (set! *fast-pending* #f))
 
+(define (fast-learn! text &optional intent)
+  "keep the function TEXT defines, a define then one call to it, as a
+learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
+  (let ((a (fast-accept text intent)))
+    (if (and (eq? (car a) 'ok) (= (length a) 3))
+        (let ((row (fast-block (caddr a))))
+          (set! *fast-pending* (list intent row))
+          (fast-keep-pending! intent)
+          (list 'ok (car row)))
+        (list 'no (if (eq? (car a) 'ok) "TEXT defines no function" (cadr a))))))
+
 (define (fast-forget! name)
   (when (assoc name *fast-learned*)
     (set! *fast-learned* (remove (lambda (r) (equal? (car r) name)) *fast-learned*))
@@ -1044,6 +1055,7 @@
 (public! 'fast-trace-text "(fast-trace-text N) -- the last N fast-code resolutions, stage by stage; M-x fast-trace shows them")
 (public! 'fast-learned-names "(fast-learned-names) -- the names of the functions fast-code learned")
 (public! 'fast-forget! "(fast-forget! NAME) -- drop a learned function")
+(public! 'fast-learn! "(fast-learn! TEXT [INTENT]) -- keep the function TEXT defines, a define then one call to it: (ok NAME) or (no REASON)")
 (public! 'fast-chat-ran! "(fast-chat-ran! TEXT PRINTED) -- a ! run printed PRINTED; a clean one keeps the function it wrote")
 (public! 'fast-chat-input? "(fast-chat-input? TEXT) -- #t when a chat input opens with !")
 (public! 'fast-chat-resolve "(fast-chat-resolve TEXT K) -- K gets the Scheme a !-input resolves to")

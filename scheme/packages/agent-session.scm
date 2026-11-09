@@ -199,7 +199,11 @@
          ;; never rides in the message. The agent reads current context itself.
          (msg (string-append
                 (if (equal? once "") "" (string-append once "\n\n"))
-                (agent-editor-context buf) (chat-fast-note buf) raw image-note)))
+                (agent-editor-context buf) (chat-fast-note buf)
+                ;; what worked last time for a request like this one, when
+                ;; this chat recalls (recall.scm)
+                (if (boundp 'recall-note) (recall-note buf raw) "")
+                raw image-note)))
     (buffer-set-local! buf 'chat-note-once #f)
     (buffer-set-local! buf 'chat-fast-runs '())
     (buffer-set-local! buf 'chat-pending-images '())
@@ -2077,8 +2081,13 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
       ;; is what it always was.
       (let ((parent (subagent-spawner)))
         (when parent (subagent-record! parent slug)))
+      ;; 'recall #t or #f turns recall on or off for this chat alone
+      (when (memq 'recall opts)
+        (buffer-set-local! buf 'agent-recall (if (plist-get opts 'recall) 'on 'off)))
       (unless (equal? prompt "")
-        (llm-session-send! slug prompt))
+        (llm-session-send! slug
+          (string-append (if (boundp 'recall-note) (recall-note buf prompt) "") prompt)
+          prompt))
       slug)))
 
 (define-command "agent-open" "Prompt for a task and spawn a new agent thread"

@@ -232,6 +232,8 @@
 (require 'telemetry)
 ;; the model rounds and tool calls of an ACP or Codex turn, for chat-perf
 (require 'agent-perf)
+;; what worked last time, in front of a prompt like it (loads fast-code)
+(require 'recall)
 (require 'perf)
 (require 'profile)
 (require 'racket)

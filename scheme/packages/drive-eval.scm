@@ -24,6 +24,9 @@
     (opus "claude-code" "opus")
     ;; a fourth item names the preset the chat starts on
     (haiku-driver "claude-code" "haiku" "Driver")
+    ;; a fifth item adds execute* options: the Driver without recall.scm
+    (haiku-driver-cold "claude-code" "haiku" "Driver" (recall #f))
+    (haiku-driver-recall "claude-code" "haiku" "Driver" (recall #t))
     (deepseek-driver "opencode-go" "opencode-go/deepseek-v4.1-flash" "Driver")))
 
 (define drive-eval-timeout-s 300)
@@ -274,7 +277,9 @@
                            (append
                              (list 'connector (cadr m) 'model (caddr m) 'notify #f
                                    'permission-mode 'auto 'title title)
-                             (if (> (length m) 3) (list 'bundle (list-ref m 3)) '()))))
+                             (if (> (length m) 3) (list 'bundle (list-ref m 3)) '())
+                             ;; a fifth item adds execute* options: (recall #f)
+                             (if (> (length m) 4) (list-ref m 4) '()))))
            (rs (drive-eval--await slug drive-eval-timeout-s))
            (ms (- (monotonic-ms) t0))
            (r (and (pair? rs) (car rs)))

@@ -1524,7 +1524,7 @@
             (message (if (string? new) (string-append "Handed over to " new) "No chat"))))))
   'modes '(todo-mode todo-detail-mode))
 
-;; Reap. Close the chats of done tasks. A chat stays when an open task
+;; Reap. Close the chats of done and inbox tasks. A chat stays when an open task
 ;; still names it, when it runs a turn, or when the user is on it.
 (define (todo--ref-buffer ref)
   (cond ((not (string? ref)) #f)
@@ -1537,10 +1537,11 @@
           (map todo--ref-buffer (cons (plist-get t 'assignee) (or (plist-get t 'chats) '())))))
 
 (define (todo-reap-chats! &optional who)
-  "(todo-reap-chats! [WHO]) — archive every live chat of a done task; keep a chat an open task names, a chat that runs a turn, and the chat the user is on; answer (CLOSED KEPT)"
-  (let* ((open (apply append (map todo--task-chats (todo-list))))
+  "(todo-reap-chats! [WHO]) — archive every live chat of a done or inbox task; keep a chat an open task names, a chat that runs a turn, and the chat the user is on; answer (CLOSED KEPT)"
+  (let* ((open (apply append (map todo--task-chats
+                                  (remove (lambda (t) (equal? (plist-get t 'state) "inbox")) (todo-list)))))
          (self (current-buffer))
-         (cands (apply append (map todo--task-chats (todo-list '(state "done")))))
+         (cands (apply append (map todo--task-chats (append (todo-list '(state "done")) (todo-list '(state "inbox"))))))
          (closed '()) (kept '()))
     (for-each
      (lambda (b)
@@ -1554,7 +1555,7 @@
      cands)
     (list (reverse closed) (reverse kept))))
 
-(public! 'todo-reap-chats! "(todo-reap-chats! [WHO]) — archive every live chat of a done task, except a chat an open task names, a running chat and the chat the user is on; answer (CLOSED KEPT)")
+(public! 'todo-reap-chats! "(todo-reap-chats! [WHO]) — archive every live chat of a done or inbox task, except a chat an open task names, a running chat and the chat the user is on; answer (CLOSED KEPT)")
 (catalog-meta! 'function "todo-reap-chats!" 'domain 'writing 'effects '(destroy))
 
 ;; Dismiss. Put a task away: close its page and the chats that work it.
@@ -1594,10 +1595,10 @@
       (if t (todo--dismiss-msg (todo-dismiss! (plist-get t 'id))) (message "No task here"))))
   'modes '(todo-mode todo-detail-mode))
 
-(define-command "todo-reap-chats" "Close every chat whose task is done; keep a chat an open task still uses, a running chat and the chat you are on"
+(define-command "todo-reap-chats" "Close every chat whose task is done or in the inbox; keep a chat an open task still uses, a running chat and the chat you are on"
   (lambda ()
     (let ((r (todo-reap-chats!)))
-      (message (string-append "Closed " (number->string (length (car r))) " chats of done tasks"
+      (message (string-append "Closed " (number->string (length (car r))) " chats of done and inbox tasks"
                               (if (pair? (cadr r)) (string-append ", kept " (number->string (length (cadr r)))) ""))))))
 
 (define (todo--chat-label c)

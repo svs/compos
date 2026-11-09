@@ -778,4 +778,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
                ((and (equal? (cadr rule) 'ask) (not decide--shell-approved)) (decide-refusal kind))
                (else #f)))))
 
+;; it may ask a model which kind of command CMD is, and keeps the answer
+(effects! '(read external execute spend))
+(public! 'decide-shell-command-verdict "(decide-shell-command-verdict CMD) — the refusal the shell policy gives CMD, or #f to let it run")
+
 (add-hook! 'tool-call-hook 'decide-shell-gate-hook)

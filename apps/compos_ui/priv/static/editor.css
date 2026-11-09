@@ -1078,7 +1078,6 @@ body.unfocused .window.active .cursor {
   min-height: 25px; padding-block: 1px;
 }
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-preview,
-.ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-duration,
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool .ag-tokens { display: none; }
 .ag-scroll.ag-verbosity-summary > :is(c-agent, c-toolcall, c-info, c-eval, c-plan, details) { display: none; }
 .ag-tool, .ag-thought {

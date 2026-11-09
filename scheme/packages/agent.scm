@@ -85,6 +85,26 @@
                     (if (equal? (nth 2 cur) "") "{}" (nth 2 cur)))
               (list "tool-result" id (nth 3 cur) failed?))))))
 
+;; The timing line a turn ends with: the whole turn, then how many tools
+;; ran and how long they took together, so the rest is the model's time.
+;; BLOCKS are newest first; the turn's tools are the ones above its prompt.
+(define (agent-turn-timing blocks ms)
+  (let loop ((bs blocks) (n 0) (tool-ms 0))
+    (if (or (null? bs) (equal? (nth 2 (car bs)) "user"))
+        (let ((label (lambda (x) (if (boundp 'chat-view-duration-label)
+                                     (chat-view-duration-label x)
+                                     (string-append (number->string x) "ms")))))
+          (string-append "turn " (label ms)
+                         (if (> n 0)
+                             (string-append " · " (number->string n) (if (= n 1) " tool " " tools ")
+                                            (label tool-ms) " · model " (label (max 0 (- ms tool-ms))))
+                             "")))
+        (let ((b (car bs)))
+          (if (equal? (nth 2 b) "tool")
+              (loop (cdr bs) (+ n 1)
+                    (+ tool-ms (let ((d (and (> (length b) 8) (nth 8 b)))) (if (number? d) d 0))))
+              (loop (cdr bs) n tool-ms))))))
+
 (define (agent-handle-event slug e)
   (let* ((buf (agent-buf slug))
          (type (plist-get e 'type)))
@@ -144,6 +164,8 @@
 
       ((equal? type 'user-msg)
        (buffer-set-local! buf 'chat-turn-active #t)
+       ;; the turn's clock: turn-end writes the timing line from it
+       (buffer-set-local! buf 'agent-turn-t0 (monotonic-ms))
        ;; the conversation of record is the truth on EVERY backend: the api
        ;; lane replays it per request, ACP seeds a fresh session from it,
        ;; and both flatten it to .chat files. The api lane's turn task
@@ -370,6 +392,14 @@
                         "\n[truncated — the reply hit the model's output limit]\n"
                         "agent-meta")))
            (agent-block-push! buf start (agent-mark slug) "meta" '())))
+       ;; how long the turn took, and how much of it the tools took
+       (let ((t0 (buffer-local-value 'agent-turn-t0 buf)))
+         (when (number? t0)
+           (buffer-set-local! buf 'agent-turn-t0 #f)
+           (let ((start (agent-render! slug
+                          (string-append "\n" (agent-turn-timing (agent-blocks buf) (- (monotonic-ms) t0)) "\n")
+                          "agent-meta")))
+             (agent-block-push! buf start (agent-mark slug) "meta" '()))))
        (buffer-set-local! buf 'agent-turn-text #f)
        (agent-thought-forget! slug)
        (buffer-set-local! buf 'agent-turn-any #f)

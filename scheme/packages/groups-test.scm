@@ -23,7 +23,7 @@
       (buffer-add-group-as! buf a 'source)
       (buffer-add-group! buf b)
       (check-equal! (buffer-group buf) b "only the destination owns the buffer")
-      (check-equal! (buffer-local-value 'group-id buf) b "storage also holds one owner")
+      (check-equal! (buffer-local buf 'group-id) b "storage also holds one owner")
       (check-false! (buffer-in-group? buf a) "the former owner loses membership immediately")
       (check-false! (buffer-group-role buf a) "the former role does not survive the move")
       (buffer-kill! buf)
@@ -369,7 +369,7 @@
         (check-equal! (list panes windows) '(3 3) "three panes before")
         (run-command "chat-companion")
         (let ((chat (current-buffer)))
-          (check-equal! (buffer-local-value 'mode-name chat) "chat-mode" "the chat has the focus")
+          (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the chat has the focus")
           (check-equal! (list (length (panes-pane-ids (panes-layout))) (length (window-list)))
                         (list panes windows) "no pane and no window added")
           (check-equal! (panes-current-layout) layout "the layout stays")
@@ -405,3 +405,15 @@
       (buffer-kill! one)
       (buffer-kill! two)
       (t--drop! g))))
+
+(deftest 'parallel-spawns-never-share-an-id
+  "eight tasks that take ids at once never take the same one: two chats with one id share a session"
+  (lambda ()
+    (let* ((ts (map (lambda (i)
+                      (task-spawn
+                        (lambda ()
+                          (let loop ((k 0) (acc '()))
+                            (if (>= k 20) acc (loop (+ k 1) (cons (group-id-take!) acc)))))))
+                    '(1 2 3 4 5 6 7 8)))
+           (all (apply append (map (lambda (t) (task-await t 10000)) ts))))
+      (check-equal! (length (llm-models-unique all)) (length all) "every id is new"))))

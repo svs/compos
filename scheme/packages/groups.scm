@@ -407,10 +407,19 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (group-display-label g)
   (group-display-label-in g (selected-frame)))
 
+;; The next number of the shared id counter. Lanes and tasks share one
+;; Scheme world with no atomic update, so a bare read and set! lets two
+;; spawns in the same second take the same number, and two chats the same
+;; id ("LLM session already running" in parallel drive-eval runs).
+(define (group-id-take!)
+  (with-scheme-lock 'group-next-id
+    (lambda ()
+      (set! *group-next-id* (+ *group-next-id* 1))
+      *group-next-id*)))
+
 (define (group-new-id!)
-  (set! *group-next-id* (+ *group-next-id* 1))
   (string-append "grp:" (number->string (current-time)) ":"
-                 (number->string *group-next-id*)))
+                 (number->string (group-id-take!))))
 
 ;;; --- the shortest name that reads apart --------------------------------------
 ;;; A group founded from a path (a directory in Dired, a file, a project
@@ -1038,8 +1047,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (chat-stable-id! buf)
   (or (buffer-local-value 'chat-id buf)
       (let ((id (string-append "chat:" (number->string (current-time)) ":"
-                               (number->string (+ *group-next-id* 1)))))
-        (set! *group-next-id* (+ *group-next-id* 1))
+                               (number->string (group-id-take!)))))
         (buffer-set-local! buf 'chat-id id)
         id)))
 

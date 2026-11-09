@@ -806,7 +806,7 @@
     buf))
 
 (define *todo-views*
-  (list (list "open" '())
+  (list (list "open" '(state ("todo" "doing" "review")))
         (list "inbox" '(state "inbox"))
         (list "review" '(state "review"))
         (list "doing" '(state "doing"))

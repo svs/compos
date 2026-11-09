@@ -869,6 +869,14 @@
   (let ((f (mode-get (buffer-local-value 'mode-name buf) 'agent-chat)))
     (if f (f buf) (llm-mode--companion-existing buf))))
 
+(define (chat-follow--panes-holding buf)
+  ;; the panes that hold BUF's window: the chat must not land there and
+  ;; cover the buffer it follows
+  (let ((l (and (boundp 'panes-layout) (panes-layout))))
+    (if (not l) '()
+        (filter (lambda (p) p)
+                (map (lambda (k) (panes-pane-of l k)) (panes-windows-holding l buf))))))
+
 (define (chat-follow! buf)
   (let ((mode (and (string? buf) (buffer-local-value 'mode-name buf))))
     (when (mode-get mode 'chat-follow?)
@@ -877,10 +885,15 @@
           (let* ((subject (or (chat-subject chat)
                               (chat-subject-set! chat (or (mode-get mode 'chat-subject) mode))))
                  (me (active-window))
+                 (held (chat-follow--panes-holding buf))
+                 (l (and (pair? held) (panes-layout)))
+                 (beside? (lambda (w) (and l (member (panes-pane-of l w) held) #t)))
                  (win (find (lambda (w) (and (not (equal? w me))
+                                             (not (beside? w))
                                              (equal? (chat-subject (window-buffer w)) subject)))
                             (display--work-windows))))
-            (if win (window-set-buffer! win chat) (display-buffer chat))))))))
+            (cond (win (window-set-buffer! win chat))
+                  ((null? held) (display-buffer chat)))))))))
 (public! 'buffer-agent-chat "(buffer-agent-chat BUF) — the agent chat of BUF: its mode's 'agent-chat, else its companion chat, or #f")
 (public! 'chat-follow! "(chat-follow! BUF) — when BUF's mode has chat-follow?, show BUF's agent chat too")
 

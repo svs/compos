@@ -273,6 +273,70 @@
 
 (define *command-modes* (if (boundp '*command-modes*) *command-modes* '()))
 
+;; A command is also a function of its name, as defun + (interactive) in
+;; Emacs: (save-buffer) and (forward-char 3) run from code. A name that
+;; already holds a function or a variable keeps it; the command stays in
+;; the command table and command-call runs it. A reload rebinds only the
+;; names define-command bound. Rows are (NAME CALLABLE ENTRY).
+(define *command-functions*
+  (if (boundp '*command-functions*) *command-functions* '()))
+
+;; what a spec code gives a call from code that leaves the argument out:
+;; no prefix, the current buffer, point, the region; a prompt has none
+(define (interactive--code-default code)
+  (cond ((equal? code 'p) (list 1))
+        ((equal? code 'P) (list #f))
+        ((equal? code 'b) (list (current-buffer)))
+        ((equal? code 'd) (list (point)))
+        ((equal? code 'm) (list (or (mark) (point))))
+        ((equal? code 'r) (list (region-beginning) (region-end)))
+        (else #f)))
+
+;; the function a command's name calls: the arguments given go first,
+;; the ones left out take their code's default, and never prompt
+(define (command--callable name spec fn)
+  (if (not spec)
+      fn
+      (lambda (&rest args)
+        (let fill ((codes (cdr spec)) (given args) (acc '()))
+          (let ((width (and (pair? codes) (if (equal? (car codes) 'r) 2 1))))
+            (cond ((null? codes) (apply fn (append (reverse acc) given)))
+                  ((>= (length given) width)
+                   (fill (cdr codes) (list-tail given width)
+                         (append (reverse (take-n given width)) acc)))
+                  ((pair? given)
+                   (error (string-append name ": the region needs two arguments")))
+                  (else
+                   (let ((d (interactive--code-default (car codes))))
+                     (if d
+                         (fill (cdr codes) '() (append (reverse d) acc))
+                         (error (string-append name ": missing argument for "
+                                               (if (string? (car codes)) (car codes) "spec"))))))))))))
+
+(define (command--bind! name callable entry)
+  (let* ((sym (string->symbol name))
+         (row (assoc name *command-functions*)))
+    (if (and (procedure? callable)
+             (or (not (boundp sym))
+                 (and row (eq? (symbol-value sym) (cadr row)))))
+        (begin
+          (set-symbol-value! sym callable)
+          (set! *command-functions*
+                (cons (list name callable entry)
+                      (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
+          #t)
+        #f)))
+
+;; (commandp F): #t when F is a command name, a string or a symbol, or a
+;; function define-command made, as Emacs's commandp
+(define (commandp f)
+  (cond ((string? f) (if (command-function f) #t #f))
+        ((symbol? f) (commandp (symbol->string f)))
+        ((procedure? f)
+         (pair? (filter (lambda (r) (or (eq? (cadr r) f) (eq? (caddr r) f)))
+                        *command-functions*)))
+        (else #f)))
+
 ;; (define-command NAME [DOC] [SPEC] FN ['modes '(MODE ...)]): 'modes
 ;; offers the command in M-x and the palette only in buffers of those
 ;; modes, as Emacs's (interactive nil MODE ...); without it, everywhere.
@@ -302,9 +366,11 @@
       (set! *command-modes*
             (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
     (set! *command-generation* (+ *command-generation* 1))
-    (catalog-register! 'command name doc
-      'use (string-append "(run-command \"" name "\")")
-      'spec (or spec #f))
+    (let ((bound (command--bind! name (command--callable name spec fn) entry)))
+      (catalog-register! 'command name doc
+        'use (string-append "(run-command \"" name "\")")
+        'spec (or spec #f)
+        'call (and bound (string-append "(" name ")"))))
     name))
 
 ;; the closure behind a command, from the one table
@@ -326,6 +392,14 @@
   (undefine-command--raw name)
   (set! *command-generation* (+ *command-generation* 1))
   (catalog-forget! 'command name)
+  ;; the function define-command bound goes with it; one the name held
+  ;; before, or got since, stays
+  (let ((row (assoc name *command-functions*))
+        (sym (string->symbol name)))
+    (when (and row (boundp sym) (eq? (symbol-value sym) (cadr row)))
+      (unbind-global! sym))
+    (set! *command-functions*
+          (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
   name)
 
 ;;; --- public API registry -----------------------------------------------------
@@ -787,6 +861,80 @@
 
 (define-command "newline" "Insert a newline at point" (interactive 'p)
   (lambda (n) (repeat-count n (lambda () (insert! "\n")))))
+
+;; insert-char reads a code point: hex as Emacs reads it (3bb, #x3bb,
+;; U+03BB), or decimal with #d; a single typed character inserts itself
+(define (insert-char--parse s)
+  (let* ((raw (string-trim s))
+         (low (string-downcase raw))
+         (strip (lambda (pre) (and (>= (string-length low) (string-length pre))
+                                   (equal? (substring low 0 (string-length pre)) pre)
+                                   (substring low (string-length pre) (string-length low)))))
+         (hex (lambda (h)
+                (and h (> (string-length h) 0)
+                     (let loop ((i 0) (n 0))
+                       (if (= i (string-length h))
+                           n
+                           (let ((d (string-search (substring h i (+ i 1)) "0123456789abcdef")))
+                             (and d (loop (+ i 1) (+ (* n 16) d)))))))))
+         (dec (strip "#d")))
+    (cond ((= (string-length raw) 0) #f)
+          (dec (string->number dec))
+          ((strip "#x") (hex (strip "#x")))
+          ((strip "u+") (hex (strip "u+")))
+          ((hex low) (hex low))
+          ((= (string-length raw) 1) (char->integer (string-ref raw 0)))
+          (else #f))))
+
+(define-command "insert-char" "Insert a character by its code point, typed in hex (3bb, U+03BB) or #d955; a prefix N inserts it N times"
+  (interactive "sInsert character (hex code point): " 'p)
+  (lambda (code n)
+    (let ((cp (if (number? code) code (insert-char--parse (or code "")))))
+      (if (and cp (> cp 0) (< cp 1114112))
+          (repeat-count n (lambda () (insert! (list->string (list (integer->char cp))))))
+          (message (string-append "Not a code point: " (if (string? code) code "?")))))))
+
+;; quoted-insert: the next key inserts its character, a control key
+;; included (C-q C-j a newline, C-q TAB a tab), instead of its binding
+(define (quoted-insert--char key)
+  (cond ((equal? key "TAB") 9) ((equal? key "RET") 13) ((equal? key "SPC") 32)
+        ((equal? key "ESC") 27) ((equal? key "DEL") 127)
+        ((= (string-length key) 1) (char->integer (string-ref key 0)))
+        ((and (= (string-length key) 3) (equal? (substring key 0 2) "C-"))
+         (let ((c (char->integer (string-ref (string-downcase key) 2))))
+           (cond ((and (>= c 97) (<= c 122)) (- c 96))
+                 ((= c 64) 0) ((= c 91) 27) ((= c 92) 28) ((= c 93) 29)
+                 (else #f))))
+        (else #f)))
+
+(define *quoted-insert-count* (if (boundp '*quoted-insert-count*) *quoted-insert-count* 1))
+
+(define-command--raw "quoted-insert--key"
+  (lambda ()
+    (let* ((seq (last-keys))
+           (cp (and (= (length seq) 1) (quoted-insert--char (car seq)))))
+      (if cp
+          (repeat-count *quoted-insert-count*
+            (lambda () (insert! (list->string (list (integer->char cp))))))
+          (message (string-append "Cannot insert " (string-join seq " ")))))))
+
+(define-command "quoted-insert" "Read the next key and insert its character, a control character included, N times"
+  (interactive 'p)
+  (lambda (n)
+    (set! *quoted-insert-count* n)
+    (capture-key! "quoted-insert--key")
+    (message "C-q-")))
+
+(define-command "insert-file" "Insert the contents of a file at point; the buffer keeps its own file"
+  (interactive "fInsert file: ")
+  (lambda (path)
+    (let ((text (and (string? path) (read-file (expand-file-name path)))))
+      (if text
+          (let ((start (point)))
+            (insert! text)
+            (goto-char! start)
+            (set-mark! (+ start (string-length text))))
+          (message (string-append "Cannot read " (if (string? path) path "?")))))))
 (define (delete-active-region!)
   (if (and (mark) (< (region-beginning) (region-end)))
       (begin
@@ -5971,6 +6119,7 @@
 (public! 'interactive "(interactive CODE ...) — a command's argument spec: 'p numeric prefix, 'P raw prefix, 'r region start and end, 'b buffer, 'd point, 'm mark, \"sPrompt: \" a string, \"nPrompt: \" a number, \"fPrompt: \" a file")
 (public! 'command-call "(command-call NAME ARG ...) — run a command's function with explicit arguments")
 (public! 'command-function "(command-function NAME) — the function behind a command, or #f")
+(public! 'commandp "(commandp F) — #t when F is a command: its name, a string or a symbol, or the function define-command bound to that name")
 (public! 'command-fn "(command-fn NAME) — the command's closure, or #f")
 (catalog-meta! 'function "command-fn" 'effects '(read))
 (public! 'call-interactively "(call-interactively NAME) — run NAME as a key would, collecting its arguments from the spec")
@@ -6636,6 +6785,9 @@
 (global-set-key "C-y" "yank")
 (global-set-key "C-/" "undo")
 (global-set-key "C-x u" "undo")
+(global-set-key "C-q" "quoted-insert")
+(global-set-key "C-x 8 RET" "insert-char")
+(global-set-key "C-x i" "insert-file")
 (global-set-key "C-g" "keyboard-quit")
 (global-set-key "C-u" "universal-argument")
 ;; ESC quits, like C-g. Emacs makes a lone ESC the Meta prefix; here it

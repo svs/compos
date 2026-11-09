@@ -122,3 +122,22 @@
       (check-equal! *command-test-got* 4 "the spec still reaches the function"))
     (define-key (mode-keymap "morg-mode") "<f9> b" #f)
     (buffer-kill! "zz-command-test-buf")))
+
+;; a global function the next command's name already holds
+(define (zz-command-test-held) 'function)
+
+(deftest 'a-command-is-a-function-of-its-name
+  "define-command binds the name: a call from code takes its arguments, a left-out p is 1; a name that held a function keeps it; commandp tells them apart"
+  (lambda ()
+    (zz-command-test-count 5)
+    (check-equal! *command-test-got* 5 "the name calls the command with its argument")
+    (zz-command-test-count)
+    (check-equal! *command-test-got* 1 "a left-out p is 1, no prompt")
+    (check-true! (commandp 'zz-command-test-count) "the name is a command")
+    (check-true! (commandp zz-command-test-count) "the function is a command")
+    (check-false! (commandp car) "a plain function is not")
+    (define-command "zz-command-test-held" "Test: a name that held a function" (lambda () 'command))
+    (check-equal! (zz-command-test-held) 'function "the function the name held stays")
+    (check-equal! (command-call "zz-command-test-held") 'command "command-call runs the command")
+    (undefine-command "zz-command-test-held")
+    (check-equal! (zz-command-test-held) 'function "undefine-command leaves it too")))

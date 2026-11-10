@@ -2366,16 +2366,46 @@
           (else (panes-display-beside! chat owner)))
     chat))
 
-(define-command "todo-new" "File a new task, then show the list and the task's page beside it; s starts it and opens its chat"
+(define (todo--file-new! title group)
+  (let ((id (todo-create title (list 'state "todo" 'group group))))
+    (todo--refresh-all!)
+    ;; the list where you are, the page beside it
+    (run-command "todo")
+    (todo-show-detail! id)
+    (message (string-append "Filed " id " in " (group-display-name group) "; s starts it"))))
+
+;; C-RET in the New Todo prompt: confirm the title, then ask for the group.
+(define todo--new-open? #f)
+(define todo--new-pick-group? #f)
+
+(define-command "todo-new-pick-group" "In the New Todo prompt, file the title in a group you choose"
   (lambda ()
-    (read-string "Task: "
-      (lambda (s)
-        (let ((id (todo-create s (list 'state "todo" 'group (todo--origin-group todo-user)))))
-          (todo--refresh-all!)
-          ;; the list where you are, the page beside it
-          (run-command "todo")
-          (todo-show-detail! id)
-          (message (string-append "Filed " id "; s starts it")))))))
+    (set! todo--new-pick-group? todo--new-open?)
+    (minibuffer-confirm-input!)))
+
+(define-key "minibuffer-mode-map" "C-RET" "todo-new-pick-group")
+
+(define-command "todo-new" "File a new task, then show the list and the task's page beside it; RET files it in this group, C-RET asks for the group first; s starts it and opens its chat"
+  (lambda ()
+    (set! todo--new-open? #t)
+    (set! todo--new-pick-group? #f)
+    (minibuffer-read* (string-append "New Todo (" (key-symbol "C-RET") " to set group): ") '()
+      (list
+        (list 'confirm
+          (lambda (title)
+            (let ((pick? todo--new-pick-group?)
+                  (here (todo--origin-group todo-user)))
+              (set! todo--new-open? #f)
+              (set! todo--new-pick-group? #f)
+              (cond
+                ((equal? title "") (message "No title; nothing filed"))
+                (pick?
+                  (completing-read (string-append "Group for \"" title "\": ") (group-names)
+                    (lambda (g) (todo--file-new! title (or (group-resolve-id g) g)))
+                    'default (group-display-name here) 'require-match #t))
+                (else (todo--file-new! title here))))))
+        (list 'cancel (lambda () (set! todo--new-open? #f) (set! todo--new-pick-group? #f)))
+        (list 'style #f)))))
 
 (global-set-key "C-c T" "todo-new")
 ;; filing a task is for every buffer, not just the todo list

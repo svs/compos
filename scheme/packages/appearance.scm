@@ -252,17 +252,30 @@
 (define (chrome-publisher key)
   (lambda (value) (frame-chrome-set! key value)))
 
+;; What packages keep after the hints, such as the build that runs
+;; (build-identity.scm): (KEY HINT) pairs, in the order they came.
+(define *echo-extra-hints* '())
+
+(define (echo-hints-of hints)
+  (append hints (map cadr *echo-extra-hints*)))
+
 (defcustom 'echo-key-hints
   '(("*Messages*" "" "view-messages"))
   "The hints in the echo area, as (KEY VERB [COMMAND]) lists. An empty verb draws the key alone. A hint with a COMMAND is a link: a click runs it."
   'group 'appearance
-  'set (chrome-publisher "echo-hints"))
+  'set (lambda (value) (frame-chrome-set! "echo-hints" (echo-hints-of value))))
+
+(define (echo-extra-hint-set! key hint)
+  "keep HINT, a (KEY VERB [COMMAND]) list, after echo-key-hints under KEY; #f removes it"
+  (let ((rest (remove (lambda (e) (equal? (car e) key)) *echo-extra-hints*)))
+    (set! *echo-extra-hints* (if hint (append rest (list (list key hint))) rest))
+    (frame-chrome-set! "echo-hints" (echo-hints-of echo-key-hints))))
 
 (domain! 'ui)
 (effects! '(read))
 (define (echo-hint-command? cmd)
   "Is CMD the command of a hint in echo-key-hints? Only those run from an echo-area click."
-  (let loop ((hs echo-key-hints))
+  (let loop ((hs (echo-hints-of echo-key-hints)))
     (cond ((null? hs) #f)
           ((and (= (length (car hs)) 3) (equal? (caddr (car hs)) cmd)) #t)
           (else (loop (cdr hs))))))
@@ -284,7 +297,7 @@
 (define workspace-bar-help "M-x workspaces new tab · C-x d switch daemon")
 (define frame-tabs-more-title "every group (M-x groups)")
 
-(frame-chrome-set! "echo-hints" echo-key-hints)
+(frame-chrome-set! "echo-hints" (echo-hints-of echo-key-hints))
 (frame-chrome-set! "mode-line-format" mode-line-format)
 (frame-chrome-set! "workspace-help" workspace-bar-help)
 (frame-chrome-set! "tabs-more-title" frame-tabs-more-title)

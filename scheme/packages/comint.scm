@@ -496,7 +496,7 @@
               (when follow?
                 (buffer-goto! buf (buffer-size buf))
                 (buffer-windows-follow-point! buf)))))
-        'eager)))))
+        'eager))))
 
 ;; the byte ranges (START END) of LINES laid end to end, one newline apart
 (define (tail--spans lines)

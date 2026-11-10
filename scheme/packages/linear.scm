@@ -644,12 +644,10 @@
             (completing-read "Team (any): " (cons "any" (map (lambda (t) (plist-get t 'key)) (linear--teams)))
               (lambda (team)
                 (let ((t (linear--team team)))
-                  (linear-gql (if t "query($id: String!) { team(id: $id) { projects(first: 100) { nodes { name } } } }"
-                                  "{ projects(first: 100) { nodes { name } } }")
-                    (if t (list 'id (plist-get t 'id)) '())
+                  ;; every project: a team's own list misses projects shared across teams
+                  (linear-gql "{ projects(first: 100) { nodes { name } } }" '()
                     (lambda (dd)
-                      (let ((names (map (lambda (p) (plist-get p 'name))
-                                        (linear--nodes (if t (and dd (plist-get dd 'team)) dd) 'projects))))
+                      (let ((names (map (lambda (p) (plist-get p 'name)) (linear--nodes dd 'projects))))
                         (completing-read "Project (any): " (cons "any" names)
                           (lambda (project)
                             (completing-read "Assignee (anyone): " '("anyone" "me")

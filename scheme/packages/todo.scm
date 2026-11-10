@@ -2604,6 +2604,62 @@
 ;; moving does not open the page, so the highlighted row says RET does
 (define-style! 'todo-list ".window[data-buffer^=\"*Todos*\"] c-line.hl-line::after { content: \"\\23CE\"; margin-left: auto; padding: 0 0.6em; opacity: 0.55; }")
 
+;; imenu on the list offers the status tabs above it; a pick shows that tab
+(define (todo--imenu-rows buf)
+  (let ((counts (todo--tab-counts buf (todo--all))))
+    (let loop ((vs *todo-views*) (cs counts) (out '()))
+      (if (null? vs)
+          (reverse out)
+          (let ((name (car (car vs))))
+            (loop (cdr vs) (cdr cs)
+                  (cons (list 1 "tab" name (string-append (number->string (car cs)) " tasks")
+                              (lambda () (todo--view-set! buf name)))
+                        out)))))))
+
+;; leaving imenu without a pick puts the tab back
+(define (todo--imenu-snapshot buf)
+  (let ((was (todo--view buf)))
+    (lambda () (unless (equal? (todo--view buf) was) (todo--view-set! buf was)))))
+
+(define (todo--imenu-setup!)
+  (buffer-set-local! (current-buffer) 'imenu-index-function 'todo--imenu-rows)
+  (buffer-set-local! (current-buffer) 'imenu-snapshot 'todo--imenu-snapshot))
+
+(add-hook! 'todo-mode-hook 'todo--imenu-setup!)
+
+;; a, on the list: the moves and edits of the task at point, as a menu
+(define (todo--action-groups buf)
+  (let* ((t (with-current-buffer buf todo--at))
+         (state (and t (plist-get t 'state)))
+         (can? (lambda (to) (or (not state) (and (not (equal? state to)) (todo-can-move? state to)))))
+         (move (lambda (to key label cmd) (if (can? to) (list (transient-suffix key label cmd)) '())))
+         (accept (cond ((member state *todo-closed*) "Reopen")
+                       ((equal? state "review") "Approve")
+                       ((equal? state "doing") "Stop")
+                       ((equal? state "waiting") "Resume")
+                       (else "Accept"))))
+    (list (cons "State"
+                (append (move "todo" "t" accept "todo-accept")
+                        (move "doing" "s" (if (equal? state "review") "Rework" "Start, open its chat") "todo-mark-doing")
+                        (move "done" "d" "Done" "todo-mark-done")
+                        (move "waiting" "W" "Wait" "todo-mark-waiting")
+                        (move "cancelled" "x" "Cancel" "todo-mark-cancelled")
+                        (move "inbox" "i" "To inbox" "todo-mark-inbox")))
+          (list "Task"
+                (transient-suffix "D" "Deadline" "todo-set-deadline")
+                (transient-suffix "P" "Project" "todo-set-project")
+                (transient-suffix "N" "Note" "todo-add-note")
+                (transient-suffix "!" "Priority" "todo-cycle-priority")
+                (transient-suffix "T" "Urgent, or not" "todo-toggle-urgent")
+                (transient-suffix "+" "Sub-task" "todo-new-subtask"))
+          (list "Open"
+                (transient-suffix "o" "Its chat" "todo-assign")
+                (transient-suffix "e" "Its file" "todo-visit")
+                (transient-suffix "k" "Dismiss" "todo-dismiss")))))
+
+(transient-define-prefix "todo-actions" "Act on the task at point: change its state, edit it, open its chat or file" todo--action-groups)
+(command-modes! "todo-actions" '(todo-mode))
+
 (define-list-mode! "todo-mode"
   (list
     'buffer *todo-buffer*
@@ -2640,9 +2696,8 @@
     'parent (lambda (buf t) (and (not (todo--sep? t)) (plist-get t 'parent)))
     'nest-cell 2
     'footer (lambda (buf)
-              '(("←→" "status") ("RET" "open") ("TAB" "fold") ("e" "file") ("t" "accept") ("i" "inbox") ("d" "done") ("x" "cancel") ("W" "wait")
-                ("M-o" "agent") ("D" "deadline") ("P" "project") ("!" "priority") ("T" "urgent")
-                ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("w" "watch") ("q" "quit")))
+              '(("←→" "status") ("RET" "open") ("a" "actions") ("TAB" "fold") ("t" "accept") ("s" "start") ("i" "inbox") ("d" "done") ("x" "cancel") ("W" "wait")
+                ("M-o" "agent") ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("w" "watch") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own
     ;; arrow remap misses it at open; the mode states it
@@ -2658,11 +2713,8 @@
             ("W" "todo-mark-waiting")
             ("s" "todo-mark-doing")
             ("i" "todo-mark-inbox")
-            ("D" "todo-set-deadline")
-            ("P" "todo-set-project")
             ("N" "todo-add-note")
-            ("!" "todo-cycle-priority")
-            ("T" "todo-toggle-urgent")
+            ("a" "todo-actions")
             ("c" "todo-new")
             ("+" "todo-new-subtask")
             ("v" "todo-next-view")
@@ -2673,7 +2725,7 @@
             ("g" "todo-refresh")
             ("k" "todo-dismiss")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `s` also opens its chat. `M-o` goes to its chat, or hands it to a new chat in a group, `N` adds a note. `a` opens the task's action menu: every move, and the deadline, project, priority and urgent mark, which the task's page also has as `D`, `P`, `!` and `T`. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `N` and the action menu act on the marked tasks after asking. imenu picks a status tab. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

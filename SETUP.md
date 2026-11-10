@@ -62,3 +62,21 @@ Restart the agent session. Check: the `eval-scheme` tool of the `compos` server 
 ### 4. Configure
 
 Follow [INSTALL.md](INSTALL.md) from step 4: the chat connector, secret storage, model presets and the decision model. Those steps run in Scheme through `eval-scheme`, the same for the binary and a source build. Then hand over to the person with `M-x setup`.
+
+Inference is the only thing compos needs. It works with no decision model and no embedding model: `apropos` falls back to plain word matching, and that is enough for the agent to find the editor API. Set up the decision model and embeddings when they are easy to get, but do not let the person stall on them, and do not tell them compos is broken without them.
+
+### 5. Fast model when JEV is not there
+
+JEV is not part of a fresh install. When it is missing, use the fast model of the agent the person already has: Claude Code's Haiku, or Codex's fast model. Put it in the `fast` and `summarize` presets ([INSTALL.md](INSTALL.md) step 6), keep `jev` out of `decide-backends`, and set `command-palette-decide-backend` to `model`. Do not leave a job pointed at JEV.
+
+Check: `(llm-model-for 'fast)` names that model, and the variable `decide-backends` does not name `jev`.
+
+### 6. Chrome extension: do not skip
+
+The extension is what lets compos read and act in the person's own Chrome, with their logins. Install it every time, and do not finish until it is connected. compos copies it to `~/.compos/chrome-extension` at every start. Walk the person through it:
+
+1. Open `chrome://extensions`.
+2. Turn on **Developer mode**, top right.
+3. **Load unpacked**, and choose `~/.compos/chrome-extension`. In the file picker, Cmd-Shift-G takes a typed path.
+
+Check: `(browser-connected?)` answers `#t`. If it does not, stay on this step. Details: [docs/CHROME_EXTENSION.md](docs/CHROME_EXTENSION.md).

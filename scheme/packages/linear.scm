@@ -170,7 +170,7 @@
 (define (linear--prio-short p) (cond ((equal? p 1) "!!!") ((equal? p 2) "!!") ((equal? p 3) "!") ((equal? p 4) "·") (else "")))
 
 (define (linear-columns buf)
-  (list (list "issue" 10) (list "status" 14) (list "pri" 4) (list "assignee" 16) (list "updated" 11) (list "title" #f)))
+  (list (list "issue" 10) (list "status" 14) (list "pri" 4) (list "assignee" 16) (list "updated" 11) (list "title" #f 'left 'end)))
 
 (define (linear-cells buf row)
   (let ((st (plist-get row 'state)))
@@ -586,6 +586,8 @@
 (define-list-mode! "linear-mode"
   (list 'doc "Linear issues, newest change first: the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. The status tabs, each with its count, head the list: open (todo and in progress; backlog and triage stay out), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
         'transient #f
+        ;; the plain text table, as Todos draws, not the drawn grid
+        'default-view "bare"
         'noun "issue"
         'rows (lambda (buf) (list-keep buf (linear-rows buf)))
         'key linear-key

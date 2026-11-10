@@ -488,9 +488,15 @@
     (buffer-set-local! buf 'tail-watch
       (on-change! buf
         (lambda (pos inserted deleted source)
-          (when (and (tail--filter buf) (> (string-length inserted) 0))
-            (tail--apply! buf)))
-        'eager))))
+          (when (> (string-length inserted) 0)
+            ;; point at the end follows the new lines, as comint does; a
+            ;; reader who moved up stays where they are
+            (let ((follow? (>= (buffer-point buf) pos)))
+              (when (tail--filter buf) (tail--apply! buf))
+              (when follow?
+                (buffer-goto! buf (buffer-size buf))
+                (buffer-windows-follow-point! buf)))))
+        'eager)))))
 
 ;; the byte ranges (START END) of LINES laid end to end, one newline apart
 (define (tail--spans lines)

@@ -2,8 +2,8 @@
 ;;;
 ;;; M-x linear lists issues under status tabs: open, backlog, todo, in
 ;;; progress, closed; / filters by team, assignee and priority. Moving onto a
-;;; row shows that issue's page beside
-;;; the list, one page per issue. The same keys act on the row and the page:
+;;; row shows that issue's page beside the list, one page per issue. The
+;;; same keys act on the row and the page:
 ;;; s status, a assignee, p priority, c comment, n new issue, o open in Linear,
 ;;; g reread.
 ;;;

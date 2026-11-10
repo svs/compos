@@ -339,6 +339,17 @@
                           " or a sign-in" "")))
       (else "needs an API key"))))
 
+;; The setup screen lists connectors most popular first; one it does not
+;; name goes after these, in declaration order.
+(define setup-connector-popularity
+  '("claude-code" "codex-app-server" "gemini" "opencode" "api"
+    "deepseek" "kimi" "opencode-go" "gemini-nano"))
+
+(define (setup-connector-names)
+  (let* ((names (connector-names))
+         (known (filter (lambda (n) (member n names)) setup-connector-popularity)))
+    (append known (filter (lambda (n) (not (member n known))) (reverse names)))))
+
 (define (setup-inference-scan)
   "Every declared connector with what this machine can actually run it.
    (NAME KIND READY? DETAIL NEXT). NEXT is the first unmet requirement, or
@@ -361,7 +372,7 @@
               (list name kind #t (if (equal? kind "hosted") "a key is registered" "ready") #f))
              (else
               (list name kind #f (setup--requirement-label (car unmet)) (car unmet))))))
-       (connector-names)))
+       (setup-connector-names)))
 
 ;; Answer the first unmet requirement of connector NAME, then K. With none
 ;; left, NAME becomes the default. A question that stays unanswered goes on
@@ -539,7 +550,7 @@
 ;; The connectors declare what they need, so the bot asks only what is
 ;; missing for the one the user picks.
 (define (setup--ask-provider)
-  (let ((names (connector-names)))
+  (let ((names (setup-connector-names)))
     (minibuffer-read "Which connector should new chats use? " (append names '("Skip"))
       (lambda (choice)
         (if (member choice names)
@@ -814,7 +825,7 @@
 (define-command "setup-install-connector"
   "Install the agent program of a connector in a terminal buffer"
   (lambda ()
-    (let ((names (filter (lambda (n) (pair? (setup-agent-missing-steps n))) (connector-names))))
+    (let ((names (filter (lambda (n) (pair? (setup-agent-missing-steps n))) (setup-connector-names))))
       (if (null? names)
           (message "Setup: every agent with install steps is installed")
           (minibuffer-read "Install the agent for: " names setup-install-agent!)))))

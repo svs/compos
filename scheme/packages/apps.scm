@@ -270,6 +270,8 @@
     (let ((id (app-id (current-buffer))))
       (cond ((not id) (message "This buffer belongs to no app"))
             ((not (app-dismiss! id)) (message "Nothing else to show in its place"))))))
+
+(global-set-key "C-c D" "app-dismiss")
 (catalog-meta! 'command "app-dismiss" 'domain 'windows 'effects '(write display))
 
 (define (app-push-read! id)

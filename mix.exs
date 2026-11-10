@@ -51,6 +51,15 @@ defmodule Compos.MixProject do
       File.cp_r!(Path.join("scheme", dir), dest)
     end
 
+    # What the modeline names as this build (scheme/packages/build-identity.scm).
+    {sha, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"])
+    built = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    File.write!(
+      Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", "build-info.scm"]),
+      ~s|(version "#{release.version}" commit "#{String.trim(sha)}" built "#{built}")\n|
+    )
+
     release
   end
 

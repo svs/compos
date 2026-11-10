@@ -237,6 +237,8 @@
 ;; what worked last time, in front of a prompt like it (loads fast-code)
 (require 'recall)
 (require 'perf)
+;; which compos is running: rel VERSION · COMMIT, or dev · jj · git
+(require 'build-identity)
 (require 'profile)
 (require 'racket)
 (require 'test)

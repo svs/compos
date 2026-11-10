@@ -170,7 +170,7 @@
 (define (linear--prio-short p) (cond ((equal? p 1) "!!!") ((equal? p 2) "!!") ((equal? p 3) "!") ((equal? p 4) "·") (else "")))
 
 (define (linear-columns buf)
-  (list (list "issue" 10) (list "status" 14) (list "pri" 4) (list "assignee" 16) (list "updated" 11) (list "title" #f 'left 'end)))
+  (list (list "issue" 10) (list "status" 11) (list "pri" 3) (list "assignee" 16) (list "updated" 11) (list "title" #f 'left 'end)))
 
 (define (linear-cells buf row)
   (let ((st (plist-get row 'state)))

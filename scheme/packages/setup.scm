@@ -779,7 +779,14 @@
    The shell stays so that the user can read the output and sign in."
   (let ((signin (plist-get (setup--agent-install name) 'signin)))
     (string-append
-      (string-join (map cadr steps) " && ")
+      ;; a quiet download looks like a hung black screen: say what runs
+      ;; and that it takes a while, before each step
+      "printf '\\nInstalling " name ". This takes a minute or two; output appears as it comes.\\n' && "
+      (string-join
+        (map (lambda (step)
+               (string-append "printf '\\n==> Installing " (car step) " ...\\n' && " (cadr step)))
+             steps)
+        " && ")
       ;; a version manager serves node through shims; a new global
       ;; program has none until a rehash, and the shell cannot find it
       ;; npm says where it put the program, whatever manages node; the

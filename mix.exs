@@ -4,7 +4,7 @@ defmodule Compos.MixProject do
   def project do
     [
       apps_path: "apps",
-      version: "0.1.0",
+      version: "0.9.0",
       start_permanent: Mix.env() == :prod,
       # No Phoenix.CodeReloader listener. It purges and deletes, in this VM,
       # every module an outside `mix compile` or `mix test` rebuilt — including
@@ -30,7 +30,8 @@ defmodule Compos.MixProject do
         steps: [:assemble, &copy_scheme_packages/1, &Burrito.wrap/1],
         burrito: [
           targets: [
-            macos_arm: [os: :darwin, cpu: :aarch64]
+            macos_arm: [os: :darwin, cpu: :aarch64],
+            linux: [os: :linux, cpu: :x86_64]
           ]
         ]
       ]

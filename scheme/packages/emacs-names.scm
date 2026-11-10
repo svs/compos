@@ -102,7 +102,12 @@
          (i (string-index haystack needle from)))
     (and i (string-length (substring-bytes haystack 0 i)))))
 
+
+;; The stub installs under effects unknown; stamp it pure before the file loads.
+;;;###autoload
 (public! 'string-search "(string-search NEEDLE HAYSTACK [START]) — find a substring: its character index, or #f; Emacs name, calls string-index" 'data)
+;;;###autoload
+(catalog-meta! 'function 'string-search 'effects '(pure))
 
 ;;;###autoload
 (define (split-string s &optional separators omit-nulls)

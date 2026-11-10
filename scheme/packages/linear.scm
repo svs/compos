@@ -174,7 +174,55 @@
   (component 'ui/callout
     (list 'label (string-append (linear--s (and (plist-get c 'user) (plist-get (plist-get c 'user) 'name))) " · " (linear--day (plist-get c 'createdAt)))
           'tone "note"
-          'body (list (list 'tag "c-group" 'class "c-prose" 'text (linear--s (plist-get c 'body)))))))
+          'body (linear--md-blocks (plist-get c 'body)))))
+
+;; Linear writes Markdown. Draw it as blocks: headings, bullets, quotes,
+;; code and paragraphs, with **bold**, `code` and [links](url) inline.
+(define (linear--inline text)
+  (let* ((t (re-replace-all "\\[([^\\]]+)\\]\\([^)]+\\)" text "\\1"))
+         (bold (string-split t "**")))
+    (let loop ((parts bold) (strong? #f) (out '()))
+      (if (null? parts) (reverse out)
+          (loop (cdr parts) (not strong?)
+                (append (reverse
+                          (let code ((cs (string-split (car parts) "`")) (c? #f) (acc '()))
+                            (if (null? cs) (reverse acc)
+                                (code (cdr cs) (not c?)
+                                      (if (equal? (car cs) "") acc
+                                          (cons (list (cond (c? "c-info") (strong? "c-strong") (else "")) (car cs)) acc))))))
+                        out))))))
+
+(define (linear--md-blocks md)
+  (let loop ((ls (string-split (linear--s md) "\n")) (para '()) (fence #f) (out '()))
+    (let ((flush (lambda (out)
+                   (if (null? para) out
+                       (cons (component 'ui/prose (list 'segs (linear--inline (string-join (reverse para) " ")))) out)))))
+      (cond
+        ((null? ls)
+         (reverse (if fence (cons (component 'ui/quote (list 'text (string-join (reverse fence) "\n"))) out) (flush out))))
+        (fence
+         (if (string-prefix? "```" (string-trim (car ls)))
+             (loop (cdr ls) '() #f (cons (component 'ui/quote (list 'text (string-join (reverse fence) "\n"))) out))
+             (loop (cdr ls) '() (cons (car ls) fence) out)))
+        (else
+         (let* ((raw (car ls)) (l (string-trim raw)) (out1 (flush out)))
+           (cond
+             ((string-prefix? "```" l) (loop (cdr ls) '() '() out1))
+             ((equal? l "") (loop (cdr ls) '() #f out1))
+             ((member l '("---" "***" "___")) (loop (cdr ls) '() #f out1))
+             ((string-prefix? "#" l)
+              (loop (cdr ls) '() #f (cons (component 'ui/title (list 'level 2 'text (string-trim (re-replace "^#+" l "")))) out1)))
+             ((string-prefix? ">" l)
+              (loop (cdr ls) '() #f (cons (component 'ui/quote (list 'text (string-trim (substring l 1 (string-length l))))) out1)))
+             ((or (string-prefix? "* " l) (string-prefix? "- " l) (string-prefix? "+ " l))
+              (let ((indent (- (string-length raw) (string-length (string-trim-left raw)))))
+                (loop (cdr ls) '() #f
+                      (cons (component 'ui/bullet (list 'segs (append (if (> indent 1) (list (list "c-dim" "– ")) '())
+                                                                      (linear--inline (substring l 2 (string-length l))))))
+                            out1))))
+             ((re-match? "^[0-9]+[.)] " l)
+              (loop (cdr ls) '() #f (cons (component 'ui/bullet (list 'segs (linear--inline l))) out1)))
+             (else (loop (cdr ls) (cons l para) #f out)))))))))
 
 (define (linear--issue-blocks row i)
   (let* ((it (or i row))
@@ -189,7 +237,7 @@
       (component 'ui/card (list 'title "Description" 'open? #t
                                 'body (list (cond ((not i) (component 'ui/empty (list 'text "reading…")))
                                                   ((equal? desc "") (component 'ui/empty (list 'text "no description")))
-                                                  (else (list 'tag "c-group" 'class "c-prose" 'text desc))))))
+                                                  (else (component 'ui/page (list 'body (linear--md-blocks desc))))))))
       (component 'ui/card (list 'title "Comments" 'open? #t 'badge (if i (number->string (length comments)) "")
                                 'body (cond ((not i) (list (component 'ui/empty (list 'text "reading…"))))
                                             ((null? comments) (list (component 'ui/empty (list 'text "no comments"))))

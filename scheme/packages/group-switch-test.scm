@@ -21,6 +21,13 @@
 (define (t--sw-setup!)
   (when (minibuffer-state) (minibuffer-cancel!))
   (when (float-open?) (float-close!))
+  ;; A group id is "grp:SECOND:N" and N starts at 0 here (see below), so
+  ;; a group of this test can wear the id of a group of the last one. The
+  ;; panes model that group left on this frame would then be drawn on a
+  ;; switch: a window of a killed buffer. Drop them before the frame is
+  ;; set free, which writes a model of its own.
+  (set-frame-local! 'panes-layouts
+    (filter (lambda (e) (not (string? (car e)))) (or (frame-local 'panes-layouts) '())))
   (for-each
     (lambda (b)
       (test-buffer! b "")

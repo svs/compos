@@ -2063,7 +2063,8 @@ is forgotten and that group falls back to creation order in the switcher."
                 "faint"))))
 
 (define (groups-meta buf)
-  (let* ((rows (list-entries buf))
+  (let* ((rows (remove (lambda (g) (pseudo-group-id? (group-resolve-id g)))
+                       (list-entries buf)))
          (n (length rows))
          (bufs (fold (lambda (acc g) (+ acc (length (groups--members g)))) 0 rows))
          (dirty (length (filter groups--dirty? rows))))

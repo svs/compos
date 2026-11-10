@@ -246,6 +246,50 @@
 ;;; only what it alone knows: the line, the column, the size, the scroll
 ;;; position. A setting set later publishes again.
 
+;; Keys as a keycap prints them: each modifier is its symbol, the hyphens
+;; stay, and the key keeps its case. C-x C-s is ⌃-x ⌃-s, C-M-f is ⌃-⌥-f,
+;; s-P is ⌘-P and s-<right> is ⌘-→. Every keycap draws its keys with this.
+(domain! 'commands)
+(effects! '(pure))
+
+(define *key-symbol-modifiers* '(("C-" "⌃") ("M-" "⌥") ("S-" "⇧") ("s-" "⌘")))
+
+(define *key-symbol-names*
+  '(("RET" "⏎") ("<return>" "⏎") ("SPC" "Space") ("TAB" "⇥") ("<tab>" "⇥")
+    ("DEL" "⌫") ("<backspace>" "⌫") ("<delete>" "⌦") ("ESC" "esc")
+    ("<left>" "←") ("<right>" "→") ("<up>" "↑") ("<down>" "↓")
+    ;; a laptop keyboard has no Home, End, PageUp or PageDown: fn and an arrow
+    ("<home>" "fn ←") ("<end>" "fn →") ("<prior>" "fn ↑") ("<next>" "fn ↓")))
+
+(define (key-symbol token)
+  ;; one key as a keycap prints it, or #f when TOKEN is not a key
+  (let loop ((t token) (syms '()))
+    (let ((m (find (lambda (p) (and (string-prefix? (car p) t) (> (string-length t) 2)))
+                   *key-symbol-modifiers*)))
+      (if m
+          (loop (substring t 2 (string-length t)) (cons (cadr m) syms))
+          (let* ((fkey (and (> (string-length t) 3) (string-prefix? "<f" t) (string-suffix? ">" t)
+                            (string->number (substring t 2 (- (string-length t) 1)))
+                            (string-append "F" (substring t 2 (- (string-length t) 1)))))
+                 (named (assoc t *key-symbol-names*))
+                 (base (cond (named (cadr named))
+                             (fkey fkey)
+                             ;; the key keeps its case: s-P is not s-p
+                             ((= (string-length t) 1) t)
+                             (else #f))))
+            (and base
+                 (string-join (reverse (cons base syms)) "-")))))))
+
+(define (key-symbols keys)
+  ;; KEYS that start with a key: each key as symbols, the rest as it is
+  (let ((tokens (string-split keys " ")))
+    (if (and (pair? tokens) (key-symbol (car tokens)))
+        (string-join (map (lambda (t) (or (key-symbol t) t)) tokens) " ")
+        keys)))
+
+(public! 'key-symbol "(key-symbol KEY) — one key as a keycap prints it: \"C-M-f\" is \"⌃-⌥-f\"; #f when KEY is not a key")
+(public! 'key-symbols "(key-symbols KEYS) — a key sequence as a keycap prints it: \"C-x C-s\" is \"⌃-x ⌃-s\"")
+
 (domain! 'ui)
 (effects! '(write))
 
@@ -257,7 +301,9 @@
 (define *echo-extra-hints* '())
 
 (define (echo-hints-of hints)
-  (append hints (map cadr *echo-extra-hints*)))
+  ;; each hint's key as a keycap prints it; a name that is not a key stays
+  (map (lambda (h) (cons (key-symbols (car h)) (cdr h)))
+       (append hints (map cadr *echo-extra-hints*))))
 
 (defcustom 'echo-key-hints
   '(("*Messages*" "" "view-messages"))

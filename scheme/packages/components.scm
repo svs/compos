@@ -281,7 +281,7 @@
                        'segs
                        (append
                          (if (> (length action) 2)
-                             (list (list "c-action-key" (nth 2 action)))
+                             (list (list "c-action-key" (key-symbols (nth 2 action))))
                              '())
                          (list (list "c-action-label" (cadr action))))))
                (component--get p 'actions '())))))
@@ -303,7 +303,7 @@
                          'class (if current? "c-tab c-tab-on" "c-tab")
                          'click id
                          'attrs (list (list "current" (if current? "true" "false")))
-                         'segs (append (if key (list (list "c-tab-key c-action-key" key)) '())
+                         'segs (append (if key (list (list "c-tab-key c-action-key" (key-symbols key))) '())
                                        (list (list "c-tab-label c-action-label" label))))))
                (component--get p 'tabs '()))
           ;; in force once the row, or a part that holds it, is named
@@ -527,7 +527,7 @@
                                                        (list "count" (number->string (length (cadr g))))))
                                      (map (lambda (r)
                                             (list 'tag "c-binding" 'class "c-binding"
-                                                  'segs (list (list "c-keymap-key c-action-key" (car r) "c-action-key")
+                                                  'segs (list (list "c-keymap-key c-action-key" (key-symbols (car r)) "c-action-key")
                                                               (list "do" (cadr r)))))
                                           (cadr g)))))
                        grids)
@@ -545,7 +545,7 @@
                  (list 'tag "c-row" 'class "c-keymap-row"
                        'segs
                        (append
-                         (list (list "c-keymap-key c-action-key" (car k) "c-action-key")
+                         (list (list "c-keymap-key c-action-key" (key-symbols (car k)) "c-action-key")
                                (list "c-keymap-cmd" (cadr k)))
                          (if (> (length k) 2)
                              (list (list "c-keymap-doc" (nth 2 k)))

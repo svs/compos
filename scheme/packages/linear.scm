@@ -86,7 +86,7 @@
   "id identifier title priority priorityLabel url updatedAt state { name type } assignee { id name } team { id key }")
 
 
-;; the status tabs, by Linear's state types: open is every issue not closed;
+;; the status tabs, by Linear's state types: open is todo and in progress, not backlog;
 ;; closed is read on its own when its tab is taken
 (define *linear-views*
   (list (list "open" '("unstarted" "started"))
@@ -584,7 +584,7 @@
 (define-command "linear-prev-view" "Show the previous status tab" (lambda () (linear--view-step! (current-buffer) -1)) 'modes '(linear-mode))
 
 (define-list-mode! "linear-mode"
-  (list 'doc "Linear issues, newest change first: the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. The status tabs, each with its count, head the list: open (every issue not closed), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
+  (list 'doc "Linear issues, newest change first: the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. The status tabs, each with its count, head the list: open (todo and in progress; backlog and triage stay out), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
         'transient #f
         'noun "issue"
         'rows (lambda (buf) (list-keep buf (linear-rows buf)))

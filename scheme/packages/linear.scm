@@ -89,7 +89,7 @@
 ;; the status tabs, by Linear's state types: open is every issue not closed;
 ;; closed is read on its own when its tab is taken
 (define *linear-views*
-  (list (list "open" '("triage" "backlog" "unstarted" "started"))
+  (list (list "open" '("unstarted" "started"))
         (list "backlog" '("triage" "backlog"))
         (list "todo" '("unstarted"))
         (list "in progress" '("started"))

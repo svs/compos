@@ -1215,7 +1215,7 @@ defmodule Compos.Core.Session do
               _ ->
                 fn msg ->
                   Roots.drop(key)
-                  __MODULE__.message("llm error: #{msg}")
+                  __MODULE__.message("llm error: #{msg}", "error")
                 end
             end
 

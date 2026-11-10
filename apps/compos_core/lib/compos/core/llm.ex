@@ -49,7 +49,7 @@ defmodule Compos.Core.LLM do
         case result do
           {:ok, text} -> callback.(text)
           {:error, msg} when is_function(on_error, 1) -> on_error.(msg)
-          {:error, msg} -> Session.message("llm error: #{msg}")
+          {:error, msg} -> Session.message("llm error: #{msg}", "error")
         end
       end)
 
@@ -85,7 +85,7 @@ defmodule Compos.Core.LLM do
             callback.(text)
 
           {:error, msg} ->
-            Session.message("llm error: #{msg}")
+            Session.message("llm error: #{msg}", "error")
         end
       end)
 

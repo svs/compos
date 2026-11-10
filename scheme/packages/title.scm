@@ -179,7 +179,9 @@
   (if (not (title-ready?))
       (k #f)
       (llm-with-model (title--prompt text) (title--model)
-        (lambda (raw) (k (and (string? raw) (not (equal? raw "")) (title--parse raw)))))))
+        (lambda (raw) (k (and (string? raw) (not (equal? raw "")) (title--parse raw))))
+        ;; a failed call is no card: the caller falls back, never waits
+        (lambda (err) (k #f)))))
 
 ;;;###autoload
 (define-command "title-server"

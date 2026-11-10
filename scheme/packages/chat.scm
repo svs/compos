@@ -1752,6 +1752,19 @@
                           (and status (car status)) (and status (cadr status))))))))
                 #t)))))
 
+;; A summary that cannot be written says so, once per distinct error, at
+;; the error level: a silent failure left chats with a title and no
+;; summary, and nothing in the editor said why.
+(define *chat-summary-last-error* #f)
+
+(define (chat-summary--failed! buf err)
+  (let ((text (if (string? err) err (format "~a" err))))
+    (when (buffer-known? buf)
+      (buffer-set-local! buf 'chat-summary-error text))
+    (unless (equal? text *chat-summary-last-error*)
+      (set! *chat-summary-last-error* text)
+      (message (string-append "chat summary failed: " text) 'error))))
+
 (define (chat-summary-refresh! buf &optional force?)
   (when (buffer-known? buf)
     (let* ((titled (string? (buffer-local-value 'chat-title buf)))
@@ -1772,6 +1785,7 @@
                (when (and (string? text) (not (equal? text "")) (buffer-known? b))
                  (let ((flat (chat-summary--flatten
                                (chat-summary--first-sentence text))))
+                   (set! *chat-summary-last-error* #f)
                    (unless (equal? flat (buffer-local-value 'chat-summary b))
                      (chat-summary-land! b flat))))))
            ;; The on-device card writer can be missing, still loading, or
@@ -1794,7 +1808,8 @@
                  chat-summary-model
                  (lambda (text)
                    (let ((b (if force? (retitle buf text) buf)))
-                     (land b text)))))))
+                     (land b text)))
+                 (lambda (err) (chat-summary--failed! buf err))))))
       ;; The on-device card writer returns TITLE and DESCRIPTION. TITLE
       ;; names the chat, once. DESCRIPTION is the running summary, and it
       ;; does move. The rename comes first, so the summary lands in the

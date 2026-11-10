@@ -2407,7 +2407,9 @@
         (list 'cancel (lambda () (set! todo--new-open? #f) (set! todo--new-pick-group? #f)))
         (list 'style #f)))))
 
-(global-set-key "C-c T" "todo-new")
+(bind-prefix! "global" "C-t" "todo-prefix-map")
+(define-key "todo-prefix-map" "n" "todo-new")
+(define-key "todo-prefix-map" "t" "todo")
 ;; filing a task is for every buffer, not just the todo list
 (app-entry! "todo-new")
 

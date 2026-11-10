@@ -691,7 +691,7 @@
 
 (catalog-meta! 'command "telemetry-toggle" 'domain 'diagnostics 'effects '(read display))
 
-(global-set-key "C-t" "telemetry-toggle")
+(global-set-key "C-x T" "telemetry-toggle")
 
 (public! 'telemetry-events
   "(telemetry-events [LIMIT]) — return recent events of every layer, newest first")

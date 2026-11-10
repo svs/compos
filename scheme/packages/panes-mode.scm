@@ -1422,6 +1422,26 @@
       ;; the focus stays on this pane: the draw keeps you here
       (panes-apply! (panes-set-focus (car added) pid)))))
 
+(define-command "column-add" "Add an empty column at the right edge; you stay where you are"
+  (lambda ()
+    (let* ((l (panes--ensure-layout!))
+           (pid (or (panes--current-pane l) (panes-focus l)))
+           (added (panes-add-empty-pane l #f)))
+      (panes-apply! (panes-set-focus (car added) pid)))))
+
+(define-command "column-remove" "Hide the rightmost column with its windows; pane-restore brings each pane back"
+  (lambda ()
+    (let* ((l (panes--ensure-layout!))
+           (cols (panes-columns l))
+           (pid (or (panes--current-pane l) (panes-focus l))))
+      (if (<= (length cols) 1)
+          (message "The last column stays")
+          (let* ((gone (map (lambda (p) (plist-get p 'id)) (car (reverse cols))))
+                 (l (let loop ((acc l) (ids gone)) (if (null? ids) acc (loop (panes-hide-pane acc (car ids)) (cdr ids))))))
+            ;; the capacity shrinks with the row, as column-add grows it
+            (let ((l (panes-set-capacity l (panes-column-count l))))
+              (panes-apply! (if (member pid gone) l (panes-set-focus l pid)))))))))
+
 (define (panes-split-off! bufs &optional from)
   "BUFS go to a second window of their mode, beside FROM; the new
    window is selected. Without FROM: the window of the first of BUFS

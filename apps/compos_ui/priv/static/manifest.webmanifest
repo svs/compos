@@ -4,6 +4,7 @@
   "description": "An agentic platform for operators",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["tabbed", "standalone"],
   "background_color": "#e6e0d2",
   "theme_color": "#e6e0d2",
   "icons": [

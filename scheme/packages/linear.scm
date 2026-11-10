@@ -179,6 +179,7 @@
 ;; code and paragraphs, with **bold**, `code` and [links](url) inline.
 (define (linear--inline text)
   (let* ((t (re-replace-all "\\[([^\\]]+)\\]\\([^)]+\\)" text "\\1"))
+         (t (re-replace-all "(^|[^*])\\*([^*\\s][^*]*)\\*(?!\\*)" t "\\1\\2"))
          (bold (string-split t "**")))
     (let loop ((parts bold) (strong? #f) (out '()))
       (if (null? parts) (reverse out)

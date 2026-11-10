@@ -1296,6 +1296,8 @@
         (else (find pred (cdr lst)))))
 (public! 'find "(find PRED LST) — the first element of LST that PRED holds for, or #f")
 (catalog-meta! 'function "find" 'domain 'system 'effects '(pure))
+(public! 'any "(any PRED LST) — the first true value PRED gives for an element of LST, or #f")
+(catalog-meta! 'function "any" 'domain 'system 'effects '(pure))
 
 ;; A whole number from 0 up to N, not N. A generator seeded from the clock:
 ;; enough to pick a file or a row at random, not for secrets. The editor had

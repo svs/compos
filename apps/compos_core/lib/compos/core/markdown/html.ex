@@ -1140,7 +1140,7 @@ defmodule Compos.Core.Markdown.Html do
   @line_numbers_css """
   <style>body{padding-left:3.6em}
   .ln::before{content:attr(data-n);position:absolute;left:0;width:2.8em;text-align:right;
-  font-size:.75em;line-height:inherit;opacity:.4;pointer-events:none;user-select:none}</style>
+  font-size:11px;line-height:inherit;opacity:.4;pointer-events:none;user-select:none}</style>
   """
 
   @doc """
@@ -1170,7 +1170,18 @@ defmodule Compos.Core.Markdown.Html do
     [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
     |> Enum.reject(&(&1 > byte_size(text)))
     |> Enum.with_index(1)
-    |> Enum.map(fn {at, n} -> {at, ~s(<span class="ln" data-p="#{at}" data-n="#{n}"></span>)} end)
+    |> Enum.map(fn {at, n} ->
+      # a blank or fence line draws nothing of its own, so its number would
+      # land on its neighbour's: keep the mark, drop the number
+      shown = if numbered_line?(text, at), do: n, else: ""
+      {at, ~s(<span class="ln" data-p="#{at}" data-n="#{shown}"></span>)}
+    end)
+  end
+
+  defp numbered_line?(text, at) do
+    rest = binary_part(text, at, byte_size(text) - at)
+    line = rest |> String.split("\n", parts: 2) |> hd() |> String.trim()
+    line != "" and not String.starts_with?(line, ["```", "~~~"])
   end
 
   @doc """

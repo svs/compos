@@ -2027,12 +2027,14 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; The rows thunk refills it; cells and the header only read it.
 (define groups--buckets '())
 (define groups--dirty-ids '())
+(define groups--dirty-names '())
 
 (define (groups--index!)
   (set! groups--buckets
         (cadr (buffer-rows '(sort recent bucket group fields ()))))
-  (set! groups--dirty-ids
-        (map cadr (filter caddr (cadr (buffer-rows '(fields (group modified))))))))
+  (let ((dirty (filter caddr (cadr (buffer-rows '(fields (group modified)))))))
+    (set! groups--dirty-ids (map cadr dirty))
+    (set! groups--dirty-names (map car dirty))))
 
 (define (groups--members g)
   (let ((id (group-resolve-id g)))
@@ -2044,7 +2046,7 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (groups--dirty? g)
   (let ((id (group-resolve-id g)))
     (if (pseudo-group-id? id)
-        (group-dirty? g)
+        (any (lambda (b) (member b groups--dirty-names)) (pseudo-group-buffers id))
         (and (member id groups--dirty-ids) #t))))
 
 ;; the members read as the group's contents, then what the group is for
@@ -3562,7 +3564,39 @@ is forgotten and that group falls back to creation order in the switcher."
   (lambda () (list-mode-show! "groups-mode")))
 
 (define-list-mode! "groups-mode"
-  'rows (lambda (buf) (groups--index!) (list-keep buf (group-names-all))))
+  (list
+    'doc (string-append
+           "Every buffer group as a table: members, companion noise, "
+           "metadata. RET switches to the group and restores its layout; "
+           "d writes its description with the LLM; n cycles noise; "
+           "x dissolves; K kills the members. `SPC` marks a group, `*` marks "
+           "every one, and the verbs act on the marked groups — or on the "
+           "row at point when nothing is marked. `/` narrows as you type "
+           "and `\\` widens by one.")
+    'buffer *groups-buffer*
+    'rows (lambda (buf) (groups--index!) (list-keep buf (group-names-all)))
+    'columns (lambda (buf)
+               (list (list "" 1)
+                     (list "group" 24)
+                     (list "buffers" 7 'right)
+                     (list "noise" 6)
+                     (list "members" #f)))
+    'cells group-cells
+    'title (lambda (buf) "Groups")
+    'meta groups-meta
+    'total (lambda (buf) (length (list-entries buf)))
+    'footer (lambda (buf)
+              '(("RET" "switch") ("SPC" "mark") ("*" "all") ("r" "rename")
+                ("d" "describe") ("n" "noise") ("x" "dissolve")
+                ("K" "kill buffers") ("b" "members") ("/" "filter")
+                ("g" "refresh") ("q" "quit")))
+    'key (lambda (buf g) g)
+    'noun "group"
+    'keys '(("RET" "group-switch") ("r" "group-rename")
+            ("d" "group-describe")
+            ("n" "group-noise-cycle") ("x" "group-dissolve")
+            ("K" "group-kill") ("b" "group-members")
+            ("g" "groups-refresh") ("q" "quit-window"))))
 
 (define (group-members-of names id)
   ;; Which of NAMES belong to group ID, in the order given.

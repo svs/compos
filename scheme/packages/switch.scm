@@ -1283,7 +1283,6 @@ the next row down. STEP is kept for the callers."
 (define-command "frame-switch" "Switch to another frame: type to narrow, RET selects"
   (lambda () (frame-switch-prompt!)))
 (global-set-key "C-x f" "frame-switch")
-(global-set-key "C-x C-t" "switch-window-buffer")
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))

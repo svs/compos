@@ -10,6 +10,8 @@ Rules for the agent:
 
 ## 1. Prerequisites
 
+If a check below fails and the person has no developer tools, follow [SETUP.md](SETUP.md) first.
+
 | Tool | Why | Check |
 |---|---|---|
 | Erlang/OTP and Elixir 1.19 or later | the daemon | `elixir --version` |

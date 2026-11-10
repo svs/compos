@@ -5,6 +5,8 @@
 ## Install and run
 
 To install with an AI agent, point the agent at [INSTALL.md](INSTALL.md).
+If you have no developer tools (Elixir, Rust, Node), ask your agent to follow
+[SETUP.md](SETUP.md) first.
 
 ```sh
 mix deps.get && mix test

@@ -687,6 +687,8 @@
                                     (if (todo--blank? said) "" (string-append ": " said)))
                 'by who))))))
 
+;; todo-state-functions: each runs as (FN OLD NEW WHO TEXT) when a task changes state;
+;; OLD and NEW are the task before and after, TEXT the log line that came with the move.
 (define (todo-update id props)
   "(todo-update ID PROPS) — change a task; return it. PROPS: any of title, state, project, assignee, chats, priority, urgent (#t or #f), deadline, scheduled, tags, source, parent, depends, goal (one line: what is true when it is done), notes (#f or blank clears one), status (what is done and what is left; it replaces the old), plus note (text added to the notes), log (a line for the log) and by (who). Each change is logged."
   (let* ((t (todo--must id))
@@ -724,6 +726,9 @@
                       (begin (todo--write-span! t #f)
                              (todo--append! (todo--project-file (plist-get new 'project)) (todo--render new))))
                   (todo--tell-parent! t new who text)
+                  ;; a source (Linear, mail, ...) hears its task move: (FN OLD NEW WHO TEXT)
+                  (unless (equal? (plist-get t 'state) (plist-get new 'state))
+                    (run-hook-with-args 'todo-state-functions t new who text))
                   (todo-get id))))))))
 
 ;; What a log, done, wait or review call answers: the task's state after

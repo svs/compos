@@ -75,8 +75,8 @@
 (define-key "list-mode-map" "w" "app-watch")
 (define-key "detail-mode-map" "w" "app-watch")
 
-(public! 'app-watch-define!)
-(public! 'app-watching?)
+(public! 'app-watch-define! "(app-watch-define! MODE) -- MODE's app redraws its buffers when its data changes; its buffers start watched")
+(public! 'app-watching? "(app-watching? BUF) -- #t when BUF follows its data; w turns it on and off")
 (catalog-meta! 'command "app-watch" 'domain 'buffers 'effects '(write) 'aliases "auto revert watch follow live refresh")
 
 (provide 'app-watch)

@@ -405,20 +405,96 @@
                     (when (pair? hit) (linear--update! buf (list 'stateId (plist-get (car hit) 'id)) (string-append "→ " name)))))
                 'require-match #t)))))))
 
+;; Linear is a source into todos, and todos are the unit of execution: assigning an
+;; issue to an agent files a todo for it (source linear:ID, once per issue) in the
+;; frame's group, with the issue as its brief, and starts a chat on that todo.
+(define linear--agent-choice "Agent (a todo in this group)")
+
+(define (linear--todo-notes i)
+  (string-append "From Linear " (linear--s (plist-get i 'identifier)) ": " (linear--s (plist-get i 'url))
+                 "\nLinear is the request; this todo is the record of the work."
+                 "\n\n" (linear--s (plist-get i 'description))))
+
+;; the todo has started, so the issue shows In Progress: the team's first started
+;; state, and only when the issue has not started or closed yet. Nothing else is sent.
+(define (linear--mark-started! buf row i)
+  (when (member (linear--s (plist-get (plist-get i 'state) 'type)) '("triage" "backlog" "unstarted"))
+    (linear--with-teams
+      (lambda (_)
+        (let* ((team (linear--team (plist-get (plist-get i 'team) 'id)))
+               (started (sort (map (lambda (s) (list (or (plist-get s 'position) 0) s))
+                                   (filter (lambda (s) (equal? (plist-get s 'type) "started")) (linear--nodes team 'states))))))
+          (when (pair? started)
+            (let ((s (cadr (car started))))
+              (linear-gql "mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }"
+                (list 'id (plist-get i 'id) 'input (list 'stateId (plist-get s 'id)))
+                (lambda (d) (when d (linear--after-change! buf row (string-append "→ " (linear--s (plist-get s 'name))))))))))))))
+
+(define (linear-assign-agent! buf row)
+  (let ((g (frame-group)))
+    (if (not g) (message "Linear: no group here to file the todo in")
+        (linear-gql "query($id: String!) { issue(id: $id) { id identifier title description url state { type } team { id } } }"
+          (list 'id (plist-get row 'id))
+          (lambda (d)
+            (let ((i (and d (plist-get d 'issue))))
+              (when i
+                (let ((id (todo-create (string-append (linear--s (plist-get i 'identifier)) ": " (linear--s (plist-get i 'title)))
+                                       (list 'group g 'state "todo"
+                                             'source (string-append "linear:" (linear--s (plist-get i 'identifier)))
+                                             'notes (linear--todo-notes i)))))
+                  (todo-assign-chat! id g)
+                  (linear--mark-started! buf row i)
+                  (message (string-append "Linear: " (linear--s (plist-get i 'identifier)) " → todo " id ", agent started"))))))))))
+
+;; The todo carries the work and Linear hears little of it: one comment when the
+;; task ends (review or done, the first of them only), and one for each question
+;; (the task goes waiting with a reason).
+(define (linear--todo-comment! ident body)
+  (linear-gql "query($id: String!) { issue(id: $id) { id } }" (list 'id ident)
+    (lambda (d)
+      (let ((i (and d (plist-get d 'issue))))
+        (when i
+          (linear-gql "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }"
+            (list 'input (list 'issueId (plist-get i 'id) 'body body))
+            (lambda (r) (when r (linear--log (string-append "commented on " ident))))))))))
+
+(define (linear--blank? s) (or (not (string? s)) (equal? (string-trim s) "")))
+
+(define (linear--todo-moved old new who text)
+  (let ((src (plist-get new 'source))
+        (state (plist-get new 'state))
+        (said (if (linear--blank? text) (linear--s (plist-get new 'status)) text)))
+    (when (and (string? src) (string-prefix? "linear:" src))
+      (let ((ident (substring src 7 (string-length src))))
+        (cond
+          ((and (equal? state "waiting") (not (linear--blank? text)))
+           (linear--todo-comment! ident (string-append "**Question** (todo " (plist-get new 'id) ")\n\n" text)))
+          ((and (member state '("review" "done")) (not (linear--blank? said)))
+           (once! (string-append "linear-ended:" (plist-get new 'id))
+             (lambda ()
+               (linear--todo-comment! ident (string-append (if (equal? state "done") "**Done**" "**Ready for review**")
+                                                           " (todo " (plist-get new 'id) ")\n\n" said))
+               #t))))))))
+
+(add-hook! 'todo-state-functions 'linear--todo-moved)
+
 (define (linear-assign! buf)
   (let ((row (linear--row-at buf)))
     (linear--with-teams
       (lambda (_)
         (let* ((team (and row (linear--row-team row)))
                (members (linear--nodes team 'members))
-               (names (cons "(unassign)" (map (lambda (m) (plist-get m 'name)) members))))
+               (names (append (list linear--agent-choice "(unassign)") (map (lambda (m) (plist-get m 'name)) members))))
           (if (not team) (message "No issue here")
               (completing-read (string-append (linear--s (plist-get row 'identifier)) " assignee: ") names
                 (lambda (name)
-                  (if (equal? name "(unassign)")
-                      (linear--update! buf (list 'assigneeId #f) "unassigned")
+                  (cond
+                    ((equal? name linear--agent-choice) (linear-assign-agent! buf row))
+                    ((equal? name "(unassign)")
+                      (linear--update! buf (list 'assigneeId #f) "unassigned"))
+                    (else
                       (let ((hit (filter (lambda (m) (equal? (plist-get m 'name) name)) members)))
-                        (when (pair? hit) (linear--update! buf (list 'assigneeId (plist-get (car hit) 'id)) (string-append "→ " name))))))
+                        (when (pair? hit) (linear--update! buf (list 'assigneeId (plist-get (car hit) 'id)) (string-append "→ " name)))))))
                 'require-match #t)))))))
 
 (define linear--priorities '(("Urgent" 1) ("High" 2) ("Medium" 3) ("Low" 4) ("No priority" 0)))
@@ -595,7 +671,7 @@
 (define-command "linear-prev-view" "Show the previous status tab" (lambda () (linear--view-step! (current-buffer) -1)) 'modes '(linear-mode))
 
 (define-list-mode! "linear-mode"
-  (list 'doc "Linear issues, newest change first: the id, status, priority (! urgent, then a bar as tall as the level: ▆ high, ▄ medium, ▂ low), assignee, last update and title. The status tabs, each with its count, head the list: open (todo and in progress; backlog and triage stay out), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
+  (list 'doc "Linear issues, newest change first: the id, status, priority (! urgent, then a bar as tall as the level: ▆ high, ▄ medium, ▂ low), assignee, last update and title. The status tabs, each with its count, head the list: open (todo and in progress; backlog and triage stay out), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee (Agent files a todo for the issue in this group and starts a chat on it: Linear is a source, the todo is the unit of work), p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
         'transient #f
         ;; the plain text table, as Todos draws, not the drawn grid
         'default-view "bare"

@@ -2022,10 +2022,35 @@ is forgotten and that group falls back to creation order in the switcher."
         ((equal? n "off") "faint")
         (else "dim")))
 
+;; The board reads its members from meta.db: one query per redraw
+;; answers every buffer, awake and asleep, by group, most recent first.
+;; The rows thunk refills it; cells and the header only read it.
+(define groups--buckets '())
+(define groups--dirty-ids '())
+
+(define (groups--index!)
+  (set! groups--buckets
+        (cadr (buffer-rows '(sort recent bucket group fields ()))))
+  (set! groups--dirty-ids
+        (map cadr (filter caddr (cadr (buffer-rows '(fields (group modified))))))))
+
+(define (groups--members g)
+  (let ((id (group-resolve-id g)))
+    (if (pseudo-group-id? id)
+        (pseudo-group-buffers id)
+        (let ((b (assoc id groups--buckets)))
+          (if b (cdr b) '())))))
+
+(define (groups--dirty? g)
+  (let ((id (group-resolve-id g)))
+    (if (pseudo-group-id? id)
+        (group-dirty? g)
+        (and (member id groups--dirty-ids) #t))))
+
 ;; the members read as the group's contents, then what the group is for
 (define (group-cells buf g)
-  (let ((members (group-buffers-mru g)))
-    (list (if (group-dirty? g) (list "●" "warn") "")
+  (let ((members (groups--members g)))
+    (list (if (groups--dirty? g) (list "●" "warn") "")
           (list (group-label g) (group-color-face g))
           (list (number->string (length members)) "dim")
           (list (group-noise g) (group-noise-face (group-noise g)))
@@ -2038,8 +2063,8 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (groups-meta buf)
   (let* ((rows (list-entries buf))
          (n (length rows))
-         (bufs (fold (lambda (acc g) (+ acc (length (group-buffers g)))) 0 rows))
-         (dirty (length (filter group-dirty? rows))))
+         (bufs (fold (lambda (acc g) (+ acc (length (groups--members g)))) 0 rows))
+         (dirty (length (filter groups--dirty? rows))))
     (string-append (number->string n) (if (= n 1) " group" " groups")
                    " · " (number->string bufs) " buffers"
                    " · " (number->string dirty) " modified"
@@ -3537,39 +3562,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (lambda () (list-mode-show! "groups-mode")))
 
 (define-list-mode! "groups-mode"
-  (list
-    'doc (string-append
-           "Every buffer group as a table: members, companion noise, "
-           "metadata. RET switches to the group and restores its layout; "
-           "d writes its description with the LLM; n cycles noise; "
-           "x dissolves; K kills the members. `SPC` marks a group, `*` marks "
-           "every one, and the verbs act on the marked groups — or on the "
-           "row at point when nothing is marked. `/` narrows as you type "
-           "and `\\` widens by one.")
-    'buffer *groups-buffer*
-    'rows (lambda (buf) (list-keep buf (group-names-all)))
-    'columns (lambda (buf)
-               (list (list "" 1)
-                     (list "group" 24)
-                     (list "buffers" 7 'right)
-                     (list "noise" 6)
-                     (list "members" #f)))
-    'cells group-cells
-    'title (lambda (buf) "Groups")
-    'meta groups-meta
-    'total (lambda (buf) (length (group-names-all)))
-    'footer (lambda (buf)
-              '(("RET" "switch") ("SPC" "mark") ("*" "all") ("r" "rename")
-                ("d" "describe") ("n" "noise") ("x" "dissolve")
-                ("K" "kill buffers") ("b" "members") ("/" "filter")
-                ("g" "refresh") ("q" "quit")))
-    'key (lambda (buf g) g)
-    'noun "group"
-    'keys '(("RET" "group-switch") ("r" "group-rename")
-            ("d" "group-describe")
-            ("n" "group-noise-cycle") ("x" "group-dissolve")
-            ("K" "group-kill") ("b" "group-members")
-            ("g" "groups-refresh") ("q" "quit-window"))))
+  'rows (lambda (buf) (groups--index!) (list-keep buf (group-names-all))))
 
 (define (group-members-of names id)
   ;; Which of NAMES belong to group ID, in the order given.

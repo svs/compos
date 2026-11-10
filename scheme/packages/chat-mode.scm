@@ -595,17 +595,23 @@
     (buffer-set-local! chat 'chat-for-key key)
     chat))
 
-(define (chat-for--keep-file! c path)
-  ;; a chat read back goes on writing the file it came from, not a new one,
-  ;; and only through the chat log: a buffer still visiting its .chat file
+(define (chat-log-file? path)
+  ;; #t when PATH is a .chat file in a chat log directory: the chats of a
+  ;; group, else the legacy directory
+  (let ((dir (string-join (reverse (cdr (reverse (string-split path "/")))) "/")))
+    (and (string-suffix? ".chat" path)
+         (or (equal? dir (chat-log-legacy-dir))
+             (and (find (lambda (g) (equal? dir (string-append (group-home-dir g) "/chats")))
+                        (group-ids))
+                  #t)))))
+
+(define (chat-keep-log-file! c path)
+  ;; a chat read back from its log goes on writing that file, not a new one,
+  ;; and only through chat-log-save!: a buffer still visiting its .chat file
   ;; is saved like a file, and the save guard then refuses every agent call
-  (let ((leaf (car (reverse (string-split path "/")))))
-    (when (and (string-suffix? ".chat" leaf)
-               (equal? (string-append (chat-log-dir-for c) "/" leaf) path)
-               (or (not (buffer-local-value 'chat-log-id c))
-                   (equal? (buffer-file-name c) path)))
-      (buffer-set-local! c 'chat-log-id (substring leaf 0 (- (string-length leaf) 5)))))
-  (when (equal? (buffer-file-name c) path)
+  (when (and (string? path) (equal? (buffer-file-name c) path) (chat-log-file? path))
+    (let ((leaf (car (reverse (string-split path "/")))))
+      (buffer-set-local! c 'chat-log-id (substring leaf 0 (- (string-length leaf) 5))))
     (buffer-detach! c)))
 
 (define (chat-for--open key path g)
@@ -626,7 +632,7 @@
         (and c
              (begin
                (buffer-set-local! c 'chat-for-key key)
-               (chat-for--keep-file! c path)
+               (chat-keep-log-file! c path)
                (let ((title (plist-get header 'title)))
                  (when (and (not live) (string? title)) (chat-title c title)))
                ;; the title renamed it; the thing's chat is a chat in its
@@ -1880,6 +1886,8 @@
           (title chat-title) (summary chat-summary) (subject chat-subject)
           (goal chat-goal-status) (goal-why chat-goal-why)
           (directory chat-directory) (slug agent-slug)))
+      ;; a chat we wrote: from now on chat-log-save! writes its file
+      (chat-keep-log-file! buf (buffer-file-name buf))
       (let ((doc (plist-get header 'companion-of)))
         (when doc (buffer-relate! buf 'companion (chat-header-string doc))))
       (let ((slug (buffer-local-value 'agent-slug buf)))

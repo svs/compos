@@ -171,17 +171,25 @@
           (or (not (string? disk)) (equal? disk base))))))
 
 (define (jj-save! buf)
-  (if (jj-savable? buf)
-      (with-current-buffer buf
-        (lambda ()
-          ;; buffer-save! opens the change and snapshots: jj-save-around
-          (let ((path (buffer-save!)))
-            (when path (run-hooks 'after-save-hook))
-            path)))
-      (begin
-        (message (string-append "jj: " (abbreviate-file-name (buffer-path buf))
-                                " changed on disk; not saved"))
-        #f)))
+  ;; A write rule that refuses this save raises in buffer-save!. The flush
+  ;; runs after every tool call, so a raise there fails every later call of
+  ;; the agent. Ask the rules first and decline, as for a file changed on disk.
+  (let ((refused (write-refusal (buffer-path buf) buf #f)))
+    (cond (refused
+           (message (string-append "jj: " (abbreviate-file-name (buffer-path buf))
+                                   " not saved: " refused))
+           #f)
+          ((jj-savable? buf)
+           (with-current-buffer buf
+             (lambda ()
+               ;; buffer-save! opens the change and snapshots: jj-save-around
+               (let ((path (buffer-save!)))
+                 (when path (run-hooks 'after-save-hook))
+                 path))))
+          (else
+           (message (string-append "jj: " (abbreviate-file-name (buffer-path buf))
+                                   " changed on disk; not saved"))
+           #f))))
 
 (define (jj-dirty-by author)
   (filter (lambda (b)

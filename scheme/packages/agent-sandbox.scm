@@ -217,6 +217,7 @@
 (public! 'agent-sandbox-on? "(agent-sandbox-on? [CHAT]) — #t when CHAT, else the agent's chat this call runs for, has the sandbox on")
 (public! 'agent-sandbox-dirs "(agent-sandbox-dirs CHAT) — where a sandboxed command of CHAT may write, as real paths")
 (public! 'agent-sandbox-wrap "(agent-sandbox-wrap CMD [CHAT]) — CMD in the sandbox when the chat has it on; else CMD")
+(public! 'unsaved-foreign-authors "(unsaved-foreign-authors BUF [ME]) — who, other than ME (else the caller's edit author), made the edits in BUF since its last save; () when none or when the editor cannot tell")
 (effects! '(pure))
 (public! 'agent-sandbox-exempt? "(agent-sandbox-exempt? CMD) — #t when CMD runs only programs in agent-sandbox-exempt, so it skips the sandbox")
 (public! 'agent-sandbox-profile "(agent-sandbox-profile DIRS) — the profile that lets a command write only under DIRS")

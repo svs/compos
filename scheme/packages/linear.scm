@@ -87,34 +87,51 @@
 (define (linear--scope buf) (or (buffer-local buf 'linear-scope) "all"))
 (define (linear--scopes) (append (list "mine") (map (lambda (t) (plist-get t 'key)) (linear--teams)) (list "all")))
 
-(define (linear--filter scope)
-  (let ((open (list 'state (list 'type (list 'nin (list "completed" "canceled" "duplicate"))))))
-    (cond ((equal? scope "mine") (append (list 'assignee (list 'isMe (list 'eq #t))) open))
-          ((equal? scope "all") open)
-          (else (append (list 'team (list 'key (list 'eq scope))) open)))))
+;; the status tabs, by Linear's state types: open is every issue not closed;
+;; closed is read on its own when its tab is taken
+(define *linear-views*
+  (list (list "open" '("triage" "backlog" "unstarted" "started"))
+        (list "backlog" '("triage" "backlog"))
+        (list "todo" '("unstarted"))
+        (list "in progress" '("started"))
+        (list "closed" '("completed" "canceled" "duplicate"))))
+(define (linear--view buf) (list-tab buf "open"))
+(define (linear--view-types buf) (cadr (or (assoc (linear--view buf) *linear-views*) (car *linear-views*))))
+(define (linear--closed? buf) (equal? (linear--view buf) "closed"))
+(define (linear--type row) (linear--s (plist-get (plist-get row 'state) 'type)))
+
+(define (linear--filter closed?)
+  (list 'state (list 'type (list (if closed? 'in 'nin) (list "completed" "canceled" "duplicate")))))
 
 (define (linear--read! buf)
-  (let ((gen (+ 1 (or (buffer-local buf 'linear-gen) 0))) (t0 (monotonic-ms)))
-    (buffer-set-local! buf 'linear-gen gen)
+  ;; open and closed are read apart, each with its own generation, so a tab
+  ;; change mid-read drops neither
+  (let* ((closed (linear--closed? buf))
+         (set (if closed 'linear-closed 'linear-open))
+         (gkey (if closed 'linear-gen-closed 'linear-gen-open))
+         (gen (+ 1 (or (buffer-local buf gkey) 0))) (t0 (monotonic-ms)))
+    (buffer-set-local! buf gkey gen)
     (buffer-set-local! buf 'linear-loading #t)
     (list-refresh! buf)
-    (linear-gql (string-append "query($f: IssueFilter) { issues(first: 150, filter: $f, orderBy: updatedAt) { nodes { " linear--issue-fields " } } }")
-      (list 'f (linear--filter (linear--scope buf)))
+    (linear-gql (string-append "query($f: IssueFilter) { issues(first: 250, filter: $f, orderBy: updatedAt) { nodes { " linear--issue-fields " } } }")
+      (list 'f (linear--filter closed))
       (lambda (d)
-        (when (and (buffer-exists? buf) (equal? (buffer-local buf 'linear-gen) gen))
+        (when (and (buffer-exists? buf) (equal? (buffer-local buf gkey) gen))
           (buffer-set-local! buf 'linear-loading #f)
-          (when d (buffer-set-local! buf 'linear-rows (linear--nodes d 'issues)))
+          (when d (buffer-set-local! buf set (linear--nodes d 'issues)))
           (list-refresh! buf)
-          (message (string-append "Linear: " (number->string (length (or (buffer-local buf 'linear-rows) '())))
-                                  " issues (" (linear--scope buf) ") in " (number->string (- (monotonic-ms) t0)) " ms")))))))
+          (message (string-append "Linear: " (number->string (length (or (buffer-local buf set) '())))
+                                  (if closed " closed" " open") " issues in " (number->string (- (monotonic-ms) t0)) " ms")))))))
 
-(define (linear-rows buf) (or (buffer-local buf 'linear-rows) '()))
+(define (linear-rows buf)
+  (let ((types (linear--view-types buf)))
+    (filter (lambda (r) (member (linear--type r) types))
+            (or (buffer-local buf (if (linear--closed? buf) 'linear-closed 'linear-open)) '()))))
 (public! 'linear-rows "(linear-rows BUF) -- the Linear issues the listing BUF holds, as plists" 'linear)
 (catalog-meta! 'function 'linear-rows 'effects '(read))
 (define (linear-key buf row) (plist-get row 'identifier))
 (define (linear-title buf)
-  (string-append "Linear — " (let ((s (linear--scope buf))) (cond ((equal? s "mine") "my open issues") ((equal? s "all") "all open issues") (else (string-append s " open issues"))))
-                 (if (buffer-local buf 'linear-loading) " — reading…" "")))
+  (string-append "Linear   " (linear--view buf) (if (buffer-local buf 'linear-loading) " — reading…" "")))
 
 (define (linear--state-tone type)
   (cond ((equal? type "started") "warn") ((equal? type "completed") "good")
@@ -311,14 +328,15 @@
   (linear--with-teams
     (lambda (_)
       (let* ((listing (if (buffer-derived-mode? buf "linear-mode") buf (buffer-local buf 'linear-listing)))
-             (scope (if listing (linear--scope listing) "mine"))
+             (scope (and listing (linear--facet listing "team")))
+             (mine (and listing (equal? (linear--facet listing "assignee") "me")))
              (go (lambda (team)
                    (read-string (string-append "New " (plist-get team 'key) " issue: ")
                      (lambda (title)
                        (unless (equal? (string-trim title) "")
                          (linear-gql "mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier } } }"
                            (list 'input (append (list 'teamId (plist-get team 'id) 'title title)
-                                                (if (equal? scope "mine") (list 'assigneeId (plist-get (plist-get *linear-teams* 'viewer) 'id)) '())))
+                                                (if mine (list 'assigneeId (plist-get (plist-get *linear-teams* 'viewer) 'id)) '())))
                            (lambda (d)
                              (when d
                                (message (string-append "Linear: created " (linear--s (plist-get (plist-get (plist-get d 'issueCreate) 'issue) 'identifier))))
@@ -338,13 +356,96 @@
       (linear--read! buf)
       (begin (buffer-set-local! buf 'linear-issue #f) (linear--issue-draw! buf) (linear--issue-read! buf))))
 
-(define (linear-next-scope! buf)
-  (linear--with-teams
-    (lambda (_)
-      (let* ((ss (linear--scopes)) (cur (linear--scope buf))
-             (rest (member cur ss)))
-        (buffer-set-local! buf 'linear-scope (if (and rest (pair? (cdr rest))) (cadr rest) (car ss)))
-        (linear--read! buf)))))
+;; the status tabs head the list, each with its count under the filters /
+;; set; the closed count shows once that tab has been read
+(define (linear--view-count buf v)
+  (let ((set (buffer-local buf (if (equal? (car v) "closed") 'linear-closed 'linear-open))))
+    (and set (length (filter (lambda (r) (and (member (linear--type r) (cadr v)) (linear--passes? buf r))) set)))))
+
+(define (linear--view-set! buf name)
+  (list-tab-set! buf name)
+  (if (and (equal? name "closed") (not (buffer-local buf 'linear-closed)))
+      (linear--read! buf)
+      (list-refresh! buf)))
+
+(define (linear--view-step! buf step)
+  (list-tab-step! buf (map car *linear-views*) step "open")
+  (linear--view-set! buf (linear--view buf)))
+
+(define (linear--tab-blocks buf)
+  (let ((view (linear--view buf)))
+    (list (component 'ui/tabs
+            (list 'class "linear-tabs"
+                  'tabs (map (lambda (v)
+                               (let ((n (linear--view-count buf v)))
+                                 (list (string-append "linear-tab-" (car v))
+                                       (if n (string-append (car v) " " (number->string n)) (car v))
+                                       (equal? (car v) view))))
+                             *linear-views*))))))
+
+(add-hook! (list 'block-click 'linear-tabs)
+  (lambda (buf id)
+    (and (string? id) (string-prefix? "linear-tab-" id) (buffer-exists? buf)
+         (let ((name (substring id 11 (string-length id))))
+           (and (assoc name *linear-views*) (begin (linear--view-set! buf name) #t))))))
+
+;; imenu on the list offers the status tabs; leaving it without a pick puts the tab back
+(define (linear--imenu-rows buf)
+  (map (lambda (v)
+         (let ((n (linear--view-count buf v)))
+           (list 1 "tab" (car v) (if n (string-append (number->string n) " issues") "")
+                 (lambda () (linear--view-set! buf (car v))))))
+       *linear-views*))
+
+(define (linear--imenu-snapshot buf)
+  (let ((was (linear--view buf)))
+    (lambda () (unless (equal? (linear--view buf) was) (linear--view-set! buf was)))))
+
+(define (linear--imenu-setup!)
+  (buffer-set-local! (current-buffer) 'imenu-index-function 'linear--imenu-rows)
+  (buffer-set-local! (current-buffer) 'imenu-snapshot 'linear--imenu-snapshot))
+(add-hook! 'linear-mode-hook 'linear--imenu-setup!)
+
+;; / filters with tabs: Team, Assignee, Priority, and Status, which is the tab
+(define (linear--facet buf kind) (let ((f (assoc kind (list-filters buf)))) (and f (cadr f))))
+(define (linear--viewer-id) (and *linear-teams* (plist-get (plist-get *linear-teams* 'viewer) 'id)))
+
+(define (linear--row-filter buf row f)
+  (let ((k (car f)) (v (cadr f)))
+    (cond ((equal? k "team") (equal? (linear--s (plist-get (plist-get row 'team) 'key)) v))
+          ((equal? k "assignee")
+           (let ((a (plist-get row 'assignee)))
+             (cond ((equal? v "me") (and a (equal? (plist-get a 'id) (linear--viewer-id))))
+                   ((equal? v "none") (not a))
+                   (else (and a (equal? (plist-get a 'id) v))))))
+          ((equal? k "priority") (equal? (linear--s (plist-get row 'priority)) v))
+          (else #t))))
+
+(define (linear--passes? buf row)
+  (null? (remove (lambda (f) (linear--row-filter buf row f))
+                 (filter (lambda (f) (member (car f) '("team" "assignee" "priority"))) (list-filters buf)))))
+
+(define (linear--all-rows buf) (append (or (buffer-local buf 'linear-open) '()) (or (buffer-local buf 'linear-closed) '())))
+
+(define (linear--distinct xs)
+  (fold (lambda (acc x) (if (or (not x) (member x acc)) acc (append acc (list x)))) '() xs))
+
+(define *linear-facets*
+  (list (list 'label "Team" 'kind "team"
+              'options (lambda (buf)
+                         (map (lambda (k) (list k k))
+                              (sort (linear--distinct (map (lambda (r) (plist-get (plist-get r 'team) 'key)) (linear--all-rows buf)))))))
+        (list 'label "Assignee" 'kind "assignee"
+              'options (lambda (buf)
+                         (append (list (list "Me" "me") (list "Unassigned" "none"))
+                                 (map (lambda (a) (list (plist-get a 'name) (plist-get a 'id)))
+                                      (linear--distinct (map (lambda (r) (plist-get r 'assignee)) (linear--all-rows buf)))))))
+        (list 'label "Priority" 'kind "priority"
+              'options (lambda (buf) (map (lambda (p) (list (car p) (number->string (cadr p)))) linear--priorities)))
+        (list 'label "Status" 'kind "status"
+              'options (lambda (buf) (map (lambda (v) (list (car v) (car v))) (cdr *linear-views*)))
+              'get (lambda (buf) (let ((v (linear--view buf))) (if (equal? v "open") #f v)))
+              'set (lambda (buf v) (linear--view-set! buf (or v "open"))))))
 
 (add-hook! (list 'block-click 'linear)
   (lambda (buf id)
@@ -369,10 +470,11 @@
 (define-command "linear-new-issue" "Create a Linear issue in the team at hand" (lambda () (linear-new-issue! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
 (define-command "linear-open-web" "Open this issue in Linear" (lambda () (linear-open-web! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
 (define-command "linear-refresh" "Read this again from Linear" (lambda () (linear-refresh! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
-(define-command "linear-next-scope" "Show the next scope: mine, each team, all open" (lambda () (linear-next-scope! (current-buffer))) 'modes '(linear-mode))
+(define-command "linear-next-view" "Show the next status tab: open, backlog, todo, in progress, closed" (lambda () (linear--view-step! (current-buffer) 1)) 'modes '(linear-mode))
+(define-command "linear-prev-view" "Show the previous status tab" (lambda () (linear--view-step! (current-buffer) -1)) 'modes '(linear-mode))
 
 (define-list-mode! "linear-mode"
-  (list 'doc "Linear issues, newest change first (all open issues at first): the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. t steps the scope: my open issues, each team's, all open. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue, o opens it in Linear, g rereads, / narrows, q quits."
+  (list 'doc "Linear issues, newest change first: the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. The status tabs, each with its count, head the list: open (every issue not closed), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
         'transient #f
         'noun "issue"
         'rows linear-rows
@@ -380,14 +482,18 @@
         'columns linear-columns
         'cells linear-cells
         'title linear-title
+        'head-blocks linear--tab-blocks
+        'filter linear--row-filter
+        'facets *linear-facets*
         'total (lambda (buf) (length (linear-rows buf)))
         'preview linear-issue-show!
         'debounce #t
         'filters (list (list "status:" (lambda (buf row) (linear--s (plist-get (plist-get row 'state) 'name))) "the status")
                        (list "team:" (lambda (buf row) (linear--s (plist-get (plist-get row 'team) 'key))) "the team key"))
-        'footer (lambda (b) (list (list "t" "scope") (list "RET" "issue") (list "s" "status") (list "a" "assign") (list "p" "priority")
-                                  (list "c" "comment") (list "n" "new") (list "o" "Linear") (list "g" "refresh") (list "q" "quit")))
-        'keys (list (list "RET" "linear-open") (list "t" "linear-next-scope")
+        'footer (lambda (b) (list (list "←→" "status") (list "RET" "issue") (list "s" "status") (list "a" "assign") (list "p" "priority")
+                                  (list "c" "comment") (list "n" "new") (list "o" "Linear") (list "/" "filter") (list "g" "refresh") (list "q" "quit")))
+        'keys (list (list "RET" "linear-open")
+                    (list "v" "linear-next-view") (list "<right>" "linear-next-view") (list "<left>" "linear-prev-view")
                     (list "s" "linear-set-state") (list "a" "linear-assign") (list "p" "linear-set-priority")
                     (list "c" "linear-comment") (list "n" "linear-new-issue") (list "o" "linear-open-web")
                     (list "g" "linear-refresh") (list "q" "quit-window"))))

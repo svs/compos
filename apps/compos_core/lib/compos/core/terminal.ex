@@ -330,6 +330,11 @@ defmodule Compos.Core.Terminal do
     # a working or blocked record ends with its program
     state = if Map.get(state, :status), do: put_status(state, nil), else: state
 
+    # Scheme hears the exit after the last status change, through the same
+    # relay (on-event! 'terminal-exit): a process sentinel, as in Emacs
+    state = ensure_relay(state)
+    send(state.status_relay, {:exit, state.buffer, status})
+
     {:stop, :normal, state}
   end
 
@@ -510,6 +515,14 @@ defmodule Compos.Core.Terminal do
         end
 
         __MODULE__.relay_loop()
+
+      {:exit, buffer, status} ->
+        with handler when handler != nil <- Roots.get({:on_event, "terminal-exit"}) do
+          Session.apply_callback(handler, [buffer, status], nil, {:terminal, buffer})
+        end
+
+        # the exit is the last message of its terminal: the relay ends with it
+        :ok
 
       {:title, buffer, title} ->
         with handler when handler != nil <- Roots.get({:on_event, "terminal-title"}) do

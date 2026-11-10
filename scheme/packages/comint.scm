@@ -291,6 +291,14 @@
 
 (on-event! 'terminal-var (lambda (buf name value) (term--var-changed! buf name value)))
 
+;; A buffer process ended with STATUS, its exit code: the sentinel of
+;; every process, comint and terminal alike. process-exit-hook runs
+;; (BUF STATUS) after the process's last output is in BUF.
+(defvar 'process-exit-hook '()
+  "Functions run as (BUF STATUS) when a buffer process ends; STATUS is its exit code.")
+(on-event! 'terminal-exit
+  (lambda (buf status) (run-hook-with-args 'process-exit-hook buf status)))
+
 (define (shell--fresh-name base)
   (let loop ((n 2))
     (let ((name (string-append base "<" (number->string n) ">")))

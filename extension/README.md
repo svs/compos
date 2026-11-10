@@ -19,7 +19,8 @@ of them.
 
 1. `chrome://extensions`
 2. Turn on **Developer mode** (top right)
-3. **Load unpacked** → pick this directory
+3. **Load unpacked** → pick `~/.compos/chrome-extension`, where compos copies
+   this directory at every start (see `docs/CHROME_EXTENSION.md`)
 
 ### Firefox
 

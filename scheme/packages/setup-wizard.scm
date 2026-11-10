@@ -388,7 +388,7 @@
                   'detail (if on? "connected to this editor"
                               (string-append "1. Open chrome://extensions in Chrome. "
                                              "2. Turn on Developer mode, at the top right. "
-                                             "3. Click Load unpacked, and choose the extension folder of the Compos checkout."))
+                                             "3. Click Load unpacked, and choose " (abbreviate-file-name (string-append (compos-home) "/chrome-extension")) ". In the file picker, Cmd-Shift-G takes a path; Cmd-Shift-. shows hidden folders."))
                   'badge (if on? "connected" "not connected")
                   'tone (if on? "good" "plain")
                   'selected? on?

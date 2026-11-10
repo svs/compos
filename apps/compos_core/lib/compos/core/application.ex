@@ -17,6 +17,8 @@ defmodule Compos.Core.Application do
     case live_daemon(daemon_socket_path()) do
       nil ->
         Compos.Core.ErrorFeed.install()
+        # ~/.compos/chrome-extension: the folder Chrome's Load unpacked points at.
+        Task.start(&Compos.Core.ChromeExtension.install/0)
         start_tree()
 
       path ->

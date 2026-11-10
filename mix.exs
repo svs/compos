@@ -56,6 +56,10 @@ defmodule Compos.MixProject do
       File.cp_r!(Path.join("scheme", dir), dest)
     end
 
+    # The Chrome extension; Compos.Core.ChromeExtension copies it to
+    # ~/.compos/chrome-extension at boot.
+    File.cp_r!("extension", Path.join([release.path, "lib", "compos_core-" <> vsn, "priv", "extension"]))
+
     # What the modeline names as this build (scheme/packages/build-identity.scm).
     built = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 

@@ -800,8 +800,11 @@
 (define (setup-choose-columns!)
   (unless (equal? window-layout-default 'columns)
     (customize-save! 'window-layout-default 'columns))
-  (unless (equal? (panes-current-layout) 'columns)
-    (panes-choose-layout! 'columns)))
+  ;; panes-current-layout answers the default when the group has no
+  ;; layout yet, which a first run never has: ask the saved layout itself
+  (let ((l (panes-layout)))
+    (unless (and l (equal? (panes-layout-name l) 'columns))
+      (panes-choose-layout! 'columns))))
 
 (define (setup-wizard! &optional step)
   (setup-choose-columns!)

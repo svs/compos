@@ -805,7 +805,8 @@
 (define (setup-install-agent! name &optional show)
   "Install the coding agent NAME in a terminal buffer. Return the buffer, or
    #f when nothing runs: every program is present, or npm is missing. SHOW
-   puts the buffer on screen; the default is switch-to-buffer!."
+   puts the buffer on screen; the default opens it in the next column,
+   so the screen that asked for the install stays."
   (let ((steps (setup-agent-missing-steps name)))
     (cond
       ((null? steps)
@@ -824,7 +825,7 @@
          ;; a restore must not run the install again: the restored
          ;; buffer starts a plain login shell over the old transcript
          (buffer-set-local! buf 'terminal-command #f)
-         (unless setup-bot-silent-mode ((or show switch-to-buffer!) buf))
+         (unless setup-bot-silent-mode ((or show display-buffer-other-window!) buf))
          buf)))))
 
 (effects! '(write execute external))

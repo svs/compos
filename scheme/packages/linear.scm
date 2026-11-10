@@ -604,9 +604,124 @@
       (app-open! buf)
       (linear--with-teams (lambda (_) (linear--read! buf))))))
 
+;;; Webhook. Linear pushes each issue and comment change to /hooks/linear-KEY
+;;; through the tunnel. The unguessable path is the check (Linear signs its
+;;; posts with an HMAC compos cannot check yet), and the handler trusts no
+;;; field of the body: it reads the issue again from the API. Each change is a
+;;; linear event, kind issue-update, comment-create and so on, and redraws the
+;;; open list and the issue's page.
+
+(define (linear--webhook-issue-id j)
+  (let ((d (plist-get j 'data)))
+    (cond ((equal? (plist-get j 'type) "Comment") (or (plist-get d 'issueId) (plist-get (plist-get d 'issue) 'id)))
+          ((equal? (plist-get j 'type) "Issue") (plist-get d 'id))
+          (else #f))))
+
+(define (linear--publish-change! id j source)
+  (linear-gql "query($id: String!) { issue(id: $id) { id identifier title url updatedAt state { name type } assignee { name } team { key } } }"
+    (list 'id id)
+    (lambda (d)
+      (let* ((i (and d (plist-get d 'issue)))
+             (it (or i (plist-get j 'data) '()))
+             (type (linear--s (or (plist-get j 'type) "Issue")))
+             (action (linear--s (or (plist-get j 'action) "update"))))
+        (event-publish! "linear" (string->symbol (string-downcase (string-append type "-" action)))
+          (list 'id id
+                'identifier (linear--s (plist-get it 'identifier))
+                'title (linear--s (plist-get it 'title))
+                'state (linear--s (and i (plist-get (plist-get i 'state) 'name)))
+                'assignee (linear--s (and i (plist-get i 'assignee) (plist-get (plist-get i 'assignee) 'name)))
+                'team (linear--s (and i (plist-get (plist-get i 'team) 'key)))
+                'url (linear--s (and i (plist-get i 'url)))
+                'actor (linear--s (and (plist-get j 'actor) (plist-get (plist-get j 'actor) 'name)))
+                'source source))
+        (when i
+          (linear--seen! (plist-get i 'updatedAt))
+          (let ((page (linear--issue-buffer i)))
+            (when (buffer-exists? page) (linear--issue-read! page))))))))
+
+;;;###autoload
+(define (linear-webhook-handle key events)
+  (let ((ids '()))
+    (for-each (lambda (e)
+                (let* ((j (plist-get e 'data)) (id (and (pair? j) (linear--webhook-issue-id j))))
+                  (when (and id (not (member id ids)))
+                    (set! ids (cons id ids))
+                    (linear--publish-change! id j "webhook"))))
+              events)
+    (when (and (pair? ids) (buffer-exists? *linear-buffer*)) (linear--read! *linear-buffer*))))
+
+(define (linear--hook-url)
+  (let ((w (webhook-get "linear")))
+    (and w webhooks-tunnel-host (string-append "https://" webhooks-tunnel-host (plist-get w 'path)))))
+
+(define (linear-webhook-setup! k)
+  (unless (webhook-get "linear")
+    (define-webhook! "linear" (list 'path (string-append "/hooks/linear-" (substring (content-hash (format "~a ~a" (current-time) (monotonic-ms))) 0 32))
+                                    'data 'json 'public #t))
+    (webhook-attach-workflow! "linear" 'linear-webhook-handle)
+    (webhooks--keep! "linear"))
+  (let ((url (linear--hook-url)))
+    (if (not url) (k (list 'error "no tunnel host"))
+        (linear-gql "{ webhooks { nodes { id url enabled } } }" '()
+          (lambda (d)
+            (let ((have (filter (lambda (w) (equal? (plist-get w 'url) url)) (linear--nodes d 'webhooks))))
+              (cond ((not d) (k (list 'error "could not list Linear's webhooks")))
+                    ((pair? have) (k (list 'url url 'linear (plist-get (car have) 'id) 'new #f)))
+                    (else
+                     (linear-gql "mutation($input: WebhookCreateInput!) { webhookCreate(input: $input) { success webhook { id enabled } } }"
+                       (list 'input (list 'url url 'label "compos" 'allPublicTeams #t 'resourceTypes (list "Issue" "Comment")))
+                       (lambda (d2)
+                         (let ((w (and d2 (plist-get (plist-get d2 'webhookCreate) 'webhook))))
+                           (k (if w (list 'url url 'linear (plist-get w 'id) 'new #t) (list 'error "webhookCreate failed"))))))))))))))
+
+(define-command "linear-webhook-setup" "Have Linear tell compos about every issue and comment change, through the webhook tunnel"
+  (lambda ()
+    (linear-webhook-setup!
+      (lambda (r)
+        (message (if (plist-get r 'error)
+                     (string-append "Linear webhook: " (plist-get r 'error) " (see *linear-log*)")
+                     (string-append "Linear webhook " (if (plist-get r 'new) "registered: " "already registered: ") (plist-get r 'url))))))))
+
+;;; Sweep. While the computer is off, Linear's pushes are lost. Every 15
+;;; minutes, and once at boot when a run was missed, every issue changed since
+;;; the last change seen is published as if it had been pushed.
+
+(define linear--seen-file (expand-file-name "~/.compos/linear-last-seen"))
+
+(define (linear--last-seen)
+  (and (file-exists? linear--seen-file)
+       (let ((s (string-trim (read-file linear--seen-file)))) (and (not (equal? s "")) s))))
+
+(define (linear--seen! iso)
+  (let ((last (linear--last-seen)))
+    (when (and (string? iso) (or (not last) (string>? iso last)))
+      (write-file! linear--seen-file iso))))
+
+(define (linear-sweep! &optional k)
+  (let ((since (linear--last-seen)))
+    (linear-gql "query($f: IssueFilter, $n: Int) { issues(first: $n, filter: $f, orderBy: updatedAt) { nodes { id updatedAt } } }"
+      (if since (list 'f (list 'updatedAt (list 'gt since)) 'n 250) (list 'n 1))
+      (lambda (d)
+        (let ((ns (linear--nodes d 'issues)))
+          (cond ((not d) (when k (k #f)))
+                ;; the first sweep only marks where the record starts
+                ((not since) (when (pair? ns) (linear--seen! (plist-get (car ns) 'updatedAt))) (when k (k 0)))
+                (else
+                 (for-each (lambda (n) (linear--publish-change! (plist-get n 'id) (list 'type "Issue" 'action "update") "sweep")) ns)
+                 (when (and (pair? ns) (buffer-exists? *linear-buffer*)) (linear--read! *linear-buffer*))
+                 (when k (k (length ns))))))))))
+
+;;;###autoload
+(define (linear-sweep-run event) (linear-sweep!))
+
 (effects! '(write external))
 (public! 'linear-gql
   "(linear-gql QUERY VARS K) — one Linear GraphQL call; K gets the data plist, or #f with the failure in *linear-log*")
+(public! 'linear-sweep!
+  "(linear-sweep! [K]) — publish a linear event for every issue changed since the last change seen; K gets the count")
+(public! 'linear-webhook-setup!
+  "(linear-webhook-setup! K) — make the linear webhook endpoint and register it on Linear; K gets (url URL linear ID new BOOL) or (error TEXT)")
 (public! 'linear
   "M-x linear — Linear issues as an app: a list, one page per issue, status/assign/priority/comment/new")
 

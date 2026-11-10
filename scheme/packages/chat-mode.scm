@@ -767,6 +767,9 @@
     (if (and m (not (member m acc)))
         (loop (mode-get m 'parent) (cons m acc))
         (append acc (or (buffer-local-value 'minor-modes src) '())))))
+(effects! '(read))
+(public! 'chat-source-modes "(chat-source-modes SRC) — SRC's major mode and its parents, the root first, then its minor modes")
+(effects! '(write))
 
 (define (chat-source-prompt src)
   (string-append

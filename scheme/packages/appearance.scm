@@ -305,6 +305,10 @@
   (map (lambda (h) (cons (key-symbols (car h)) (cdr h)))
        (append hints (map cadr *echo-extra-hints*))))
 
+(effects! '(read))
+(public! 'echo-hints-of "(echo-hints-of HINTS) — HINTS and the extra hints packages keep, each key as a keycap prints it")
+(effects! '(write))
+
 (defcustom 'echo-key-hints
   '(("*Messages*" "" "view-messages"))
   "The hints in the echo area, as (KEY VERB [COMMAND]) lists. An empty verb draws the key alone. A hint with a COMMAND is a link: a click runs it."

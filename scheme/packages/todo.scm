@@ -1245,8 +1245,18 @@
 (define-command "todo-mark-waiting" "Park the task as waiting"
   (lambda () (todo--set-at! 'state "waiting"))
   'modes '(todo-mode))
-(define-command "todo-mark-doing" "Mark the task in progress"
-  (lambda () (todo--set-at! 'state "doing"))
+;; the task's chat, kept or new, shown beside OWNER; the focus stays
+(define (todo--start-chat! t owner)
+  (let ((chat (or (todo--revive-chat t)
+                  (todo-assign-chat! (plist-get t 'id) (or (todo--home-group t) (group-here))))))
+    (todo--show-chat-beside! chat owner)))
+
+(define-command "todo-mark-doing" "Mark the task in progress, and open its chat; marked tasks only change state"
+  (lambda ()
+    (let ((t (todo--at)) (marked (todo--marked-tasks)))
+      (todo--set-at! 'state "doing")
+      (when (and t (null? marked))
+        (todo--start-chat! (todo-get (plist-get t 'id)) (current-buffer)))))
   'modes '(todo-mode))
 
 (define-command "todo-mark-inbox" "Send the task back to the inbox, to triage again"
@@ -2127,8 +2137,11 @@
   (lambda () (todo--detail-set! 'state "waiting"))
   'modes '(todo-detail-mode))
 
-(define-command "todo-detail-start" "Start the task: in progress; on Children, the sub-task at point"
-  (lambda () (todo--detail-set! 'state "doing"))
+(define-command "todo-detail-start" "Start the task: in progress, and open its chat; on Children, the sub-task at point"
+  (lambda ()
+    (let ((t (todo--detail-target (current-buffer))))
+      (todo--detail-set! 'state "doing")
+      (when t (todo--start-chat! (todo-get (plist-get t 'id)) (current-buffer)))))
   'modes '(todo-detail-mode))
 
 (define-command "todo-detail-inbox" "Send the task back to the inbox, to triage again; on Children, the sub-task at point"
@@ -2348,20 +2361,16 @@
           (else (panes-display-beside! chat owner)))
     chat))
 
-(define-command "todo-new" "File a new task, then show the list, the task's page and the chat that starts on it; the chat writes the task's notes, goal and status first"
+(define-command "todo-new" "File a new task, then show the list and the task's page beside it; s starts it and opens its chat"
   (lambda ()
     (read-string "Task: "
       (lambda (s)
-        (let* ((g (todo--origin-group todo-user))
-               (id (todo-create s (list 'state "todo" 'group g))))
+        (let ((id (todo-create s (list 'state "todo" 'group (todo--origin-group todo-user)))))
           (todo--refresh-all!)
-          ;; the list where you are, the page beside it, the chat beside that
+          ;; the list where you are, the page beside it
           (run-command "todo")
-          (let* ((page (todo-show-detail! id))
-                 (chat (todo-assign-chat! id g)))
-            (todo--refresh-all!)
-            (todo--show-chat-beside! chat page)
-            (message (string-append "Filed " id "; " chat " fills it in"))))))))
+          (todo-show-detail! id)
+          (message (string-append "Filed " id "; s starts it")))))))
 
 (global-set-key "C-c T" "todo-new")
 ;; filing a task is for every buffer, not just the todo list

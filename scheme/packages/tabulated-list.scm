@@ -3174,6 +3174,7 @@
 (define-key "list-mode-map" "C-c v" "list-toggle-detail")
 
 (public! 'list-detail-off? "(list-detail-off? BUF) — #t when list BUF's detail does not follow the highlight")
+(public! 'list-view-of "(list-view-of BUF) — the view list BUF draws: rendered, bare or source")
 
 (public! 'list-cycle-view! "(list-cycle-view! BUF) — the next view of list BUF: rendered, bare, source; answers its name")
 (public! 'list-source-text "(list-source-text BUF) — the buffer under list BUF's view, as ComposML text")
@@ -3407,6 +3408,6 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
   '(list-format-template))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
-  '(list-source-text list-detail-off?))
+  '(list-source-text list-detail-off? list-view-of))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(list-cycle-view!))

@@ -1,7 +1,8 @@
 ;;; linear.scm — Linear as a compos app.
 ;;;
-;;; M-x linear lists issues: yours by default; t steps the scope through each
-;;; team and all open issues. Moving onto a row shows that issue's page beside
+;;; M-x linear lists issues under status tabs: open, backlog, todo, in
+;;; progress, closed; / filters by team, assignee and priority. Moving onto a
+;;; row shows that issue's page beside
 ;;; the list, one page per issue. The same keys act on the row and the page:
 ;;; s status, a assignee, p priority, c comment, n new issue, o open in Linear,
 ;;; g reread.
@@ -84,8 +85,6 @@
 (define linear--issue-fields
   "id identifier title priority priorityLabel url updatedAt state { name type } assignee { id name } team { id key }")
 
-(define (linear--scope buf) (or (buffer-local buf 'linear-scope) "all"))
-(define (linear--scopes) (append (list "mine") (map (lambda (t) (plist-get t 'key)) (linear--teams)) (list "all")))
 
 ;; the status tabs, by Linear's state types: open is every issue not closed;
 ;; closed is read on its own when its tab is taken

@@ -1,7 +1,7 @@
 ;;; release.scm --- build the release executable and put it in service.
 ;;;
 ;;; M-x release-build-and-install builds the executable from the compos
-;;; checkout, installs it where the launchd agent starts it, and restarts the
+;;; checkout, installs it where the stable compos runs from, and restarts the
 ;;; stable compos. M-x release-install does the last two steps for a build
 ;;; already made. Either runs from the stable compos or from the dev one: the
 ;;; stable compos restarts itself, or the dev one asks it to over its socket.
@@ -20,7 +20,7 @@
   'group 'release 'type 'string)
 
 (defcustom 'release-bin-path "~/.local/bin/compos-stable"
-  "The stable compos's executable, the one its launchd agent starts."
+  "The stable compos's executable; a restart starts it again, logging to daemon.log."
   'group 'release 'type 'string)
 
 (defcustom 'release-stable-socket "~/.compos/sock"

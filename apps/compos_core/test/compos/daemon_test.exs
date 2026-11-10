@@ -30,6 +30,17 @@ defmodule Compos.DaemonTest do
     assert {"", 0} = System.cmd("/bin/sh", ["-n", "-c", script], stderr_to_stdout: true)
   end
 
+  test "the release respawn script relaunches the executable into the home log" do
+    script = Daemon.release_respawn_script("/Users/me/.local/bin/compos stable", "/tmp/user's home", "42")
+
+    assert script =~ "kill -0 42"
+    assert script =~ "compos stable"
+    assert script =~ "daemon.log"
+    assert script =~ "RELEASE_"
+    refute script =~ "mix run"
+    assert {"", 0} = System.cmd("/bin/sh", ["-n", "-c", script], stderr_to_stdout: true)
+  end
+
   test "restart-daemon is a registered command with a doc" do
     assert {:ok, ~s{"Save the desktop and restart the daemon"}} =
              Session.eval(~s{(command-doc "restart-daemon")})

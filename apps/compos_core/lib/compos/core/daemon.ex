@@ -102,17 +102,26 @@ defmodule Compos.Core.Daemon do
     if Compos.Core.project_dir(), do: restart_checkout(), else: restart_release()
   end
 
-  # A release has no checkout to respawn from: whatever supervises it (the
-  # launchd agent, KeepAlive) starts the executable again when this VM stops.
+  # A release respawns its own executable, the one Burrito started it from.
+  # Nothing else supervises it.
   defp restart_release do
-    with :ok <- save_desktop() do
+    with {:ok, bin} <- release_bin(),
+         :ok <- save_desktop(),
+         :ok <- run_relauncher(release_respawn_script(bin, Compos.Core.home(), System.pid())) do
       schedule_stop()
       :ok
     end
   end
 
+  defp release_bin do
+    case System.get_env("__BURRITO_BIN_PATH") do
+      bin when is_binary(bin) and bin != "" -> {:ok, bin}
+      _ -> {:error, :no_release_executable}
+    end
+  end
+
   @doc """
-  Install the release executable SRC at BIN, the path the supervisor starts.
+  Install the release executable SRC at BIN, the path the stable compos runs from.
   Copies beside BIN and renames over it, so a running BIN is never half
   written. Prunes the unpacked releases of other builds next to the one this
   VM runs from. Returns :ok or an error tuple; restarting is the caller's.
@@ -314,8 +323,10 @@ defmodule Compos.Core.Daemon do
   # The new daemon starts after the port and socket are free. All relauncher
   # descriptors point away from System.cmd, so it returns at once.
   defp respawn do
-    script = respawn_script(File.cwd!(), Compos.Core.home(), System.pid())
+    run_relauncher(respawn_script(File.cwd!(), Compos.Core.home(), System.pid()))
+  end
 
+  defp run_relauncher(script) do
     case System.cmd("/bin/sh", ["-c", script], stderr_to_stdout: true) do
       {_out, 0} -> :ok
       {out, code} -> {:error, {:spawn_failed, code, out}}
@@ -340,6 +351,22 @@ defmodule Compos.Core.Daemon do
         "cd #{shq(root)}; " <>
         @raise_fd_limit <>
         "exec env COMPOS_HOME=#{shq(home)} mix run --no-halt >> #{shq(log)} 2>&1"
+
+    "nohup /bin/sh -c #{shq(relaunch)} </dev/null >/dev/null 2>&1 &"
+  end
+
+  # The new executable must not inherit this VM's release environment: Burrito
+  # and the release scripts would take RELEASE_ROOT, an unpacked directory an
+  # install may have pruned, as given.
+  @doc false
+  def release_respawn_script(bin, home, pid) do
+    log = Path.join(home, "daemon.log")
+
+    relaunch =
+      "while kill -0 #{pid} 2>/dev/null; do sleep 0.1; done; " <>
+        "unset $(env | awk -F= '/^(RELEASE_|__BURRITO|BINDIR=|ROOTDIR=|EMU=|PROGNAME=)/{print $1}'); " <>
+        @raise_fd_limit <>
+        "exec env COMPOS_HOME=#{shq(home)} #{shq(bin)} >> #{shq(log)} 2>&1"
 
     "nohup /bin/sh -c #{shq(relaunch)} </dev/null >/dev/null 2>&1 &"
   end

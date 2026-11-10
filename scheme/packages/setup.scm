@@ -84,7 +84,16 @@
 (define (setup--program-present? program)
   "#t when PROGRAM is on PATH, or npm installed it where PATH does not look."
   (or (setup--on-path? program)
-      (and (setup--npm-program program) #t)))
+      (and (setup--npm-program program) #t)
+      ;; a GUI-launched editor often lacks the shell's PATH; the native
+      ;; installers (claude's among them) put programs in these places,
+      ;; and a missed one means a long download of what is already here
+      (and (find (lambda (dir) (file-exists? (string-append (expand-file-name dir) "/" program)))
+                 setup-extra-program-dirs)
+           #t)))
+
+(define setup-extra-program-dirs
+  '("~/.local/bin" "~/.claude/local" "/opt/homebrew/bin" "/usr/local/bin" "~/.bun/bin"))
 
 (define (setup--adopt-npm-command! name)
   "When the program of connector NAME is not on PATH but npm installed it,
@@ -781,7 +790,7 @@
     (string-append
       ;; a quiet download looks like a hung black screen: say what runs
       ;; and that it takes a while, before each step
-      "printf '\\nInstalling " name ". This takes a minute or two; output appears as it comes.\\n' && "
+      "printf '\\nSetting up " name " for compos. Only what is missing is installed; programs you already have stay as they are.\\n' && "
       (string-join
         (map (lambda (step)
                (string-append "printf '\\n==> Installing " (car step) " ...\\n' && " (cadr step)))

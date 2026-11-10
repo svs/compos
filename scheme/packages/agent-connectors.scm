@@ -44,7 +44,7 @@ nonstandard install out of the built-in connector catalog."
     ;; ids (no [1m] forms), and its list is the menu
     accepts "^(claude-|opus|sonnet|haiku|default)"
     install (("claude" "curl -fsSL https://claude.ai/install.sh | bash")
-             ("claude-agent-acp" "npm install -g @agentclientprotocol/claude-agent-acp"))
+             ("claude-agent-acp" "npm install -g --no-audit --no-fund --prefer-offline @agentclientprotocol/claude-agent-acp"))
     signin "claude"
     ;; The editor names every tool through MCP and writes the whole
     ;; system prompt, so the adapter's own tools have no place in an

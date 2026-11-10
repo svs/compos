@@ -448,12 +448,13 @@
     (let ((buf (current-buffer)))
       (let ((path (buffer-local-value 'tail-path buf)))
         (buffer-set-read-only! buf #t)
+        (tail--watch! buf)
         (when (and path (not (process-running? buf)))
           (start-process! buf (tail-command path)))))))
-(mode-keys! "tail-mode" '(("q" "quit-window")))
+(mode-keys! "tail-mode" '(("q" "quit-window") ("/" "tail-filter") ("t" "tail-filter-ts") ("\\" "tail-filter-clear")))
 
 (mode-doc! "tail-mode"
-  "A file that follows itself, local or over `ssh`. New lines append at the end. The buffer is read-only, and `q` closes it.")
+  "A file that follows itself, local or over `ssh`. New lines append at the end, in batches, and the buffer keeps the newest 512 KB. `/` keeps only the lines that hold some text, `t` only the lines a tree-sitter query matches (a JSON log with the json grammar, say); the filter goes on as lines come, and `\\` shows every line again. The buffer is read-only, and `q` closes it.")
 
 (define (tail-open path)
   (if (and (remote-path? path) (not (remote-parse path)))
@@ -469,6 +470,110 @@
   (lambda ()
     (read-file-name "Tail file: "
       (lambda (input) (tail-open (normalize-file-input input))))))
+
+;;; A filter keeps only the lines that pass it: (text NEEDLE), the lines
+;;; that hold NEEDLE in any case, or (ts LANG QUERY), the lines a capture of
+;;; the tree-sitter QUERY starts on. tail -F writes every line; a watch
+;;; drops the failing ones, from the marker tail-filtered up to the last
+;;; whole line, so a half-written line waits for its end. A new filter
+;;; reads the file again.
+
+(define (tail--filter buf) (buffer-local-value 'tail-filter buf))
+
+(define (tail--watch! buf)
+  (unless (buffer-local-value 'tail-watch buf)
+    (buffer-marker-local! buf 'tail-filtered 'stay)
+    (unless (buffer-local-value 'tail-filtered buf)
+      (buffer-set-local! buf 'tail-filtered (buffer-size buf)))
+    (buffer-set-local! buf 'tail-watch
+      (on-change! buf
+        (lambda (pos inserted deleted source)
+          (when (and (tail--filter buf) (> (string-length inserted) 0))
+            (tail--apply! buf)))
+        'eager))))
+
+;; the byte ranges (START END) of LINES laid end to end, one newline apart
+(define (tail--spans lines)
+  (let loop ((ls lines) (at 0) (out '()))
+    (if (null? ls)
+        (reverse out)
+        (let ((end (+ at (string-byte-length (car ls)))))
+          (loop (cdr ls) (+ end 1) (cons (list at end) out))))))
+
+;; the lines a capture of QUERY starts on, as LANG text
+(define (tail--ts-keep lines lang query)
+  (let ((caps (or (ignore-errors
+                    (lambda ()
+                      (sort (map cadr (ts-query-string lang (string-append (string-join lines "\n") "\n") query)))))
+                  '())))
+    (let loop ((ls lines) (spans (tail--spans lines)) (caps caps) (out '()))
+      (if (null? ls)
+          (reverse out)
+          (let* ((s (car (car spans))) (e (cadr (car spans)))
+                 (caps (let drop ((c caps)) (if (and (pair? c) (< (car c) s)) (drop (cdr c)) c))))
+            (loop (cdr ls) (cdr spans) caps
+                  (if (and (pair? caps) (<= (car caps) e)) (cons (car ls) out) out)))))))
+
+(define (tail--keep lines f)
+  (if (eq? (car f) 'ts)
+      (tail--ts-keep lines (cadr f) (caddr f))
+      (let ((needle (string-downcase (cadr f))))
+        (filter (lambda (l) (string-contains? (string-downcase l) needle)) lines))))
+
+(define (tail--apply! buf)
+  (let* ((f (tail--filter buf))
+         (from (or (buffer-local-value 'tail-filtered buf) 0))
+         (size (buffer-size buf)))
+    (when (and f (< from size))
+      (let* ((parts (string-split (with-current-buffer buf (lambda () (buffer-substring from size))) "\n"))
+             (whole (reverse (cdr (reverse parts)))))
+        (when (pair? whole)
+          (let* ((len (apply + (map (lambda (l) (+ 1 (string-byte-length l))) whole)))
+                 (kept (tail--keep whole f))
+                 (text (if (null? kept) "" (string-append (string-join kept "\n") "\n"))))
+            (unless (= (length kept) (length whole))
+              (buffer-replace-range! buf from len text))
+            (buffer-set-local! buf 'tail-filtered (+ from (string-byte-length text)))))))))
+
+(define (tail--describe f)
+  (cond ((not f) "no filter")
+        ((eq? (car f) 'ts) (string-append (cadr f) " query: " (caddr f)))
+        (else (string-append "lines with " (cadr f)))))
+
+(define (tail-filter! buf f)
+  (buffer-set-local! buf 'tail-filter f)
+  (tail--watch! buf)
+  (buffer-replace-range! buf 0 (buffer-size buf) "")
+  (buffer-set-local! buf 'tail-filtered 0)
+  (if (process-running? buf)
+      (process-restart! buf)
+      (let ((path (buffer-local-value 'tail-path buf)))
+        (when path (start-process! buf (tail-command path)))))
+  (message (string-append "Tail: " (tail--describe f))))
+
+(define-command "tail-filter" "Show only the lines that hold some text; empty shows every line"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (read-string "Keep lines with: "
+        (lambda (s)
+          (tail-filter! buf (if (equal? (string-trim s) "") #f (list 'text (string-trim s))))))))
+  'modes '(tail-mode))
+
+(define-command "tail-filter-ts" "Show only the lines a tree-sitter query matches"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Grammar: " (map (lambda (l) (list l l)) (ts-langs))
+        (lambda (lang)
+          (minibuffer-read "Tree-sitter query: " (history-items 'occur-ts-query)
+            (lambda (query)
+              (unless (equal? (string-trim query) "")
+                (history-push! 'occur-ts-query query)
+                (tail-filter! buf (list 'ts (string-trim lang) query)))))))))
+  'modes '(tail-mode))
+
+(define-command "tail-filter-clear" "Show every line again"
+  (lambda () (tail-filter! (current-buffer) #f))
+  'modes '(tail-mode))
 
 (domain! 'unknown)
 (effects! '(unknown))

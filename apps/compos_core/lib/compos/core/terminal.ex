@@ -289,7 +289,12 @@ defmodule Compos.Core.Terminal do
           |> schedule_raw_flush()
 
         true ->
-          append(state, strip_ansi(data))
+          # a comint process (tail, comint-shell) lands in the buffer in
+          # batches: one append per flush, not one per chunk, so a busy log
+          # costs the buffer a change every few milliseconds at most
+          state
+          |> Map.update(:comint_pending, [data], &[data | &1])
+          |> schedule_comint_flush()
       end
 
     {:noreply, state}
@@ -316,12 +321,20 @@ defmodule Compos.Core.Terminal do
     {:noreply, state |> Map.put(:transcript, transcript) |> queue_transcript(text)}
   end
 
+  def handle_info(:flush_comint, state) do
+    {:noreply, state |> Map.put(:comint_timer, nil) |> flush_comint()}
+  end
+
   def handle_info(:flush_transcript, state) do
     {:noreply, state |> Map.put(:transcript_timer, nil) |> flush_transcript()}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    state = state |> flush_terminal() |> append("\n[process exited: #{status}]\n")
+    state =
+      state
+      |> flush_comint()
+      |> flush_terminal()
+      |> append("\n[process exited: #{status}]\n")
 
     Enum.each(Map.keys(state.subscribers), fn subscriber ->
       send(subscriber, {:terminal_exit, state.buffer, status})
@@ -575,6 +588,29 @@ defmodule Compos.Core.Terminal do
   end
 
   defp schedule_raw_flush(state), do: state
+
+  defp schedule_comint_flush(state) do
+    if Map.get(state, :comint_timer) do
+      state
+    else
+      Map.put(state, :comint_timer, Process.send_after(self(), :flush_comint, @raw_flush_ms))
+    end
+  end
+
+  # the comint text keeps the newest @transcript_limit bytes, as the
+  # transcript of a raw terminal does
+  defp flush_comint(state) do
+    case Map.get(state, :comint_pending, []) do
+      [] ->
+        state
+
+      pending ->
+        text = pending |> Enum.reverse() |> IO.iodata_to_binary() |> strip_ansi()
+        state = state |> Map.put(:comint_pending, []) |> append(text)
+        trim_transcript(state.buffer)
+        %{state | mark: Buffer.byte_size(state.buffer)}
+    end
+  end
 
   defp queue_transcript(state, ""), do: state
 

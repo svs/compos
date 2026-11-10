@@ -2390,6 +2390,8 @@ defmodule Compos.Core.Buffer do
 
   defp mirror_insert(state, pos, text, actor) do
     if mirroring?(state) do
+      state = keep_undone(state, actor)
+
       state
       |> commit_on_actor_change(actor)
       |> history_result(History.insert(state.history, pos, text), "insert")
@@ -2401,6 +2403,8 @@ defmodule Compos.Core.Buffer do
 
   defp mirror_delete(state, pos, len, actor) do
     if mirroring?(state) do
+      state = keep_undone(state, actor)
+
       state
       |> commit_on_actor_change(actor)
       |> history_result(History.delete(state.history, pos, len), "delete")
@@ -2408,6 +2412,45 @@ defmodule Compos.Core.Buffer do
     else
       state
     end
+  end
+
+  # Emacs never loses an undone state: an undo is itself an edit, so undoing
+  # far enough brings it back. Loro drops its redo stack at the next edit, so
+  # just before that edit the undone steps are replayed and each undo goes back
+  # in as an ordinary step. The text ends where it was; the history keeps every
+  # state on the way, and undo after the new edit walks back through them.
+  defp keep_undone(state, actor) do
+    scope = undo_scope(actor)
+
+    with true <- History.actor?(state.history, scope),
+         {_undos, redos} when redos > 0 <- History.undo_count(state.history, scope) do
+      state = commit_history(state)
+
+      # newest first: the text after every redo, down to the text now
+      seen =
+        Enum.reduce_while(1..redos, [History.text(state.history)], fn _, acc ->
+          if History.redo(state.history, scope) == true,
+            do: {:cont, [History.text(state.history) | acc]},
+            else: {:halt, acc}
+        end)
+
+      origin = history_origin(actor)
+      msg = history_message(actor, buffer_group(state))
+
+      Enum.each(tl(seen), fn text ->
+        History.update(state.history, text)
+        History.commit(state.history, origin, msg)
+      end)
+
+      state
+    else
+      _ -> state
+    end
+  rescue
+    # the edit still goes in; only the undone states are lost, as before
+    e ->
+      Logger.error("keeping undone states failed for #{state.name}: #{Exception.message(e)}")
+      state
   end
 
   # Who owns the operations sitting uncommitted in the document. Provenance

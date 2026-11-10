@@ -2146,7 +2146,16 @@ c-action-key {
    above it: Emacs' minibuffer shape */
 .mb-panel:not(.palette) .mb-input-row {
   padding: 8px 20px 9px; font-size: 1em;
+  /* asking for input: an inverted bar, so the prompt cannot be missed */
+  background: var(--accent-fg, #26356b);
+  color: var(--window-bg, #fdfcf8);
+  border-top: none;
 }
+.mb-panel:not(.palette) .mb-input-row .mb-input .cursor {
+  background: var(--window-bg, #fdfcf8); color: var(--accent-fg, #26356b);
+}
+.mb-panel:not(.palette) .mb-input-row .mb-count,
+.mb-panel:not(.palette) .mb-input-row .ml-frame-path { color: inherit; opacity: 0.75; }
 .mb-panel:not(.palette) .mb-body { flex: 0 1 auto; min-height: 0; }
 .mb-panel:not(.palette) .mb-cands { max-height: min(48dvh, 440px); }
 /* em, like the palette: a fixed 18px read louder than the buffers the
@@ -2154,7 +2163,7 @@ c-action-key {
    back in colour and weight and the typed text leads. */
 .mb-panel:not(.palette) .prompt {
   font-size: 1em; margin-right: 8px;
-  font-weight: 500; color: var(--dim-fg, #8a857a);
+  font-weight: 700; color: var(--window-bg, #fdfcf8);
 }
 .mb-panel:not(.palette) .mb-input { font-size: 1em; }
 /* A plain completion prompt IS the minibuffer (minibuffer.scm,

@@ -5793,6 +5793,8 @@
          ;; after the model's repair, each window still on NAME goes back to
          ;; its own past (window.scm); the core fills what is left
          (release (and (boundp 'window-records-release!) (window-records-release! name))))
+    ;; the buffer's process (a tail, a shell) dies with it, as in Emacs
+    (when (process-running? name) (process-kill! name))
     (buffer-kill-raw! name)
     (keymap--forget-buffer! name)
     (hook--forget-buffer! name)

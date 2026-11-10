@@ -178,7 +178,9 @@
 ;; Linear writes Markdown. Draw it as blocks: headings, bullets, quotes,
 ;; code and paragraphs, with **bold**, `code` and [links](url) inline.
 (define (linear--inline text)
-  (let* ((t (re-replace-all "\\[([^\\]]+)\\]\\([^)]+\\)" text "\\1"))
+  ;; a backslash only escapes the character after it
+  (let* ((text (string-replace text "\\" ""))
+         (t (re-replace-all "\\[([^\\]]+)\\]\\([^)]+\\)" text "\\1"))
          (t (re-replace-all "(^|[^*])\\*([^*\\s][^*]*)\\*(?!\\*)" t "\\1\\2"))
          (bold (string-split t "**")))
     (let loop ((parts bold) (strong? #f) (out '()))
@@ -191,6 +193,23 @@
                                       (if (equal? (car cs) "") acc
                                           (cons (list (cond (c? "c-info") (strong? "c-strong") (else "")) (car cs)) acc))))))
                         out))))))
+
+(define (linear--plain text) (apply string-append (map cadr (linear--inline text))))
+
+;; a Markdown table: its first row heads the columns, the --- row goes
+(define (linear--table-cells l)
+  (let* ((s (string-trim l))
+         (s (if (string-prefix? "|" s) (substring s 1 (string-length s)) s))
+         (s (if (string-suffix? "|" s) (substring s 0 (- (string-length s) 1)) s)))
+    (map string-trim (string-split s "|"))))
+
+(define (linear--rule-row? cells)
+  (null? (remove (lambda (c) (equal? (string-replace (string-replace c "-" "") ":" "") "")) cells)))
+
+(define (linear--table-block lines)
+  (let ((rows (remove linear--rule-row? (map linear--table-cells lines))))
+    (component 'ui/table (list 'columns (map (lambda (c) (list (linear--plain c))) (car rows))
+                               'rows (map (lambda (r) (map linear--plain r)) (cdr rows))))))
 
 (define (linear--md-blocks md)
   (let loop ((ls (string-split (linear--s md) "\n")) (para '()) (fence #f) (out '()))
@@ -210,6 +229,15 @@
              ((string-prefix? "```" l) (loop (cdr ls) '() '() out1))
              ((equal? l "") (loop (cdr ls) '() #f out1))
              ((member l '("---" "***" "___")) (loop (cdr ls) '() #f out1))
+             ;; a line that is only **bold** heads what follows
+             ((and (> (string-length l) 4) (string-prefix? "**" l) (string-suffix? "**" l)
+                   (not (string-contains? (substring l 2 (- (string-length l) 2)) "**")))
+              (loop (cdr ls) '() #f (cons (component 'ui/title (list 'level 2 'text (linear--plain l))) out1)))
+             ((string-prefix? "|" l)
+              (let take ((rest ls) (rows '()))
+                (if (and (pair? rest) (string-prefix? "|" (string-trim (car rest))))
+                    (take (cdr rest) (cons (car rest) rows))
+                    (loop rest '() #f (cons (linear--table-block (reverse rows)) out1)))))
              ((string-prefix? "#" l)
               (loop (cdr ls) '() #f (cons (component 'ui/title (list 'level 2 'text (string-trim (re-replace "^#+" l "")))) out1)))
              ((string-prefix? ">" l)

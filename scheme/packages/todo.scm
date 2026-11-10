@@ -844,19 +844,14 @@
 (define *todo-views*
   (list (list "open" '(state ("todo" "doing" "review")))
         (list "inbox" '(state "inbox"))
-        (list "review" '(state "review"))
-        (list "doing" '(state "doing"))
         (list "waiting" '(state "waiting"))
-        (list "mine" 'mine)
-        (list "overdue" '(overdue #t))
         (list "closed" '(state ("done" "cancelled")))
         (list "all" '(all #t))))
 
 (define (todo--view buf) (list-tab buf "open"))
 
 (define (todo--view-spec buf)
-  (let ((s (cadr (assoc (todo--view buf) *todo-views*))))
-    (if (equal? s 'mine) (list 'assignee todo-user) s)))
+  (cadr (or (assoc (todo--view buf) *todo-views*) (car *todo-views*))))
 
 ;; `/` narrows by words, all of which must hit: p:PROJECT, s:STATE,
 ;; @ASSIGNEE, #TAG, !PRIORITY, or any text of the task
@@ -2552,7 +2547,7 @@
            (and (assoc name *todo-views*)
                 (begin (todo--view-set! buf name) #t))))))
 
-(define-command "todo-next-view" "Show the next status tab: open, inbox, review, doing, waiting, mine, overdue, closed, all"
+(define-command "todo-next-view" "Show the next status tab: open, inbox, waiting, closed, all"
   (lambda () (todo--view-step! (todo--list-buffer) 1))
   'modes '(todo-mode))
 
@@ -2652,7 +2647,7 @@
             ("g" "todo-refresh")
             ("k" "todo-dismiss")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, review, doing, waiting, mine, overdue, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `M-o` goes to its chat, or hands it to a new chat in a group, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority, `T` marks it time-sensitive (urgent) or not. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `D`, `P`, `N`, `!` and `T` act on the marked tasks after asking. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

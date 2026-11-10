@@ -157,6 +157,12 @@ if config_env() == :test do
   config :compos_ui, oembed_fetch: false
 end
 
+# The installed compos: LiveView narrates every keystroke at debug, and the
+# release's log is the file people read when something goes wrong.
+if config_env() == :prod do
+  config :logger, level: :info
+end
+
 # Sample configuration:
 #
 #     config :logger, :default_handler,

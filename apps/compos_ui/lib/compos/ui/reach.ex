@@ -103,6 +103,8 @@ defmodule Compos.Ui.Reach do
 
     cond do
       host in ["localhost", "127.0.0.1", "[::1]", "::1"] -> true
+      # compos.localhost: browsers resolve every *.localhost to loopback
+      String.ends_with?(host, ".localhost") -> true
       host == name -> true
       String.starts_with?(host, name <> ".") and String.ends_with?(host, ".ts.net") -> true
       true -> trusted_address?(host)

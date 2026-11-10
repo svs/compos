@@ -95,12 +95,22 @@
     return keys ? keys.split(" ") : [];
   }
 
+  // Cmd stays a hold through a sequence: while a prefix that began with
+  // a Cmd key waits (Cmd-K), the next Cmd key is the editor's too, so
+  // Cmd-K Cmd-T reaches the keymap. A sequence begun with C-x leaves
+  // Cmd-C to the browser.
+  function cmdPrefixPending() {
+    const w = document.getElementById("windows");
+    const pending = w && w.dataset.pending;
+    return !!pending && pending.startsWith("s-");
+  }
+
   function keySpec(e) {
     if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;
     const base = baseKey(e);
     if (base === null) return null;
     // the claim reads the base, not e.key: Cmd-Shift-= is "+"
-    if (e.metaKey && !boundCmdKeys().includes(base)) return null;
+    if (e.metaKey && !boundCmdKeys().includes(base) && !cmdPrefixPending()) return null;
     let spec = base;
     // S- only for named keys (TAB, arrows, RET...): printable chars
     // already encode shift in the character itself, Emacs-style.

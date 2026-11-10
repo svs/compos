@@ -2407,9 +2407,11 @@
         (list 'cancel (lambda () (set! todo--new-open? #f) (set! todo--new-pick-group? #f)))
         (list 'style #f)))))
 
-(bind-prefix! "global" "C-t" "todo-prefix-map")
+(bind-prefix! "global" "C-x t" "todo-prefix-map")
 (define-key "todo-prefix-map" "n" "todo-new")
 (define-key "todo-prefix-map" "t" "todo")
+;; Cmd held through Cmd-K: Cmd-K Cmd-T is the list, Cmd-K t the todo keys
+(define-key "ctl-x-map" "s-t" "todo")
 ;; filing a task is for every buffer, not just the todo list
 (app-entry! "todo-new")
 

@@ -54,9 +54,8 @@
     ("s-Z" "undo-redo")
     ("C-s-<left>" "window-previous-pane")
     ("C-s-<right>" "window-next-pane")
-    ;; Cmd-K opens the palette, as the Cmd-K bar of a web app does: Start
-    ;; here comes first while nothing is typed
-    ("s-k" "command-palette")))
+    ;; Cmd-K is the leader, as C-x is: Cmd-K t n is C-x t n
+    ("s-k" (keymap "ctl-x-map"))))
 
 (define-keymap! "vscode-mode-map")
 ;; Shift with a letter arrives as the capital: s-P, never s-S-p

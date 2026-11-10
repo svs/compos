@@ -99,8 +99,39 @@
 (define (linear--closed? buf) (equal? (linear--view buf) "closed"))
 (define (linear--type row) (linear--s (plist-get (plist-get row 'state) 'type)))
 
-(define (linear--filter closed?)
-  (list 'state (list 'type (list (if closed? 'in 'nin) (list "completed" "canceled" "duplicate")))))
+(define (linear--filter closed? &optional d)
+  (append (list 'state (list 'type (list (if closed? 'in 'nin) (list "completed" "canceled" "duplicate"))))
+          (let ((t (and d (plist-get d 'team)))) (if t (list 'team (list 'key (list 'eq t))) '()))
+          (let ((pr (and d (plist-get d 'project)))) (if pr (list 'project (list 'name (list 'eq pr))) '()))
+          (if (and d (equal? (plist-get d 'assignee) "me")) (list 'assignee (list 'isMe (list 'eq #t))) '())))
+
+;;; --- per-group defaults --------------------------------------------------------
+;;; A group can pin the list to a team, a project and an assignee ("me") in its
+;;; group.scm: (group-defaults! 'linear-team "SMA" 'linear-project "DM queue"
+;;; 'linear-assignee "me"). M-x linear-group-defaults sets them. A group with
+;;; defaults gets its own listing, read already narrowed, and new issues land in
+;;; its team and project.
+
+(define (linear-group-defaults &optional g)
+  (let ((g (or g (frame-group))))
+    (and g
+         (let ((team (group-setting g 'linear-team))
+               (project (group-setting g 'linear-project))
+               (assignee (group-setting g 'linear-assignee)))
+           (and (or team project assignee) (list 'team team 'project project 'assignee assignee))))))
+
+(define (linear--defaults-label d)
+  (string-join (filter (lambda (s) (and s (not (equal? s ""))))
+                       (list (plist-get d 'team) (plist-get d 'project)
+                             (and (equal? (plist-get d 'assignee) "me") "mine")))
+               " · "))
+
+;; K gets the id of the project named NAME, or #f
+(define (linear--project-id name k)
+  (if (not name) (k #f)
+      (linear-gql "query($n: String!) { projects(first: 1, filter: { name: { eq: $n } }) { nodes { id } } }"
+        (list 'n name)
+        (lambda (d) (let ((ns (linear--nodes d 'projects))) (k (and (pair? ns) (plist-get (car ns) 'id))))))))
 
 (define (linear--read! buf)
   ;; open and closed are read apart, each with its own generation, so a tab
@@ -113,7 +144,7 @@
     (buffer-set-local! buf 'linear-loading #t)
     (list-refresh! buf)
     (linear-gql (string-append "query($f: IssueFilter) { issues(first: 250, filter: $f, orderBy: updatedAt) { nodes { " linear--issue-fields " } } }")
-      (list 'f (linear--filter closed))
+      (list 'f (linear--filter closed (buffer-local buf 'linear-defaults)))
       (lambda (d)
         (when (and (buffer-exists? buf) (equal? (buffer-local buf gkey) gen))
           (buffer-set-local! buf 'linear-loading #f)
@@ -130,7 +161,7 @@
 (catalog-meta! 'function 'linear-rows 'effects '(read))
 (define (linear-key buf row) (plist-get row 'identifier))
 (define (linear-title buf)
-  (string-append "Linear   " (linear--view buf) (if (buffer-local buf 'linear-loading) " — reading…" "")))
+  (string-append "Linear   " (let ((d (buffer-local buf 'linear-defaults))) (if d (string-append (linear--defaults-label d) "   ") "")) (linear--view buf) (if (buffer-local buf 'linear-loading) " — reading…" "")))
 
 (define (linear--state-tone type)
   (cond ((equal? type "started") "warn") ((equal? type "completed") "good")
@@ -404,19 +435,22 @@
   (linear--with-teams
     (lambda (_)
       (let* ((listing (if (buffer-derived-mode? buf "linear-mode") buf (buffer-local buf 'linear-listing)))
-             (scope (and listing (linear--facet listing "team")))
-             (mine (and listing (equal? (linear--facet listing "assignee") "me")))
+             (d (or (and listing (buffer-local listing 'linear-defaults)) (linear-group-defaults)))
+             (scope (or (and listing (linear--facet listing "team")) (and d (plist-get d 'team))))
+             (mine (or (and listing (equal? (linear--facet listing "assignee") "me")) (and d (equal? (plist-get d 'assignee) "me"))))
              (go (lambda (team)
                    (read-string (string-append "New " (plist-get team 'key) " issue: ")
                      (lambda (title)
                        (unless (equal? (string-trim title) "")
+                        (linear--project-id (and d (plist-get d 'project)) (lambda (project-id)
                          (linear-gql "mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier } } }"
                            (list 'input (append (list 'teamId (plist-get team 'id) 'title title)
+                                                (if project-id (list 'projectId project-id) '())
                                                 (if mine (list 'assigneeId (plist-get (plist-get *linear-teams* 'viewer) 'id)) '())))
                            (lambda (d)
                              (when d
                                (message (string-append "Linear: created " (linear--s (plist-get (plist-get (plist-get d 'issueCreate) 'issue) 'identifier))))
-                               (when (and listing (buffer-exists? listing)) (linear--read! listing)))))))))))
+                               (when (and listing (buffer-exists? listing)) (linear--read! listing)))))))))))))
         (if (linear--team scope)
             (go (linear--team scope))
             (completing-read "Team: " (map (lambda (t) (plist-get t 'key)) (linear--teams))
@@ -590,12 +624,48 @@
   (lambda (buf) (string-append "Linear issue page " buf " is open. Read it with (buffer-outline BUF) and (buffer-section BUF NAME).")))
 
 (define (linear-listing!)
-  (unless (buffer-exists? *linear-buffer*) (buffer-create *linear-buffer*))
-  (linear--join! *linear-buffer*)
-  (unless (buffer-derived-mode? *linear-buffer* "linear-mode")
-    (with-current-buffer *linear-buffer* (lambda () (set-mode! "linear-mode"))))
-  (app-claim! *linear-buffer* "linear" 'listing)
-  *linear-buffer*)
+  (let* ((g (frame-group))
+         (d (linear-group-defaults g))
+         (buf (if d (string-append "*linear — " (group-name g) "*") *linear-buffer*)))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (linear--join! buf)
+    (unless (buffer-derived-mode? buf "linear-mode")
+      (with-current-buffer buf (lambda () (set-mode! "linear-mode"))))
+    (buffer-set-local! buf 'linear-defaults d)
+    (app-claim! buf "linear" 'listing)
+    buf))
+
+;; pick the frame group's team, project and assignee; each may be left open
+(define (linear-group-defaults-set!)
+  (let ((g (frame-group)))
+    (if (not g) (message "Linear: no group here")
+        (linear--with-teams
+          (lambda (_)
+            (completing-read "Team (any): " (cons "any" (map (lambda (t) (plist-get t 'key)) (linear--teams)))
+              (lambda (team)
+                (let ((t (linear--team team)))
+                  (linear-gql (if t "query($id: String!) { team(id: $id) { projects(first: 100) { nodes { name } } } }"
+                                  "{ projects(first: 100) { nodes { name } } }")
+                    (if t (list 'id (plist-get t 'id)) '())
+                    (lambda (dd)
+                      (let ((names (map (lambda (p) (plist-get p 'name))
+                                        (linear--nodes (if t (and dd (plist-get dd 'team)) dd) 'projects))))
+                        (completing-read "Project (any): " (cons "any" names)
+                          (lambda (project)
+                            (completing-read "Assignee (anyone): " '("anyone" "me")
+                              (lambda (who)
+                                (group-config-set! g 'linear-team (and t team))
+                                (group-config-set! g 'linear-project (and (not (equal? project "any")) project))
+                                (group-config-set! g 'linear-assignee (and (equal? who "me") "me"))
+                                (message (string-append "Linear defaults for " (group-name g) ": "
+                                                        (let ((d (linear-group-defaults g))) (if d (linear--defaults-label d) "none"))
+                                                        ". M-x linear opens them.")))
+                              'require-match #t))
+                          'require-match #t))))))
+              'require-match #t))))))
+
+(define-command "linear-group-defaults" "Pin this group's Linear list to a team, project and assignee"
+  (lambda () (linear-group-defaults-set!)))
 
 ;;;###autoload
 (define-command "linear" "Open the Linear app: your open issues, one page per issue"

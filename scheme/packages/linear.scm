@@ -1,0 +1,431 @@
+;;; linear.scm — Linear as a compos app.
+;;;
+;;; M-x linear lists issues: yours by default; t steps the scope through each
+;;; team and all open issues. Moving onto a row shows that issue's page beside
+;;; the list, one page per issue. The same keys act on the row and the page:
+;;; s status, a assignee, p priority, c comment, n new issue, o open in Linear,
+;;; g reread.
+;;;
+;;; Data: Linear's GraphQL API with a personal API key, the secret setting
+;;; linear-api-key: the setting, else LINEAR_API_KEY, else ~/.compos/linear-key.
+;;; Make one at Linear > Settings > Security & access > Personal API keys.
+;;; Every call is async; nothing waits on the lane.
+
+(domain! 'linear)
+(effects! '(write))
+
+(defgroup 'linear "Linear: issues, their status, assignees and comments.")
+
+(defcustom 'linear-api-key #f
+  "Linear: a personal API key for its GraphQL API."
+  'type 'secret 'group 'linear 'env "LINEAR_API_KEY"
+  'key-page "https://linear.app/settings/account/security")
+
+(effects! '(write external display))
+
+(define linear-api "https://api.linear.app/graphql")
+(define *linear-buffer* "*linear*")
+
+;;; --- plumbing ---------------------------------------------------------------
+
+(define (linear--s v) (cond ((string? v) v) ((number? v) (number->string v)) ((not v) "") (else (format "~a" v))))
+(define (linear--day iso) (let ((s (linear--s iso))) (if (>= (string-length s) 10) (substring s 0 10) s)))
+
+(define (linear--log text)
+  (unless (buffer-exists? "*linear-log*") (buffer-create "*linear-log*"))
+  (buffer-append! "*linear-log*" (string-append (format-time (current-time) "%Y-%m-%d %H:%M") " " text "\n")))
+
+;; every app buffer joins the frame's group, so the group keeps the layout
+(define (linear--join! buf)
+  (let ((g (frame-group)))
+    (when (and g (not (buffer-in-group? buf g))) (buffer-add-group! buf g)))
+  buf)
+
+;; one GraphQL call; K gets the data plist, or #f with the failure logged
+;;;###autoload
+(define (linear-gql query vars k)
+  (http-post linear-api
+    (if (pair? vars) (list 'query query 'variables vars) (list 'query query))
+    (list 'headers (list 'authorization (or (secret-value 'linear-api-key) "")))
+    (lambda (reply)
+      (let* ((j (and (pair? reply) (plist-get reply 'json)))
+             (errs (and (pair? j) (plist-get j 'errors)))
+             (data (and (pair? j) (plist-get j 'data))))
+        (when (or errs (not data))
+          (linear--log (string-append "graphql failed: "
+                                      (if errs (json-encode errs) (linear--s (and (pair? reply) (plist-get reply 'status))))
+                                      " — " (substring query 0 (min 60 (string-length query)))))
+          (message "Linear: request failed (see *linear-log*)"))
+        (k (and (not errs) data))))))
+
+;;; --- teams, their states and members (read once) -----------------------------
+
+(define *linear-teams* #f)
+
+(define (linear--with-teams k)
+  (if *linear-teams*
+      (k *linear-teams*)
+      (linear-gql "{ viewer { id name } teams { nodes { id key name states { nodes { id name type position } } members { nodes { id name displayName } } } } }" '()
+        (lambda (d)
+          (when d
+            (set! *linear-teams*
+              (list 'viewer (plist-get d 'viewer)
+                    'teams (plist-get (plist-get d 'teams) 'nodes))))
+          (k *linear-teams*)))))
+
+(define (linear--teams) (or (and *linear-teams* (plist-get *linear-teams* 'teams)) '()))
+(define (linear--team key)
+  (let ((hit (filter (lambda (t) (or (equal? (plist-get t 'key) key) (equal? (plist-get t 'id) key))) (linear--teams))))
+    (and (pair? hit) (car hit))))
+(define (linear--nodes v k) (or (and v (plist-get (plist-get v k) 'nodes)) '()))
+
+;;; --- the listing ---------------------------------------------------------------
+
+(define linear--issue-fields
+  "id identifier title priority priorityLabel url updatedAt state { name type } assignee { id name } team { id key }")
+
+(define (linear--scope buf) (or (buffer-local buf 'linear-scope) "all"))
+(define (linear--scopes) (append (list "mine") (map (lambda (t) (plist-get t 'key)) (linear--teams)) (list "all")))
+
+(define (linear--filter scope)
+  (let ((open (list 'state (list 'type (list 'nin (list "completed" "canceled" "duplicate"))))))
+    (cond ((equal? scope "mine") (append (list 'assignee (list 'isMe (list 'eq #t))) open))
+          ((equal? scope "all") open)
+          (else (append (list 'team (list 'key (list 'eq scope))) open)))))
+
+(define (linear--read! buf)
+  (let ((gen (+ 1 (or (buffer-local buf 'linear-gen) 0))) (t0 (monotonic-ms)))
+    (buffer-set-local! buf 'linear-gen gen)
+    (buffer-set-local! buf 'linear-loading #t)
+    (list-refresh! buf)
+    (linear-gql (string-append "query($f: IssueFilter) { issues(first: 150, filter: $f, orderBy: updatedAt) { nodes { " linear--issue-fields " } } }")
+      (list 'f (linear--filter (linear--scope buf)))
+      (lambda (d)
+        (when (and (buffer-exists? buf) (equal? (buffer-local buf 'linear-gen) gen))
+          (buffer-set-local! buf 'linear-loading #f)
+          (when d (buffer-set-local! buf 'linear-rows (linear--nodes d 'issues)))
+          (list-refresh! buf)
+          (message (string-append "Linear: " (number->string (length (or (buffer-local buf 'linear-rows) '())))
+                                  " issues (" (linear--scope buf) ") in " (number->string (- (monotonic-ms) t0)) " ms")))))))
+
+(define (linear-rows buf) (or (buffer-local buf 'linear-rows) '()))
+(public! 'linear-rows "(linear-rows BUF) -- the Linear issues the listing BUF holds, as plists" 'linear)
+(catalog-meta! 'function 'linear-rows 'effects '(read))
+(define (linear-key buf row) (plist-get row 'identifier))
+(define (linear-title buf)
+  (string-append "Linear — " (let ((s (linear--scope buf))) (cond ((equal? s "mine") "my open issues") ((equal? s "all") "all open issues") (else (string-append s " open issues"))))
+                 (if (buffer-local buf 'linear-loading) " — reading…" "")))
+
+(define (linear--state-tone type)
+  (cond ((equal? type "started") "warn") ((equal? type "completed") "good")
+        ((member type '("canceled" "duplicate")) "bad") ((member type '("backlog" "triage")) "dim") (else "")))
+(define (linear--prio-tone p) (cond ((equal? p 1) "bad") ((equal? p 2) "warn") (else "dim")))
+(define (linear--prio-short p) (cond ((equal? p 1) "!!!") ((equal? p 2) "!!") ((equal? p 3) "!") ((equal? p 4) "·") (else "")))
+
+(define (linear-columns buf)
+  (list (list "issue" 10) (list "status" 14) (list "pri" 4) (list "assignee" 16) (list "updated" 11) (list "title" #f)))
+
+(define (linear-cells buf row)
+  (let ((st (plist-get row 'state)))
+    (list (list (linear--s (plist-get row 'identifier)) "dim")
+          (list (linear--s (and st (plist-get st 'name))) (let ((t (linear--state-tone (and st (plist-get st 'type))))) (if (equal? t "") "default" t)))
+          (list (linear--prio-short (plist-get row 'priority)) (linear--prio-tone (plist-get row 'priority)))
+          (list (linear--s (let ((a (plist-get row 'assignee))) (if a (plist-get a 'name) "—"))) "dim")
+          (list (linear--day (plist-get row 'updatedAt)) "dim")
+          (linear--s (plist-get row 'title)))))
+
+;;; --- the issue page ----------------------------------------------------------------
+
+(define (linear--issue-buffer row) (string-append "*linear:" (linear--s (plist-get row 'identifier)) "*"))
+
+(define linear--detail-actions
+  '(("linear:state" "Status" "s") ("linear:assign" "Assign" "a") ("linear:priority" "Priority" "p")
+    ("linear:comment" "Comment" "c") ("linear:open" "Open in Linear ↗" "o") ("linear:refresh" "Refresh" "g")))
+
+(define (linear--issue-pairs i)
+  (filter (lambda (kv) (not (equal? (cadr kv) "")))
+    (list (list "team" (linear--s (and (plist-get i 'team) (plist-get (plist-get i 'team) 'name))))
+          (list "priority" (linear--s (plist-get i 'priorityLabel)))
+          (list "assignee" (linear--s (let ((a (plist-get i 'assignee))) (if a (plist-get a 'name) "unassigned"))))
+          (list "creator" (linear--s (and (plist-get i 'creator) (plist-get (plist-get i 'creator) 'name))))
+          (list "project" (linear--s (and (plist-get i 'project) (plist-get (plist-get i 'project) 'name))))
+          (list "labels" (string-join (map (lambda (l) (linear--s (plist-get l 'name))) (linear--nodes i 'labels)) ", "))
+          (list "created" (linear--day (plist-get i 'createdAt)))
+          (list "updated" (linear--day (plist-get i 'updatedAt))))))
+
+(define (linear--comment-block c)
+  (component 'ui/callout
+    (list 'label (string-append (linear--s (and (plist-get c 'user) (plist-get (plist-get c 'user) 'name))) " · " (linear--day (plist-get c 'createdAt)))
+          'tone "note"
+          'body (list (list 'tag "c-group" 'class "c-prose" 'text (linear--s (plist-get c 'body)))))))
+
+(define (linear--issue-blocks row i)
+  (let* ((it (or i row))
+         (st (plist-get it 'state))
+         (comments (if i (linear--nodes i 'comments) '()))
+         (desc (linear--s (and i (plist-get i 'description)))))
+    (list
+      (component 'ui/section (list 'title (string-append (linear--s (plist-get it 'identifier)) "  " (linear--s (plist-get it 'title)))))
+      (component 'ui/badge (list 'text (linear--s (and st (plist-get st 'name))) 'class (linear--state-tone (and st (plist-get st 'type)))))
+      (component 'ui/actions (list 'actions linear--detail-actions))
+      (component 'ui/card (list 'title "Issue" 'open? #t 'body (list (component 'ui/kv (list 'pairs (linear--issue-pairs it))))))
+      (component 'ui/card (list 'title "Description" 'open? #t
+                                'body (list (cond ((not i) (component 'ui/empty (list 'text "reading…")))
+                                                  ((equal? desc "") (component 'ui/empty (list 'text "no description")))
+                                                  (else (list 'tag "c-group" 'class "c-prose" 'text desc))))))
+      (component 'ui/card (list 'title "Comments" 'open? #t 'badge (if i (number->string (length comments)) "")
+                                'body (cond ((not i) (list (component 'ui/empty (list 'text "reading…"))))
+                                            ((null? comments) (list (component 'ui/empty (list 'text "no comments"))))
+                                            (else (map linear--comment-block comments)))))
+      (list 'tag "c-group" 'class "c-dim" 'text "— end —"))))
+
+;; the text agents read, with anchors on its parts: header, description, comments
+(define (linear--issue-text row i)
+  (let* ((it (or i row))
+         (st (plist-get it 'state))
+         (head (string-append (linear--s (plist-get it 'identifier)) "  " (linear--s (plist-get it 'title)) "\n"
+                              (linear--s (and st (plist-get st 'name))) " · " (linear--s (plist-get it 'priorityLabel)) " · "
+                              (linear--s (let ((a (plist-get it 'assignee))) (if a (plist-get a 'name) "unassigned"))) "\n"
+                              (linear--s (plist-get it 'url)) "\n\n"))
+         (desc (string-append "Description\n" (if i (linear--s (plist-get i 'description)) "reading…") "\n\n"))
+         (com (string-append "Comments\n"
+                             (string-join (map (lambda (c) (string-append "— " (linear--s (and (plist-get c 'user) (plist-get (plist-get c 'user) 'name)))
+                                                                         " " (linear--day (plist-get c 'createdAt)) "\n" (linear--s (plist-get c 'body))))
+                                               (if i (linear--nodes i 'comments) '())) "\n\n")
+                             "\n\nend\n")))
+    (list head desc com)))
+
+(define (linear--issue-draw! buf)
+  (let* ((row (buffer-local buf 'linear-row)) (i (buffer-local buf 'linear-issue))
+         (parts (linear--issue-text row i))
+         (h (string-byte-length (car parts))) (d (string-byte-length (cadr parts))) (c (string-byte-length (caddr parts))))
+    (buffer-set-text! buf (apply string-append parts) #t)
+    (buffer-set-local! buf 'render-mode "blocks")
+    (buffer-set-local! buf 'render-blocks (linear--issue-blocks row i))
+    (anchor-set! buf (list (list "header" 0 h) (list "description" h (+ h d)) (list "comments" (+ h d) (+ h d c))))))
+
+(define (linear--issue-read! buf)
+  (let ((row (buffer-local buf 'linear-row)))
+    (linear-gql "query($id: String!) { issue(id: $id) { id identifier title description priority priorityLabel url createdAt updatedAt state { name type } assignee { id name } creator { name } team { id key name } project { name } labels { nodes { name } } comments(first: 100) { nodes { body createdAt user { name } } } } }"
+      (list 'id (plist-get row 'id))
+      (lambda (d)
+        (when (and d (buffer-exists? buf))
+          (let ((i (plist-get d 'issue)))
+            (when i
+              (set! i (append i '()))
+              (buffer-set-local! buf 'linear-issue i)
+              (buffer-set-local! buf 'linear-read-at (monotonic-ms))
+              (linear--issue-draw! buf))))))))
+
+(define (linear-issue-show! listing row)
+  (when row
+    (let ((buf (linear--issue-buffer row)))
+      (unless (buffer-exists? buf) (buffer-create buf))
+      (linear--join! buf)
+      (unless (buffer-derived-mode? buf "linear-detail-mode")
+        (with-current-buffer buf (lambda () (set-mode! "linear-detail-mode"))))
+      (enable-minor-mode! buf "anchor-mode")
+      (buffer-set-local! buf 'linear-row row)
+      (buffer-set-local! buf 'linear-listing listing)
+      (app-claim! buf "linear" 'detail)
+      (linear--issue-draw! buf)
+      (if (buffer-exists? listing) (display-buffer-detail! buf listing) (switch-to-buffer! buf))
+      ;; a read under a minute old stands
+      (let ((at (buffer-local buf 'linear-read-at)))
+        (when (or (not at) (> (- (monotonic-ms) at) 60000)) (linear--issue-read! buf)))
+      buf)))
+
+;;; --- verbs, the same on the listing and its pages ---------------------------------
+
+(define (linear--row-at buf)
+  (if (buffer-derived-mode? buf "linear-mode") (list-current buf) (buffer-local buf 'linear-row)))
+
+(define (linear--after-change! buf row what)
+  (message (string-append "Linear: " (linear--s (plist-get row 'identifier)) " " what))
+  (let* ((listing (if (buffer-derived-mode? buf "linear-mode") buf (buffer-local buf 'linear-listing)))
+         (page (linear--issue-buffer row)))
+    (when (buffer-exists? page) (linear--issue-read! page))
+    (when (and listing (buffer-exists? listing)) (linear--read! listing))))
+
+(define (linear--update! buf input what)
+  (let ((row (linear--row-at buf)))
+    (if (not row) (message "No issue here")
+        (linear-gql "mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }"
+          (list 'id (plist-get row 'id) 'input input)
+          (lambda (d) (when d (linear--after-change! buf row what)))))))
+
+(define (linear--row-team row)
+  (let ((t (plist-get row 'team))) (and t (linear--team (plist-get t 'id)))))
+
+(define (linear-set-state! buf)
+  (let ((row (linear--row-at buf)))
+    (linear--with-teams
+      (lambda (_)
+        (let* ((team (and row (linear--row-team row)))
+               (states (map caddr (sort (map (lambda (s) (list (or (plist-get s 'position) 0) (plist-get s 'name) s)) (linear--nodes team 'states))))))
+          (if (not team) (message "No issue here")
+              (completing-read (string-append (linear--s (plist-get row 'identifier)) " status: ") (map (lambda (s) (plist-get s 'name)) states)
+                (lambda (name)
+                  (let ((hit (filter (lambda (s) (equal? (plist-get s 'name) name)) states)))
+                    (when (pair? hit) (linear--update! buf (list 'stateId (plist-get (car hit) 'id)) (string-append "→ " name)))))
+                'require-match #t)))))))
+
+(define (linear-assign! buf)
+  (let ((row (linear--row-at buf)))
+    (linear--with-teams
+      (lambda (_)
+        (let* ((team (and row (linear--row-team row)))
+               (members (linear--nodes team 'members))
+               (names (cons "(unassign)" (map (lambda (m) (plist-get m 'name)) members))))
+          (if (not team) (message "No issue here")
+              (completing-read (string-append (linear--s (plist-get row 'identifier)) " assignee: ") names
+                (lambda (name)
+                  (if (equal? name "(unassign)")
+                      (linear--update! buf (list 'assigneeId #f) "unassigned")
+                      (let ((hit (filter (lambda (m) (equal? (plist-get m 'name) name)) members)))
+                        (when (pair? hit) (linear--update! buf (list 'assigneeId (plist-get (car hit) 'id)) (string-append "→ " name))))))
+                'require-match #t)))))))
+
+(define linear--priorities '(("Urgent" 1) ("High" 2) ("Medium" 3) ("Low" 4) ("No priority" 0)))
+
+(define (linear-set-priority! buf)
+  (let ((row (linear--row-at buf)))
+    (if (not row) (message "No issue here")
+        (completing-read (string-append (linear--s (plist-get row 'identifier)) " priority: ") (map car linear--priorities)
+          (lambda (name)
+            (let ((hit (assoc name linear--priorities)))
+              (when hit (linear--update! buf (list 'priority (cadr hit)) (string-append "priority " name)))))
+          'require-match #t))))
+
+(define (linear-comment! buf)
+  (let ((row (linear--row-at buf)))
+    (if (not row) (message "No issue here")
+        (read-string (string-append "Comment on " (linear--s (plist-get row 'identifier)) ": ")
+          (lambda (text)
+            (unless (equal? (string-trim text) "")
+              (linear-gql "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }"
+                (list 'input (list 'issueId (plist-get row 'id) 'body text))
+                (lambda (d) (when d (linear--after-change! buf row "commented"))))))))))
+
+(define (linear-new-issue! buf)
+  (linear--with-teams
+    (lambda (_)
+      (let* ((listing (if (buffer-derived-mode? buf "linear-mode") buf (buffer-local buf 'linear-listing)))
+             (scope (if listing (linear--scope listing) "mine"))
+             (go (lambda (team)
+                   (read-string (string-append "New " (plist-get team 'key) " issue: ")
+                     (lambda (title)
+                       (unless (equal? (string-trim title) "")
+                         (linear-gql "mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier } } }"
+                           (list 'input (append (list 'teamId (plist-get team 'id) 'title title)
+                                                (if (equal? scope "mine") (list 'assigneeId (plist-get (plist-get *linear-teams* 'viewer) 'id)) '())))
+                           (lambda (d)
+                             (when d
+                               (message (string-append "Linear: created " (linear--s (plist-get (plist-get (plist-get d 'issueCreate) 'issue) 'identifier))))
+                               (when (and listing (buffer-exists? listing)) (linear--read! listing)))))))))))
+        (if (linear--team scope)
+            (go (linear--team scope))
+            (completing-read "Team: " (map (lambda (t) (plist-get t 'key)) (linear--teams))
+              (lambda (k) (let ((t (linear--team k))) (when t (go t))))
+              'require-match #t))))))
+
+(define (linear-open-web! buf)
+  (let ((row (linear--row-at buf)))
+    (if (and row (plist-get row 'url)) (tab-open (plist-get row 'url)) (message "No issue here"))))
+
+(define (linear-refresh! buf)
+  (if (buffer-derived-mode? buf "linear-mode")
+      (linear--read! buf)
+      (begin (buffer-set-local! buf 'linear-issue #f) (linear--issue-draw! buf) (linear--issue-read! buf))))
+
+(define (linear-next-scope! buf)
+  (linear--with-teams
+    (lambda (_)
+      (let* ((ss (linear--scopes)) (cur (linear--scope buf))
+             (rest (member cur ss)))
+        (buffer-set-local! buf 'linear-scope (if (and rest (pair? (cdr rest))) (cadr rest) (car ss)))
+        (linear--read! buf)))))
+
+(add-hook! (list 'block-click 'linear)
+  (lambda (buf id)
+    (and (buffer-local buf 'linear-row)
+         (cond ((equal? id "linear:state") (linear-set-state! buf) #t)
+               ((equal? id "linear:assign") (linear-assign! buf) #t)
+               ((equal? id "linear:priority") (linear-set-priority! buf) #t)
+               ((equal? id "linear:comment") (linear-comment! buf) #t)
+               ((equal? id "linear:open") (linear-open-web! buf) #t)
+               ((equal? id "linear:refresh") (linear-refresh! buf) #t)
+               (else #f)))))
+
+;;; --- modes and commands -----------------------------------------------------------
+
+(define-command "linear-open" "Show the issue on this row beside the list"
+  (lambda () (let ((buf (current-buffer))) (linear-issue-show! buf (list-current buf))))
+  'modes '(linear-mode))
+(define-command "linear-set-state" "Change this issue's status" (lambda () (linear-set-state! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-assign" "Change who this issue is assigned to" (lambda () (linear-assign! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-set-priority" "Change this issue's priority" (lambda () (linear-set-priority! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-comment" "Comment on this issue" (lambda () (linear-comment! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-new-issue" "Create a Linear issue in the team at hand" (lambda () (linear-new-issue! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-open-web" "Open this issue in Linear" (lambda () (linear-open-web! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-refresh" "Read this again from Linear" (lambda () (linear-refresh! (current-buffer))) 'modes '(linear-mode linear-detail-mode))
+(define-command "linear-next-scope" "Show the next scope: mine, each team, all open" (lambda () (linear-next-scope! (current-buffer))) 'modes '(linear-mode))
+
+(define-list-mode! "linear-mode"
+  (list 'doc "Linear issues, newest change first (all open issues at first): the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. t steps the scope: my open issues, each team's, all open. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue, o opens it in Linear, g rereads, / narrows, q quits."
+        'transient #f
+        'noun "issue"
+        'rows linear-rows
+        'key linear-key
+        'columns linear-columns
+        'cells linear-cells
+        'title linear-title
+        'total (lambda (buf) (length (linear-rows buf)))
+        'preview linear-issue-show!
+        'debounce #t
+        'filters (list (list "status:" (lambda (buf row) (linear--s (plist-get (plist-get row 'state) 'name))) "the status")
+                       (list "team:" (lambda (buf row) (linear--s (plist-get (plist-get row 'team) 'key))) "the team key"))
+        'footer (lambda (b) (list (list "t" "scope") (list "RET" "issue") (list "s" "status") (list "a" "assign") (list "p" "priority")
+                                  (list "c" "comment") (list "n" "new") (list "o" "Linear") (list "g" "refresh") (list "q" "quit")))
+        'keys (list (list "RET" "linear-open") (list "t" "linear-next-scope")
+                    (list "s" "linear-set-state") (list "a" "linear-assign") (list "p" "linear-set-priority")
+                    (list "c" "linear-comment") (list "n" "linear-new-issue") (list "o" "linear-open-web")
+                    (list "g" "linear-refresh") (list "q" "quit-window"))))
+
+(define-mode "linear-detail-mode" (lambda () #f))
+
+(mode-keys! "linear-detail-mode"
+  '(("s" "linear-set-state") ("a" "linear-assign") ("p" "linear-set-priority") ("c" "linear-comment")
+    ("n" "linear-new-issue") ("o" "linear-open-web") ("g" "linear-refresh") ("q" "quit-window")))
+
+(mode-doc! "linear-detail-mode"
+  "A Linear issue beside the list: its status, details, description and comments. s status, a assignee, p priority, c comment, n new issue, o opens it in Linear, g rereads.")
+
+(detail-name! "linear-detail-mode"
+  (lambda (buf) (let ((row (buffer-local buf 'linear-row))) (string-append "*" (linear--s (and row (plist-get row 'identifier))) "*"))))
+
+(register-context-provider! "linear-detail-mode"
+  (lambda (buf) (string-append "Linear issue page " buf " is open. Read it with (buffer-outline BUF) and (buffer-section BUF NAME).")))
+
+(define (linear-listing!)
+  (unless (buffer-exists? *linear-buffer*) (buffer-create *linear-buffer*))
+  (linear--join! *linear-buffer*)
+  (unless (buffer-derived-mode? *linear-buffer* "linear-mode")
+    (with-current-buffer *linear-buffer* (lambda () (set-mode! "linear-mode"))))
+  (app-claim! *linear-buffer* "linear" 'listing)
+  *linear-buffer*)
+
+;;;###autoload
+(define-command "linear" "Open the Linear app: your open issues, one page per issue"
+  (lambda ()
+    (let ((buf (linear-listing!)))
+      (app-open! buf)
+      (linear--with-teams (lambda (_) (linear--read! buf))))))
+
+(effects! '(write external))
+(public! 'linear-gql
+  "(linear-gql QUERY VARS K) — one Linear GraphQL call; K gets the data plist, or #f with the failure in *linear-log*")
+(public! 'linear
+  "M-x linear — Linear issues as an app: a list, one page per issue, status/assign/priority/comment/new")
+
+(provide 'linear)

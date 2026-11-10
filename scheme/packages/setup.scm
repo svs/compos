@@ -947,3 +947,8 @@
 ;; it runs `command -v` and `npm prefix -g` to look at PATH
 (effects! '(read execute))
 (public! 'setup-agent-missing-steps "(setup-agent-missing-steps NAME) — the (PROGRAM COMMAND) install steps of connector NAME whose program is not on PATH")
+
+;; it runs `command -v` and `npm prefix -g`, and saves an npm-installed
+;; program's full path as the connector's command override
+(effects! '(read write execute))
+(public! 'setup-inference-scan "(setup-inference-scan) — every declared connector as (NAME KIND READY? DETAIL NEXT): what this machine can actually run")

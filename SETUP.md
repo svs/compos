@@ -1,10 +1,8 @@
-# Set up compos from nothing
+# Set up compos
 
-This file is for a person who does not have developer tools on their machine, and for the AI agent that does the work for them. [INSTALL.md](INSTALL.md) assumes the tools are there. This file gets them there, then hands over to INSTALL.md.
+This file is for a person who wants to try compos, and for the AI agent that sets it up for them. compos ships as one binary, so there is nothing to build and no developer tools to install. To build from source instead, see [INSTALL.md](INSTALL.md).
 
 ## For the person
-
-You do not need to know what Elixir, Rust or Node are. Your agent installs them.
 
 1. Get Claude Code. On macOS or Linux, open the Terminal app and paste:
 
@@ -16,9 +14,9 @@ You do not need to know what Elixir, Rust or Node are. Your agent installs them.
 
 2. Say this to the agent:
 
-   > Set up compos for me. Follow SETUP.md in <REPO-URL>, then INSTALL.md.
+   > Set up compos for me. Follow SETUP.md in <REPO-URL>.
 
-3. The agent asks before it installs anything on your machine, and it may ask for your login password. Say yes when you agree. It never needs your API keys; you type those yourself into `M-x setup` at the end.
+3. The agent asks before it changes anything on your machine. It never needs your API keys; you type those yourself into `M-x setup` at the end.
 
 ## For the agent
 
@@ -26,62 +24,41 @@ Do the steps in order. Each step says how to check it. Stop and tell the person 
 
 Rules:
 
-- Ask the person before each system-wide install. Group the installs so you ask once per step, not once per package.
-- When a command needs `sudo` or a password, tell the person to type it in the terminal. Never ask for it in the chat.
+- Ask the person before you install or move anything.
 - Do not read, print, or store a secret value.
-- Skip a step when its check already passes.
+- Run the daemon in the background. Do not block on it.
 
-### 1. Find the platform
+### 1. Get the binary
 
-Run `uname -sm`. Find the Linux distribution in `/etc/os-release`. Tell the person what you found.
+Find the platform with `uname -sm`. Each release on <REPO-URL>/releases has two binaries:
 
-- macOS on Apple silicon (`Darwin arm64`): every step applies.
-- macOS on Intel (`Darwin x86_64`): skip Python, laya does not run there.
-- Linux: use the distribution's package manager for system packages, and mise for Erlang and Elixir.
-- Windows: use WSL2 with Ubuntu, then follow the Linux steps inside it.
+- `compos-VERSION-macos_arm`: macOS on Apple silicon (`Darwin arm64`).
+- `compos-VERSION-linux`: Linux on x86_64.
 
-### 2. A package manager
+Other platforms have no binary yet; tell the person and stop. Download the binary of the latest release into `~/.local/bin/compos` and make it executable. On macOS, clear the quarantine flag: `xattr -d com.apple.quarantine ~/.local/bin/compos`. The first run unpacks itself once and is slower.
 
-- macOS: Homebrew. Check: `brew --version`. Install:
+Check: `~/.local/bin/compos --version` answers.
 
-  ```sh
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  ```
-
-  The installer asks for the person's password and may install the Xcode Command Line Tools. Then add brew to the shell as the installer prints at the end, and open a new shell.
-- Linux: the system one (`apt`, `dnf`, `pacman`). Install the build basics: `build-essential` (or `base-devel`), `curl`, `git`, `libssl-dev`, `libncurses-dev`, `autoconf`.
-
-### 3. The tools
-
-| Tool | macOS | Linux | Check |
-|---|---|---|---|
-| git | `brew install git` | package manager | `git --version` |
-| Erlang/OTP and Elixir 1.19 or later | `brew install elixir` | mise, below | `elixir --version` |
-| Rust | `brew install rustup && rustup-init -y` | `curl https://sh.rustup.rs -sSf \| sh -s -- -y` | `cargo --version` |
-| Node and npm | `brew install node` | mise, below | `npm --version` |
-| Google Chrome | `brew install --cask google-chrome` | the vendor package | the browser opens |
-| Python 3.12 (Apple silicon only) | `brew install python@3.12` | not needed | `python3.12 --version` |
-
-On Linux, distribution packages of Elixir are often too old. Use mise:
+### 2. Run it
 
 ```sh
-curl https://mise.run | sh
-~/.local/bin/mise use -g erlang@latest elixir@latest node@lts
+~/.local/bin/compos   # in the background; it serves http://localhost:4004
 ```
 
-Erlang compiles from source here and takes several minutes. Run it in the background and tell the person it is slow on purpose. Add mise to the shell as its installer says, then open a new shell.
+Open the editor in Chrome: `open -na "Google Chrome" --args --app=http://localhost:4004`. Without Chrome, any browser at that address works.
 
-Check: every command in the Check column answers, in a new shell. If `elixir --version` shows a version below 1.19, the old one is first on the `PATH`; fix the `PATH` before you go on.
+Check: `http://localhost:4004` answers, and the person sees the editor. The state lives in `~/.compos`.
 
-### 4. Hex and Rebar
+### 3. Connect the agent to the editor
+
+The editor is an MCP server. For Claude Code:
 
 ```sh
-mix local.hex --force
-mix local.rebar --force
+claude mcp add --scope user compos -- <MCP-SHIM-PATH>
 ```
 
-Check: `mix hex.info` answers.
+Restart the agent session. Check: the `eval-scheme` tool of the `compos` server answers `(setup-report)`.
 
-### 5. Hand over to INSTALL.md
+### 4. Configure
 
-Tell the person the tools are in, then follow [INSTALL.md](INSTALL.md) from step 2. Its step 1 should now pass as it is.
+Follow [INSTALL.md](INSTALL.md) from step 4: the chat connector, secret storage, model presets and the decision model. Those steps run in Scheme through `eval-scheme`, the same for the binary and a source build. Then hand over to the person with `M-x setup`.

@@ -1,6 +1,6 @@
 # Install compos
 
-This file is for an AI agent. A person points the agent at this repository and says "install compos". Do the steps in order. Each step says how to check it. Stop and tell the person when a check fails.
+This file is for an AI agent that builds compos from source. To install the shipped binary, follow [SETUP.md](SETUP.md). A person points the agent at this repository and says "install compos". Do the steps in order. Each step says how to check it. Stop and tell the person when a check fails.
 
 Rules for the agent:
 
@@ -9,8 +9,6 @@ Rules for the agent:
 - Run the daemon in the background. Do not block on it.
 
 ## 1. Prerequisites
-
-If a check below fails and the person has no developer tools, follow [SETUP.md](SETUP.md) first.
 
 | Tool | Why | Check |
 |---|---|---|

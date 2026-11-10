@@ -935,3 +935,6 @@
 (public! 'bot-show-document-other-window!
   "(bot-show-document-other-window! BUFFER TITLE MARKDOWN SILENT?) — show bot documentation only in another window")
 (public! 'setup-report "(setup-report) — secret-free first-run setup report")
+;; it runs `command -v` and `npm prefix -g` to look at PATH
+(effects! '(read execute))
+(public! 'setup-agent-missing-steps "(setup-agent-missing-steps NAME) — the (PROGRAM COMMAND) install steps of connector NAME whose program is not on PATH")

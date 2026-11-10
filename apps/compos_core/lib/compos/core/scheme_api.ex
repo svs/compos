@@ -3572,7 +3572,7 @@ defmodule Compos.Core.SchemeAPI do
 
   defp report_slow_shell(cmd, dir, ms) when ms > @slow_shell_ms do
     require Logger
-    Logger.warning("shell: #{ms}ms in #{dir}: #{String.slice(cmd, 0, 160)}")
+    Logger.debug("shell: #{ms}ms in #{dir}: #{String.slice(cmd, 0, 160)}")
   end
 
   defp report_slow_shell(_cmd, _dir, _ms), do: :ok

@@ -387,7 +387,7 @@ defmodule Compos.Core.Lane do
         if ms > @slow_ms do
           require Logger
 
-          Logger.warning(
+          Logger.debug(
             "lane #{inspect(key)} owner #{inspect(owner)}: slow job #{label} #{ms}ms"
           )
         end

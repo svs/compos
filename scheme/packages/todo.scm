@@ -2340,13 +2340,30 @@
   (lambda () (todo--ask-at! "Note: " 'note))
   'modes '(todo-mode))
 
-(define-command "todo-new" "File a new task"
+;; show CHAT in the chat pane, else in the pane beside OWNER; the focus stays
+(define (todo--show-chat-beside! chat owner)
+  (let ((pane (window-showing-mode "chat-mode" #f)))
+    (cond ((window-showing chat) #t)
+          (pane (display-buffer-in-window! pane chat))
+          (else (panes-display-beside! chat owner)))
+    chat))
+
+(define-command "todo-new" "File a new task, then show the list, the task's page and the chat that starts on it; the chat writes the task's notes, goal and status first"
   (lambda ()
     (read-string "Task: "
       (lambda (s)
-        (let ((id (todo-create s (list 'state "todo" 'group (todo--origin-group todo-user)))))
+        (let* ((g (todo--origin-group todo-user))
+               (id (todo-create s (list 'state "todo" 'group g))))
           (todo--refresh-all!)
-          (message (string-append "Filed " id)))))))
+          ;; the list where you are, the page beside it, the chat beside that
+          (run-command "todo")
+          (let* ((page (todo-show-detail! id))
+                 (chat (todo-assign-chat! id g)))
+            (todo--refresh-all!)
+            (todo--show-chat-beside! chat page)
+            (message (string-append "Filed " id "; " chat " fills it in"))))))))
+
+(global-set-key "C-c T" "todo-new")
 ;; filing a task is for every buffer, not just the todo list
 (app-entry! "todo-new")
 

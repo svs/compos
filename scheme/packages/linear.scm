@@ -525,7 +525,7 @@
   (list 'doc "Linear issues, newest change first: the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. The status tabs, each with its count, head the list: open (every issue not closed), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
         'transient #f
         'noun "issue"
-        'rows linear-rows
+        'rows (lambda (buf) (list-keep buf (linear-rows buf)))
         'key linear-key
         'columns linear-columns
         'cells linear-cells

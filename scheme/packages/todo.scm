@@ -34,6 +34,7 @@
 
 ;; the chat hook and the boot sweep below set a prompt part
 (require 'prompts)
+(require 'app-watch)
 
 (domain! 'writing)
 (effects! '(read))
@@ -412,10 +413,14 @@
   (debounce! 'todo-changed 150
     (lambda (_)
       (for-each (lambda (b) (if (window-showing b) (list-refresh! b) (buffer-mark-dirty! b 'todo-list)))
-                (todo--buffers))
+                (filter app-watching? (todo--buffers)))
       (for-each (lambda (b) (if (window-showing b) (todo--detail-render! b) (buffer-mark-dirty! b 'todo-detail)))
-                (todo--detail-buffers)))
+                (filter app-watching? (todo--detail-buffers))))
     #f))
+
+;; todo redraws on its own writes, so w only turns that on and off
+(app-watch-define! "todo-mode")
+(app-watch-define! "todo-detail-mode")
 
 ;; the user saved a todo file by hand, or another program changed one on disk
 (define (todo--after-save!)
@@ -1966,7 +1971,7 @@
     ;; the page's keys: the same keys bar the list carries
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar
-              (list 'main '(("←→" "tab") ("t" "accept") ("i" "inbox") ("d" "done") ("X" "cancel") ("a" "agent") ("g" "refresh") ("q" "quit"))))))
+              (list 'main '(("←→" "tab") ("t" "accept") ("i" "inbox") ("d" "done") ("X" "cancel") ("a" "agent") ("g" "refresh") ("w" "watch") ("q" "quit"))))))
     (buffer-set-read-only! buf #t)
     (if t (todo--detail-retitle! buf t) buf)))
 
@@ -2616,7 +2621,7 @@
     'footer (lambda (buf)
               '(("←→" "status") ("RET" "open") ("TAB" "fold") ("e" "file") ("t" "accept") ("i" "inbox") ("d" "done") ("x" "cancel") ("W" "wait")
                 ("M-o" "agent") ("D" "deadline") ("P" "project") ("!" "priority") ("T" "urgent")
-                ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("q" "quit")))
+                ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("w" "watch") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own
     ;; arrow remap misses it at open; the mode states it

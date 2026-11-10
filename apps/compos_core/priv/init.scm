@@ -185,6 +185,7 @@
 (require 'markdown-mode)
 (require 'cua)
 (require 'vscode)
+(require 'app-watch)
 (require 'notmuch)
 (require 'occur)
 (require 'org)

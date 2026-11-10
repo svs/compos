@@ -61,6 +61,8 @@ Four keys are bound on your map AFTER your own, so a mode that declares one sile
 
 Nine more are inherited from `list-mode-map` and ARE yours to shadow: `f` also filters, `\\` pops the filter, `?` grows the keys card into the whole keymap, `n`/`p` walk, `m` marks, `u`/`U`/`*` unmark and mark-all, `x` executes the marks, `g` reverts. Most apps shadow `g` with their own refetch. That is fine.
 
+`w` watches, on the listing and on every page (`app-watch`): a watched buffer follows its data without a `g`. An app that knows when its data changes calls `(app-watch-define! MODE)` for each of its modes and asks `(app-watching? BUF)` before it redraws; its buffers start watched. Any other app is read again by its own `g` every `app-watch-interval` seconds while it is watched and shown, and starts unwatched. Draw `w` in the keys card. A page mode that binds `w` itself keeps it.
+
 Give your own verbs the letters none of these use. A server-side filter is not the same thing as `/` — `/` narrows the rows already drawn, so put "read a different query" on its own key (`t` for a tab, `s` for a scope) and say so in `'doc`.
 
 After you define the mode, read the map back rather than trusting the declaration:

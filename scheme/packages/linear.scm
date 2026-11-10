@@ -167,10 +167,11 @@
   (cond ((equal? type "started") "warn") ((equal? type "completed") "good")
         ((member type '("canceled" "duplicate")) "bad") ((member type '("backlog" "triage")) "dim") (else "")))
 (define (linear--prio-tone p) (cond ((equal? p 1) "bad") ((equal? p 2) "warn") (else "dim")))
-(define (linear--prio-short p) (cond ((equal? p 1) "!!!") ((equal? p 2) "!!") ((equal? p 3) "!") ((equal? p 4) "·") (else "")))
+;; one cell a priority: a bar as tall as the level, as Linear draws it, and ! when urgent
+(define (linear--prio-short p) (cond ((equal? p 1) "!") ((equal? p 2) "▆") ((equal? p 3) "▄") ((equal? p 4) "▂") (else "")))
 
 (define (linear-columns buf)
-  (list (list "issue" 10) (list "status" 8 'left 'end) (list "pri" 3) (list "assignee" 16) (list "updated" 11) (list "title" #f 'left 'end)))
+  (list (list "issue" 8) (list "status" 8 'left 'end) (list "P" 1) (list "assignee" 16) (list "updated" 11) (list "title" #f 'left 'end)))
 
 (define (linear-cells buf row)
   (let ((st (plist-get row 'state)))
@@ -180,6 +181,16 @@
           (list (linear--s (let ((a (plist-get row 'assignee))) (if a (plist-get a 'name) "—"))) "dim")
           (list (linear--day (plist-get row 'updatedAt)) "dim")
           (linear--s (plist-get row 'title)))))
+
+;; a narrow window keeps one dense line an issue: no assignee, no date
+(define (linear-narrow-columns buf)
+  (list (list "issue" 8) (list "status" 8 'left 'end) (list "P" 1) (list "title" #f 'left 'end)))
+
+(define (linear-narrow-cells buf row)
+  (let ((cs (linear-cells buf row)))
+    (list (nth 0 cs) (nth 1 cs) (nth 2 cs) (nth 5 cs))))
+
+(define linear-wide-cols 100)
 
 ;;; --- the issue page ----------------------------------------------------------------
 
@@ -584,15 +595,17 @@
 (define-command "linear-prev-view" "Show the previous status tab" (lambda () (linear--view-step! (current-buffer) -1)) 'modes '(linear-mode))
 
 (define-list-mode! "linear-mode"
-  (list 'doc "Linear issues, newest change first: the id, status, priority (!!! urgent, !! high, ! medium, · low), assignee, last update and title. The status tabs, each with its count, head the list: open (todo and in progress; backlog and triage stay out), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
+  (list 'doc "Linear issues, newest change first: the id, status, priority (! urgent, then a bar as tall as the level: ▆ high, ▄ medium, ▂ low), assignee, last update and title. The status tabs, each with its count, head the list: open (todo and in progress; backlog and triage stay out), backlog, todo, in progress, closed; left and right (or v) step them, a click takes one, and imenu picks one. / filters with tabs, Team, Assignee, Priority and Status, each led by All; words that match no choice filter the text, and status: or team: narrow by field. Moving or RET shows the issue beside the list. s status, a assignee, p priority, c comment, n new issue (in the team and for the assignee the filter shows), o opens it in Linear, g rereads, q quits."
         'transient #f
         ;; the plain text table, as Todos draws, not the drawn grid
         'default-view "bare"
         'noun "issue"
         'rows (lambda (buf) (list-keep buf (linear-rows buf)))
         'key linear-key
-        'columns linear-columns
-        'cells linear-cells
+        'layouts (list (list 'name 'wide 'min-cols linear-wide-cols
+                             'columns linear-columns 'cells linear-cells)
+                       (list 'name 'narrow 'default #t
+                             'columns linear-narrow-columns 'cells linear-narrow-cells))
         'title linear-title
         'head-blocks linear--tab-blocks
         'filter linear--row-filter

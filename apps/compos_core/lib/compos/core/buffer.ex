@@ -840,6 +840,10 @@ defmodule Compos.Core.Buffer do
   def undo(name, opts \\ []),
     do: GenServer.call(via(name), {:undo, source(opts), author(opts)})
 
+  @doc "Redo one step this buffer's undos took back; `{:error, :no_redo}` when none wait."
+  def redo(name, opts \\ []),
+    do: GenServer.call(via(name), {:redo, source(opts), author(opts)})
+
   @doc """
   All render inputs (text, point, mark, version, locals, overlays, hidden)
   in one read. With a win_id, point/mark/cursor geometry come from that
@@ -2037,6 +2041,33 @@ defmodule Compos.Core.Buffer do
         {:error, reason} ->
           Logger.error("undo failed for #{state.name}: #{inspect(reason)}")
           {:reply, {:error, :no_undo}, state}
+      end
+    end
+  end
+
+  # Redo only: it replays what undo took back and never undoes. The run stays
+  # open, so an undo after it takes the redo back again.
+  defp on_call({:redo, src, author}, _from, state) do
+    actor = resolve_actor(author, src)
+
+    if state.history == nil do
+      {:reply, {:error, :no_redo}, state}
+    else
+      state = state |> close_undo_step() |> ensure_undo_actor(actor)
+      id = undo_scope(actor)
+      {_undos, redos} = History.undo_count(state.history, id)
+
+      case redos > 0 and result(History.redo(state.history, id)) do
+        {:ok, _} ->
+          state = state |> apply_history_text(actor) |> Map.put(:undo_run, true)
+          {:reply, :ok, checkpoint_later(state)}
+
+        {:error, reason} ->
+          Logger.error("redo failed for #{state.name}: #{inspect(reason)}")
+          {:reply, {:error, :no_redo}, state}
+
+        _ ->
+          {:reply, {:error, :no_redo}, state}
       end
     end
   end

@@ -1886,6 +1886,11 @@ defmodule Compos.Core.SchemeAPI do
         fn [] ->
           Buffer.undo(Editor.current_buffer()) == :ok
         end,
+      {"redo!",
+       "(redo!) — redo one step the undos took back in the current buffer; never undoes. Return #t on success, #f when nothing waits."} =>
+        fn [] ->
+          Buffer.redo(Editor.current_buffer()) == :ok
+        end,
       # the redo-run flag only; undo-boundary! is the boundary
       {"break-undo-chain!",
        "(break-undo-chain!) — end a run of undos, so the next undo reverses them (redo). It is not a boundary: see undo-boundary!."} =>

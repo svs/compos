@@ -1050,6 +1050,17 @@
             (loop (+ i 1))
             (message "No further undo information"))))))
 
+;; Emacs 28's undo-redo: it only replays what undo took back, so pressing it
+;; with nothing undone does nothing rather than undo the last edit
+(define-command "undo-redo" "Redo the last change undo took back" (interactive 'p)
+  (lambda (n)
+    (let loop ((i 0))
+      (when (< i n)
+        (if (redo!)
+            (loop (+ i 1))
+            (message "No further redo information"))))))
+(catalog-meta! 'command "undo-redo" 'domain 'editing 'effects '(write) 'aliases "redo")
+
 ;;; --- registries ---------------------------------------------------------------
 ;;; One name-to-value table for everything that keeps one: a mode's facts,
 ;;; a keyed hook's functions, an annotator per category, and in the
@@ -6976,6 +6987,8 @@
 (global-set-key "C-y" "yank")
 (global-set-key "C-/" "undo")
 (global-set-key "C-x u" "undo")
+(global-set-key "C-?" "undo-redo")
+(global-set-key "C-M-_" "undo-redo")
 (global-set-key "C-q" "quoted-insert")
 (global-set-key "C-x 8 RET" "insert-char")
 (global-set-key "C-x i" "insert-file")

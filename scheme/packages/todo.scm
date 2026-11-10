@@ -403,6 +403,31 @@
 
 (effects! '(write))
 
+;; A write to a todo file redraws every list and task page that shows it, so a
+;; task an agent moves moves on screen too. A hidden one waits for its window.
+(define (todo--detail-buffers)
+  (filter (lambda (b) (equal? (buffer-local-value 'mode-name b) "todo-detail-mode")) (buffer-list)))
+
+(define (todo--changed!)
+  (debounce! 'todo-changed 150
+    (lambda (_)
+      (for-each (lambda (b) (if (window-showing b) (list-refresh! b) (buffer-mark-dirty! b 'todo-list)))
+                (todo--buffers))
+      (for-each (lambda (b) (if (window-showing b) (todo--detail-render! b) (buffer-mark-dirty! b 'todo-detail)))
+                (todo--detail-buffers)))
+    #f))
+
+;; the user saved a todo file by hand, or another program changed one on disk
+(define (todo--after-save!)
+  (when (member (buffer-path (current-buffer)) *todo-files*) (todo--changed!)))
+
+(define *todo-mtimes* '())
+(define (todo--fs-change root)
+  (let ((now (map (lambda (p) (cons p (file-mtime p))) *todo-files*)))
+    (unless (equal? now *todo-mtimes*)
+      (set! *todo-mtimes* now)
+      (todo--changed!))))
+
 (define (todo--save! path) (with-current-buffer path (lambda () (buffer-save!))))
 
 ;; replace task T's lines with NEW, or delete them (and one blank after)
@@ -424,7 +449,8 @@
         (write-file! path (string-join (append (list-head ls from)
                                                (if new (list new) '())
                                                (list-tail ls to))
-                                       "\n")))))
+                                       "\n"))))
+  (todo--changed!))
 
 (define (todo--append! path text)
   (let ((sep (lambda (cur) (cond ((equal? cur "") "")
@@ -440,7 +466,8 @@
           (else
            (write-file! path (string-append "# " (todo--file-project path) "\n\n" text "\n"))
            (set! *todo-files* (append (todo--files) (list path)))
-           (todo--agenda-sync!)))))
+           (todo--agenda-sync!))))
+  (todo--changed!))
 
 ;; the agenda reads every project's todos.md; a new project joins it here
 (define (todo--agenda-sync!)
@@ -2287,10 +2314,13 @@
 
 (define (todo--on-refresh! b keys)
   (cond ((memq 'todo-list keys) (list-refresh! b))
-        ((memq 'todo-cards keys) (list-redraw! b))))
+        ((memq 'todo-cards keys) (list-redraw! b))
+        ((memq 'todo-detail keys) (todo--detail-render! b))))
 
 (event-subscribe! "todo-cards" "chat:*" 'todo--on-chat-event)
 (add-hook! 'buffer-refresh-hook 'todo--on-refresh!)
+(add-hook! 'after-save-hook 'todo--after-save!)
+(add-hook! 'fs-change-hook 'todo--fs-change)
 
 (define-command "todo-set-deadline" "Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w"
   (lambda () (todo--ask-at! "Deadline: " 'deadline))

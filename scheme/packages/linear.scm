@@ -214,7 +214,7 @@
              ((string-prefix? ">" l)
               (loop (cdr ls) '() #f (cons (component 'ui/quote (list 'text (string-trim (substring l 1 (string-length l))))) out1)))
              ((or (string-prefix? "* " l) (string-prefix? "- " l) (string-prefix? "+ " l))
-              (let ((indent (- (string-length raw) (string-length (string-trim-left raw)))))
+              (let ((indent (- (string-length raw) (string-length (re-replace "^\\s+" raw "")))))
                 (loop (cdr ls) '() #f
                       (cons (component 'ui/bullet (list 'segs (append (if (> indent 1) (list (list "c-dim" "– ")) '())
                                                                       (linear--inline (substring l 2 (string-length l))))))

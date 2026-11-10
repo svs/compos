@@ -239,6 +239,8 @@
 (require 'perf)
 ;; which compos is running: rel VERSION · COMMIT, or dev · jj · git
 (require 'build-identity)
+;; M-x release-build-and-install: build, install as the stable compos, restart it
+(require 'release)
 (require 'profile)
 (require 'racket)
 (require 'test)

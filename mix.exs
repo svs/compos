@@ -1,10 +1,12 @@
 defmodule Compos.MixProject do
   use Mix.Project
 
+  @version "0.9.0"
+
   def project do
     [
       apps_path: "apps",
-      version: "0.9.0",
+      version: @version,
       start_permanent: Mix.env() == :prod,
       # No Phoenix.CodeReloader listener. It purges and deletes, in this VM,
       # every module an outside `mix compile` or `mix test` rebuilt — including
@@ -20,6 +22,9 @@ defmodule Compos.MixProject do
   defp releases do
     [
       compos: [
+        # The commit rides in the release version, so Burrito unpacks each
+        # build into its own directory instead of reusing the last 0.9.0.
+        version: "#{@version}+#{commit()}",
         applications: [
           compos_scheme: :permanent,
           compos_core: :permanent,
@@ -52,15 +57,19 @@ defmodule Compos.MixProject do
     end
 
     # What the modeline names as this build (scheme/packages/build-identity.scm).
-    {sha, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"])
     built = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
     File.write!(
       Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", "build-info.scm"]),
-      ~s|(version "#{release.version}" commit "#{String.trim(sha)}" built "#{built}")\n|
+      ~s|(version "#{vsn}" commit "#{commit()}" built "#{built}")\n|
     )
 
     release
+  end
+
+  defp commit do
+    {sha, 0} = System.cmd("git", ["rev-parse", "--short", "HEAD"])
+    String.trim(sha)
   end
 
   # Dependencies listed here are available only for this

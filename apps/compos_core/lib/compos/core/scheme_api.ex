@@ -1700,6 +1700,18 @@ defmodule Compos.Core.SchemeAPI do
               message: "listener-restart!: #{name}: #{inspect(reason)}"
         end
       end,
+      {"release-install-binary!",
+       "(release-install-binary! SRC BIN) — install the release executable SRC at BIN, replacing it whole, and prune other builds' unpacked releases; return BIN. Restarting is separate."} =>
+        fn [src, bin] ->
+          case Compos.Core.Daemon.install_release(src, bin) do
+            :ok ->
+              Path.expand(bin)
+
+            {:error, reason} ->
+              raise Compos.Scheme.Eval.Error,
+                message: "could not install #{src} at #{bin}: #{inspect(reason)}"
+          end
+        end,
       {"daemon-restart!",
        "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t."} =>
         fn [] ->

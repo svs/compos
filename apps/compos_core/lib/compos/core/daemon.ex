@@ -99,6 +99,63 @@ defmodule Compos.Core.Daemon do
 
   @doc "Save the desktop, respawn the daemon, and stop this VM. Returns :ok or an error tuple."
   def restart do
+    if Compos.Core.project_dir(), do: restart_checkout(), else: restart_release()
+  end
+
+  # A release has no checkout to respawn from: whatever supervises it (the
+  # launchd agent, KeepAlive) starts the executable again when this VM stops.
+  defp restart_release do
+    with :ok <- save_desktop() do
+      schedule_stop()
+      :ok
+    end
+  end
+
+  @doc """
+  Install the release executable SRC at BIN, the path the supervisor starts.
+  Copies beside BIN and renames over it, so a running BIN is never half
+  written. Prunes the unpacked releases of other builds next to the one this
+  VM runs from. Returns :ok or an error tuple; restarting is the caller's.
+  """
+  def install_release(src, bin) do
+    src = Path.expand(src)
+    bin = Path.expand(bin)
+    tmp = bin <> ".new"
+
+    cond do
+      not File.regular?(src) ->
+        {:error, {:missing, src}}
+
+      src == bin ->
+        {:error, :same_file}
+
+      true ->
+        with :ok <- File.mkdir_p(Path.dirname(bin)),
+             :ok <- File.cp(src, tmp),
+             :ok <- File.chmod(tmp, 0o755),
+             :ok <- File.rename(tmp, bin) do
+          prune_unpacked_releases()
+          :ok
+        end
+    end
+  end
+
+  # Burrito unpacks each build once, into a directory named for its version.
+  # Keep the one this VM runs from; the next start unpacks the new build.
+  defp prune_unpacked_releases do
+    with root when is_binary(root) <- System.get_env("RELEASE_ROOT"),
+         "1" <- System.get_env("__BURRITO") do
+      parent = Path.dirname(root)
+
+      for dir <- Path.wildcard(Path.join(parent, "compos_erts-*")), dir != root do
+        File.rm_rf(dir)
+      end
+    end
+
+    :ok
+  end
+
+  defp restart_checkout do
     # Compile BEFORE the handover, while this daemon still serves. The
     # respawn then boots in seconds instead of minutes, and a tree that
     # does not compile refuses the restart instead of leaving no daemon.

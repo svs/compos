@@ -42,6 +42,17 @@
         (loop (+ n 1) (string-append label " <" (number->string n) ">"))
         l)))
 
+;; a modal with its own drawing on top (Cmd-J, Cmd-L) is a small dialog,
+;; not the wide palette: it is narrower and lower, and the drawing says
+;; what the facts pane on the right would
+(define-style! 'vscode-modals "
+.mb-panel.palette:has(.mb-html) {
+  width: min(calc(720px / var(--ui-zoom, 1)), calc(88vw / var(--ui-zoom, 1)));
+  height: calc(52dvh / var(--ui-zoom, 1));
+}
+.mb-panel.palette:has(.mb-html) .mb-preview { display: none; }
+")
+
 (define-command "vscode-windows" "Choose a layout, each one shows as you move to it; or a window of this group"
   (lambda ()
     (let* ((before (panes--ensure-layout!))

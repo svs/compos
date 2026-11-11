@@ -62,8 +62,7 @@
 .vl-top { display: flex; align-items: center; gap: 6px; }
 .vl-name { font-size: .75em; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); }
 .vl-on .vl-name { color: var(--default-fg); }
-.vl-value { font-size: .85em; color: var(--default-fg); max-width: 150px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vl-value { font-size: .85em; color: var(--default-fg); max-width: 260px; overflow-wrap: anywhere; }
 ")
 
 (define-command "vscode-windows" "Choose a layout, each one shows as you move to it; or a window of this group"
@@ -222,8 +221,8 @@
 
 (define (vscode--llm-head chat section)
   (let* ((now (llm-config-combination chat))
-         (tools (let ((extra (filter (lambda (x) (not (eq? x 'compos))) (or (plist-get now 'presets) '()))))
-                  (if (null? extra) "editor only" (string-join (map symbol->string extra) " "))))
+         (tools (let ((on (or (plist-get now 'presets) '())))
+                  (if (null? on) "none" (string-join (map symbol->string on) ", "))))
          (values (list (list "b" (plist-get now 'connector))
                        (list "m" (plist-get now 'model))
                        (list "e" (plist-get now 'effort))

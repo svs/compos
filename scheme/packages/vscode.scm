@@ -238,14 +238,14 @@
                     (list 'tag "div" 'class (if (equal? key section) "vl-tab vl-on" "vl-tab")
                           'children
                           (list (list 'tag "div" 'class "vl-top"
-                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text key)
+                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text (string-append "M-" key))
                                                       (list 'tag "span" 'class "vl-name"
                                                             'text (substring (cadr s) 2 (string-length (cadr s))))))
                                 (list 'tag "div" 'class "vl-value" 'text (cadr (assoc key values)))))))
                 vscode--llm-sections)))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
-;; top; b m e p s o (on an empty input), or Left and Right, choose what the
+;; top; M-b M-m M-e M-p M-s M-o, or Left and Right, choose what the
 ;; rows set: the backend, the model, the effort, the tools, a saved setup,
 ;; or the other actions. RET applies at once. Tools toggle and stay open.
 (define (vscode--llm-open! chat key)
@@ -255,9 +255,10 @@
          ;; another tab opens the dialog again: its drawing on top marks the tab
          (show! (lambda (k)
                   (set! *mb-tab-fn* #f)
+                  (set! *mb-shortcuts* '())
                   (minibuffer-detach!)
                   (vscode--llm-open! chat k)))
-         (done! (lambda () (set! *mb-tab-fn* #f)))
+         (done! (lambda () (set! *mb-tab-fn* #f) (set! *mb-shortcuts* '())))
          (apply! (lambda (box what)
                    (llm-bundle-apply! chat box)
                    (llm-config-remember! box)
@@ -266,11 +267,6 @@
     (minibuffer-read* "LLM: " (vscode--llm-rows chat section)
       (list (list 'style "modal")
             (list 'html (vscode--llm-head chat section))
-            (list 'change
-                  (lambda (input)
-                    (when (and (= (string-length input) 1) (assoc input vscode--llm-sections))
-                      (minibuffer-input! "")
-                      (show! input))))
             (list 'cancel done!)
             (list 'confirm
                   (lambda (v)
@@ -305,6 +301,8 @@
                      ((equal? v "Connectors") (run-command "llm-connectors"))
                      ((equal? v "Switch chat") (run-command "vscode-chats"))
                      ((equal? v "New chat") (run-command "chat-new")))))))
+    ;; Meta and the tab's letter choose the tab; plain letters type
+    (set! *mb-shortcuts* (map (lambda (s) (list (car s) (lambda () (show! (car s))))) vscode--llm-sections))
     (set! *mb-tab-fn*
           (lambda (step)
             (let* ((keys (map car vscode--llm-sections))

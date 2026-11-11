@@ -50,7 +50,7 @@
       ((equal? kind "command")
        ;; the key leads in its own column, as in the resting list, so the
        ;; eye finds it before the doc
-       (let ((key (or (plist-get hit 'key) (key-for-command name) "")))
+       (let ((key (or (plist-get hit 'key) (command-palette--key name) "")))
          (list name
                (string-append (string-pad-right (key-symbols key) 12) " "
                               (or (plist-get hit 'doc) "")))))
@@ -62,9 +62,21 @@
       (else #f))))
 
 ;; A command the palette can draw: name, key and doc, in apropos hit shape.
+;; the key a row shows: with vscode-mode on, the Cmd chord its map gives the
+;; command (Cmd-Z for undo), ahead of the Emacs key the other maps put first
+(define (command-palette--key name)
+  (let ((cmd (and (boundp 'vscode-mode) (symbol-value 'vscode-mode)
+                  (let loop ((bs (keymap-bindings "vscode-mode-map")))
+                    (cond ((null? bs) #f)
+                          ((and (equal? (cadr (car bs)) name)
+                                (not (string-contains? (car (car bs)) " ")))
+                           (car (car bs)))
+                          (else (loop (cdr bs))))))))
+    (or cmd (key-for-command name))))
+
 (define (command-palette--command-hit name)
   (list 'kind "command" 'name name 'doc (command-doc name)
-        'key (let ((k (key-for-command name))) (if (equal? k "") #f k))))
+        'key (let ((k (command-palette--key name))) (if (equal? k "") #f k))))
 
 ;; A mode's commands are for its buffers (command-applicable?): the palette
 ;; leaves out the ones whose modes are not on in BUF, the buffer you are in.
@@ -99,7 +111,7 @@
 ;; keeps the Emacs spelling: the resting rows come from M-x's table, so their
 ;; key column is drawn again here. 811 rows cost 4 ms.
 (define (command-palette--symbol-row row)
-  (let ((k (key-for-command (car row))))
+  (let ((k (command-palette--key (car row))))
     (if (or (equal? k "") (> (string-length k) 12) (not (pair? (cdr row)))
             (not (string? (cadr row))) (not (string-prefix? k (cadr row))))
         row
@@ -141,7 +153,7 @@
   (let ((words (assoc (car row) command-tutorial-labels)))
     (if (not words)
         row
-        (let ((k (key-for-command (car row))))
+        (let ((k (command-palette--key (car row))))
           (list (cadr words)
                 (string-append (string-pad-right (if (or (equal? k "") (> (string-length k) 12)) "" (key-symbols k)) 12)
                                (car row)))))))

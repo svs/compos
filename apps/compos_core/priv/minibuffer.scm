@@ -102,6 +102,9 @@
 ;; STEP, -1 or 1, and answers #t when it moved the tab. The preview
 ;; prompt clears it, so a stale fn never steers the next prompt.
 (define *mb-tab-fn* #f)
+;; a prompt with a leader: SPC on an empty input calls it first, and a true
+;; answer means it took the key (it arms the next key); #f picks the row
+(define *mb-space-fn* #f)
 
 ;; a prompt whose rows nest folds them with TAB: the fn gets the selected
 ;; candidate and answers #t when it took the key
@@ -468,7 +471,8 @@
 (define-command "minibuffer-space" "Pick the row on an empty prompt, else type a space"
   (lambda ()
     (if (equal? (minibuffer-input) "")
-        (run-command "minibuffer-confirm")
+        (unless (and *mb-space-fn* (*mb-space-fn*))
+          (run-command "minibuffer-confirm"))
         (run-command "self-insert-command")))
   'modes '(minibuffer-mode))
 

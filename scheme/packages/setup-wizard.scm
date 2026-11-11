@@ -926,13 +926,20 @@
 .wizard-title { font-size: 34px; font-weight: 600; line-height: 1.15; margin-bottom: 10px; }
 .wizard-lede { font-size: 17px; line-height: 1.6; color: var(--dim-fg, #8a857a); max-width: 34em; margin-bottom: 18px; }
 .wizard-tools { margin-bottom: 14px; }
-.wizard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-.wizard-choice { border: 1px solid var(--border-bg, #cbc4b1); padding: 16px 16px 14px; display: flex;
-  flex-direction: column; gap: 8px; background: var(--window-bg, transparent); }
-.wizard-choice.wizard-selected { border-color: var(--accent-fg, #26356b); box-shadow: inset 0 0 0 1px var(--accent-fg, #26356b); }
-.wizard-choice-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.wizard-choice-title { font-size: 19px; font-weight: 600; }
-.wizard-choice-detail { font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg, #8a857a); flex: 1; }
+.wizard-grid { display: flex; flex-direction: column; border-top: 1px solid var(--border-bg, #cbc4b1); }
+.wizard-choice { border-bottom: 1px solid var(--border-bg, #cbc4b1); padding: 9px 10px; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: center;
+  background: var(--window-bg, transparent); }
+.wizard-choice > .wizard-choice-head { grid-column: 1; }
+.wizard-choice > .wizard-choice-detail { grid-column: 1; }
+.wizard-choice > .c-actions { grid-column: 2; grid-row: 1 / span 2; }
+.wizard-choice.wizard-selected { box-shadow: inset 3px 0 0 var(--accent-fg, #26356b); }
+.wizard-choice-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wizard-choice-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wizard-choice-detail { font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg, #8a857a);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wizard .wizard-choice .c-actions { padding: 0; flex-wrap: nowrap; }
+.wizard .wizard-choice c-action { padding: 4px 10px; font-size: 12px; }
 .wizard .c-badge { font-family: var(--font-mono); font-size: 11px; padding: 2px 8px; border: 1px solid currentColor;
   text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 .wizard-tone-good { color: #2f7d4f; }

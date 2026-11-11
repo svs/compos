@@ -109,7 +109,7 @@ Renaming a buffer, changing its path, or saving it under a new path updates mate
 
 ### Mode changes
 
-A mode change applies automatic policy after the mode is known and before mode-generated content changes. Stopping retains the accepted head. Resuming after unrecorded edits creates the gap revision specified in internal/PROVENANCE.md.
+A mode change applies automatic policy after the mode is known and before mode-generated content changes. Stopping retains the accepted head. Resuming after unrecorded edits creates the gap revision specified in PROVENANCE.md.
 
 ### Kill, eviction, and discard
 

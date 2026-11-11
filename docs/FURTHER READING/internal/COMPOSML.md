@@ -38,7 +38,7 @@ theme variables, class styles, and new `face` attribute selectors coexist.
 The dashboard and shared heading/action components now emit semantic Scheme
 blocks, so these structures remain semantic when rendered dynamically.
 
-The [current-frame specimen](internal/examples/current-frame.composml) is grounded in the
+The [current-frame specimen](examples/current-frame.composml) is grounded in the
 rendered localhost:4004 page inspected on 2026-09-09. It is a proposed rendition,
 not an implementation claim. Its repeated transcript entries and transport
 bookkeeping are abbreviated.

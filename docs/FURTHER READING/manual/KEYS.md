@@ -230,4 +230,5 @@ Every key in the global map, except the keys that insert their own character. A 
 | `s-]` | `window-next-mode-buffer` | Show the next buffer of this mode down this window's stack; hold Cmd to keep walking |
 | `s-_` | `text-scale-decrease` | Make this buffer's text smaller |
 | `s-i` | `imenu` | Jump to a definition in this buffer; an index of more than one kind has a tab for each |
-| `s-p` | `command-palette` | Find a command by what it does |
+| `s-p` | `project-find-file` | Find a file in the current project (git-aware, ignores ignored) |
+| `s-P` | `command-palette` | Find a command by what it does |

@@ -632,7 +632,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 |---|---|---|
 | `app-preview` | `C-c C-a` | Run the current buffer as an HTML app |
 | `app-reload` | `C-c C-r` | Reload every running app |
-| `command-palette` | `s-p` | Find a command by what it does |
+| `command-palette` | `s-P` | Find a command by what it does |
 | `digit-argument` | `M-0` | Add a digit to the next command's prefix argument |
 | `global-predict-mode` |  | Toggle local echo of typed text in every file buffer |
 | `goto-address-at-point` |  | Follow the URL or file path at point, else find the definition of the name there |

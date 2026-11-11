@@ -12,7 +12,7 @@ Press `M-x` (`execute-extended-command`) and type a part of the name. The list g
 
 Every action in the editor is a command. When you forget a key, you can always use its name.
 
-To search by what a command does, use `s-p` (`command-palette`).
+To search by what a command does, use `s-P` (`command-palette`).
 
 ### How do I cancel what I started?
 

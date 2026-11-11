@@ -18,60 +18,50 @@
 (effects! '(pure))
 
 (defcomponent 'wizard/steps
-  "A row of numbered wizard steps; the current step is marked and the steps before it are done."
+  "The wizard steps as a row of tabs; the current step is marked. A tab's click is wizard:step: and the step's id, which shows that step and commits nothing."
   '((steps list required) (current string required))
   '(steps (("model" "Choose a model") ("learn" "Start learning")) current "model")
   (lambda (p)
     (let ((current (component--get p 'current "")))
       (list 'tag "div" 'class "wizard-steps"
             'children
-            (let loop ((steps (component--get p 'steps '())) (n 1) (seen? #f) (out '()))
+            (let loop ((steps (component--get p 'steps '())) (n 1) (out '()))
               (if (null? steps)
                   (reverse out)
                   (let* ((id (car (car steps)))
-                         (here? (equal? id current))
-                         (state (cond (here? "current") (seen? "todo") (else "done"))))
-                    (loop (cdr steps) (+ n 1) (or seen? here?)
+                         (here? (equal? id current)))
+                    (loop (cdr steps) (+ n 1)
                           (cons (list 'tag "div"
-                                      'class (string-append "wizard-step wizard-step-" state)
-                                      'segs (list (list "wizard-step-n"
-                                                        (if (equal? state "done") "✓"
-                                                            (number->string n)))
-                                                  (list "wizard-step-label"
-                                                        (cadr (car steps)))))
+                                      'class (string-append "wizard-step" (if here? " wizard-step-current" ""))
+                                      'click (string-append "wizard:step:" id)
+                                      'segs (list (list "wizard-step-label" (cadr (car steps)))))
                                 out)))))))))
 
 (defcomponent 'wizard/choice
-  "A choice card: a title, a status badge, one line of detail, and its action buttons."
+  "One row of a wizard table: a title, one line of detail, a status badge and the action buttons, with a status line under them that wraps. Rows in a wizard-grid line up as columns."
   '((title string required) (detail string optional) (badge string optional)
-    (tone string optional) (selected? boolean optional) (actions list optional))
-  '(title "claude-code" detail "ready" badge "ready" tone "good"
-    actions (("use" "Use this")))
+    (tone string optional) (status string optional) (selected? boolean optional) (actions list optional))
+  '(title "claude-code" detail "Claude Code on this machine" badge "ready" tone "good"
+    status "replied: hello" actions (("use" "Use this")))
   (lambda (p)
     (list 'tag "div"
           'class (string-append "wizard-choice"
                                 (if (component--get p 'selected? #f) " wizard-selected" ""))
           'children
           (append
-            (list (list 'tag "div" 'class "wizard-choice-head"
-                        'children
-                        (append
-                          (list (list 'tag "div" 'class "wizard-choice-title"
-                                      'text (component--get p 'title "")))
-                          (if (component--has? p 'badge)
-                              (list (component 'ui/badge
-                                      (list 'text (component--get p 'badge "")
-                                            'class (string-append "wizard-tone-"
-                                                     (component--get p 'tone "plain")))))
-                              '()))))
-            (if (component--has? p 'detail)
-                (list (list 'tag "div" 'class "wizard-choice-detail"
-                            'text (component--get p 'detail "")))
-                '())
-            (if (pair? (component--get p 'actions '()))
-                (list (component 'ui/actions
-                        (list 'actions (component--get p 'actions '())
-                              'class "wizard-buttons")))
+            (list (list 'tag "div" 'class "wizard-choice-title" 'text (component--get p 'title ""))
+                  (list 'tag "div" 'class "wizard-choice-detail" 'text (component--get p 'detail ""))
+                  (if (component--has? p 'badge)
+                      (component 'ui/badge
+                        (list 'text (component--get p 'badge "")
+                              'class (string-append "wizard-tone-" (component--get p 'tone "plain"))))
+                      (list 'tag "div" 'text ""))
+                  (component 'ui/actions
+                    (list 'actions (component--get p 'actions '()) 'class "wizard-buttons")))
+            (if (component--has? p 'status)
+                (list (list 'tag "div"
+                            'class (string-append "wizard-choice-status wizard-tone-" (component--get p 'tone "plain"))
+                            'text (component--get p 'status "")))
                 '())))))
 
 (defcomponent 'wizard/nav
@@ -101,11 +91,12 @@
 (define *setup-wizard-buffer* "*Setup*")
 
 (define *setup-wizard-steps*
-  '(("model" "Choose a model") ("search" "Set up embeddings")
-    ("decide" "Decision model") ("browser" "Browser extension") ("learn" "Start learning")))
+  '(("model" "Model") ("search" "Embeddings")
+    ("decide" "Decision") ("browser" "Browser")))
 
 (define (setup-wizard-step buf)
   (or (buffer-local-value 'setup-wizard-step buf) "model"))
+(public! 'setup-wizard-step "(setup-wizard-step BUF) -- the setup step BUF shows: model, search, decide or browser" 'system)
 
 ;; The model cards: one card for each connector, with one button that
 ;; uses it, installs it, or asks for its key. ROW is (NAME KIND READY?
@@ -151,8 +142,9 @@
                              said))))
     (component 'wizard/choice
       (list 'title (or (plist-get (connector-config name) 'title) name)
+            'detail (connector-description name)
             ;; a tested card says what the test said, not that it is ready
-            'detail (string-append (connector-description name) " · " (or said (list-ref row 3)))
+            'status (or said (list-ref row 3))
             'badge (cond (default? "default") (failed? "no reply") (ready? "ready") (else "needs setup"))
             'tone (cond (default? "accent") (failed? "bad") (ready? "good") (else "plain"))
             'selected? default?
@@ -167,17 +159,14 @@
 
 (define (setup-wizard--model-blocks)
   (append
-    (list (list 'tag "div" 'class "wizard-title" 'text "Choose a model")
-          (list 'tag "div" 'class "wizard-lede"
-                'text (string-append
-                        "Compos talks to a model through a connector. "
-                        "Pick the one that new chats use. You can change it later in any chat."))
+    (list (list 'tag "div" 'class "wizard-lede"
+                'text "The model new chats use. You can change it in any chat.")
           (component 'ui/actions
             (list 'actions '(("wizard:rescan" "Scan again" "g") ("wizard:connectors" "All connectors" "c"))
                   'class "wizard-tools")))
     (setup-model-cards)
     (list (component 'wizard/nav
-            (list 'next (list "wizard:next" "Next: set up embeddings →"))))))
+            (list 'next (list "wizard:next" "Next →"))))))
 
 ;; The local embedding backend: Ollama on this machine. Its state is
 ;; absent, stopped, no-model or ready. A card draw asks the server off the
@@ -238,12 +227,13 @@
          (chosen? (and active (eq? (car active) b))))
     (component 'wizard/choice
       (list 'title (list-ref spec 1)
-            'detail (string-append (list-ref spec 4) " · " (cond ((not local?) (if ready? "key found" "no key"))
-                                                                      ((eq? ollama 'absent) "not installed")
-                                                                      ((eq? ollama 'stopped) "installed, not running")
-                                                                      ((eq? ollama 'no-model) "running, model not pulled")
-                                                                      ((eq? ollama 'ready) "on this machine")
-                                                                      (else "checking…")))
+            'detail (list-ref spec 4)
+            'status (cond ((not local?) (if ready? "key found" "no key"))
+                          ((eq? ollama 'absent) "not installed")
+                          ((eq? ollama 'stopped) "installed, not running")
+                          ((eq? ollama 'no-model) "running, model not pulled")
+                          ((eq? ollama 'ready) "on this machine")
+                          (else "checking…"))
             'badge (cond (chosen? "in use") (ready? "ready") (local? "needs setup") (else "needs a key"))
             'tone (cond (chosen? "accent") (ready? "good") (else "plain"))
             'selected? chosen?
@@ -260,17 +250,14 @@
                                        (if ready? "Change the key" "Add a key")))))))))
 
 (define (setup-wizard--search-blocks)
-  (list (list 'tag "div" 'class "wizard-title" 'text "Set up embeddings")
-        (list 'tag "div" 'class "wizard-lede"
+  (list         (list 'tag "div" 'class "wizard-lede"
               'text (string-append
-                      "Compos finds commands and functions for you and for its agents. "
-                      "An embedding model lets it find them by their meaning, not only by their words. "
-                      "Choose the service that makes the embeddings. The first index costs less than one cent."))
+                      "Lets apropos find commands by meaning. The first index costs less than one cent."))
         (list 'tag "div" 'class "wizard-grid"
               'children (map setup-wizard--embed-card (map car *apropos-embedding-backend-specs*)))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:next" "Next: decision model →")))))
+                'next (list "wizard:next" "Next →")))))
 
 ;; the decision model: decide asks the first backend that is ready
 (define (setup-wizard--decide-ready? b)
@@ -307,19 +294,17 @@
                                 '(("wizard:laya-install" "Install")) '()))))))
     (component 'wizard/choice
       (list 'title (list-ref spec 0)
-            'detail (string-append (list-ref spec 1) " · " (if tested (caddr tested) (list-ref spec 2)))
+            'detail (list-ref spec 1)
+            'status (if tested (caddr tested) (list-ref spec 2))
             'badge (cond (failed? "no reply") (live? "in use") (ready? "ready") (else "needs setup"))
             'tone (cond (failed? "bad") (live? "accent") (ready? "good") (else "plain"))
             'selected? live?
             'actions (append test (list-ref spec 3))))))
 
 (define (setup-wizard--decide-blocks buf)
-  (list (list 'tag "div" 'class "wizard-title" 'text "Decision model")
-        (list 'tag "div" 'class "wizard-lede"
+  (list         (list 'tag "div" 'class "wizard-lede"
               'text (string-append
-                      "Compos makes small decisions with a decision model: is a mail urgent, "
-                      "which group a buffer belongs to, which command fits a request. "
-                      "Test asks a model a question, and Use this makes it the one decisions ask first."))
+                      "Answers small questions, such as: is a mail urgent, which command fits."))
         (component 'ui/actions
           (list 'actions '(("wizard:rescan" "Scan again" "g"))
                 'class "wizard-tools"))
@@ -329,7 +314,7 @@
               'children (map setup-wizard--decide-card '(jev laya)))
         (component 'wizard/nav
           (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:next" "Next: browser extension →")))))
+                'next (list "wizard:next" "Next →")))))
 
 (define (setup-wizard-install-laya!)
   "Install laya with pip in a terminal in the other column; Scan again then
@@ -377,25 +362,29 @@
 ;; the browser extension: Compos in the user's own Chrome
 (define (setup-wizard--browser-blocks)
   (let ((on? (browser-connected?)))
-    (list (list 'tag "div" 'class "wizard-title" 'text "Browser extension")
-          (list 'tag "div" 'class "wizard-lede"
-                'text (string-append
-                        "The extension connects Compos to your Chrome tabs. With it, M-x and C-x work "
-                        "in any page, and Compos can read a tab, type into it, and open pages "
-                        "in your own browser with your logins."))
-          (component 'wizard/choice
-            (list 'title "Chrome extension"
-                  'detail (if on? "connected to this editor"
-                              (string-append "1. Open chrome://extensions in Chrome. "
-                                             "2. Turn on Developer mode, at the top right. "
-                                             "3. Click Load unpacked, and choose " (abbreviate-file-name (string-append (compos-home) "/chrome-extension")) ". In the file picker, Cmd-Shift-G takes a path; Cmd-Shift-. shows hidden folders."))
-                  'badge (if on? "connected" "not connected")
-                  'tone (if on? "good" "plain")
-                  'selected? on?
-                  'actions (if on? '() '(("wizard:rescan" "Check again")))))
+    (list (list 'tag "div" 'class "wizard-lede"
+                'text "Connects Compos to your Chrome tabs, with your logins.")
+          (list 'tag "div" 'class "wizard-grid"
+                'children (list (component 'wizard/choice
+                                  (list 'title "Chrome extension"
+                                        'detail "Compos in your own Chrome"
+                                        'status (if on? "connected to this editor" "install it with the steps below")
+                                        'badge (if on? "connected" "not connected")
+                                        'tone (if on? "good" "plain")
+                                        'selected? on?
+                                        'actions (if on? '() '(("wizard:rescan" "Check again")))))))
+          ;; the install steps wrap: a choice row holds one line
+          (if on? (list 'tag "div" 'text "")
+              (list 'tag "ol" 'class "wizard-howto"
+                    'children (map (lambda (s) (list 'tag "li" 'text s))
+                                   (list "Open chrome://extensions in Chrome."
+                                         "Turn on Developer mode, at the top right."
+                                         (string-append "Click Load unpacked, and choose "
+                                                        (abbreviate-file-name (string-append (compos-home) "/chrome-extension"))
+                                                        ". Cmd-Shift-G takes a path; Cmd-Shift-. shows hidden folders.")))))
           (component 'wizard/nav
             (list 'back (list "wizard:back" "← Back")
-                  'next (list "wizard:next" "Next: start learning →"))))))
+                  'next (list "wizard:learn" "Start the tutorial →"))))))
 
 ;; The step DELTA places from BUF's step, held to the first and the last.
 (define (setup-wizard--step-after buf delta)
@@ -407,26 +396,6 @@
          (there (max 0 (min (- (length names) 1) (+ here delta)))))
     (list-ref names there)))
 
-(define (setup-wizard--learn-blocks)
-  (list (list 'tag "div" 'class "wizard-title" 'text "Start learning")
-        (list 'tag "div" 'class "wizard-lede"
-              'text (string-append
-                      "The tutorial teaches you Compos one small step at a time. A slide "
-                      "says what to do, you do it, and the slide goes on by itself. "
-                      "It starts with windows and buffers, then editing."))
-        (list 'tag "div" 'class "wizard-columns"
-              'children
-              (map (lambda (c)
-                     (list 'tag "div" 'class "wizard-column"
-                           'segs (list (list "wizard-column-name" (car c))
-                                       (list "wizard-column-what" (cadr c)))))
-                   '(("Practice" "the page where you try each step")
-                     ("Slide" "one small step at a time, with its keys")
-                     ("Lesson" "the lesson, to read"))))
-        (component 'wizard/nav
-          (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:learn" "Start the tutorial ->")))))
-
 (define (setup-wizard-blocks buf)
   (let ((step (setup-wizard-step buf)))
     (list (list 'tag "div" 'class "wizard"
@@ -434,8 +403,7 @@
                 (append
                   (list (component 'wizard/steps
                           (list 'steps *setup-wizard-steps* 'current step)))
-                  (cond ((equal? step "learn") (setup-wizard--learn-blocks))
-                        ((equal? step "browser") (setup-wizard--browser-blocks))
+                  (cond ((equal? step "browser") (setup-wizard--browser-blocks))
                         ((equal? step "decide") (setup-wizard--decide-blocks buf))
                         ((equal? step "search") (setup-wizard--search-blocks))
                         (else (setup-wizard--model-blocks))))))))
@@ -454,7 +422,7 @@
       (setup-wizard-redraw! buf))))
 
 (mode-doc! "setup-wizard-mode"
-  "First-run setup in five steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three sets up the decision model that decide asks: start laya or add a key, and t tests it. Step four connects the Chrome extension. Step five starts the tutorial.")
+  "First-run setup in four steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three sets up the decision model that decide asks: start laya or add a key, and t tests it. Step four connects the Chrome extension, and its button starts the tutorial. The steps are tabs: click one, or press left and right, to look over the steps; a tab chooses nothing. Next asks for a model when none is chosen.")
 
 ;;; --- actions -------------------------------------------------------------------
 
@@ -476,6 +444,12 @@
     (secret-for-provider (list-ref (assq b *apropos-embedding-backend-specs*) 2)) #f
     (lambda ()
       (when (apropos-embedding-backend) (setup-wizard-embed-use! buf b)))))
+
+(define (setup-wizard-view! buf step)
+  ;; a tab shows its step and asks nothing: the user looks over the steps
+  (when (assoc step *setup-wizard-steps*)
+    (buffer-set-local! buf 'setup-wizard-step step)
+    (setup-wizard-redraw! buf)))
 
 (define (setup-wizard-go! buf step)
   ;; Next without a choice asks which model new chats use: nothing is
@@ -760,6 +734,8 @@
   (cond
     ((equal? id "wizard:next") (setup-wizard-go! buf (setup-wizard--step-after buf 1)) #t)
     ((equal? id "wizard:back") (setup-wizard-go! buf (setup-wizard--step-after buf -1)) #t)
+    ((string-prefix? "wizard:step:" id)
+     (setup-wizard-view! buf (substring-bytes id 12 (string-byte-length id))) #t)
     ((string-prefix? "wizard:embed-use:" id)
      (setup-wizard-embed-use! buf (string->symbol (substring-bytes id 17 (string-byte-length id)))) #t)
     ((string-prefix? "wizard:embed-key:" id)
@@ -904,42 +880,61 @@
   (lambda () (setup-wizard-decide-test! (current-buffer)))
   'modes '(setup-wizard-mode))
 
+(define-command "setup-wizard-tab-next" "Show the next setup step, and choose nothing"
+  (lambda () (setup-wizard-view! (current-buffer) (setup-wizard--step-after (current-buffer) 1)))
+  'modes '(setup-wizard-mode))
+
+(define-command "setup-wizard-tab-prev" "Show the previous setup step, and choose nothing"
+  (lambda () (setup-wizard-view! (current-buffer) (setup-wizard--step-after (current-buffer) -1)))
+  'modes '(setup-wizard-mode))
+
 (mode-keys! "setup-wizard-mode"
   '(("n" "setup-wizard-next")
     ("p" "setup-wizard-back")
     ("g" "setup-wizard-rescan")
     ("c" "setup-wizard-connectors")
     ("t" "setup-wizard-decide-test")
+    ("<right>" "setup-wizard-tab-next")
+    ("<left>" "setup-wizard-tab-prev")
     ("q" "quit-window")))
 
 (define-style! 'setup-wizard "
-.wizard { max-width: 760px; margin: 0 auto; padding: 28px 20px 40px; font-family: var(--font-serif); }
-.wizard-steps { display: flex; gap: 28px; margin-bottom: 34px; font-family: var(--font-mono); font-size: 12px;
-  letter-spacing: .06em; text-transform: uppercase; }
-.wizard-step { display: flex; align-items: center; gap: 9px; color: var(--dim-fg, #8a857a); }
-.wizard-step-n { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center;
+.wizard { max-width: 760px; margin: 0 auto; padding: 12px 16px 24px; font-family: var(--font-serif); }
+.wizard-steps { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 14px; font-family: var(--font-mono); font-size: 12px; }
+.wizard-step { display: flex; align-items: center; gap: 6px; color: var(--dim-fg, #8a857a); cursor: pointer;
+  padding-bottom: 8px; border-bottom: 2px solid transparent; }
+.wizard-step:hover { color: var(--default-fg, inherit); }
+.wizard-step-current { border-bottom-color: var(--accent-fg, #26356b); }
+.wizard-step-n { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center;
   border: 1px solid var(--border-bg, #cbc4b1); border-radius: 50%; }
 .wizard-step-current { color: var(--default-fg, inherit); font-weight: 600; }
 .wizard-step-current .wizard-step-n { background: var(--accent-fg, #26356b); border-color: var(--accent-fg, #26356b);
   color: var(--default-bg, #fff); }
-.wizard-step-done .wizard-step-n { border-color: var(--accent-fg, #26356b); color: var(--accent-fg, #26356b); }
 .wizard-title { font-size: 34px; font-weight: 600; line-height: 1.15; margin-bottom: 10px; }
-.wizard-lede { font-size: 17px; line-height: 1.6; color: var(--dim-fg, #8a857a); max-width: 34em; margin-bottom: 18px; }
-.wizard-tools { margin-bottom: 14px; }
-.wizard-grid { display: flex; flex-direction: column; border-top: 1px solid var(--border-bg, #cbc4b1); }
-.wizard-choice { border-bottom: 1px solid var(--border-bg, #cbc4b1); padding: 9px 10px; display: grid;
-  grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: center;
-  background: var(--window-bg, transparent); }
-.wizard-choice > .wizard-choice-head { grid-column: 1; }
-.wizard-choice > .wizard-choice-detail { grid-column: 1; }
-.wizard-choice > .c-actions { grid-column: 2; grid-row: 1 / span 2; }
+.wizard-lede { font-size: 13px; line-height: 1.5; color: var(--dim-fg, #8a857a); margin-bottom: 8px; }
+.wizard .wizard-tools { margin-bottom: 8px; padding: 0; }
+.wizard-tools c-action { padding: 4px 10px; font-size: 12px; }
+.wizard-howto { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--dim-fg, #8a857a); margin: 10px 0 0; padding-left: 20px; }
+.wizard-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  column-gap: 14px; border-top: 1px solid var(--border-bg, #cbc4b1); }
+.wizard-choice { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; row-gap: 3px; align-items: center;
+  border-bottom: 1px solid var(--border-bg, #cbc4b1); padding: 8px 10px; background: var(--window-bg, transparent); }
 .wizard-choice.wizard-selected { box-shadow: inset 3px 0 0 var(--accent-fg, #26356b); }
-.wizard-choice-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.wizard-choice-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wizard-choice-title { font-size: 15px; font-weight: 600; white-space: nowrap; }
 .wizard-choice-detail { font-family: var(--font-mono); font-size: 12px; color: var(--dim-fg, #8a857a);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wizard .wizard-choice .c-actions { padding: 0; flex-wrap: nowrap; }
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wizard-choice-status { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  overflow-wrap: anywhere; }
+.wizard-choice-status.wizard-tone-accent, .wizard-choice-status.wizard-tone-plain { color: var(--dim-fg, #8a857a); }
+.wizard .wizard-choice .c-actions { padding: 0; flex-wrap: nowrap; justify-content: flex-end; }
 .wizard .wizard-choice c-action { padding: 4px 10px; font-size: 12px; }
+.wizard { container-type: inline-size; }
+/* a narrow window drops the detail column: name, badge, buttons, status */
+@container (max-width: 560px) {
+  .wizard-grid { grid-template-columns: minmax(0, 1fr) max-content max-content; }
+  .wizard-choice-detail { display: none; }
+  .wizard-choice-title { overflow: hidden; text-overflow: ellipsis; }
+}
 .wizard .c-badge { font-family: var(--font-mono); font-size: 11px; padding: 2px 8px; border: 1px solid currentColor;
   text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 .wizard-tone-good { color: #2f7d4f; }
@@ -954,9 +949,10 @@
   border-color: var(--accent-fg, #26356b); }
 .wizard-buttons c-action:hover, .wizard-next c-action:hover { opacity: .88; background: var(--accent-fg, #26356b);
   border-color: var(--accent-fg, #26356b); color: var(--default-bg, #fff); }
-.wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 34px;
-  padding-top: 18px; border-top: 1px solid var(--border-bg, #cbc4b1); }
-.wizard-next c-action { font-size: 15px; padding: 11px 20px; }
+.wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
+  padding-top: 10px; border-top: 1px solid var(--border-bg, #cbc4b1); }
+.wizard-next c-action { font-size: 13px; padding: 6px 14px; }
+.wizard .wizard-nav .c-actions { padding: 0; }
 .wizard-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
 .wizard-columns-2 { grid-template-columns: repeat(2, 1fr); }
 .wizard-column { border: 1px solid var(--border-bg, #cbc4b1); border-top: 3px solid var(--accent-fg, #26356b);

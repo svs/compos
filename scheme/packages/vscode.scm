@@ -28,16 +28,107 @@
 (define-command "vscode-close-buffer" "Close this buffer, asking when it has unsaved changes"
   (lambda () (kill-buffer-confirm! (current-buffer) (lambda (killed?) #t))))
 
+;; Cmd-P, Cmd-J, Cmd-B and Cmd-L: one key for each thing on the screen.
+;; The pane has its card; the window, the buffer and the chat a modal.
+
+(define (vscode--short name)
+  (if (and (> (string-length name) 0) (equal? (substring name 0 1) "/"))
+      (file-name-nondirectory (strip-trailing-slash name))
+      name))
+
+(define (vscode--unique label seen)
+  (let loop ((n 2) (l label))
+    (if (member l seen)
+        (loop (+ n 1) (string-append label " <" (number->string n) ">"))
+        l)))
+
+(define-command "vscode-windows" "Choose a window of this group, or a layout; each layout shows as you move to it"
+  (lambda ()
+    (let* ((before (panes--ensure-layout!))
+           (pids '())
+           (seen '())
+           (wins (let loop ((ks (panes-window-keys before)) (out '()))
+                   (if (null? ks)
+                       (reverse out)
+                       (let* ((k (car ks))
+                              (b (panes-window-buffer before k))
+                              (pid (panes-pane-of before k)))
+                         (unless (member pid pids) (set! pids (append pids (list pid))))
+                         (if (not b)
+                             (loop (cdr ks) out)
+                             (let* ((n (length (member pid (reverse pids))))
+                                    (label (vscode--unique
+                                            (string-append "Pane " (number->string n) ": " (vscode--short b))
+                                            seen)))
+                               (set! seen (cons label seen))
+                               (loop (cdr ks)
+                                     (cons (list label k (if (window-exists? k) "on screen" "behind")) out))))))))
+           (lays (map (lambda (n) (list (string-append "Layout: " (symbol->string n))
+                                        n
+                                        (or (plist-get (panes-layout-spec n) 'doc) "")))
+                      (panes-layout-names)))
+           (rows (append wins lays)))
+      (minibuffer-read-preview "Window or layout: "
+        (map (lambda (r) (list (car r) (nth 2 r))) rows)
+        (lambda (label)
+          (let ((r (assoc label lays)))
+            (panes-look! (if r (panes-set-layout before (cadr r)) before))))
+        (lambda (label)
+          (cond ((assoc label lays)
+                 => (lambda (r) (panes-choose-layout! (cadr r))
+                       (message (string-append "Layout " (symbol->string (cadr r))))))
+                ((assoc label wins)
+                 => (lambda (r)
+                      (let* ((applied (panes-apply! (panes-raise before (cadr r))))
+                             (h (panes-handle applied (cadr r))))
+                        (when (and h (window-exists? h)) (select-window! h)))))
+                (else (panes-apply! before))))
+        (lambda () (panes-apply! before))
+        #f "modal"))))
+
+(define-command "vscode-buffers" "Choose a buffer of this group, then a file of its project"
+  (lambda ()
+    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (g (or (buffer-group here) (frame-group)))
+           (bufs (filter (lambda (b) (and (not (equal? b here)) (equal? (buffer-group b) g)))
+                         (map car (switch-prompt-rows here (active-window)))))
+           (root (project-current))
+           (root (and root (strip-trailing-slash root)))
+           (files (if root
+                      (filter (lambda (f) (not (member f bufs)))
+                              (map car (filter (lambda (c) (not (equal? (cadr c) "dired")))
+                                               (project-file-candidates root))))
+                      '())))
+      (minibuffer-read* "Buffer or file: "
+        (append (map (lambda (b) (list b "buffer")) bufs)
+                (map (lambda (f) (list f "file")) files))
+        (list (list 'style "modal")
+              (list 'confirm
+                    (lambda (v)
+                      (cond ((member v bufs) (ibuffer-pick! v (lambda () #f)) (group-current-recalculate!))
+                            ((and root (member v files)) (visit-in-group (string-append root "/" v) g))
+                            ((buffer-known? v) (ibuffer-pick! v (lambda () #f)))
+                            (else (message (string-append "No buffer or file " v)))))))))))
+
+(define-command "vscode-chats" "Choose a chat, in a modal"
+  (lambda ()
+    (chat-prompt-open!)
+    (when (minibuffer-active?) (minibuffer-style! "modal"))))
+
 ;; the VSCode chords on macOS: Cmd is s-, Ctrl is C-
 (define vscode--keys
   '(;; the palette
     ("s-P" "command-palette")
     ("<f1>" "command-palette")
     ;; files
-    ("s-p" "project-find-file")
     ("s-o" "find-file")
     ("s-F" "project-ripgrep")
     ("s-E" "project-dired")
+    ;; the four things on the screen: pane, window, buffer, chat
+    ("s-p" "pane-card")
+    ("s-j" "vscode-windows")
+    ("s-b" "vscode-buffers")
+    ("s-l" "vscode-chats")
     ;; switch between buffers and windows
     ("s-{" "window-previous-buffer")
     ("s-}" "window-next-buffer")
@@ -99,10 +190,12 @@
       (string-append (number->string (monotonic-ms)) (if vscode-keyboard-lock " lock" "")))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P finds a file in the project, Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
+  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P shows this pane's card. Cmd-J chooses a window or a layout. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L chooses a chat. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
 
 (vscode--apply! vscode-mode)
 
 (catalog-meta! 'command "vscode-mode" 'domain 'commands 'effects '(write))
+(for-each (lambda (c) (catalog-meta! 'command c 'domain 'windows 'effects '(write display)))
+          '("vscode-windows" "vscode-buffers" "vscode-chats"))
 (catalog-meta! 'command "toggle-frame-fullscreen" 'domain 'commands 'effects '(write display))
 (public! 'vscode--keys "vscode--keys — the ((KEYS COMMAND) ...) vscode-mode puts in force")

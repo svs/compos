@@ -1610,8 +1610,19 @@
             (unless (and record (group-record-primary-chat-id record))
               (group-record-update! id 'primary-chat-id (chat-stable-id! buf)))
             (when (boundp 'workspace-chat-inherit!) (workspace-chat-inherit! buf (group-name id)))
+            ;; panes-display-in-pane! takes a chat window in another pane
+            ;; first; the card's chat stays in the card's pane
             (if pid
-                (select-window! (panes-display-in-pane! buf pid))
+                (let* ((l (panes--ensure-layout!))
+                       (mode (panes--buffer-mode buf))
+                       (same (find (lambda (k) (equal? (panes-window-mode l k) mode))
+                                   (panes-pane-keys l pid)))
+                       (placed (if same
+                                   (list (panes-show (panes-drop-buffer l buf) same buf) same)
+                                   (panes-add-window (panes-drop-buffer l buf) pid buf mode)))
+                       (l (panes-set-focus (panes-raise (car placed) (cadr placed)) pid)))
+                  (panes-apply! l)
+                  (window-log-note! "pane card chat" buf "->" (cadr placed)))
                 (switch-to-buffer-here! buf))
             (with-current-buffer buf (lambda () (end-of-buffer!)))
             buf))))

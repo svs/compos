@@ -238,7 +238,7 @@
                     (list 'tag "div" 'class (if (equal? key section) "vl-tab vl-on" "vl-tab")
                           'children
                           (list (list 'tag "div" 'class "vl-top"
-                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text (string-append "M-" key))
+                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text (key-symbol (string-append "M-" key)))
                                                       (list 'tag "span" 'class "vl-name"
                                                             'text (substring (cadr s) 2 (string-length (cadr s))))))
                                 (list 'tag "div" 'class "vl-value" 'text (cadr (assoc key values)))))))

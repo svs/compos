@@ -1735,10 +1735,6 @@
               (pane-home--section "Layout"
                 (list (list 'tag "div" 'class "ph-layouts"
                             'children (map (lambda (r) (pane-home--layout-card r current)) pane-home--layouts))))
-              (pane-home--section "Next steps"
-                (list (component 'ui/actions
-                        (list 'class "ph-actions"
-                              'actions (map (lambda (s) (list (caddr s) (cadr s) (car s))) (pane-home--next-steps))))))
               (list 'tag "div" 'class "ph-foot" 'text (if empty? "" "q goes back to what this pane showed")))))))
 
 (define (pane-home--text)
@@ -1749,7 +1745,6 @@
       "\n   This pane\n"
       (rows "" (map (lambda (a) (line (car a) (cadr a))) (pane-home--shown-actions)))
       (rows "Layout" (map (lambda (r) (line (car r) (list-ref r 2))) pane-home--layouts))
-      (rows "Next steps" (map (lambda (s) (line (car s) (cadr s))) (pane-home--next-steps)))
       "\n   q goes back\n")))
 
 (define (pane-home--render!)

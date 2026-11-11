@@ -122,6 +122,45 @@
   "The commands every user should know: the palette shows them under Start here, below the commands you ran, while you have typed nothing."
   'group 'interaction)
 
+(defcustom 'command-tutorial-labels
+  '(("help-with-tutorial" "Learn compos, step by step")
+    ("find-file" "Open a file")
+    ("ibuffer-prompt" "Switch buffer")
+    ("save-buffer" "Save")
+    ("undo" "Undo")
+    ("chat-new" "New chat")
+    ("chat-list" "Go to a chat")
+    ("window-layout" "Choose a layout")
+    ("keys" "See the keys"))
+  "The plain words a Start here row leads with, as (COMMAND WORDS). The key and the command's name follow them, so a new user reads what it does and learns what it is called. A command not here leads with its name."
+  'group 'interaction)
+
+(define (command-palette--tutorial-row row)
+  ;; ROW (NAME HINT ...) as Start here draws it: the plain words, then the
+  ;; key and the name where the doc was
+  (let ((words (assoc (car row) command-tutorial-labels)))
+    (if (not words)
+        row
+        (let ((k (key-for-command (car row))))
+          (list (cadr words)
+                (string-append (string-pad-right (if (or (equal? k "") (> (string-length k) 12)) "" (key-symbols k)) 12)
+                               (car row)))))))
+
+(define (command-palette--tutorial-name choice)
+  ;; the command a Start here row's words stand for, else CHOICE itself
+  (let ((hit (find (lambda (e) (equal? (cadr e) choice)) command-tutorial-labels)))
+    (if hit (car hit) choice)))
+
+(define (command-palette--label-start-here cands)
+  ;; the rows under the Start here heading lead with their plain words
+  (let loop ((cs cands) (in? #f) (out '()))
+    (if (null? cs)
+        (reverse out)
+        (let ((r (car cs)))
+          (cond ((command-palette--heading? r) (loop (cdr cs) (equal? (car r) "Start here") (cons r out)))
+                (in? (loop (cdr cs) in? (cons (command-palette--tutorial-row r) out)))
+                (else (loop (cdr cs) in? (cons r out))))))))
+
 (define (command-section-heading label) (list label "" "separator"))
 
 ;; ROWS, (NAME HINT ...) in their order, with the tutorial commands among
@@ -154,7 +193,7 @@
              (ran (filter (lambda (r) r) (map (lambda (h) (assoc h rows)) recent)))
              (top (list-head ran (min command-palette-recent-count (length ran)))))
         ;; What you ran, then Start here, then every other command
-        (command-sections rows #f top))
+        (command-palette--label-start-here (command-sections rows #f top)))
       (command-palette--with-ask query
         (filter (lambda (c) c) (map command-palette--candidate (command-palette--search query))))))
 
@@ -177,7 +216,8 @@
                      (minibuffer-set-candidates! rows)))))))
 
 (define (command-palette--run choice)
-  (let ((bind (command-palette--bind-parse choice)))
+  (let* ((choice (command-palette--tutorial-name choice))
+         (bind (command-palette--bind-parse choice)))
     (cond
       ((command-fn choice)
        (history-push! 'M-x choice)

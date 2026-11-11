@@ -1448,10 +1448,15 @@
             const c = d.caretRangeFromPoint
               ? d.caretRangeFromPoint(e.clientX, e.clientY)
               : d.caretPositionFromPoint && d.caretPositionFromPoint(e.clientX, e.clientY);
-            if (!c) return;
+            // a click with no text under it still selects this window:
+            // the iframe takes the keyboard either way, and a key must act
+            // in the window you clicked, not the one selected before
+            const selectOnly = () =>
+              this.pushEvent("mouse", { win: parseInt(this.el.dataset.win, 10) });
+            if (!c) return selectOnly();
             const node = c.startContainer || c.offsetNode;
-            if (!node || node.nodeType !== 3) return;
-            if (chromeNode(node)) return;
+            if (!node || node.nodeType !== 3) return selectOnly();
+            if (chromeNode(node)) return selectOnly();
             const off = c.startOffset !== undefined ? c.startOffset : c.offset;
             this.dragFrom = { x: e.clientX, y: e.clientY };
             // a click lands only where the page names the byte; a

@@ -285,7 +285,7 @@ document that holds its rules.
 | Commands | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-two-palettes>) | [COMMANDS.md](<FURTHER READING/COMMANDS.md>) |
 | Companions | [7. Agents](<07. AGENTS.md#context-visible-buffers-companions-group-members>) | [AGENT CONTEXT MANAGEMENT.md](<FURTHER READING/AGENT CONTEXT MANAGEMENT.md>) |
 | Completion | [4. Everyday editing](<04. EVERYDAY EDITING.md#completion>) | [COMPLETION.md](<FURTHER READING/COMPLETION.md>) |
-| Components and ComposML | [13. Extend](<13. EXTEND.md#components-and-composml>) | [COMPOSML.md](<FURTHER READING/internal/COMPOSML.md>) |
+| Components and ComposML | [13. Extend](<13. EXTEND.md#components-and-composml>) | [COMPOSML.md](<FURTHER READING/COMPOSML.md>) |
 | Connector | [8. Models and connectors](<08. MODELS + CONNECTORS.md#a-connector-runs-a-model>) | - |
 | Context (agent) | [7. Agents](<07. AGENTS.md#context-visible-buffers-companions-group-members>) | [AGENT CONTEXT MANAGEMENT.md](<FURTHER READING/AGENT CONTEXT MANAGEMENT.md>) |
 | Cron | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#cron>) | - |
@@ -340,7 +340,7 @@ document that holds its rules.
 | Packages | [13. Extend](<13. EXTEND.md#packages>) | [ARCHITECTURE.md](<FURTHER READING/ARCHITECTURE.md>) |
 | Pane | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#the-parts-from-the-outside-in>) | [PANES.md](<FURTHER READING/PANES.md>) |
 | Paredit | [5. Working on code](<05. CODE.md#structural-editing-with-paredit>) | - |
-| PDF | [6. Writing](<06. WRITING.md#pdf-documents>) | [PDF-ANNOTATIONS.md](<FURTHER READING/internal/PDF-ANNOTATIONS.md>) |
+| PDF | [6. Writing](<06. WRITING.md#pdf-documents>) | [PDF-ANNOTATIONS.md](<FURTHER READING/PDF-ANNOTATIONS.md>) |
 | Peek | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#peek-and-popups>) | [PEEK.md](<FURTHER READING/PEEK.md>) |
 | Permission answers | [7. Agents](<07. AGENTS.md#permission-answers>) | - |
 | Point | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-mark-ring>) | - |
@@ -350,7 +350,7 @@ document that holds its rules.
 | Processes and lanes | [15. Under the hood](<15. UNDER THE HOOD.md#processes-lanes-and-threads>) | [BEAM-POWER.md](<FURTHER READING/BEAM-POWER.md>) |
 | Project | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-project>) | - |
 | Prompts | [7. Agents](<07. AGENTS.md#prompts>) | [PROMPTS.md](<FURTHER READING/PROMPTS.md>) |
-| Provenance | [5. Working on code](<05. CODE.md#provenance-who-wrote-this>) | [PROVENANCE.md](<FURTHER READING/internal/PROVENANCE.md>) |
+| Provenance | [5. Working on code](<05. CODE.md#provenance-who-wrote-this>) | [PROVENANCE.md](<FURTHER READING/PROVENANCE.md>) |
 | Registers | [4. Everyday editing](<04. EVERYDAY EDITING.md#registers>) | - |
 | Remote files | [5. Working on code](<05. CODE.md#remote-files>) | - |
 | Replace | [4. Everyday editing](<04. EVERYDAY EDITING.md#replace>) | - |
@@ -383,7 +383,7 @@ document that holds its rules.
 | WhatsApp | [11. Connected apps](<11. CONNECTED APPS.md#whatsapp>) | - |
 | Windows | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#windows-are-stacks>) | [WINDOWS.md](<FURTHER READING/WINDOWS.md>) |
 | Workflows | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#workflows>) | - |
-| Worktrees | [5. Working on code](<05. CODE.md#worktrees-and-task-workspaces>) | [WORKTREES.md](<FURTHER READING/internal/WORKTREES.md>) |
+| Worktrees | [5. Working on code](<05. CODE.md#worktrees-and-task-workspaces>) | [WORKTREES.md](<FURTHER READING/WORKTREES.md>) |
 | Writing workspace | [6. Writing](<06. WRITING.md#the-writing-workspace>) | - |
 
 ## Reference documents
@@ -448,7 +448,7 @@ from one page.
   plan.
 - [MORG-DEMO.md](<FURTHER READING/MORG-DEMO.md>) - Morg in use.
 - [ANNOTATIONS.md](<FURTHER READING/ANNOTATIONS.md>) - notes on a document.
-- [PDF-ANNOTATIONS.md](<FURTHER READING/internal/PDF-ANNOTATIONS.md>) - notes on a PDF.
+- [PDF-ANNOTATIONS.md](<FURTHER READING/PDF-ANNOTATIONS.md>) - notes on a PDF.
 
 ### Agents and automation
 
@@ -477,8 +477,8 @@ from one page.
 - [HOOKS.md](<FURTHER READING/HOOKS.md>) - hooks.
 - [ADVICE.md](<FURTHER READING/ADVICE.md>) - advice around a function.
 - [COMPONENTS.md](<FURTHER READING/COMPONENTS.md>) - the component contract.
-- [COMPOSML.md](<FURTHER READING/internal/COMPOSML.md>) - ComposML markup.
-- [COMPOSML-COMPONENTS.md](<FURTHER READING/internal/COMPOSML-COMPONENTS.md>) - the
+- [COMPOSML.md](<FURTHER READING/COMPOSML.md>) - ComposML markup.
+- [COMPOSML-COMPONENTS.md](<FURTHER READING/COMPOSML-COMPONENTS.md>) - the
   components in ComposML.
 
 ### Code and repository
@@ -487,10 +487,10 @@ from one page.
 - [CODE-BROWSER-PLAN.md](<FURTHER READING/internal/CODE-BROWSER-PLAN.md>) - its plan.
 - [EDITING-SURFACE-SPEC.md](<FURTHER READING/internal/EDITING-SURFACE-SPEC.md>) - the
   editing surface.
-- [PROVENANCE.md](<FURTHER READING/internal/PROVENANCE.md>) - who wrote a line.
+- [PROVENANCE.md](<FURTHER READING/PROVENANCE.md>) - who wrote a line.
 - [PROVENANCE-CRDT.md](<FURTHER READING/internal/PROVENANCE-CRDT.md>) - provenance and
   the CRDT.
-- [WORKTREES.md](<FURTHER READING/internal/WORKTREES.md>) - worktrees and task
+- [WORKTREES.md](<FURTHER READING/WORKTREES.md>) - worktrees and task
   workspaces.
 - [COMMITS.md](<FURTHER READING/COMMITS.md>) - how a commit message is written.
 - [TESTING.md](<FURTHER READING/TESTING.md>) - how to test.

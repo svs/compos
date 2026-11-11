@@ -269,7 +269,7 @@
 ;; top; M-b M-m M-e M-t M-p M-s M-o, or Left and Right, choose what the
 ;; rows set: the backend, the model, the effort, the tools, a saved setup,
 ;; or the other actions. RET applies at once. Tools toggle and stay open.
-(define (vscode--llm-open! chat key)
+(define (vscode--llm-open! chat key . at)
   (let* ((section key)
          (now (llm-config-combination chat))
          (tabs (lambda () (map (lambda (s) (list (cadr s) (equal? (car s) section))) vscode--llm-sections)))
@@ -287,6 +287,8 @@
                    (message (string-append chat " now runs " what)))))
     (minibuffer-read* "LLM: " (vscode--llm-rows chat section)
       (list (list 'style "modal")
+            ;; reopened after a pick: the highlight stays on the row picked
+            (list 'selected (and (pair? at) (car at)))
             (list 'html (vscode--llm-head chat section))
             (list 'cancel done!)
             (list 'confirm
@@ -346,7 +348,7 @@
                     (when (and (not (equal? v ""))
                                (or (member section '("b" "m" "e" "t" "p"))
                                    (and (equal? section "s") (not (equal? v "Save as a new preset")))))
-                      (vscode--llm-open! chat section))))))
+                      (vscode--llm-open! chat section v))))))
     ;; Meta and the tab's letter choose the tab; plain letters type
     (set! *mb-shortcuts*
           (cons (list "a" (lambda ()

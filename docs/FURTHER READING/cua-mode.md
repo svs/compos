@@ -34,7 +34,7 @@ cua-mode owns one keymap, `cua-mode-map`, and the map is in force only in a
 buffer you are editing.
 
 A buffer you have just landed on is in the movement state, and there the Shift
-chords keep their plain meaning: `S-<left>` walks buffer history and
+chords keep their plain meaning: `S-<left>` moves this window to the previous pane and
 `M-S-<left>` moves to the group on the left. The first key that says you are
 editing here (a letter, RET, a plain arrow, anything but the Shift chords
 themselves) arms the editing state, and the selections come with it. `ESC` or

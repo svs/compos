@@ -309,8 +309,7 @@
                                                        (if (memq name on)
                                                            (filter (lambda (x) (not (eq? x name))) on)
                                                            (cons name on)))
-                                    (string-append "with " v (if (memq name on) " off" " on"))))
-                        (vscode--llm-open! chat "t")))
+                                    (string-append "with " v (if (memq name on) " off" " on"))))))
                      ((member section '("p" "s"))
                       (let* ((setup (llm-config-combination chat))
                              (preset (llm-config-preset-name chat))
@@ -342,7 +341,12 @@
                      ((equal? v "Full setup") (with-current-buffer chat (lambda () (run-command "llm-configure"))))
                      ((equal? v "Connectors") (run-command "llm-connectors"))
                      ((equal? v "Switch chat") (run-command "vscode-chats"))
-                     ((equal? v "New chat") (run-command "chat-new")))))))
+                     ((equal? v "New chat") (run-command "chat-new")))
+                    ;; a pick applies and the dialog stays; Esc or C-g closes it
+                    (when (and (not (equal? v ""))
+                               (or (member section '("b" "m" "e" "t" "p"))
+                                   (and (equal? section "s") (not (equal? v "Save as a new preset")))))
+                      (vscode--llm-open! chat section))))))
     ;; Meta and the tab's letter choose the tab; plain letters type
     (set! *mb-shortcuts*
           (cons (list "a" (lambda ()

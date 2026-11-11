@@ -241,44 +241,23 @@
 
 (define (panes--empty-keys)
   "The keymap of pane-empty-mode as ((COMMAND (KEY ...)) ...), in the
-   order the keys were bound."
+   order the keys were bound. pane-restore is in it only when a pane is
+   hidden and it can bring one back."
   (let loop ((bs (reverse (keymap-bindings (mode-keymap "pane-empty-mode")))) (rows '()))
     (if (null? bs)
-        (reverse rows)
+        (if (pane-home--hidden-pane?)
+            (reverse rows)
+            (filter (lambda (r) (not (equal? (car r) "pane-restore"))) (reverse rows)))
         (let* ((k (car (car bs))) (c (cadr (car bs))))
           (loop (cdr bs)
                 (if (assoc c rows)
                     (map (lambda (r) (if (equal? (car r) c) (list c (append (cadr r) (list k))) r)) rows)
                     (cons (list c (list k)) rows)))))))
 
-(define panes--empty-labels
-  ;; the short words a key wears in the empty pane; a command not here shows its doc
-  '(("pane-take-window" "Move a window here")
-    ("find-file" "Open a file")
-    ("todo" "Go to todos")
-    ("chat-new" "New chat")
-    ("pane-remove" "Remove this pane")
-    ("pane-restore" "Bring back a hidden pane")))
-
 (define (panes--empty-blocks)
-  "The blank buffer as blocks: a dashed frame, a title, one line on what
-   the pane is, and one action for each command of pane-empty-mode, its
-   first key beside it. A click runs the command (block-click panes)."
-  (list
-    (list 'tag "div" 'class "pane-empty"
-          'children
-          (list (list 'tag "div" 'class "pane-empty-frame" 'text "")
-                (list 'tag "div" 'class "pane-empty-title" 'text "Empty pane")
-                (list 'tag "div" 'class "pane-empty-sub" 'text "Move a window in, or open something here.")
-                (component 'ui/actions
-                  (list 'class "pane-empty-actions"
-                        'actions (map (lambda (row)
-                                        (let* ((cmd (car row)) (e (assoc cmd panes--empty-labels)))
-                                          (append (list (string-append "pane:" cmd)
-                                                        (if e (cadr e) (or (command-doc cmd) cmd))
-                                                        (string-join (cadr row) " "))
-                                                  (if (equal? cmd "pane-remove") '("quiet") '()))))
-                                      (panes--empty-keys))))))))
+  "The blank buffer as blocks: the empty pane's page of the pane home
+   (pane-home--empty-blocks)."
+  (pane-home--empty-blocks))
 
 (define (panes--empty-render!)
   "Writes the blank buffer: blocks for the page (panes--empty-blocks),
@@ -299,26 +278,6 @@
           (loop (cdr rows)
                 (string-append text "   " (string-pad-right keys (max 8 (+ 2 (string-length keys)))) doc "\n")
                 (cons (list start (+ start (string-length keys)) "pane-empty-key") spans))))))
-
-;; an action of the empty pane runs its command in the pane clicked
-(add-hook! (list 'block-click 'panes)
-  (lambda (buf id)
-    (and (equal? buf panes-empty-buffer)
-         (string-prefix? "pane:" id)
-         (begin (run-command (substring id 5 (string-length id))) #t))))
-
-(define-style! 'pane-empty "
-.pane-empty { display: flex; flex-direction: column; align-items: center;
-  padding: 18vh 24px 24px; gap: 6px; text-align: center; }
-.pane-empty-frame { width: 64px; height: 44px; margin-bottom: 14px;
-  border: 1.5px dashed var(--dim-fg); border-radius: 8px; opacity: 0.55; }
-.pane-empty-title { font-size: 1.15em; font-weight: 600; color: var(--default-fg); }
-.pane-empty-sub { color: var(--dim-fg); font-size: 0.92em; margin-bottom: 16px; }
-.pane-empty-actions { display: flex; flex-direction: column; align-items: stretch;
-  gap: 4px; min-width: 220px; }
-.pane-empty-actions .c-action { justify-content: flex-start; }
-.pane-empty-actions .c-action.quiet { opacity: 0.7; }
-")
 
 (define-mode "pane-empty-mode"
   (lambda () (panes--empty-render!)))
@@ -574,14 +533,17 @@
   "The frame follows LAYOUT and it becomes this group's model. In
    order: each buffer goes to one window, the frame is drawn
    (panes--draw!), the layout is stored (panes-layout-set!), and
-   window-state-changed! runs. It stores the layout also when the draw
-   did not arrange the frame. Answers the drawn layout."
+   window-state-changed! runs, and the empty pane, the pane home and
+   the pane cards are drawn again (pane-home--redraw!). It stores the
+   layout also when the draw did not arrange the frame. Answers the
+   drawn layout."
   ;; a buffer is in one window, whatever made this layout. Only the
   ;; layout's own windows are drawn: a member of the group with no window
   ;; stays without one until the user opens it
   (let ((layout (panes--draw! (panes-unique-buffers (panes--own-keys layout)))))
     (panes-layout-set! layout)
     (window-state-changed!)
+    (pane-home--redraw!)
     layout))
 
 (define (panes-look! layout &optional g)
@@ -1247,6 +1209,10 @@
                                            (list 'tag "kbd" 'class "lt-cap" 'text (string-append kp (car t)))))))
                  panes-layout-tiles)))))
 
+(define (panes-layout-command name)
+  "The command that chooses the layout NAME, as window-layout-halves."
+  (string-append "window-layout-" (symbol->string name)))
+
 (define-style! 'panes-layouts "
 .lt-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 104px)); justify-content: center; gap: 8px; }
 .lt-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px;
@@ -1586,15 +1552,6 @@
     ("r" "Bring back a hidden pane" "pane-restore")
     ("k" "Remove this pane" "pane-remove")))
 
-;; (KEY NAME LABEL COMMAND SHARES CHAT-LAST?); SHARES are the column widths, () is free
-(define pane-home--layouts
-  '(("1" single "single" "window-layout-single" (1) #f)
-    ("2" halves "halves" "window-layout-halves" (1 1) #f)
-    ("3" two-pane "two-pane" "window-layout-two-pane" (2 1) #f)
-    ("4" columns "columns" "window-layout-columns" (1 1 1) #f)
-    ("5" two-chat "two-chat" "window-layout-two-chat" (5 5 3) #t)
-    ("6" free "free" "window-layout-free" () #f)))
-
 (define (pane-home--hidden-pane?)
   "#t when a pane is hidden and pane-restore can bring it back."
   (let ((l (panes-layout))) (and l (cadr (panes-restore-pane l)) #t)))
@@ -1705,11 +1662,12 @@
                                         'text ""))
                               out))))))))
 
-(define (pane-home--layout-card row current)
-  (let ((key (list-ref row 0)) (name (list-ref row 1)) (label (list-ref row 2)) (cmd (list-ref row 3)))
+(define (pane-home--layout-card tile current)
+  "TILE is a row of panes-layout-tiles: (KEY NAME SHARES CHAT-LAST?)."
+  (let ((key (car tile)) (name (cadr tile)) (label (symbol->string (cadr tile))))
     (list 'tag "div" 'class (if (eq? name current) "ph-layout ph-current" "ph-layout")
-          'click (string-append "cmd:" cmd)
-          'children (list (pane-home--preview (list-ref row 4) (list-ref row 5))
+          'click (string-append "cmd:" (panes-layout-command name))
+          'children (list (pane-home--preview (caddr tile) (cadddr tile))
                           (list 'tag "div" 'class "ph-layout-label"
                                 'children (list (list 'tag "span" 'class "ph-key" 'text key)
                                                 (list 'tag "span" 'class "pc-quiet-label" 'text label)))))))
@@ -1734,7 +1692,7 @@
                                     (pane-home--shown-actions))))
               (pane-home--section "Layout"
                 (list (list 'tag "div" 'class "ph-layouts"
-                            'children (map (lambda (r) (pane-home--layout-card r current)) pane-home--layouts))))
+                            'children (map (lambda (t) (pane-home--layout-card t current)) panes-layout-tiles))))
               (list 'tag "div" 'class "ph-foot" 'text (if empty? "" "q goes back to what this pane showed")))))))
 
 (define (pane-home--text)
@@ -1744,7 +1702,7 @@
     (string-append
       "\n   This pane\n"
       (rows "" (map (lambda (a) (line (car a) (cadr a))) (pane-home--shown-actions)))
-      (rows "Layout" (map (lambda (r) (line (car r) (list-ref r 2))) pane-home--layouts))
+      (rows "Layout" (map (lambda (t) (line (car t) (symbol->string (cadr t)))) panes-layout-tiles))
       "\n   q goes back\n")))
 
 (define (pane-home--render!)
@@ -1803,7 +1761,7 @@
 
 (mode-keys! "pane-home-mode"
   (append (map (lambda (a) (list (car a) (caddr a))) pane-home--actions)
-          (map (lambda (r) (list (car r) (list-ref r 3))) pane-home--layouts)
+          (map (lambda (t) (list (car t) (panes-layout-command (cadr t)))) panes-layout-tiles)
           '(("S" "setup-inference") ("R" "todo") ("T" "tutorial") ("p" "command-palette") ("g" "group-new")
             ("?" "contextual-help") ("L" "tutorial-index")
             ("G" "pane-home-refresh") ("q" "pane-home-back"))))
@@ -1821,17 +1779,11 @@
 (for-each (lambda (c) (command-modes! c '()))
           '("pane-take-window" "pane-remove" "pane-restore"))
 
-;; the empty pane offers restore only when a pane is hidden
-(advice-add! 'panes--empty-keys 'around 'pane-home-hide-restore
-  (lambda (next)
-    (let ((rows (next)))
-      (if (pane-home--hidden-pane?)
-          rows
-          (filter (lambda (r) (not (equal? (car r) "pane-restore"))) rows)))))
-
 ;; hiding or restoring a pane redraws the empty pane and the home page
-(advice-add! 'panes-apply! 'after 'pane-home-redraw
-  (lambda args
+(define (pane-home--redraw!)
+  "Draw again each page of a pane whose content changed: the empty pane,
+   the pane home and each pane card. panes-apply! calls it."
+  (begin
     ;; only a page whose content changed is drawn again: a redraw that
     ;; changes nothing still makes the page jump
     (when (and (buffer-exists? panes-empty-buffer)
@@ -1892,6 +1844,7 @@
          (tiles (list (pane-home--tile "b" "Switch buffer" "pane-switch-buffer")
                       (pane-home--tile "f" "Find file" "find-file")
                       (pane-home--tile "c" "New chat" "pane-home-new-chat")
+                      (pane-home--tile "g" "New group" "group-new")
                       (pane-home--tile "t" "Todos" "todo")))
          (quiet (append (if (pane-home--hidden-pane?)
                             (list (list 'tag "div" 'class "pc-quiet-item" 'click "cmd:pane-restore"
@@ -1909,10 +1862,6 @@
             'children
             (list
               (list 'tag "div" 'class "pc-title" 'text (if (pair? title) (car title) "Empty pane"))
-              (list 'tag "div" 'class "pc-quest" 'click (cadr quest)
-                    'children (list (list 'tag "span" 'class "pc-quest-tag" 'text "Next")
-                                    (list 'tag "span" 'class "pc-quest-label" 'text (car quest))
-                                    (pane-home--key "RET")))
               (list 'tag "div" 'class "pc-tiles" 'children tiles)
               (list 'tag "div" 'class "pc-heading" 'text "Layout")
               (component 'panes/layouts (list 'current (symbol->string current)))
@@ -1928,7 +1877,8 @@
 
 (define-style! 'pane-card "
 .pc { display: flex; flex-direction: column; align-items: stretch; gap: 14px;
-  width: min(440px, 100%); margin: 0 auto; padding: 14vh 20px 24px;
+  width: min(440px, 100%); margin: 0 auto; padding: 24px 20px;
+  min-height: 100%; box-sizing: border-box; justify-content: center;
   font-family: var(--font-sans); }
 .pc-title { font-size: 1.5em; font-weight: 600; color: var(--default-fg); text-align: center; margin-bottom: 4px; }
 .pc-cap { display: inline-flex; align-items: center; justify-content: center;
@@ -1944,6 +1894,7 @@
 .pc-quest-label { flex: 1; font-size: 1.12em; font-weight: 600; }
 .pc-quest .pc-cap { background: transparent; color: var(--window-bg); border-color: var(--window-bg); }
 .pc-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pc-tiles > :last-child:nth-child(odd) { grid-column: span 2; }
 .pc-tile { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;
   border: 1px solid var(--border-bg); }
 .pc-tile:hover { background: var(--hl-line-bg); border-color: var(--default-fg); }
@@ -1973,9 +1924,6 @@
 .pc-quiet-item:hover { color: var(--default-fg); }
 ")
 
-(advice-add! 'panes--empty-blocks 'around 'pane-home-empty-page
-  (lambda (next) (pane-home--empty-blocks)))
-
 (define-style! 'pane-home-compact "
 .ph-compact { align-items: center; text-align: center; padding-top: 16vh; gap: 10px; max-width: 420px; }
 .ph-compact .ph-actions { justify-content: center; }
@@ -1988,7 +1936,7 @@
 ")
 
 (mode-keys! "pane-empty-mode"
-  (append (map (lambda (r) (list (car r) (list-ref r 3))) pane-home--layouts)
+  (append (map (lambda (t) (list (car t) (panes-layout-command (cadr t)))) panes-layout-tiles)
           '(("RET" "pane-home-next") ("|" "split-window-right") ("-" "split-window-below") ("u" "unsplit") ("b" "pane-switch-buffer") ("a" "pane-add") ("c" "pane-home-new-chat") ("S" "setup-inference") ("R" "todo") ("T" "tutorial")
             ("p" "command-palette") ("g" "group-new") ("?" "contextual-help") ("L" "tutorial-index"))))
 

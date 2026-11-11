@@ -1637,41 +1637,6 @@
                         (list "?" "Help about what is here" "cmd:contextual-help")))))
     (list-head steps (min 4 (length steps)))))
 
-(define (pane-home--preview shares chat?)
-  "A small drawing of a layout: one box for each column, as wide as its share.
-   Columns draws as many columns as window-layout-columns gives it."
-  (let ((shares (if (and (equal? shares '(1 1 1)) (not chat?) (boundp 'window-layout-columns)
-                         (integer? window-layout-columns) (> window-layout-columns 0))
-                    (make-list window-layout-columns 1)
-                    shares)))
-  (list 'tag "div" 'class (if (null? shares) "ph-preview ph-free" "ph-preview")
-        'children
-        (if (null? shares)
-            (list (list 'tag "div" 'class "ph-col ph-plus" 'text "+"))
-            (let loop ((s shares) (i 1) (out '()))
-              (if (null? s) (reverse out)
-                  (loop (cdr s) (+ i 1)
-                        (cons (if (and chat? (null? (cdr s)))
-                                  ;; the chat column is drawn as a chat: messages, yours on the right
-                                  (list 'tag "div" 'class "ph-col ph-chat"
-                                        'attrs (list (list "style" (string-append "flex:" (number->string (car s)))))
-                                        'children (map (lambda (side) (list 'tag "div" 'class (string-append "ph-bubble " side) 'text ""))
-                                                       '("l" "r" "l")))
-                                  (list 'tag "div" 'class "ph-col"
-                                        'attrs (list (list "style" (string-append "flex:" (number->string (car s)))))
-                                        'text ""))
-                              out))))))))
-
-(define (pane-home--layout-card tile current)
-  "TILE is a row of panes-layout-tiles: (KEY NAME SHARES CHAT-LAST?)."
-  (let ((key (car tile)) (name (cadr tile)) (label (symbol->string (cadr tile))))
-    (list 'tag "div" 'class (if (eq? name current) "ph-layout ph-current" "ph-layout")
-          'click (string-append "cmd:" (panes-layout-command name))
-          'children (list (pane-home--preview (caddr tile) (cadddr tile))
-                          (list 'tag "div" 'class "ph-layout-label"
-                                'children (list (list 'tag "span" 'class "ph-key" 'text key)
-                                                (list 'tag "span" 'class "pc-quiet-label" 'text label)))))))
-
 (define (pane-home--section title children)
   (list 'tag "div" 'class "ph-section"
         'children (cons (list 'tag "div" 'class "ph-heading" 'text title) children)))
@@ -1691,8 +1656,7 @@
                                                         (if (equal? (car a) "k") '("quiet") '())))
                                     (pane-home--shown-actions))))
               (pane-home--section "Layout"
-                (list (list 'tag "div" 'class "ph-layouts"
-                            'children (map (lambda (t) (pane-home--layout-card t current)) panes-layout-tiles))))
+                (list (component 'panes/layouts (list 'current (symbol->string current)))))
               (list 'tag "div" 'class "ph-foot" 'text (if empty? "" "q goes back to what this pane showed")))))))
 
 (define (pane-home--text)
@@ -1731,20 +1695,6 @@
 .ph-heading { color: var(--dim-fg); font-size: 0.8em; letter-spacing: 0.06em; text-transform: uppercase; }
 .ph-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .ph-actions .c-action.quiet { opacity: 0.7; }
-.ph-layouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
-.ph-layout { display: flex; flex-direction: column; gap: 6px; padding: 8px; cursor: pointer;
-  border: 1px solid transparent; border-radius: 8px; }
-.ph-layout:hover { border-color: var(--dim-fg); }
-.ph-current { border-color: var(--default-fg); }
-.ph-preview { display: flex; gap: 3px; height: 44px; padding: 3px;
-  border: 1.5px solid var(--dim-fg); border-radius: 5px; opacity: 0.8; }
-.ph-free { border-style: dashed; }
-.ph-col { flex: 1; border-radius: 2px; background: var(--dim-fg); opacity: 0.35; }
-.ph-chat { opacity: 0.7; }
-.ph-plus { background: none; opacity: 1; color: var(--dim-fg); display: flex;
-  align-items: center; justify-content: center; }
-.ph-layout-label { display: flex; gap: 6px; font-size: 0.88em; color: var(--default-fg); }
-.ph-key { font-family: var(--mono-font, monospace); font-weight: 600; color: var(--dim-fg); }
 .ph-foot { margin-top: 18px; color: var(--dim-fg); font-size: 0.85em; }
 ")
 
@@ -1901,38 +1851,11 @@
 .pc-label { font-size: 1em; color: var(--default-fg); }
 .pc-heading { margin-top: 6px; font-size: 0.72em; font-weight: 700; letter-spacing: .12em;
   text-transform: uppercase; color: var(--dim-fg); }
-.pc-layouts { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: -6px; }
-.pc-layout { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px; cursor: pointer;
-  border: 1px solid transparent; }
-.pc-layout:hover { border-color: var(--border-bg); background: var(--hl-line-bg); }
-.pc-layout .ph-preview { width: 100%; height: 40px; padding: 3px; gap: 3px; border-width: 1.5px; border-radius: 0;
-  box-sizing: border-box; }
-.pc-layout .ph-col { border-radius: 0; }
-.pc-layout .pc-cap { min-width: 1.6em; height: 1.6em; font-size: 0.8em; }
-.pc-current { border-color: var(--accent-fg); }
-.pc-current .ph-preview { border-color: var(--accent-fg); opacity: 1; }
-.pc-current .ph-col { background: var(--accent-fg); }
-.ph-col.ph-chat { background: none; opacity: 1; border: 1px solid var(--dim-fg);
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; padding: 2px; box-sizing: border-box; }
-.ph-bubble { height: 4px; width: 70%; background: var(--dim-fg); opacity: .6; }
-.ph-bubble.r { align-self: flex-end; background: var(--accent-fg); opacity: 1; }
-.pc-current .ph-col.ph-chat { background: none; border-color: var(--accent-fg); }
 .pc-quiet { display: flex; justify-content: center; gap: 18px; margin-top: 10px; color: var(--dim-fg); font-size: 0.85em; }
 .pc-quiet-item { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .pc-quiet-item .pc-cap { min-width: 1.7em; height: 1.7em; font-size: 0.85em; color: var(--default-fg);
   background: var(--hl-line-bg); border-color: var(--dim-fg); }
 .pc-quiet-item:hover { color: var(--default-fg); }
-")
-
-(define-style! 'pane-home-compact "
-.ph-compact { align-items: center; text-align: center; padding-top: 16vh; gap: 10px; max-width: 420px; }
-.ph-compact .ph-actions { justify-content: center; }
-.ph-mini { grid-template-columns: repeat(6, 44px); gap: 6px; justify-content: center; margin-top: 6px; }
-.ph-mini .ph-layout { padding: 3px; gap: 3px; }
-.ph-mini .ph-preview { height: 22px; padding: 2px; gap: 2px; border-width: 1px; border-radius: 3px; }
-.ph-mini .ph-layout-label span:not(.ph-key) { display: none; }
-.ph-mini .ph-layout-label { justify-content: center; font-size: 0.75em; }
-.ph-next { margin-top: 6px; opacity: 0.85; }
 ")
 
 (mode-keys! "pane-empty-mode"

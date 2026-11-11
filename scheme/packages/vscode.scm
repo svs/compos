@@ -47,10 +47,14 @@
 ;; what the facts pane on the right would
 (define-style! 'vscode-modals "
 .mb-panel.palette:has(.mb-html) {
-  width: min(calc(720px / var(--ui-zoom, 1)), calc(88vw / var(--ui-zoom, 1)));
+  width: fit-content;
+  min-width: calc(420px / var(--ui-zoom, 1));
+  max-width: min(calc(720px / var(--ui-zoom, 1)), calc(88vw / var(--ui-zoom, 1)));
   height: calc(52dvh / var(--ui-zoom, 1));
 }
 .mb-panel.palette:has(.mb-html) .mb-preview { display: none; }
+.mb-panel.palette:has(.mb-html) .mb-head-legend { display: none; }
+.mb-panel.palette:has(.mb-html) .mb-cand { column-gap: 12px; }
 ")
 
 (define-command "vscode-windows" "Choose a layout, each one shows as you move to it; or a window of this group"

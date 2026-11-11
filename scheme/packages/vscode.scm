@@ -91,7 +91,20 @@
         #f "modal" #f #f
         (map (lambda (t) (list (car t) (string-append "Layout: " (symbol->string (cadr t)))))
              panes-layout-tiles)
-        #f tiles))))
+        #f tiles)
+      ;; left and right walk the layouts, each shown as you land on it;
+      ;; on a window row they stay the cursor keys
+      (set! *mb-tab-fn*
+            (lambda (step)
+              (let* ((labels (map car lays))
+                     (sel (minibuffer-selected))
+                     (i (let loop ((ls labels) (n 0))
+                          (cond ((null? ls) #f) ((equal? (car ls) sel) n) (else (loop (cdr ls) (+ n 1)))))))
+                (and i
+                     (let ((j (modulo (+ i step) (length labels))))
+                       (prompt--do 'move (- j i))
+                       (mb-select-notify!)
+                       #t))))))))
 
 (define-command "vscode-buffers" "Choose a buffer of this group, then a file of its project"
   (lambda ()

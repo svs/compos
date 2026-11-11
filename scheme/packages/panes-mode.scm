@@ -1248,13 +1248,13 @@
                  panes-layout-tiles)))))
 
 (define-style! 'panes-layouts "
-.lt-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.lt-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 104px)); justify-content: center; gap: 8px; }
 .lt-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px;
   cursor: pointer; border: 1px solid transparent; }
 .lt-tile:hover { border-color: var(--border-bg); background: var(--hl-line-bg); }
 .lt-tile.selected { border-color: var(--default-fg); background: var(--hl-line-bg); }
 .lt-current { border-color: var(--accent-fg); }
-.lt-preview { display: flex; gap: 3px; width: 100%; height: 40px; padding: 3px; box-sizing: border-box;
+.lt-preview { display: flex; gap: 3px; width: min(88px, 100%); aspect-ratio: 16 / 10; padding: 3px; box-sizing: border-box;
   border: 1.5px solid var(--dim-fg); opacity: .8; }
 .lt-free { border-style: dashed; }
 .lt-col { flex: 1; background: var(--dim-fg); opacity: .35; }

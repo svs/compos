@@ -97,7 +97,7 @@
   (training--show! (training--prepare-document!)))
 
 ;;; --- the tutorial app -------------------------------------------------------
-;;; C-h t opens three panes: *tutorial*, the practice page you type in;
+;;; C-h t opens three panes: *practice*, the practice page you type in;
 ;;; *tutorial-detail*, the slide that teaches one small step at a time; and
 ;;; *tutorial-lesson*, the lesson to read. *tutorial-index*, the list of
 ;;; lessons, comes over the practice pane when asked and goes with q.
@@ -106,7 +106,7 @@
 
 (effects! '(write display))
 
-(define *tutorial-buffer* "*tutorial*")
+(define *tutorial-buffer* "*practice*")
 (define *tutorial-detail-buffer* "*tutorial-detail*")
 (define *tutorial-lesson-buffer* "*tutorial-lesson*")
 (define *tutorial-index-buffer* "*tutorial-index*")

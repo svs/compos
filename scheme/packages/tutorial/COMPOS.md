@@ -94,7 +94,7 @@ The window keys of this lesson work only in focus. In editing, `s-<right>` moves
 | `C-x b` | Show another buffer in this window |
 | `C-x C-b` | List every buffer in ibuffer |
 
-> In the practice page, type `C-x b`, choose `*tutorial*` and press `RET`.
+> In the practice page, type `C-x b`, choose `*practice*` and press `RET`.
 
 ### List the buffers
 
@@ -429,7 +429,7 @@ A **file** is data on disk. A **buffer** is a named place where the editor holds
 
 This TUTORIAL buffer does not visit the master file. So your edits cannot change the installed tutorial.
 
-> Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
+> Type `C-x C-f` and enter `/tmp/compos-practice.txt`. Type a line and save it with `C-x C-s`. Then type `C-x b`, choose `*practice*` and press `RET` to bring the practice page back.
 
 Almost everything you see in Compos lives in a buffer. Files are one kind. Help pages, chats, directory listings, web pages, mail, process output, search results and dashboards are buffers too.
 
@@ -622,7 +622,7 @@ Every buffer opens normally, in a window, as your own. A list such as dired open
 
 This is `scroll-other-window` made into a pattern: look at nearby context without losing the work that led you there.
 
-> Type `C-x b`, choose `*tutorial*` and press `RET` to bring the practice page back.
+> Type `C-x b`, choose `*practice*` and press `RET` to bring the practice page back.
 
 ## Browsing the web
 

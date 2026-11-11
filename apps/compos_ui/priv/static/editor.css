@@ -1541,8 +1541,11 @@ body.unfocused .window.active .cursor {
   min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
   text-transform: none; letter-spacing: 0;
   /* the bottom line sits in the row; the lines above it hang over
-     the windows on the echo ground */
+     the windows on the echo ground, at most five of them: a long
+     message (a stack trace) keeps its head here and its whole text
+     in *Messages* */
   align-self: flex-end; background: var(--surface-sunken);
+  max-height: 5lh;
 }
 .ml-frame-path {
   min-width: 0; max-width: 62vw; flex: 0 1 auto;

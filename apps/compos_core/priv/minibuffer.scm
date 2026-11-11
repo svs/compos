@@ -1028,16 +1028,19 @@
 ;; a click on the prompt's own HTML: move the highlight to the row LABEL
 ;; and take it as RET would. #f when the open prompt shows no such row.
 (define (minibuffer-pick! label)
-  (let* ((rows (or (prompt--do 'filtered) '()))
-         (labels (map (lambda (r) (if (pair? r) (car r) r)) rows))
+  ;; the highlight skips separator rows, so walk it one row at a time
+  ;; toward LABEL instead of counting rows
+  (let* ((labels (map (lambda (r) (if (pair? r) (car r) r)) (or (prompt--do 'filtered) '())))
          (at (lambda (x) (let loop ((ls labels) (i 0))
                            (cond ((null? ls) #f) ((equal? (car ls) x) i) (else (loop (cdr ls) (+ i 1)))))))
          (want (at label))
          (now (at (minibuffer-selected))))
     (and want now
-         (begin (unless (= want now) (prompt--do 'move (- want now)))
-                (and (equal? (minibuffer-selected) label)
-                     (begin (minibuffer-confirm!) #t))))))
+         (let ((step (if (< want now) -1 1)))
+           (let walk ((n (length labels)))
+             (cond ((equal? (minibuffer-selected) label) (minibuffer-confirm!) #t)
+                   ((= n 0) #f)
+                   (else (prompt--do 'move step) (walk (- n 1)))))))))
 (public! 'minibuffer-pick! "(minibuffer-pick! LABEL) — highlight the row LABEL of the open prompt and take it as RET would; #f when it shows no such row")
 (public! 'minibuffer-confirm-input! "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate.")
 (public! 'minibuffer-cancel! "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit.")

@@ -139,6 +139,30 @@
     (if (null? x) sum
         (loop (cdr x) (cdr y) (+ sum (abs (- (car x) (car y))))))))
 
+
+(deftest 'beginner-theme-keeps-prompts-distinct-and-restores-the-original
+  "Switching away removes the beginner prompt and selection overrides"
+  (lambda ()
+    (load-theme "compos-dark")
+    (let ((selection (theme-test-face-attr 'select 'bg))
+          (prompt (theme-test-face-attr 'minibuffer-prompt 'bg))
+          (skin (style-css 'theme)))
+      (load-theme "beginner")
+      (check-true!
+        (> (theme-test-distance
+             (theme-test-face-attr 'window 'bg)
+             (theme-test-face-attr 'select 'bg)) 180)
+        "The selected row clearly separates from the window")
+      (check-true!
+        (> (theme-test-distance
+             (theme-test-face-attr 'minibuffer-prompt 'bg)
+             (theme-test-face-attr 'select 'bg)) 120)
+        "The prompt and selected row have distinct grounds")
+      (load-theme "compos-dark")
+      (check-equal! (theme-test-face-attr 'select 'bg) selection "Original selection returns")
+      (check-equal! (theme-test-face-attr 'minibuffer-prompt 'bg) prompt "Original prompt returns")
+      (check-equal! (style-css 'theme) skin "Original skin returns"))))
+
 (deftest 'a-dark-theme-shows-the-row-under-point
   "hl-line stands off the window background, and select and region stand off hl-line"
   (lambda ()
@@ -162,7 +186,7 @@
                        (string-append theme ": a search match is not a selection"))))
       ;; brut is light, and the same rule holds: a row under point that
       ;; does not stand off the sheet is a row you cannot find
-      '("compos" "paper-night" "compos-dark" "catppuccin-mocha" "tokyo-night"
+      '("compos" "paper-night" "compos-dark" "beginner" "catppuccin-mocha" "tokyo-night"
         "zenburn" "ascii" "crt" "brut" "maharaja"))
     (theme-test-restore!)))
 

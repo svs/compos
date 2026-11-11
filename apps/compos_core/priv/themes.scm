@@ -932,6 +932,54 @@
 (define-theme-skin! "compos" compos-theme-skin)
 (define-theme-skin! "compos-dark" compos-theme-skin)
 
+;; Beginner: stronger separation between text, prompts, and selections.
+(domain! 'faces)
+(effects! '(write))
+(define-theme-from "beginner" "compos-dark"
+  (list
+    (list 'default 'bg "#090b10" 'fg "#ffffff")
+    (list 'window 'bg "#10141c")
+    (list 'paper 'bg "#0c1017")
+    (list 'window-inactive 'bg "#0c1017")
+    (list 'body 'fg "#eeeef4")
+    (list 'dim 'fg "#b8bbc9")
+    (list 'faint 'fg "#9da3b5")
+    (list 'linenum 'fg "#9da3b5")
+    (list 'border 'bg "#69758c")
+    (list 'border-soft 'bg "#465168")
+    (list 'modeline 'bg "#161e2c" 'fg "#c8d0df")
+    (list 'modeline-active 'bg "#283b53" 'fg "#ffffff")
+    (list 'accent 'fg "#b1ddf5")
+    (list 'link 'fg "#b1ddf5" 'decoration "underline")
+    (list 'cursor 'bg "#ffffff")
+    (list 'hl-line 'bg "#303c50")
+    (list 'select 'bg "#70508c" 'fg "#ffffff")
+    (list 'region 'bg "#69501b" 'fg "#ffffff")
+    (list 'minibuffer-prompt 'bg "#1b2839" 'fg "#ffffff")
+    (list 'ts-comment 'fg "#adb5c9")
+    (list 'ts-punctuation 'fg "#b8bbc9")
+    (list 'ts-operator 'fg "#d0d3df")
+    (list 'org-meta 'fg "#b8bbc9")
+    (list 'org-tag 'fg "#b8bbc9")
+    (list 'fold-marker 'fg "#b8bbc9")
+    (list 'chrome 'gap "5px" 'radius "0"
+          'border "1px solid #69758c"
+          'shadow "0 14px 40px rgba(0, 0, 0, 0.7)"
+          'shadow-deep "0 22px 60px rgba(0, 0, 0, 0.7)")))
+
+(define-theme-skin! "beginner"
+  (string-append compos-theme-skin "
+.mb-panel:not(.palette) .mb-input-row {
+  background: var(--minibuffer-prompt-bg);
+  color: var(--minibuffer-prompt-fg);
+  border-top: 2px solid var(--border-bg);
+}
+.mb-panel:not(.palette) .mb-input-row .mb-input .cursor {
+  background: var(--cursor-bg); color: var(--window-bg);
+}
+"))
+
+
 ;;; --- zenburn: the low-contrast classic --------------------------------------
 ;;; Jani Nurminen's palette, as Emacs has worn it since 2003. A grey-green
 ;;; ground, a bone foreground, and colours that are all one step muted, so

@@ -1,4 +1,4 @@
-;;; build-identity.scm --- which compos is running, at the right of the frame modeline.
+;;; build-identity.scm --- which compos is running, in the echo area after *Messages*.
 ;;;
 ;;; A release shows its version and the commit it was built from:
 ;;;   rel 0.9.0 · 2fa2acc
@@ -60,7 +60,22 @@
                          (set! *build-identity-at* (monotonic-ms))
                          (when (and ok? (not (equal? value *build-identity*)))
                            (set! *build-identity* value)
-                           (global-mode-string-refresh!)))))
+                           (build-identity-publish!)))))
           (or *build-identity* "dev")))))
 
-(global-mode-string-set! 'build-identity (lambda () (list "ml-segment" (build-identity-text))))
+(define (build-identity-describe)
+  "what build-info says: the build line, and where this compos runs from"
+  (let ((info (build-info)))
+    (string-append (build-identity-text)
+                   (if (and info (plist-get info 'built)) (string-append " · built " (plist-get info 'built)) "")
+                   " · " (or (compos-project-dir) (getenv "RELEASE_ROOT") "?"))))
+
+(define-command "build-info" "Say which compos runs: version and commit, or the checkout's jj change and git commit"
+  (lambda () (message (build-identity-describe))))
+
+(define (build-identity-publish!)
+  "show the build line in the echo area, after *Messages*; a click says more"
+  (echo-extra-hint-set! 'build-identity (list (build-identity-text) "" "build-info")))
+
+(global-mode-string-set! 'build-identity #f)
+(build-identity-publish!)

@@ -172,8 +172,8 @@
 
 (define vscode--llm-sections
   ;; (KEY TAB-LABEL); on an empty input the key goes to that tab
-  '(("b" "b backend") ("m" "m model") ("e" "e effort") ("p" "p tools")
-    ("s" "s saved") ("o" "o other")))
+  '(("b" "b backend") ("m" "m model") ("e" "e effort") ("t" "t tools")
+    ("p" "p presets") ("o" "o other")))
 
 ;; the rows that are on (hint starting with the filled dot) before the rest,
 ;; each part keeping its order, a separator between the two
@@ -202,7 +202,7 @@
      ((equal? key "e")
       (map (lambda (e) (list e (mark (equal? e effort) (if (equal? e "default") "the model decides" "reasoning effort"))))
            (cons "default" (car (chat-model-effort-info chat connector model)))))
-     ((equal? key "p")
+     ((equal? key "t")
       (vscode--on-first
        (map (lambda (e) (list (symbol->string (car e))
                               (string-append (if (member (car e) tools) "● on   " "○ off  ")
@@ -211,7 +211,7 @@
        (map (lambda (srv) (list (symbol->string (car srv))
                                 (string-append (if (member (car srv) tools) "● on   " "○ off  ") "MCP server")))
             (filter (lambda (srv) (not (assq (car srv) *chat-presets*))) *mcp-registry*))))
-     ((equal? key "s")
+     ((equal? key "p")
       (let ((g (group-resolve-id (or (buffer-group chat) (frame-group)))))
         (append
          (list (list "Save as a new preset" "name this setup and keep it"))
@@ -238,8 +238,8 @@
          (values (list (list "b" (plist-get now 'connector))
                        (list "m" (plist-get now 'model))
                        (list "e" (plist-get now 'effort))
-                       (list "p" tools)
-                       (list "s" (string-append (or (llm-config-preset-name chat) "own setup") " · save, default"))
+                       (list "t" tools)
+                       (list "p" (string-append (or (llm-config-preset-name chat) "own setup") " · save, default"))
                        (list "o" "setup, chats"))))
     (blocks->html
      (list 'tag "div" 'class "vl-tabs"
@@ -264,7 +264,7 @@
                              (list 'tag "div" 'class "vl-value" 'text "full setup menu")))))))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
-;; top; M-b M-m M-e M-p M-s M-o, or Left and Right, choose what the
+;; top; M-b M-m M-e M-t M-p M-o, or Left and Right, choose what the
 ;; rows set: the backend, the model, the effort, the tools, a saved setup,
 ;; or the other actions. RET applies at once. Tools toggle and stay open.
 (define (vscode--llm-open! chat key)
@@ -298,7 +298,7 @@
                       (apply! (vscode--plist-set (vscode--plist-set now 'model v) 'effort "default") v))
                      ((equal? section "e")
                       (apply! (vscode--plist-set now 'effort v) (string-append (plist-get now 'model) " at " v " effort")))
-                     ((equal? section "p")
+                     ((equal? section "t")
                       (let* ((name (string->symbol v))
                              (on (or (plist-get now 'presets) '())))
                         (if (eq? name 'compos)
@@ -308,8 +308,8 @@
                                                            (filter (lambda (x) (not (eq? x name))) on)
                                                            (cons name on)))
                                     (string-append "with " v (if (memq name on) " off" " on"))))
-                        (vscode--llm-open! chat "p")))
-                     ((equal? section "s")
+                        (vscode--llm-open! chat "t")))
+                     ((equal? section "p")
                       (let* ((setup (llm-config-combination chat))
                              (preset (llm-config-preset-name chat))
                              (g (group-resolve-id (or (buffer-group chat) (frame-group))))

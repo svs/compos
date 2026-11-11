@@ -42,7 +42,7 @@
         (loop (+ n 1) (string-append label " <" (number->string n) ">"))
         l)))
 
-(define-command "vscode-windows" "Choose a window of this group, or a layout; each layout shows as you move to it"
+(define-command "vscode-windows" "Choose a layout, each one shows as you move to it; or a window of this group"
   (lambda ()
     (let* ((before (panes--ensure-layout!))
            (pids '())
@@ -67,7 +67,7 @@
                                         n
                                         (or (plist-get (panes-layout-spec n) 'doc) "")))
                       (panes-layout-names)))
-           (rows (append wins lays)))
+           (rows (append lays wins)))
       (minibuffer-read-preview "Window or layout: "
         (map (lambda (r) (list (car r) (nth 2 r))) rows)
         (lambda (label)
@@ -84,7 +84,9 @@
                         (when (and h (window-exists? h)) (select-window! h)))))
                 (else (panes-apply! before))))
         (lambda () (panes-apply! before))
-        #f "modal"))))
+        #f "modal" #f #f
+        '(("1" "Layout: single") ("2" "Layout: two-pane") ("=" "Layout: halves")
+          ("c" "Layout: columns") ("+" "Layout: two-chat") ("f" "Layout: free"))))))
 
 (define-command "vscode-buffers" "Choose a buffer of this group, then a file of its project"
   (lambda ()
@@ -190,7 +192,7 @@
       (string-append (number->string (monotonic-ms)) (if vscode-keyboard-lock " lock" "")))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P shows this pane's card. Cmd-J chooses a window or a layout. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L chooses a chat. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
+  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L chooses a chat. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
 
 (vscode--apply! vscode-mode)
 

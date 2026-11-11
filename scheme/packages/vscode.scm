@@ -276,11 +276,10 @@
          ;; another tab opens the dialog again: its drawing on top marks the tab
          (show! (lambda (k)
                   (set! *mb-tab-fn* #f)
-                  (set! *mb-space-fn* #f)
                   (set! *mb-shortcuts* '())
                   (minibuffer-detach!)
                   (vscode--llm-open! chat k)))
-         (done! (lambda () (set! *mb-tab-fn* #f) (set! *mb-space-fn* #f) (set! *mb-shortcuts* '())))
+         (done! (lambda () (set! *mb-tab-fn* #f) (set! *mb-shortcuts* '())))
          (apply! (lambda (box what)
                    (llm-bundle-apply! chat box)
                    (llm-config-remember! box)
@@ -355,7 +354,6 @@
           (cons (list "a" (lambda ()
                               ;; advanced: the full setup menu, on this chat
                               (set! *mb-tab-fn* #f)
-                              (set! *mb-space-fn* #f)
                               (set! *mb-shortcuts* '())
                               (minibuffer-detach!)
                               (with-current-buffer chat (lambda () (run-command "llm-configure")))))
@@ -365,28 +363,7 @@
             (let* ((keys (map car vscode--llm-sections))
                    (i (let loop ((ks keys) (n 0)) (cond ((null? ks) 0) ((equal? (car ks) section) n) (else (loop (cdr ks) (+ n 1)))))))
               (show! (list-ref keys (modulo (+ i step) (length keys))))
-              #t)))
-    ;; SPC on an empty input is the leader: the next letter picks the tab
-    (set! *mb-space-fn*
-          (lambda ()
-            (capture-key! "vscode-llm-leader")
-            (message "SPC-  b backend  m model  e effort  t tools  p presets  s save  o other  a advanced  SPC pick")
-            #t))))
-
-;; the key after SPC in Cmd-L: a tab's letter opens that tab, a second SPC
-;; picks the row, C-g or ESC only drops the leader
-(define-command "vscode-llm-leader" "Open the Cmd-L tab of the letter typed after SPC"
-  (lambda ()
-    (let* ((ks (last-keys))
-           (k (cond ((pair? ks) (car (reverse ks)))
-                    ((string? ks) (car (reverse (string-split ks " "))))
-                    (else "")))
-           (hit (assoc k *mb-shortcuts*)))
-      (message "")
-      (cond (hit ((cadr hit)))
-            ((equal? k "SPC") (run-command "minibuffer-confirm"))
-            (else #f))))
-  'modes '(minibuffer-mode))
+              #t)))))
 
 (define-command "vscode-llm" "Change this chat's backend, model, effort, tools or saved setup"
   (lambda ()

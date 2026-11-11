@@ -102,9 +102,6 @@
 ;; STEP, -1 or 1, and answers #t when it moved the tab. The preview
 ;; prompt clears it, so a stale fn never steers the next prompt.
 (define *mb-tab-fn* #f)
-;; a prompt with a leader: SPC on an empty input calls it first, and a true
-;; answer means it took the key (it arms the next key); #f picks the row
-(define *mb-space-fn* #f)
 
 ;; a prompt whose rows nest folds them with TAB: the fn gets the selected
 ;; candidate and answers #t when it took the key
@@ -466,14 +463,33 @@
       (buffer-set-local! buf 'minibuffer-prompt (cdr split))
       #t)))
 
-;; No name starts with a space, so SPC on an empty prompt picks the row,
-;; as RET does; after typed text it is a space, a separator in the filter.
-(define-command "minibuffer-space" "Pick the row on an empty prompt, else type a space"
+;; No name starts with a space, so SPC on an empty prompt is a leader: the
+;; next key runs as its Meta key, SPC SPC picks the row; after typed text
+;; it is a space, a separator in the filter.
+(define-command "minibuffer-space" "On an empty prompt, wait for a key and run it with Meta; else type a space"
   (lambda ()
+    ;; no input starts with a space, so on an empty prompt SPC is a
+    ;; leader: SPC b is M-b, SPC SPC picks the row
     (if (equal? (minibuffer-input) "")
-        (unless (and *mb-space-fn* (*mb-space-fn*))
-          (run-command "minibuffer-confirm"))
+        (begin (capture-key! "minibuffer-leader")
+               (message "SPC-"))
         (run-command "self-insert-command")))
+  'modes '(minibuffer-mode))
+
+(define-command "minibuffer-leader" "Run the key typed after SPC as its Meta key"
+  (lambda ()
+    (let* ((ks (last-keys))
+           (k (cond ((pair? ks) (car (reverse ks)))
+                    ((string? ks) (car (reverse (string-split ks " "))))
+                    (else "")))
+           (meta (key-binding-dispatch (list (string-append "M-" k))))
+           (own (key-binding-dispatch (list k))))
+      (message "")
+      (cond ((member k '("C-g" "ESC")) #f)
+            ((equal? k "SPC") (run-command "minibuffer-confirm"))
+            ((and (pair? meta) (equal? (car meta) "command")) (run-command (cadr meta)))
+            ((and (pair? own) (equal? (car own) "command")) (run-command (cadr own)))
+            (else #f))))
   'modes '(minibuffer-mode))
 
 ;; RET in a path prompt (find-file) means the HIGHLIGHTED candidate

@@ -404,8 +404,10 @@
     ("s-Z" "undo-redo")
     ("C-s-<left>" "window-previous-pane")
     ("C-s-<right>" "window-next-pane")
-    ;; Cmd-K is the leader, as C-x is: Cmd-K t n is C-x t n
-    ("s-k" (keymap "ctl-x-map"))))
+    ;; Cmd-K is the leader, as C-x is: Cmd-K t n is C-x t n; C-g after it quits
+    ("s-k" (keymap "ctl-x-map"))
+    ;; Cmd-G is the group keys, C-x C-g's: Cmd-G n new, Cmd-G g go to, Cmd-G C-g last
+    ("s-g" (keymap "buffer-group-map"))))
 
 (define-keymap! "vscode-mode-map")
 ;; Shift with a letter arrives as the capital: s-P, never s-S-p
@@ -415,6 +417,29 @@
             "s-k s-<left>" "s-k s-<right>" "s-k s-<up>" "s-k s-<down>" "s-k s-\\" "s-k s-w"
             "s-k <left>" "s-k <right>" "s-k <up>" "s-k <down>" "s-k s-s" "s-k l" "s-k b" "s-k c"))
 (for-each (lambda (k) (define-key "vscode-mode-map" (car k) (cadr k))) vscode--keys)
+
+;; Cmd-K is C-x itself, not a map of its own: C-x b and the rest are bound
+;; as whole sequences, which a map behind Cmd-K never finds. The key after
+;; Cmd-K is C-x's, except C-g and ESC: they quit, where C-x C-g would be
+;; the group keys (Cmd-G here). The s-k binding above stays so the browser
+;; hands Cmd-K over.
+(define vscode--after-leader #f)
+(define (vscode--plain-routing?)
+  (let ((r (key-routing)))
+    (not (or (plist-get r 'capture) (plist-get r 'minibuffer)
+             (plist-get r 'completion) (plist-get r 'transient)))))
+(define (vscode--leader-key next key)
+    (let ((leader vscode--after-leader))
+      (set! vscode--after-leader #f)
+      (cond
+       ((not vscode-mode) (next key))
+       ((and (equal? key "s-k") (vscode--plain-routing?)
+             (null? (or (plist-get (key-routing) 'pending) '())))
+        (set! vscode--after-leader #t)
+        (next "C-x"))
+       ((and leader (equal? key "C-g")) (next "ESC"))
+       (else (next key)))))
+(advice-add! 'key-dispatch! 'around 'vscode-leader vscode--leader-key)
 
 (define (vscode--others)
   (remove (lambda (m) (equal? m "vscode-mode-map")) (global-minor-maps)))
@@ -449,7 +474,7 @@
       (string-append (number->string (monotonic-ms)) (if vscode-keyboard-lock " lock" "")))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L changes this chat's model, effort, preset or connector. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
+  "The VSCode keys, in every buffer. Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-K is C-x: Cmd-K t is C-x t, and C-g after it quits. Cmd-G is the group keys: Cmd-G n makes a group, Cmd-G g goes to one. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L changes this chat's model, effort, preset or connector. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
 
 (vscode--apply! vscode-mode)
 

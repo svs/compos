@@ -62,6 +62,7 @@
 .vl-top { display: flex; align-items: center; gap: 6px; }
 .vl-name { font-size: .75em; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); }
 .vl-on .vl-name { color: var(--default-fg); }
+.vl-advanced { border-style: dashed; margin-left: auto; }
 .vl-value { font-size: .85em; color: var(--default-fg); max-width: 260px; overflow-wrap: anywhere; }
 ")
 
@@ -243,6 +244,7 @@
     (blocks->html
      (list 'tag "div" 'class "vl-tabs"
            'children
+           (append
            (map (lambda (s)
                   (let ((key (car s)))
                     (list 'tag "div" 'class (if (equal? key section) "vl-tab vl-on" "vl-tab")
@@ -252,7 +254,14 @@
                                                       (list 'tag "span" 'class "vl-name"
                                                             'text (substring (cadr s) 2 (string-length (cadr s))))))
                                 (list 'tag "div" 'class "vl-value" 'text (cadr (assoc key values)))))))
-                vscode--llm-sections)))))
+                vscode--llm-sections)
+           ;; not a tab: it leaves for the full setup menu
+           (list (list 'tag "div" 'class "vl-tab vl-advanced"
+                       'children
+                       (list (list 'tag "div" 'class "vl-top"
+                                   'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text (key-symbol "M-a"))
+                                                   (list 'tag "span" 'class "vl-name" 'text "advanced")))
+                             (list 'tag "div" 'class "vl-value" 'text "full setup menu")))))))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
 ;; top; M-b M-m M-e M-p M-s M-o, or Left and Right, choose what the
@@ -334,7 +343,14 @@
                      ((equal? v "Switch chat") (run-command "vscode-chats"))
                      ((equal? v "New chat") (run-command "chat-new")))))))
     ;; Meta and the tab's letter choose the tab; plain letters type
-    (set! *mb-shortcuts* (map (lambda (s) (list (car s) (lambda () (show! (car s))))) vscode--llm-sections))
+    (set! *mb-shortcuts*
+          (cons (list "a" (lambda ()
+                              ;; advanced: the full setup menu, on this chat
+                              (set! *mb-tab-fn* #f)
+                              (set! *mb-shortcuts* '())
+                              (minibuffer-detach!)
+                              (with-current-buffer chat (lambda () (run-command "llm-configure")))))
+                (map (lambda (s) (list (car s) (lambda () (show! (car s))))) vscode--llm-sections)))
     (set! *mb-tab-fn*
           (lambda (step)
             (let* ((keys (map car vscode--llm-sections))

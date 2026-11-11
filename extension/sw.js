@@ -332,7 +332,16 @@ async function minimized(id) {
   return id;
 }
 
-async function readerWindow() {
+// one call at a time: two snapshots that start together must share one
+// window, so the second call waits until the first one stores the id
+let readerWindowLock = Promise.resolve();
+function readerWindow() {
+  const next = readerWindowLock.then(readerWindowOnce, readerWindowOnce);
+  readerWindowLock = next.catch(() => {});
+  return next;
+}
+
+async function readerWindowOnce() {
   const stored = await chrome.storage.local.get("readerWin");
   if (stored.readerWin && (await isReaderWindow(stored.readerWin))) return minimized(stored.readerWin);
   const w = await chrome.windows.create({

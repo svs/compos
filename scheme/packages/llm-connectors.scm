@@ -217,7 +217,7 @@
 
 (define (llm-connectors--cells buf name)
   (if (llm-connectors--section? name)
-      (list (list (cadr name) "list-section-name") "" "" "" "" "")
+      (list (list (cadr name) "list-section-name") "" "" "" "")
       (llm-connectors--row-cells buf name)))
 
 (define (llm-connectors--row-cells buf name)
@@ -225,7 +225,6 @@
     (list (if (llm-connectors--default? name)
               (list (string-append "✓ " (llm-connectors--title name)) "llm-connectors-default")
               (list (string-append "  " (llm-connectors--title name)) "llm-connectors-name"))
-          (list (llm-connectors-kind name) "dim")
           (list state (if (equal? state "ready") "success" "warning"))
           (list (number->string (length (llm-connectors-models name))) "dim")
           (list (llm-connectors--test-text name) (llm-connectors--test-face name))
@@ -297,7 +296,7 @@
   (let* ((name (buffer-local-value 'llm-connector buf))
          (c (and name (connector-config (llm-connectors--connector name))))
          (r (and name (llm-connectors-test-result name)))
-         (fact (lambda (id label value) (list 'fact id label value))))
+         (fact (lambda (id label value . hint) (list 'fact id label value (if (pair? hint) (car hint) #f)))))
     (if (not name)
         '()
         (append
@@ -310,7 +309,8 @@
                           (string-append "yes, new chats use it"
                                          (let ((m (llm-connectors--default-model name)))
                                            (if m (string-append " with " m) "")))
-                          "no; d makes it the default")))
+                          "no")
+                      (if (llm-connectors--default? name) #f '("d" "makes it the default"))))
           (if (plist-get c 'cmd) (list (fact "command" "command" (plist-get c 'cmd))) '())
           (let ((pv (llm-connectors--provider name)))
             (if pv
@@ -321,8 +321,8 @@
                                                  (let ((sh (llm-provider-shape pv)))
                                                    (if sh (string-append " · speaks " sh) "")))))
                       '())
-                  (list (fact "model" "tests with"
-                            (string-append (or (llm-connectors--provider-model pv) "none") "; t tests it"))))
+                  (list (fact "model" "tests with" (or (llm-connectors--provider-model pv) "none")
+                            '("t" "tests it"))))
                 '()))
           ;; only what is still to install: a present program needs no instructions
           (let ((steps (filter (lambda (step) (not (setup--program-present? (car step))))
@@ -331,8 +331,8 @@
                 '()
                 (cons (list 'section "Install")
                       (map (lambda (step)
-                             (fact (string-append "install:" (car step)) (car step)
-                                   (string-append "missing; i installs it · " (cadr step))))
+                             (fact (string-append "install:" (car step)) (car step) "missing"
+                                   (list "i" (string-append "installs it: " (cadr step)))))
                            steps))))
           ;; only what is still to do: a reply proves the sign-in, and a key that
           ;; is set needs nothing (k still changes it)
@@ -345,12 +345,15 @@
                 (append
                   (list (list 'section "Sign in"))
                   (if signin
-                      (list (fact "signin" "sign in" (string-append signin "; l runs it")))
+                      (list (fact "signin" "sign in" "needed" (list "l" (string-append "runs " signin))))
                       '())
                   (map (lambda (s)
-                         (fact (string-append "key:" (symbol->string s)) "key"
-                               (string-append (let ((l (setup-secret-label s))) (if (string-suffix? "." l) (substring l 0 (- (string-length l) 1)) l)) ": "
-                                              (if (secret-set? s) "set; k changes it" "missing; k adds it"))))
+                         (let* ((l (setup-secret-label s))
+                                (l (if (string-suffix? "." l) (substring l 0 (- (string-length l) 1)) l))
+                                (l (if (string-prefix? "The " l) (string-append "the " (substring l 4 (string-length l))) l)))
+                           (fact (string-append "key:" (symbol->string s)) "key"
+                                 (if (secret-set? s) "set" "missing")
+                                 (list "k" (string-append (if (secret-set? s) "changes " "adds ") l)))))
                        ss))))
           (append
             (list (list 'section "Last test")
@@ -366,9 +369,9 @@
                      (llm-connectors-models name)))))))
 
 (define (llm-connectors--page-columns buf)
-  ;; one column the width of the pane: a fact reads label: value, a model
-  ;; row is its id and its result, and nothing stands empty beside them
-  (list (list "" #f 'left 'wrap)))
+  ;; two columns: the label, dim, and what it says: its status, then what a
+  ;; key does about it. A model row leaves the label column empty
+  (list (list "" 11) (list "" #f 'left 'wrap)))
 
 (define (llm-connectors--row-key r)
   (cond ((eq? (car r) 'model) (string-append "model:" (cadr r)))
@@ -378,12 +381,13 @@
 (define (llm-connectors--page-cells buf r)
   (let ((name (buffer-local-value 'llm-connector buf)))
     (cond
-      ((eq? (car r) 'section) (list (list (cadr r) "list-section-name")))
+      ((eq? (car r) 'section) (list (list (cadr r) "list-section-name") ""))
       ((eq? (car r) 'model)
        (let* ((id (cadr r))
               (default? (equal? id (llm-connectors--default-model name)))
               (t (llm-connectors-test-result name id)))
-         (list (list (string-append (if default? "✓ " "  ") id
+         (list ""
+               (list (string-append (if default? "✓ " "") id
                                     ;; a short id is an alias, and its name says which model it is
                                     (if (or (equal? (caddr r) "") (> (string-length id) 12)) ""
                                         (string-append " · " (caddr r)))
@@ -396,12 +400,31 @@
                            (t (llm-connectors--test-face name id))
                            (else #f))))))
       (else
-       (let ((id (cadr r)) (value (cadddr r)))
-         (list (list (string-append (caddr r) ": " value)
-                     (cond ((equal? id "state") (if (equal? value "ready") "success" "warning"))
-                           ((equal? id "test") (llm-connectors--test-face name))
-                           ((string-prefix? "install:" id) (if (string-prefix? "present" value) #f "warning"))
-                           (else #f)))))))))
+       (let* ((id (cadr r)) (value (cadddr r))
+              (hint (and (> (length r) 4) (nth 4 r)))
+              (face (cond ((equal? id "state") (if (equal? value "ready") "success" "warning"))
+                          ((equal? id "test") (llm-connectors--test-face name))
+                          ((member value '("missing" "needed")) "warning")
+                          ((equal? value "set") "success")
+                          (else #f))))
+         (list (list (caddr r) "dim")
+               (llm-connectors--fact-cell value face hint)))))))
+
+;; a status, then what a key does about it: the status in its face, the key
+;; as a key, and its words dim
+(define (llm-connectors--fact-cell value face hint)
+  (if (not hint)
+      (list value face)
+      (let* ((key (car hint))
+             (gap "  ·  ")
+             (v (string-byte-length value))
+             (k-at (+ v (string-byte-length gap)))
+             (k (string-byte-length key))
+             (w-at (+ k-at k)))
+        (list (string-append value gap key " " (cadr hint))
+              (append (if face (list (list 0 v face)) '())
+                      (list (list k-at k "llm-connectors-key")
+                            (list w-at (+ 1 (string-byte-length (cadr hint))) "dim")))))))
 
 (define (llm-connectors--page-meta buf)
   (let ((name (buffer-local-value 'llm-connector buf)))
@@ -416,6 +439,13 @@
 (effects! '(write))
 
 (defface! 'llm-connectors-name 'fg "var(--default-fg)" 'weight "600")
+;; a key on a connector page: d, t, k and the rest, as the keys bar draws them
+(defface! 'llm-connectors-key 'fg "var(--default-fg)" 'bg "var(--border-bg)" 'inherit "mono" 'weight "600")
+;; a line over each section of a connector page: Connector, Sign in, Last test, Models
+(define-style! 'llm-connectors-page "
+[data-buffer^='*llm-connector:'] .lg-row:has(.f-list-section-name) { border-top: 1px solid var(--border-bg); margin-top: 8px; padding-top: 6px; }
+[data-buffer^='*llm-connector:'] .f-llm-connectors-key { font-family: var(--font-mono); padding: 0 4px; border-radius: 3px; }
+")
 ;; the one new chats use: a tick on a green ground, on the list and on the page
 (defface! 'llm-connectors-default 'fg "color-mix(in srgb, #4fa36b 75%, var(--default-fg))"
   'bg "color-mix(in srgb, #4fa36b 20%, transparent)" 'weight "600")
@@ -816,7 +846,7 @@
 (define-list-mode! "llm-connectors-mode"
   (list
     'doc (string-append
-           "The model connectors: their kind (an agent program, a direct API, or the browser), "
+           "The model connectors, under agent, API and browser headings: "
            "what each still needs, and what its last test said. Moving the point shows the "
            "connector's page beside the list. i installs the agent program, l signs in, "
            "k adds or changes the API key, t sends a test message and times the reply, "
@@ -830,7 +860,7 @@
     'separator? (lambda (buf r) (llm-connectors--section? r))
     'section? (lambda (buf r) (llm-connectors--section? r))
     'columns (lambda (buf)
-               (list (list "connector" 30) (list "kind" 8) (list "needs" 14)
+               (list (list "connector" 30) (list "needs" 14)
                      (list "models" 7) (list "last test" 28) (list "about" #f)))
     'cells (lambda (buf name) (llm-connectors--cells buf name))
     ;; narrow: the test result matters more than the description
@@ -846,11 +876,11 @@
                                                     (llm-connectors--test-face name)))))))
                    (list 'name 'narrow 'max-cols (lambda (buf) 120)
                          'columns (lambda (buf)
-                                    (list (list "connector" 30) (list "kind" 8)
+                                    (list (list "connector" 30)
                                           (list "needs" 14) (list "models" 7) (list "last test" #f)))
                          'cells (lambda (buf name)
                                   (let ((cs (llm-connectors--cells buf name)))
-                                    (list (nth 0 cs) (nth 1 cs) (nth 2 cs) (nth 3 cs) (nth 4 cs)))))
+                                    (list (nth 0 cs) (nth 1 cs) (nth 2 cs) (nth 3 cs)))))
                    (list 'name 'wide 'default #t))
     'title (lambda (buf) "LLM connectors")
     'meta (lambda (buf) (llm-connectors--meta buf))

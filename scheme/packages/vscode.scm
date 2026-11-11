@@ -130,29 +130,8 @@
                        (mb-select-notify!)
                        #t))))))))
 
-(define-command "vscode-buffers" "Choose a buffer of this group, then a file of its project"
-  (lambda ()
-    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
-           (g (or (buffer-group here) (frame-group)))
-           (bufs (filter (lambda (b) (and (not (equal? b here)) (equal? (buffer-group b) g)))
-                         (map car (switch-prompt-rows here (active-window)))))
-           (root (project-current))
-           (root (and root (strip-trailing-slash root)))
-           (files (if root
-                      (filter (lambda (f) (not (member f bufs)))
-                              (map car (filter (lambda (c) (not (equal? (cadr c) "dired")))
-                                               (project-file-candidates root))))
-                      '())))
-      (minibuffer-read* "Buffer or file: "
-        (append (map (lambda (b) (list b "buffer")) bufs)
-                (map (lambda (f) (list f "file")) files))
-        (list (list 'style "modal")
-              (list 'confirm
-                    (lambda (v)
-                      (cond ((member v bufs) (ibuffer-pick! v (lambda () #f)) (group-current-recalculate!))
-                            ((and root (member v files)) (visit-in-group (string-append root "/" v) g))
-                            ((buffer-known? v) (ibuffer-pick! v (lambda () #f)))
-                            (else (message (string-append "No buffer or file " v)))))))))))
+(define-command "vscode-buffers" "Switch buffer, the same prompt as C-x b: tabs across the top, modes in the margin, SPC leader"
+  (lambda () (switch-bare-prompt!)))
 
 ;; Cmd-L: the LLM of this chat. Its setup is drawn on top; the rows below
 ;; change one thing at once (the model, the effort, a saved preset, the

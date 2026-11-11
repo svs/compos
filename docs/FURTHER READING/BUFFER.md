@@ -1,6 +1,6 @@
 # Buffer
 
-This document specifies how an compos buffer participates in Provenance. The normative history model is defined in [PROVENANCE.md](PROVENANCE.md).
+This document specifies how an compos buffer participates in Provenance. The normative history model is defined in [PROVENANCE.md](internal/PROVENANCE.md).
 
 ## Identity
 
@@ -109,7 +109,7 @@ Renaming a buffer, changing its path, or saving it under a new path updates mate
 
 ### Mode changes
 
-A mode change applies automatic policy after the mode is known and before mode-generated content changes. Stopping retains the accepted head. Resuming after unrecorded edits creates the gap revision specified in PROVENANCE.md.
+A mode change applies automatic policy after the mode is known and before mode-generated content changes. Stopping retains the accepted head. Resuming after unrecorded edits creates the gap revision specified in internal/PROVENANCE.md.
 
 ### Kill, eviction, and discard
 

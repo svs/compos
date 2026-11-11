@@ -43,7 +43,7 @@ The intelligence can write you any app you want. It can write apps that pull con
 
 need a sentry app? just ask for one.
 
-![image](sentry.png)
+![image](../assets/sentry.png)
 
 Imagine. Pulling all of your context to you instead of going there. What a luxury. You can ask the agent to build you a button that asks an agent to solve the issue. Or resolve it from right there.
 

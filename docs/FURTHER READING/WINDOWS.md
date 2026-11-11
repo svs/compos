@@ -3,7 +3,7 @@
 This page tells you what you see on the screen and how the parts fit
 together. Read it once, and the window keys will make sense.
 
-![The parts of the screen](windows-guide.svg)
+![The parts of the screen](../assets/windows-guide.svg)
 
 ## The parts, from the outside in
 
@@ -100,5 +100,5 @@ buffers to fill a pane.
   practise the keys above.
 - [How do I ...?](manual/HOW-DO-I.md) gives short answers for buffers,
   windows and groups.
-- [The window specification](WINDOWS-SPEC.md) gives the exact rules and
+- [The window specification](internal/WINDOWS-SPEC.md) gives the exact rules and
   the test cases. Not every case there is verified.

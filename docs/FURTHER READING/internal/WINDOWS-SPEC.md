@@ -1,6 +1,6 @@
 # Windows, panes, buffers, and groups: the specification
 
-For a guide to the screen, read [WINDOWS.md](WINDOWS.md). This file is the
+For a guide to the screen, read [WINDOWS.md](../WINDOWS.md). This file is the
 acceptance contract: rules and test cases.
 
 ## Status and authority
@@ -360,7 +360,7 @@ A specialized application must not bypass the contract by calling a lower-level 
 ## 12. Layout keyboard shortcuts
 
 Run these cases through keyboard dispatch, starting with `C-x l`. See
-[the keymap reference](KEYMAPS.md#layout-selection) for the binding list.
+[the keymap reference](../KEYMAPS.md#layout-selection) for the binding list.
 `C-x l` opens the `window-layout` chooser. In the chooser, each key below
 picks its layout at once. An arrow moves the chooser's highlight.
 `layout-forward` and `layout-backward` have no stock key.
@@ -550,8 +550,8 @@ they do not claim the current file implementation supports it.
 ## Coverage and completion
 
 Single ownership is already enforced by `buffer-add-group!`, `buffer-move-to-group!`,
-and the chat ownership functions in [groups.scm](../scheme/packages/groups.scm).
-[groups-test.scm](../scheme/packages/groups-test.scm) tests immediate replacement
+and the chat ownership functions in [groups.scm](../../../scheme/packages/groups.scm).
+[groups-test.scm](../../../scheme/packages/groups-test.scm) tests immediate replacement
 of work-buffer ownership and normalization of legacy multiple memberships.
 These checks do not prove the window registry or proposed application instances.
 

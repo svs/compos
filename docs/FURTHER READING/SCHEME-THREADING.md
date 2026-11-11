@@ -136,7 +136,7 @@ small. Put editor state in buffers. Use a narrow serialized
 writer when a global invariant spans several operations.
 
 The editable race diagram is in
-[`boards/scheme-threading-lost-update.tldr`](../boards/scheme-threading-lost-update.tldr).
+[`boards/scheme-threading-lost-update.tldr`](../../boards/scheme-threading-lost-update.tldr).
 
 The planned Loro provenance layer will add versioned buffer operations,
 anchors, authorship, and conflict handling. The task layer does not invent a

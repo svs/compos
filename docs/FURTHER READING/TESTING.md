@@ -7,7 +7,7 @@ it as `scheme/packages/NAME-test.scm`. Run one file at a time while working:
     SCHEME_TESTS=name mix test --include packages apps/compos_core/test/compos/package_suite_test.exs
 
 `SCHEME_TESTS` matches the file name; a comma separates several. The tests
-that go red by order only are listed in KNOWN-FAILURES.md.
+that go red by order only are listed in internal/KNOWN-FAILURES.md.
 
 ## Fixtures
 

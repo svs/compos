@@ -164,7 +164,7 @@ telemetry), `docs/BUFFER.md` (buffer state, the text scale), `docs/FACES.md` (fa
 `docs/MARKDOWN.md` (the rendered page, pictures and captions),
 `docs/BLOCKS.md` (fenced-block kinds: one registration for paint and runner),
 `docs/POPUPS.md` (the floating window),
-`docs/EDITING-SURFACE-SPEC.md` (the input surface). When behaviour changes,
+`docs/FURTHER READING/internal/EDITING-SURFACE-SPEC.md` (the input surface). When behaviour changes,
 the document changes in the same commit.
 
 One hook the editor itself runs: `window-configuration-changed!` (Emacs

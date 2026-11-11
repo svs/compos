@@ -81,4 +81,4 @@ true of the Shift chords as well as the Cmd ones.
 - `apps/compos_core/priv/editor.scm` - the movement and editing states, `*editing-state-maps*`, and the global map the Emacs keys come from.
 - `scheme/packages/cua-test.scm` - the selections, and the gate.
 - `apps/compos_core/priv/tests/editing-state-test.scm` - the state itself.
-- `docs/KEYMAPS.md` - the ladder. `docs/EDITING-SURFACE-SPEC.md` - the client half of the two states.
+- `docs/KEYMAPS.md` - the ladder. `docs/FURTHER READING/internal/EDITING-SURFACE-SPEC.md` - the client half of the two states.

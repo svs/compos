@@ -181,7 +181,7 @@ Named so a contributor can pick one up, not as a warning.
   from the list. Anything done here has to leave Desktop out.
 - Visual-line motion decided in the browser. See below: it is the same rule as
   "derive in the reader", drawn across the client boundary. The wrap map now
-  fixes it. `VISUAL-LINE-WRAP-MAP.md` records the task, its status, and the
+  fixes it. `internal/VISUAL-LINE-WRAP-MAP.md` records the task, its status, and the
   landmines.
 
 ## The client measures. Scheme decides.

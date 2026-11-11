@@ -264,7 +264,7 @@ document that holds its rules.
 | Concept | Chapter | Reference |
 | --- | --- | --- |
 | Advice | [12. Customize](<12. CUSTOMIZE.md#advice>) | [ADVICE.md](<FURTHER READING/ADVICE.md>) |
-| Agenda | [6. Writing](<06. WRITING.md#todo-states-and-the-agenda>) | [ORG-MODE-PLAN.md](<FURTHER READING/ORG-MODE-PLAN.md>) |
+| Agenda | [6. Writing](<06. WRITING.md#todo-states-and-the-agenda>) | [ORG-MODE-PLAN.md](<FURTHER READING/internal/ORG-MODE-PLAN.md>) |
 | Agents | [7. Agents](<07. AGENTS.md>) | [LEARN COMPOS.md](<FURTHER READING/LEARN COMPOS.md>) |
 | Annotation (notes) | [6. Writing](<06. WRITING.md#notes-on-a-document>) | [ANNOTATIONS.md](<FURTHER READING/ANNOTATIONS.md>) |
 | Apps | [10. Apps](<10. APPS.md>) | [COMPONENTS.md](<FURTHER READING/COMPONENTS.md>) |
@@ -285,7 +285,7 @@ document that holds its rules.
 | Commands | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-two-palettes>) | [COMMANDS.md](<FURTHER READING/COMMANDS.md>) |
 | Companions | [7. Agents](<07. AGENTS.md#context-visible-buffers-companions-group-members>) | [AGENT CONTEXT MANAGEMENT.md](<FURTHER READING/AGENT CONTEXT MANAGEMENT.md>) |
 | Completion | [4. Everyday editing](<04. EVERYDAY EDITING.md#completion>) | [COMPLETION.md](<FURTHER READING/COMPLETION.md>) |
-| Components and ComposML | [13. Extend](<13. EXTEND.md#components-and-composml>) | [COMPOSML.md](<FURTHER READING/COMPOSML.md>) |
+| Components and ComposML | [13. Extend](<13. EXTEND.md#components-and-composml>) | [COMPOSML.md](<FURTHER READING/internal/COMPOSML.md>) |
 | Connector | [8. Models and connectors](<08. MODELS + CONNECTORS.md#a-connector-runs-a-model>) | - |
 | Context (agent) | [7. Agents](<07. AGENTS.md#context-visible-buffers-companions-group-members>) | [AGENT CONTEXT MANAGEMENT.md](<FURTHER READING/AGENT CONTEXT MANAGEMENT.md>) |
 | Cron | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#cron>) | - |
@@ -297,7 +297,7 @@ document that holds its rules.
 | Diff | [5. Working on code](<05. CODE.md#the-diff>) | - |
 | Dired | [4. Everyday editing](<04. EVERYDAY EDITING.md#dired>) | - |
 | Display a buffer | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#where-a-new-buffer-goes>) | [DISPLAY-BUFFER.md](<FURTHER READING/DISPLAY-BUFFER.md>) |
-| Errors | [16. Troubleshooting](<16. TROUBLESHOOTING.md#errors-and-provenance>) | [KNOWN-FAILURES.md](<FURTHER READING/KNOWN-FAILURES.md>) |
+| Errors | [16. Troubleshooting](<16. TROUBLESHOOTING.md#errors-and-provenance>) | [KNOWN-FAILURES.md](<FURTHER READING/internal/KNOWN-FAILURES.md>) |
 | eval-expression (M-:) | [12. Customize](<12. CUSTOMIZE.md#start-here>) | - |
 | Event bus | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#the-event-bus>) | [EVENT BUS.md](<FURTHER READING/EVENT BUS.md>) |
 | Extend | [13. Extend](<13. EXTEND.md>) | [ARCHITECTURE.md](<FURTHER READING/ARCHITECTURE.md>) |
@@ -309,7 +309,7 @@ document that holds its rules.
 | Git | [5. Working on code](<05. CODE.md#git-and-jj>) | [COMMITS.md](<FURTHER READING/COMMITS.md>) |
 | Google Workspace | [11. Connected apps](<11. CONNECTED APPS.md#google-workspace>) | [features/GOOGLE.md](<FURTHER READING/features/GOOGLE.md>) |
 | Group | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#start-here>) | [groups.md](<FURTHER READING/groups.md>) |
-| Group modes | [12. Customize](<12. CUSTOMIZE.md#groups-and-their-config>) | [GROUP-MODES.md](<FURTHER READING/GROUP-MODES.md>) |
+| Group modes | [12. Customize](<12. CUSTOMIZE.md#groups-and-their-config>) | [GROUP-MODES.md](<FURTHER READING/internal/GROUP-MODES.md>) |
 | Handheld (phone) | [14. Sessions and sharing](<14. SESSIONS + SHARING.md#the-phone>) | [HANDHELD.md](<FURTHER READING/HANDHELD.md>) |
 | Hooks | [12. Customize](<12. CUSTOMIZE.md#hooks>) | [HOOKS.md](<FURTHER READING/HOOKS.md>) |
 | iMessage and SMS | [11. Connected apps](<11. CONNECTED APPS.md#imessage-and-sms>) | - |
@@ -320,7 +320,7 @@ document that holds its rules.
 | Kill ring | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-kill-ring>) | [KILL.md](<FURTHER READING/KILL.md>) |
 | Kindle | [11. Connected apps](<11. CONNECTED APPS.md#kindle>) | - |
 | Language server | [5. Working on code](<05. CODE.md#language-servers>) | - |
-| Layout | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#layouts>) | [WINDOWS-SPEC.md](<FURTHER READING/WINDOWS-SPEC.md>) |
+| Layout | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#layouts>) | [WINDOWS-SPEC.md](<FURTHER READING/internal/WINDOWS-SPEC.md>) |
 | Linear | [11. Connected apps](<11. CONNECTED APPS.md#linear>) | - |
 | List mode | [10. Apps](<10. APPS.md#the-list-keys>) | [LISTS.md](<FURTHER READING/LISTS.md>) |
 | Listeners | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#listeners>) | [EVENT BUS.md](<FURTHER READING/EVENT BUS.md>) |
@@ -328,19 +328,19 @@ document that holds its rules.
 | Mail | [11. Connected apps](<11. CONNECTED APPS.md#mail>) | - |
 | Mark and point | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-mark-ring>) | - |
 | Markdown | [6. Writing](<06. WRITING.md#markdown-pages>) | [MARKDOWN.md](<FURTHER READING/MARKDOWN.md>) |
-| MCP | [8. Models and connectors](<08. MODELS + CONNECTORS.md#mcp-servers-and-the-mcp-hub>) | [mcp-proxy.html](<FURTHER READING/mcp-proxy.html>) |
+| MCP | [8. Models and connectors](<08. MODELS + CONNECTORS.md#mcp-servers-and-the-mcp-hub>) | [mcp-proxy.html](<FURTHER READING/internal/protos/mcp-proxy.html>) |
 | Menus | [4. Everyday editing](<04. EVERYDAY EDITING.md#menus>) | - |
 | Model | [8. Models and connectors](<08. MODELS + CONNECTORS.md#choose-the-model-with-c-c-b>) | - |
 | Modes | [5. Working on code](<05. CODE.md#a-mode-for-every-language>) | [MODES.md](<FURTHER READING/MODES.md>) |
 | Morg | [6. Writing](<06. WRITING.md#folding-and-moving-in-morg>) | [MORG-DEMO.md](<FURTHER READING/MORG-DEMO.md>) |
 | Notes | [6. Writing](<06. WRITING.md#notes-on-a-document>) | [ANNOTATIONS.md](<FURTHER READING/ANNOTATIONS.md>) |
 | Notifications | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#notifications>) | - |
-| Org files | [6. Writing](<06. WRITING.md#org-files>) | [ORG-MODE-PLAN.md](<FURTHER READING/ORG-MODE-PLAN.md>) |
+| Org files | [6. Writing](<06. WRITING.md#org-files>) | [ORG-MODE-PLAN.md](<FURTHER READING/internal/ORG-MODE-PLAN.md>) |
 | Outline | [5. Working on code](<05. CODE.md#read-code-by-its-structure>) | [CODEBROWSER.md](<FURTHER READING/CODEBROWSER.md>) |
 | Packages | [13. Extend](<13. EXTEND.md#packages>) | [ARCHITECTURE.md](<FURTHER READING/ARCHITECTURE.md>) |
 | Pane | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#the-parts-from-the-outside-in>) | [PANES.md](<FURTHER READING/PANES.md>) |
 | Paredit | [5. Working on code](<05. CODE.md#structural-editing-with-paredit>) | - |
-| PDF | [6. Writing](<06. WRITING.md#pdf-documents>) | [PDF-ANNOTATIONS.md](<FURTHER READING/PDF-ANNOTATIONS.md>) |
+| PDF | [6. Writing](<06. WRITING.md#pdf-documents>) | [PDF-ANNOTATIONS.md](<FURTHER READING/internal/PDF-ANNOTATIONS.md>) |
 | Peek | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#peek-and-popups>) | [PEEK.md](<FURTHER READING/PEEK.md>) |
 | Permission answers | [7. Agents](<07. AGENTS.md#permission-answers>) | - |
 | Point | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-mark-ring>) | - |
@@ -350,7 +350,7 @@ document that holds its rules.
 | Processes and lanes | [15. Under the hood](<15. UNDER THE HOOD.md#processes-lanes-and-threads>) | [BEAM-POWER.md](<FURTHER READING/BEAM-POWER.md>) |
 | Project | [4. Everyday editing](<04. EVERYDAY EDITING.md#the-project>) | - |
 | Prompts | [7. Agents](<07. AGENTS.md#prompts>) | [PROMPTS.md](<FURTHER READING/PROMPTS.md>) |
-| Provenance | [5. Working on code](<05. CODE.md#provenance-who-wrote-this>) | [PROVENANCE.md](<FURTHER READING/PROVENANCE.md>) |
+| Provenance | [5. Working on code](<05. CODE.md#provenance-who-wrote-this>) | [PROVENANCE.md](<FURTHER READING/internal/PROVENANCE.md>) |
 | Registers | [4. Everyday editing](<04. EVERYDAY EDITING.md#registers>) | - |
 | Remote files | [5. Working on code](<05. CODE.md#remote-files>) | - |
 | Replace | [4. Everyday editing](<04. EVERYDAY EDITING.md#replace>) | - |
@@ -373,7 +373,7 @@ document that holds its rules.
 | Theme | [12. Customize](<12. CUSTOMIZE.md#appearance>) | [FACES.md](<FURTHER READING/FACES.md>) |
 | Todo | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#one-list-for-the-person-and-the-agent>) | - |
 | Tool results | [7. Agents](<07. AGENTS.md#tool-results>) | - |
-| Troubleshooting | [16. Troubleshooting](<16. TROUBLESHOOTING.md>) | [KNOWN-FAILURES.md](<FURTHER READING/KNOWN-FAILURES.md>) |
+| Troubleshooting | [16. Troubleshooting](<16. TROUBLESHOOTING.md>) | [KNOWN-FAILURES.md](<FURTHER READING/internal/KNOWN-FAILURES.md>) |
 | Tutorial | [2. Concepts](<02. CONCEPTS.md#start-here>) | [TUTORIAL.md](<FURTHER READING/TUTORIAL.md>) |
 | Undo | [4. Everyday editing](<04. EVERYDAY EDITING.md#undo>) | - |
 | Variables | [12. Customize](<12. CUSTOMIZE.md#settings>) | [VARIABLES.md](<FURTHER READING/VARIABLES.md>) |
@@ -383,7 +383,7 @@ document that holds its rules.
 | WhatsApp | [11. Connected apps](<11. CONNECTED APPS.md#whatsapp>) | - |
 | Windows | [3. Buffers, panes, windows](<03. BUFFERS, PANES, WINDOWS.md#windows-are-stacks>) | [WINDOWS.md](<FURTHER READING/WINDOWS.md>) |
 | Workflows | [9. Todos and workflows](<09. TODOS + WORKFLOWS.md#workflows>) | - |
-| Worktrees | [5. Working on code](<05. CODE.md#worktrees-and-task-workspaces>) | [WORKTREES.md](<FURTHER READING/WORKTREES.md>) |
+| Worktrees | [5. Working on code](<05. CODE.md#worktrees-and-task-workspaces>) | [WORKTREES.md](<FURTHER READING/internal/WORKTREES.md>) |
 | Writing workspace | [6. Writing](<06. WRITING.md#the-writing-workspace>) | - |
 
 ## Reference documents
@@ -405,7 +405,7 @@ from one page.
   an editor is the agent's home.
 - [CORDIS-VS-EMACS.md](<FURTHER READING/CORDIS-VS-EMACS.md>) - Lisp, JavaScript
   and this design.
-- [COMPOS-HOMEPAGE-BRIEF.md](<FURTHER READING/COMPOS-HOMEPAGE-BRIEF.md>) - the
+- [COMPOS-HOMEPAGE-BRIEF.md](<FURTHER READING/internal/COMPOS-HOMEPAGE-BRIEF.md>) - the
   short public description.
 
 ### Buffers, windows and groups
@@ -413,8 +413,8 @@ from one page.
 - [BUFFER.md](<FURTHER READING/BUFFER.md>) - the buffer, its text and its
   locals.
 - [WINDOWS.md](<FURTHER READING/WINDOWS.md>) - windows, frames and the stack.
-- [WINDOWS-SPEC.md](<FURTHER READING/WINDOWS-SPEC.md>) - the window model.
-- [windows-guide.svg](<FURTHER READING/windows-guide.svg>) - one picture of the
+- [WINDOWS-SPEC.md](<FURTHER READING/internal/WINDOWS-SPEC.md>) - the window model.
+- [windows-guide.svg](<assets/windows-guide.svg>) - one picture of the
   window model.
 - [PANES.md](<FURTHER READING/PANES.md>) - panes and layouts.
 - [POPUPS.md](<FURTHER READING/POPUPS.md>) - transient and popup buffers.
@@ -425,7 +425,7 @@ from one page.
 - [KILL.md](<FURTHER READING/KILL.md>) - the kill ring.
 - [LISTS.md](<FURTHER READING/LISTS.md>) - the list mode all apps share.
 - [groups.md](<FURTHER READING/groups.md>) - groups and their isolation.
-- [GROUP-MODES.md](<FURTHER READING/GROUP-MODES.md>) - a mode for a group.
+- [GROUP-MODES.md](<FURTHER READING/internal/GROUP-MODES.md>) - a mode for a group.
 - [HANDHELD.md](<FURTHER READING/HANDHELD.md>) - the phone client.
 
 ### Editing and commands
@@ -435,7 +435,7 @@ from one page.
 - [COMPLETION.md](<FURTHER READING/COMPLETION.md>) - completion at point.
 - [C-u.md](<FURTHER READING/C-u.md>) - the prefix argument.
 - [cua-mode.md](<FURTHER READING/cua-mode.md>) - CUA and Vim keys.
-- [VISUAL-LINE-WRAP-MAP.md](<FURTHER READING/VISUAL-LINE-WRAP-MAP.md>) - soft
+- [VISUAL-LINE-WRAP-MAP.md](<FURTHER READING/internal/VISUAL-LINE-WRAP-MAP.md>) - soft
   wrap and the screen map.
 - [MODES.md](<FURTHER READING/MODES.md>) - modes and their setup.
 
@@ -443,12 +443,12 @@ from one page.
 
 - [MARKDOWN.md](<FURTHER READING/MARKDOWN.md>) - Markdown pages.
 - [BLOCKS.md](<FURTHER READING/BLOCKS.md>) - fenced blocks and their runners.
-- [editor/blocks/diff-block.md](<FURTHER READING/editor/blocks/diff-block.md>) - the inline diff block.
-- [ORG-MODE-PLAN.md](<FURTHER READING/ORG-MODE-PLAN.md>) - Org support and its
+- [editor/blocks/diff-block.md](<FURTHER READING/internal/examples/diff-block.md>) - the inline diff block.
+- [ORG-MODE-PLAN.md](<FURTHER READING/internal/ORG-MODE-PLAN.md>) - Org support and its
   plan.
 - [MORG-DEMO.md](<FURTHER READING/MORG-DEMO.md>) - Morg in use.
 - [ANNOTATIONS.md](<FURTHER READING/ANNOTATIONS.md>) - notes on a document.
-- [PDF-ANNOTATIONS.md](<FURTHER READING/PDF-ANNOTATIONS.md>) - notes on a PDF.
+- [PDF-ANNOTATIONS.md](<FURTHER READING/internal/PDF-ANNOTATIONS.md>) - notes on a PDF.
 
 ### Agents and automation
 
@@ -458,14 +458,14 @@ from one page.
 - [CHAT-LIST.md](<FURTHER READING/CHAT-LIST.md>) - the chat list.
 - [EVENT BUS.md](<FURTHER READING/EVENT BUS.md>) - events, listeners and
   workflows.
-- [SIMPLIFY-SPEC.md](<FURTHER READING/SIMPLIFY-SPEC.md>) - the agent and chat
+- [SIMPLIFY-SPEC.md](<FURTHER READING/internal/SIMPLIFY-SPEC.md>) - the agent and chat
   design.
 
 ### Models, tools and services
 
 - [CHROME_EXTENSION.md](<FURTHER READING/CHROME_EXTENSION.md>) - the Chrome
   extension.
-- [mcp-proxy.html](<FURTHER READING/mcp-proxy.html>) - the MCP socket.
+- [mcp-proxy.html](<FURTHER READING/internal/protos/mcp-proxy.html>) - the MCP socket.
 - [BROWSE.md](<FURTHER READING/BROWSE.md>) - reading a web page.
 - [features/GOOGLE.md](<FURTHER READING/features/GOOGLE.md>) - Google
   Workspace.
@@ -477,20 +477,20 @@ from one page.
 - [HOOKS.md](<FURTHER READING/HOOKS.md>) - hooks.
 - [ADVICE.md](<FURTHER READING/ADVICE.md>) - advice around a function.
 - [COMPONENTS.md](<FURTHER READING/COMPONENTS.md>) - the component contract.
-- [COMPOSML.md](<FURTHER READING/COMPOSML.md>) - ComposML markup.
-- [COMPOSML-COMPONENTS.md](<FURTHER READING/COMPOSML-COMPONENTS.md>) - the
+- [COMPOSML.md](<FURTHER READING/internal/COMPOSML.md>) - ComposML markup.
+- [COMPOSML-COMPONENTS.md](<FURTHER READING/internal/COMPOSML-COMPONENTS.md>) - the
   components in ComposML.
 
 ### Code and repository
 
 - [CODEBROWSER.md](<FURTHER READING/CODEBROWSER.md>) - reading code as a tree.
-- [CODE-BROWSER-PLAN.md](<FURTHER READING/CODE-BROWSER-PLAN.md>) - its plan.
-- [EDITING-SURFACE-SPEC.md](<FURTHER READING/EDITING-SURFACE-SPEC.md>) - the
+- [CODE-BROWSER-PLAN.md](<FURTHER READING/internal/CODE-BROWSER-PLAN.md>) - its plan.
+- [EDITING-SURFACE-SPEC.md](<FURTHER READING/internal/EDITING-SURFACE-SPEC.md>) - the
   editing surface.
-- [PROVENANCE.md](<FURTHER READING/PROVENANCE.md>) - who wrote a line.
-- [PROVENANCE-CRDT.md](<FURTHER READING/PROVENANCE-CRDT.md>) - provenance and
+- [PROVENANCE.md](<FURTHER READING/internal/PROVENANCE.md>) - who wrote a line.
+- [PROVENANCE-CRDT.md](<FURTHER READING/internal/PROVENANCE-CRDT.md>) - provenance and
   the CRDT.
-- [WORKTREES.md](<FURTHER READING/WORKTREES.md>) - worktrees and task
+- [WORKTREES.md](<FURTHER READING/internal/WORKTREES.md>) - worktrees and task
   workspaces.
 - [COMMITS.md](<FURTHER READING/COMMITS.md>) - how a commit message is written.
 - [TESTING.md](<FURTHER READING/TESTING.md>) - how to test.
@@ -504,7 +504,7 @@ from one page.
 - [ARCHITECTURE.md](<FURTHER READING/ARCHITECTURE.md>) - the one rule and the
   layers.
 - [BEAM-POWER.md](<FURTHER READING/BEAM-POWER.md>) - processes and the BEAM.
-- [DESIGN-PORT.md](<FURTHER READING/DESIGN-PORT.md>) - the design port.
+- [DESIGN-PORT.md](<FURTHER READING/internal/DESIGN-PORT.md>) - the design port.
 
 ### Manual
 
@@ -516,19 +516,19 @@ from one page.
 
 ### Project and engineering notes
 
-- [SIMPLIFY-AUDIT.md](<FURTHER READING/SIMPLIFY-AUDIT.md>) - the current state
+- [SIMPLIFY-AUDIT.md](<FURTHER READING/internal/SIMPLIFY-AUDIT.md>) - the current state
   and the queue.
-- [KNOWN-FAILURES.md](<FURTHER READING/KNOWN-FAILURES.md>) - tests that were
+- [KNOWN-FAILURES.md](<FURTHER READING/internal/KNOWN-FAILURES.md>) - tests that were
   already red.
-- [CLEANUP-QUEUE.md](<FURTHER READING/CLEANUP-QUEUE.md>) - the cleanup queue.
-- [DOGFOOD-BENCH.md](<FURTHER READING/DOGFOOD-BENCH.md>) - the dogfood
+- [CLEANUP-QUEUE.md](<FURTHER READING/internal/CLEANUP-QUEUE.md>) - the cleanup queue.
+- [DOGFOOD-BENCH.md](<FURTHER READING/internal/DOGFOOD-BENCH.md>) - the dogfood
   benchmark.
-- [SWITCHER-PERF-HANDOFF.md](<FURTHER READING/SWITCHER-PERF-HANDOFF.md>) -
+- [SWITCHER-PERF-HANDOFF.md](<FURTHER READING/internal/SWITCHER-PERF-HANDOFF.md>) -
   switcher performance.
-- [BUG-escaped-closure-handlers.md](<FURTHER READING/BUG-escaped-closure-handlers.md>) -
+- [BUG-escaped-closure-handlers.md](<FURTHER READING/internal/BUG-escaped-closure-handlers.md>) -
   a closure-handler bug.
-- [training.md](<FURTHER READING/training.md>) - training notes.
-- [proposals/REACTIVITY.md](<FURTHER READING/proposals/REACTIVITY.md>) - the
+- [LEARN COMPOS.md](<FURTHER READING/LEARN COMPOS.md>) - the tutorial.
+- [proposals/REACTIVITY.md](<FURTHER READING/internal/proposals/REACTIVITY.md>) - the
   reactivity proposal.
-- [code-browse.html](<FURTHER READING/code-browse.html>) - the code browser
+- [code-browse.html](<FURTHER READING/internal/protos/code-browse.html>) - the code browser
   prototype.

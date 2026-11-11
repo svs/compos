@@ -2549,6 +2549,9 @@
     (cond ((null? bs) #f)
           ((equal? (llm-bundle-name (car bs)) name) (car bs))
           (else (loop (cdr bs))))))
+(effects! '(read))
+(public! 'llm-bundle-named "(llm-bundle-named NAME) - the saved LLM bundle called NAME, or #f")
+(effects! '(unknown))
 
 ;; The name is the identity: saving over one replaces it without changing its key.
 (define (llm-bundle-save! name bundle)

@@ -1004,6 +1004,8 @@ the next row down. STEP is kept for the callers."
          (rest (filter (lambda (r) (not (equal? (car r) here))) all))
          (self (let ((r (assoc here all))) (if r (list r) '()))))
     (map row-of (append rest self))))
+(public! 'switch-prompt-rows "(switch-prompt-rows HERE WIN) - the buffer switcher's rows by recent use, HERE last; a row is (NAME PATH MODIFIED MODE GROUP-ID GROUP)" 'buffers)
+(catalog-meta! 'function "switch-prompt-rows" 'domain 'buffers 'effects '(read))
 
 ;; C-x b has three tabs over one list: every buffer, the current group's,
 ;; and the ones this window showed. The side arrows move between them and
@@ -1283,6 +1285,7 @@ the next row down. STEP is kept for the callers."
 (define-command "frame-switch" "Switch to another frame: type to narrow, RET selects"
   (lambda () (frame-switch-prompt!)))
 (global-set-key "C-x f" "frame-switch")
+(global-set-key "C-x C-t" "switch-window-buffer")
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))

@@ -117,6 +117,97 @@
                             ((buffer-known? v) (ibuffer-pick! v (lambda () #f)))
                             (else (message (string-append "No buffer or file " v)))))))))))
 
+;; Cmd-L: the LLM of this chat. Its setup is drawn on top; the rows below
+;; change one thing at once (the model, the effort, a saved preset, the
+;; connector) and the change applies at once. Typing narrows, so opus
+;; finds the model. The full setup and the chats are the last rows.
+
+(define (vscode--plist-set pl key value)
+  (cond ((null? pl) (list key value))
+        ((eq? (car pl) key) (cons key (cons value (cddr pl))))
+        (else (cons (car pl) (cons (cadr pl) (vscode--plist-set (cddr pl) key value))))))
+
+(define (vscode--llm-apply! chat box what)
+  (llm-bundle-apply! chat box)
+  (llm-config-remember! box)
+  (llm-config-changed! chat)
+  (message (string-append chat " now runs " what)))
+
+(define-command "vscode-llm" "Change this chat's model, effort, preset or connector"
+  (lambda ()
+    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (chat (llm-config-session here))
+           (now (llm-config-combination chat))
+           (connector (plist-get now 'connector))
+           (model (plist-get now 'model))
+           (effort (plist-get now 'effort))
+           (preset (llm-config-preset-name chat))
+           (mark (lambda (on? hint) (if on? (string-append "● in use  " hint) hint)))
+           (sep (lambda (title) (list title "" "separator")))
+           (efforts (car (chat-model-effort-info chat connector model)))
+           (rows
+            (append
+             (list (sep "Model"))
+             (map (lambda (m) (list (string-append "Model: " (car m)) (mark (equal? (car m) model) (cadr m))))
+                  (chat-model-options chat connector))
+             (list (sep "Effort"))
+             (map (lambda (e) (list (string-append "Effort: " e) (mark (equal? e effort) "")))
+                  (cons "default" efforts))
+             (list (sep "Presets"))
+             (map (lambda (b) (list (string-append "Preset: " (llm-bundle-name b))
+                                    (mark (equal? (llm-bundle-name b) preset) (or (llm-bundle-label b) ""))))
+                  *llm-bundles*)
+             (list (sep "Connector"))
+             (map (lambda (n) (list (string-append "Connector: " n) (mark (equal? n connector) (llm-connectors-state n))))
+                  (connector-names))
+             (list (sep "More")
+                   (list "Full setup" "every field, saving and defaults (C-c b)")
+                   (list "Connectors" "set up, sign in and test each connector")
+                   (list "Switch chat" "go to another chat")
+                   (list "New chat" "start a chat in this group"))))
+           (head (blocks->html
+                  (component 'ui/stats
+                    (list 'stats
+                          (list (list 'label "chat" 'value chat)
+                                (list 'label "connector" 'value connector)
+                                (list 'label "model" 'value model)
+                                (list 'label "effort" 'value effort)
+                                (list 'label "preset" 'value (or preset "own setup")))))))
+           (after (lambda (label prefix)
+                    (and (> (string-length label) (string-length prefix))
+                         (equal? (substring label 0 (string-length prefix)) prefix)
+                         (substring label (string-length prefix) (string-length label))))))
+      (minibuffer-read* "LLM: " rows
+        (list (list 'style "modal")
+              (list 'html head)
+              (list 'confirm
+                    (lambda (v)
+                      (cond
+                       ((after v "Model: ")
+                        => (lambda (m) (vscode--llm-apply! chat
+                                          (vscode--plist-set (vscode--plist-set now 'model m) 'effort "default") m)))
+                       ((after v "Effort: ")
+                        => (lambda (e) (vscode--llm-apply! chat (vscode--plist-set now 'effort e)
+                                                           (string-append model " at " e " effort"))))
+                       ((after v "Preset: ")
+                        => (lambda (p)
+                             (let ((b (llm-bundle-named p)))
+                               (when b
+                                 (llm-bundle-apply! chat b)
+                                 (buffer-set-local! chat 'llm-preset p)
+                                 (llm-config-changed! chat)
+                                 (message (string-append chat " now runs " p))))))
+                       ((after v "Connector: ")
+                        => (lambda (c) (vscode--llm-apply! chat
+                                          (vscode--plist-set (vscode--plist-set (vscode--plist-set now 'connector c)
+                                                                                'model "default")
+                                                             'effort "default")
+                                          c)))
+                       ((equal? v "Full setup") (with-current-buffer chat (lambda () (run-command "llm-configure"))))
+                       ((equal? v "Connectors") (run-command "llm-connectors"))
+                       ((equal? v "Switch chat") (run-command "vscode-chats"))
+                       ((equal? v "New chat") (run-command "chat-new"))))))))))
+
 (define-command "vscode-chats" "Choose a chat, in a modal"
   (lambda ()
     (chat-prompt-open!)
@@ -135,7 +226,7 @@
     ("s-p" "pane-card")
     ("s-j" "vscode-windows")
     ("s-b" "vscode-buffers")
-    ("s-l" "vscode-chats")
+    ("s-l" "vscode-llm")
     ;; switch between buffers and windows
     ("s-{" "window-previous-buffer")
     ("s-}" "window-next-buffer")
@@ -197,12 +288,12 @@
       (string-append (number->string (monotonic-ms)) (if vscode-keyboard-lock " lock" "")))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L chooses a chat. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
+  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L changes this chat's model, effort, preset or connector. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
 
 (vscode--apply! vscode-mode)
 
 (catalog-meta! 'command "vscode-mode" 'domain 'commands 'effects '(write))
 (for-each (lambda (c) (catalog-meta! 'command c 'domain 'windows 'effects '(write display)))
-          '("vscode-windows" "vscode-buffers" "vscode-chats"))
+          '("vscode-windows" "vscode-buffers" "vscode-chats" "vscode-llm"))
 (catalog-meta! 'command "toggle-frame-fullscreen" 'domain 'commands 'effects '(write display))
 (public! 'vscode--keys "vscode--keys — the ((KEYS COMMAND) ...) vscode-mode puts in force")

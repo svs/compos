@@ -176,11 +176,14 @@
     ("s" "s saved") ("o" "o other")))
 
 ;; the rows that are on (hint starting with the filled dot) before the rest,
-;; each part keeping its order
+;; each part keeping its order, a separator between the two
 (define (vscode--on-first rows . more)
   (let* ((all (apply append rows more))
          (on? (lambda (r) (and (> (string-length (cadr r)) 0) (equal? (substring (cadr r) 0 1) "●")))))
-    (append (filter on? all) (filter (lambda (r) (not (on? r))) all))))
+    (let ((on (filter on? all)) (off (filter (lambda (r) (not (on? r))) all)))
+      (if (or (null? on) (null? off))
+          all
+          (append on (list (list "off" "" "separator")) off)))))
 
 (define (vscode--llm-rows chat key)
   (let* ((now (llm-config-combination chat))

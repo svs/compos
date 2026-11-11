@@ -373,7 +373,7 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `kill` | `group-kill` | `K` in the board |
 | `rename` | `group-rename` | `r` in the board |
 | `revive` | `group-revive` | `M-x` |
-| `groups` | `groups` | `C-x C-g l` |
+| `groups` | `groups` | `M-x` |
 | `members` | `group-members` | `C-x C-g b`; `b` in the board |
 | `buffer-select` | `buffer-select`; `SPC` marks in every list | |
 

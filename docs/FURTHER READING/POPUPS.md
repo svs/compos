@@ -57,4 +57,4 @@ A float is a window whose buffer wears the float class (window.scm, "the float")
 
 ## What went
 
-The earlier model floated a popup over the frame as a side window. The side window, the popup's own buffer stack, the return arrangement, the popup focus code, the move keys (`popup-move-*`), `popup-toggle`, `popup-buffer` (`C-c p`), and `popup-bufferize` are gone.
+The earlier model floated a popup over the frame as a side window. The side window, the popup's own buffer stack, the return arrangement, the popup focus code, the move keys (`popper-move-*`), `popup-toggle`, `popup-buffer` (`C-c p`), and `popup-bufferize` are gone.

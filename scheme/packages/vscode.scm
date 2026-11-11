@@ -173,7 +173,8 @@
 (define vscode--llm-sections
   ;; (KEY TAB-LABEL); on an empty input the key goes to that tab
   '(("b" "b backend") ("m" "m model") ("e" "e effort") ("t" "t tools")
-    ("p" "p presets") ("o" "o other")))
+    ("p" "p presets") ("s" "s save")
+    ("o" "o other")))
 
 ;; the rows that are on (hint starting with the filled dot) before the rest,
 ;; each part keeping its order, a separator between the two
@@ -212,6 +213,9 @@
                                 (string-append (if (member (car srv) tools) "● on   " "○ off  ") "MCP server")))
             (filter (lambda (srv) (not (assq (car srv) *chat-presets*))) *mcp-registry*))))
      ((equal? key "p")
+      (map (lambda (b) (list (llm-bundle-name b) (mark (equal? (llm-bundle-name b) preset) (or (llm-bundle-label b) ""))))
+           *llm-bundles*))
+     ((equal? key "s")
       (let ((g (group-resolve-id (or (buffer-group chat) (frame-group)))))
         (append
          (list (list "Save as a new preset" "name this setup and keep it"))
@@ -221,10 +225,7 @@
          (if g
              (list (list "Default for this group" (string-append "new chats in " (group-name g) " start with this setup")))
              '())
-         (list (list "Default for every group" "new chats start with this setup where the group has none")
-               (list "presets" "" "separator"))
-         (map (lambda (b) (list (llm-bundle-name b) (mark (equal? (llm-bundle-name b) preset) (or (llm-bundle-label b) ""))))
-              *llm-bundles*))))
+         (list (list "Default for every group" "new chats start with this setup where the group has none")))))
      (else
       (list (list "Full setup" "every field, saving and defaults (C-c b)")
             (list "Connectors" "set up, sign in and test each connector")
@@ -239,7 +240,8 @@
                        (list "m" (plist-get now 'model))
                        (list "e" (plist-get now 'effort))
                        (list "t" tools)
-                       (list "p" (string-append (or (llm-config-preset-name chat) "own setup") " · save, default"))
+                       (list "p" (or (llm-config-preset-name chat) "own setup"))
+                       (list "s" "preset, default")
                        (list "o" "setup, chats"))))
     (blocks->html
      (list 'tag "div" 'class "vl-tabs"
@@ -264,7 +266,7 @@
                              (list 'tag "div" 'class "vl-value" 'text "full setup menu")))))))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
-;; top; M-b M-m M-e M-t M-p M-o, or Left and Right, choose what the
+;; top; M-b M-m M-e M-t M-p M-s M-o, or Left and Right, choose what the
 ;; rows set: the backend, the model, the effort, the tools, a saved setup,
 ;; or the other actions. RET applies at once. Tools toggle and stay open.
 (define (vscode--llm-open! chat key)
@@ -309,7 +311,7 @@
                                                            (cons name on)))
                                     (string-append "with " v (if (memq name on) " off" " on"))))
                         (vscode--llm-open! chat "t")))
-                     ((equal? section "p")
+                     ((member section '("p" "s"))
                       (let* ((setup (llm-config-combination chat))
                              (preset (llm-config-preset-name chat))
                              (g (group-resolve-id (or (buffer-group chat) (frame-group))))

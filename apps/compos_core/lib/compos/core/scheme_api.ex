@@ -3426,6 +3426,7 @@ defmodule Compos.Core.SchemeAPI do
   defp mb_view_field("style", v), do: {:style, v}
   defp mb_view_field("note", v), do: {:note, v}
   defp mb_view_field("legend", v), do: {:legend, v}
+  defp mb_view_field("html", v), do: {:html, v}
   defp mb_view_field("selected", v), do: {:selected, v}
   defp mb_view_field(_, _), do: nil
 

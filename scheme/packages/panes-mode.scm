@@ -1190,6 +1190,88 @@
 (define-command "window-layout-columns" "Equal columns" (lambda () (panes-choose-layout! 'columns)))
 (define-command "window-layout-two-chat" "Two equal panes and a narrow chat" (lambda () (panes-choose-layout! 'two-chat)))
 (define-command "window-layout-free" "As many panes as you open" (lambda () (panes-choose-layout! #f)))
+
+;; --- the layouts drawn small ----------------------------------------------
+;; One tile for each layout: a small drawing, one box for each column as
+;; wide as its share, and the key that picks it. The pane card and the
+;; window modal draw the same tiles.
+(define panes-layout-tiles
+  ;; (KEY NAME SHARES CHAT-LAST?); SHARES () is free
+  '(("1" single (1) #f) ("2" halves (1 1) #f) ("3" two-pane (2 1) #f)
+    ("4" columns (1 1 1) #f) ("5" two-chat (5 5 3) #t) ("6" free () #f)))
+
+(define (panes--tile-preview shares chat?)
+  (let ((shares (if (and (equal? shares '(1 1 1)) (not chat?)
+                         (integer? window-layout-columns) (> window-layout-columns 0))
+                    (make-list window-layout-columns 1)
+                    shares))
+        (col (lambda (share cls kids)
+               (list 'tag "div" 'class cls
+                     'attrs (list (list "style" (string-append "flex:" (number->string share))))
+                     'children kids))))
+    (list 'tag "div" 'class (if (null? shares) "lt-preview lt-free" "lt-preview")
+          'children
+          (if (null? shares)
+              (list (list 'tag "div" 'class "lt-col lt-plus" 'text "+"))
+              (let loop ((s shares) (out '()))
+                (if (null? s)
+                    (reverse out)
+                    (loop (cdr s)
+                          (cons (if (and chat? (null? (cdr s)))
+                                    (col (car s) "lt-col lt-chat"
+                                         (map (lambda (side) (list 'tag "div" 'class (string-append "lt-bubble " side)))
+                                              '("l" "r" "l")))
+                                    (col (car s) "lt-col" '()))
+                                out))))))))
+
+(defcomponent 'panes/layouts
+  "The layouts drawn small, one tile each with the key that picks it; the current one is marked. A tile's click is CLICK-PREFIX and the layout's name."
+  '((current string optional "the layout on now, as two-pane; free or empty for none")
+    (click-prefix string optional "what a tile's click starts with; cmd:window-layout- runs the layout's command")
+    (key-prefix string optional "what goes before each tile's key, as M-"))
+  '(current "halves" click-prefix "cmd:window-layout-")
+  (lambda (p)
+    (let ((current (component--get p 'current "free"))
+          (prefix (component--get p 'click-prefix "cmd:window-layout-"))
+          (kp (component--get p 'key-prefix "")))
+      (list 'tag "div" 'class "lt-grid"
+            'children
+            (map (lambda (t)
+                   (let ((name (symbol->string (cadr t))))
+                     (list 'tag "div"
+                           'class (if (equal? name current) "lt-tile lt-current" "lt-tile")
+                           'click (string-append prefix name)
+                           'attrs (list (list "title" (or (plist-get (panes-layout-spec (cadr t)) 'doc) name)))
+                           'children (list (panes--tile-preview (caddr t) (cadddr t))
+                                           (list 'tag "span" 'class "lt-name" 'text name)
+                                           (list 'tag "kbd" 'class "lt-cap" 'text (string-append kp (car t)))))))
+                 panes-layout-tiles)))))
+
+(define-style! 'panes-layouts "
+.lt-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.lt-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px;
+  cursor: pointer; border: 1px solid transparent; }
+.lt-tile:hover { border-color: var(--border-bg); background: var(--hl-line-bg); }
+.lt-tile.selected { border-color: var(--default-fg); background: var(--hl-line-bg); }
+.lt-current { border-color: var(--accent-fg); }
+.lt-preview { display: flex; gap: 3px; width: 100%; height: 40px; padding: 3px; box-sizing: border-box;
+  border: 1.5px solid var(--dim-fg); opacity: .8; }
+.lt-free { border-style: dashed; }
+.lt-col { flex: 1; background: var(--dim-fg); opacity: .35; }
+.lt-plus { background: none; opacity: 1; color: var(--dim-fg); display: flex; align-items: center; justify-content: center; }
+.lt-current .lt-preview { border-color: var(--accent-fg); opacity: 1; }
+.lt-current .lt-col { background: var(--accent-fg); }
+.lt-col.lt-chat { background: none; opacity: 1; border: 1px solid var(--dim-fg); display: flex; flex-direction: column;
+  justify-content: flex-end; gap: 2px; padding: 2px; box-sizing: border-box; }
+.lt-bubble { height: 4px; width: 70%; background: var(--dim-fg); opacity: .6; }
+.lt-bubble.r { align-self: flex-end; background: var(--accent-fg); opacity: 1; }
+.lt-current .lt-col.lt-chat { background: none; border-color: var(--accent-fg); }
+.lt-name { font-size: .78em; color: var(--dim-fg); }
+.lt-cap { display: inline-flex; align-items: center; justify-content: center; min-width: 1.6em; height: 1.6em;
+  padding: 0 4px; box-sizing: border-box; font-family: var(--font-mono); font-weight: 700; font-size: .8em;
+  color: var(--default-fg); background: var(--hl-line-bg); border: 1px solid var(--border-bg); border-bottom-width: 3px; }
+")
+
 ;; the strip scroll walks the stack of this pane
 (define-command "layout-forward" "Bring the next window of this pane to the front" (lambda () (panes--cycle-pane-window! 1)))
 (define-command "layout-backward" "Bring the previous window of this pane to the front" (lambda () (panes--cycle-pane-window! -1)))

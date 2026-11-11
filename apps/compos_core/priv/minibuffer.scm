@@ -431,7 +431,7 @@
                 ((equal? k "cancel") (loop rest input complete unfiltered view confirm v change collect))
                 ((equal? k "change") (loop rest input complete unfiltered view confirm cancel v collect))
                 ((equal? k "collect") (loop rest input complete unfiltered view confirm cancel change v))
-                ((member k '("match-hint" "completion-style" "preselect" "style" "note" "legend" "selected"))
+                ((member k '("match-hint" "completion-style" "preselect" "style" "note" "legend" "selected" "html"))
                  (loop rest input complete unfiltered (cons (list (string->symbol k) v) view)
                        confirm cancel change collect))
                 (else (loop rest input complete unfiltered view confirm cancel change collect)))))))
@@ -863,7 +863,7 @@
        cands))
 
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
-                                 &optional match-hint style complete collect shortcuts selected)
+                                 &optional match-hint style complete collect shortcuts selected html)
   ;; the outer prompt's cancel handler clears *mb-select-fn*, so let it run
   ;; BEFORE this prompt installs its own. minibuffer-read* would quit the
   ;; outer prompt for us, but by then the new hook is already in place and
@@ -901,7 +901,9 @@
         (if complete (list (list 'complete complete)) '())
         (if collect (list (list 'collect collect)) '())
         ;; SELECTED is the label of the row the prompt opens on
-        (if selected (list (list 'selected selected)) '())))))
+        (if selected (list (list 'selected selected)) '())
+        ;; HTML is drawn over the rows; see minibuffer-read*
+        (if html (list (list 'html html)) '())))))
 
 ;;; --- minibuffer-mode ---------------------------------------------------------
 ;;; The prompt's input is a buffer, because typing, DEL, yank and undo are
@@ -1009,7 +1011,7 @@
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
 (public! 'y-or-n "(y-or-n PROMPT YES &optional NO) — a one-key question; y runs YES, n and C-g run NO")
 (catalog-meta! 'function "y-or-n" 'domain 'interaction 'effects '(read))
-(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT SHORTCUTS) — preview candidates; SHORTCUTS maps keys to candidate names, otherwise M-1..M-9 choose by position")
+(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT SHORTCUTS SELECTED HTML) — preview candidates; SHORTCUTS maps keys to candidate names, otherwise M-1..M-9 choose by position; HTML is drawn over the rows")
 (public! 'minibuffer-buffer? "(minibuffer-buffer? BUF) — whether BUF is a prompt's input buffer, i.e. in minibuffer-mode")
 (public! 'minibuffer-mode-ensure! "(minibuffer-mode-ensure! &optional BUF) — put minibuffer-mode on this frame's prompt buffer; answers the buffer")
 
@@ -1020,9 +1022,23 @@
 (public! 'y-or-n? "(y-or-n? PROMPT K) — one key; K gets #t for y, #f for n or C-g")
 (public! 'yes-or-no? "(yes-or-no? PROMPT K) — the word yes or no; K gets #t or #f")
 (public! 'minibuffer-active? "(minibuffer-active?) — #t while a prompt is up")
-(public! 'minibuffer-read* "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, selected (the label of the row it opens on), style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail.")
+(public! 'minibuffer-read* "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist: confirm, cancel, complete, change, collect, initial, filter, match-hint, completion-style, preselect, selected (the label of the row it opens on), style (\"palette\" floats), note (the palette rail's footer line), legend (((KEY LABEL) ...) for the palette head), html (markup drawn over the rows, as it is; an element with data-pick=LABEL picks that row on a click and wears .selected while the highlight is on it). A candidate is LABEL, (LABEL HINT), (LABEL HINT KIND), (LABEL HINT KIND CHIPS [FACE]), or (LABEL HINT KIND CHIPS FACE FACTS) where FACTS is ((KEY VALUE) ...) for the palette rail.")
 (public! 'minibuffer-input "(minibuffer-input) — what the open prompt holds, \"\" without one")
 (public! 'minibuffer-confirm! "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value.")
+;; a click on the prompt's own HTML: move the highlight to the row LABEL
+;; and take it as RET would. #f when the open prompt shows no such row.
+(define (minibuffer-pick! label)
+  (let* ((rows (or (prompt--do 'filtered) '()))
+         (labels (map (lambda (r) (if (pair? r) (car r) r)) rows))
+         (at (lambda (x) (let loop ((ls labels) (i 0))
+                           (cond ((null? ls) #f) ((equal? (car ls) x) i) (else (loop (cdr ls) (+ i 1)))))))
+         (want (at label))
+         (now (at (minibuffer-selected))))
+    (and want now
+         (begin (unless (= want now) (prompt--do 'move (- want now)))
+                (and (equal? (minibuffer-selected) label)
+                     (begin (minibuffer-confirm!) #t))))))
+(public! 'minibuffer-pick! "(minibuffer-pick! LABEL) — highlight the row LABEL of the open prompt and take it as RET would; #f when it shows no such row")
 (public! 'minibuffer-confirm-input! "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate.")
 (public! 'minibuffer-cancel! "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit.")
 (public! 'minibuffer-detach! "(minibuffer-detach!) — close the prompt; return its state and closures, or #f.")

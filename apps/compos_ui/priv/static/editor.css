@@ -1541,11 +1541,8 @@ body.unfocused .window.active .cursor {
   min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
   text-transform: none; letter-spacing: 0;
   /* the bottom line sits in the row; the lines above it hang over
-     the windows on the echo ground, at most five of them: a long
-     message (a stack trace) keeps its head here and its whole text
-     in *Messages* */
+     the windows on the echo ground */
   align-self: flex-end; background: var(--surface-sunken);
-  max-height: 5lh;
 }
 .ml-frame-path {
   min-width: 0; max-width: 62vw; flex: 0 1 auto;
@@ -1930,6 +1927,11 @@ c-action-key {
 /* the palette body: candidates left, the facts panel right */
 .mb-body { display: flex; flex: 1; min-height: 0; }
 .mb-body .mb-cands { flex: 1; min-width: 0; }
+/* the prompt's own HTML over its rows: Scheme writes the markup, the
+   panel only gives it room. An element with data-pick is a row's
+   stand-in: it takes the pointer, and .selected follows the highlight. */
+.mb-html { padding: 10px 14px; border-bottom: 1px solid var(--border-bg); overflow: auto; max-height: 40vh; }
+.mb-html [data-pick] { cursor: pointer; }
 .mb-preview {
   flex: 0 0 172px;
   /* min-width:auto would let the long title win over the

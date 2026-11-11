@@ -281,7 +281,7 @@
                        'segs
                        (append
                          (if (> (length action) 2)
-                             (list (list "c-action-key" (key-symbols (nth 2 action))))
+                             (list (list "c-action-key" (nth 2 action)))
                              '())
                          (list (list "c-action-label" (cadr action))))))
                (component--get p 'actions '())))))
@@ -303,7 +303,7 @@
                          'class (if current? "c-tab c-tab-on" "c-tab")
                          'click id
                          'attrs (list (list "current" (if current? "true" "false")))
-                         'segs (append (if key (list (list "c-tab-key c-action-key" (key-symbols key))) '())
+                         'segs (append (if key (list (list "c-tab-key c-action-key" key)) '())
                                        (list (list "c-tab-label c-action-label" label))))))
                (component--get p 'tabs '()))
           ;; in force once the row, or a part that holds it, is named
@@ -326,7 +326,7 @@
   ;; an app's tab bars (tab-bars.scm) reach past a row keyed otherwise
   (let loop ((ts (tabs--here)))
     (cond ((null? ts)
-           (let* ((mode (buffer-local-value 'mode-name (current-buffer)))
+           (let* ((mode (buffer-local (current-buffer) 'mode-name))
                   (cmd (and mode (keymap-lookup (mode-keymap mode) key))))
              (if (and (string? cmd) (not (string-prefix? "tabs-key-" cmd)))
                  (run-command cmd)
@@ -527,7 +527,7 @@
                                                        (list "count" (number->string (length (cadr g))))))
                                      (map (lambda (r)
                                             (list 'tag "c-binding" 'class "c-binding"
-                                                  'segs (list (list "c-keymap-key c-action-key" (key-symbols (car r)) "c-action-key")
+                                                  'segs (list (list "c-keymap-key c-action-key" (car r) "c-action-key")
                                                               (list "do" (cadr r)))))
                                           (cadr g)))))
                        grids)
@@ -545,7 +545,7 @@
                  (list 'tag "c-row" 'class "c-keymap-row"
                        'segs
                        (append
-                         (list (list "c-keymap-key c-action-key" (key-symbols (car k)) "c-action-key")
+                         (list (list "c-keymap-key c-action-key" (car k) "c-action-key")
                                (list "c-keymap-cmd" (cadr k)))
                          (if (> (length k) 2)
                              (list (list "c-keymap-doc" (nth 2 k)))
@@ -902,3 +902,36 @@ c-header.c-group { padding: 10px 14px; }
 ;; and a registration by value would keep calling the old one.
 (when (boundp 'dashboard-block-click)
   (add-hook! (list 'block-click 'dashboard) (lambda (buf id) (dashboard-block-click buf id))))
+
+
+;; --- blocks as HTML -------------------------------------------------------
+;; A component's blocks as one HTML string, for a surface that takes markup
+;; and not a block tree: the prompt's html handler. A block's click id
+;; becomes data-pick, which the prompt takes as the label of a row.
+(domain! 'ui)
+(effects! '(pure))
+
+(define (block->html b)
+  (if (string? b)
+      (html-escape b)
+      (let* ((tag (or (plist-get b 'tag) "div"))
+             (cls (plist-get b 'class))
+             (click (plist-get b 'click))
+             (text (plist-get b 'text))
+             (kids (or (plist-get b 'children) '()))
+             (attr (lambda (k v) (string-append " " k "=\"" (html-escape (format "~a" v)) "\""))))
+        (string-append
+         "<" tag
+         (if (and (string? cls) (not (equal? cls ""))) (attr "class" cls) "")
+         (apply string-append
+                (map (lambda (a) (attr (format "~a" (car a)) (cadr a))) (or (plist-get b 'attrs) '())))
+         (if click (attr "data-pick" click) "")
+         ">" (if (string? text) (html-escape text) "") (blocks->html kids) "</" tag ">"))))
+
+(define (blocks->html blocks)
+  (cond ((null? blocks) "")
+        ((string? blocks) (html-escape blocks))
+        ((symbol? (car blocks)) (block->html blocks))
+        (else (apply string-append (map block->html blocks)))))
+
+(public! 'blocks->html "(blocks->html BLOCKS) — a block, or a list of blocks, as one HTML string; a click id becomes data-pick")

@@ -233,6 +233,16 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # a click on an element of the prompt's own HTML that names a row:
+  # minibuffer.scm picks that row as RET would
+  def handle_event("mb_pick", %{"label" => label}, socket) when is_binary(label) do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("minibuffer-pick!", [label])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # a click on the frame tab rail: stand in that group. The chip that
   # counts the groups the rail left out opens the board instead.
   def handle_event("frame_tab", %{"id" => id}, socket) when is_binary(id) and id != "" do
@@ -1222,6 +1232,13 @@ defmodule Compos.Ui.EditorLive do
               <% end %>
             </c-group>
           <% end %>
+          <c-group
+            :if={Map.get(@state.minibuffer, :html)}
+            id="mb-html"
+            class="mb-html"
+            phx-hook="MbHtml"
+            data-selected={mb_selected_label(@state.minibuffer)}
+          >{Phoenix.HTML.raw(@state.minibuffer.html)}</c-group>
           <c-group class={"mb-body #{if mb_rail_focused?(@state.minibuffer), do: "rail-focus"}"}>
             <.dynamic_tag tag_name={if Enum.any?(@state.minibuffer.candidates, &(Map.get(&1, :kind) == "symbol")), do: "symbol-list", else: "c-completions"} aria-label={@state.minibuffer.prompt} id="mb-cands" class="mb-cands" phx-hook="SelectionScroll" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
               <%= for c <- @state.minibuffer.candidates do %>
@@ -1663,6 +1680,12 @@ defmodule Compos.Ui.EditorLive do
 
   # the palette's head row legend: the prompt's own, else the completion keys
   defp palette_legend(%{legend: [_ | _] = rows}), do: rows
+
+  # the label of the row the highlight is on, so the prompt's own HTML can
+  # mark the element that stands for it
+  defp mb_selected_label(mb) do
+    Enum.find_value(mb.candidates, "", fn c -> if c.selected, do: c.label end)
+  end
 
   defp palette_legend(_mb) do
     [

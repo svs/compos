@@ -60,10 +60,14 @@
                                  "  " (if b (vscode--short b) "empty")
                                  "  " (number->string n) (if (= n 1) " buffer" " buffers")))))
                       (panes-window-keys before)))
-           (lays (map (lambda (n) (list (string-append "Layout: " (symbol->string n))
-                                        n
-                                        (or (plist-get (panes-layout-spec n) 'doc) "")))
-                      (panes-layout-names)))
+           (lays (map (lambda (t) (list (string-append "Layout: " (symbol->string (cadr t)))
+                                        (cadr t)
+                                        (or (plist-get (panes-layout-spec (cadr t)) 'doc) "")))
+                      panes-layout-tiles))
+           (tiles (blocks->html
+                   (component 'panes/layouts
+                              (list 'current (symbol->string (or (panes-current-layout) 'free))
+                                    'click-prefix "Layout: " 'key-prefix "M-"))))
            (cands (append (list (list "Layouts" "" "separator"))
                           (map (lambda (r) (list (car r) (nth 2 r))) lays)
                           (list (list "Windows" "● here  ■ on screen  □ behind" "separator"))
@@ -85,8 +89,9 @@
                 (else (panes-apply! before))))
         (lambda () (panes-apply! before))
         #f "modal" #f #f
-        '(("1" "Layout: single") ("2" "Layout: two-pane") ("=" "Layout: halves")
-          ("c" "Layout: columns") ("+" "Layout: two-chat") ("f" "Layout: free"))))))
+        (map (lambda (t) (list (car t) (string-append "Layout: " (symbol->string (cadr t)))))
+             panes-layout-tiles)
+        #f tiles))))
 
 (define-command "vscode-buffers" "Choose a buffer of this group, then a file of its project"
   (lambda ()

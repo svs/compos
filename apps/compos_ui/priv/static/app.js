@@ -2046,6 +2046,26 @@
     // transient and the minibuffer candidates both wear this; a
     // list that scrolls and has no hook loses its selection off
     // the bottom, which is the bug this exists to prevent.
+    // the prompt's own HTML over its rows: a click on an element with
+    // data-pick picks the row of that label, and the element that stands
+    // for the highlighted row wears .selected
+    MbHtml: {
+      mounted() {
+        this.el.addEventListener("click", (e) => {
+          const t = e.target.closest("[data-pick]");
+          if (!t || !this.el.contains(t)) return;
+          e.preventDefault();
+          this.pushEvent("mb_pick", { label: t.dataset.pick });
+        });
+        this.mark();
+      },
+      updated() { this.mark(); },
+      mark() {
+        const on = this.el.dataset.selected || "";
+        this.el.querySelectorAll("[data-pick]").forEach((n) =>
+          n.classList.toggle("selected", n.dataset.pick === on));
+      }
+    },
     SelectionScroll: {
       mounted() { this.follow(); },
       updated() { this.follow(); },

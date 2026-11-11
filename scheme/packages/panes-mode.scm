@@ -1137,12 +1137,12 @@
   (let ((before (panes--ensure-layout!)))
     (minibuffer-read-preview "Window layout: "
       (map (lambda (n) (list (symbol->string n) (or (plist-get (panes-layout-spec n) 'doc) "")))
-           (panes-layout-names))
+           (filter (lambda (n) (not (eq? n 'free))) (panes-layout-names)))
       (lambda (name) (panes-look! (panes-set-layout before (string->symbol name))))
       (lambda (name) (panes-choose-layout! (string->symbol name)) (message (string-append "Layout " name)))
       (lambda () (panes-apply! before))
       #f #f #f #f
-      '(("1" "single") ("2" "two-pane") ("=" "halves") ("c" "columns") ("+" "two-chat") ("f" "free")))))
+      '(("1" "single") ("2" "two-pane") ("=" "halves") ("c" "columns") ("+" "two-chat")))))
 
 (define-command "window-layout" "Choose this group's layout; each one shows as you move to it"
   panes--layout-prompt!)
@@ -1151,16 +1151,17 @@
 (define-command "window-layout-halves" "Two equal panes" (lambda () (panes-choose-layout! 'halves)))
 (define-command "window-layout-columns" "Equal columns" (lambda () (panes-choose-layout! 'columns)))
 (define-command "window-layout-two-chat" "Two equal panes and a narrow chat" (lambda () (panes-choose-layout! 'two-chat)))
-(define-command "window-layout-free" "As many panes as you open" (lambda () (panes-choose-layout! #f)))
 
 ;; --- the layouts drawn small ----------------------------------------------
 ;; One tile for each layout: a small drawing, one box for each column as
 ;; wide as its share, and the key that picks it. The pane card and the
 ;; window modal draw the same tiles.
 (define panes-layout-tiles
-  ;; (KEY NAME SHARES CHAT-LAST?); SHARES () is free
+  ;; (KEY NAME SHARES CHAT-LAST?). free is no choice: a frame goes free on
+  ;; its own when it holds more than its layout, and a pane is added or
+  ;; removed by hand
   '(("1" single (1) #f) ("2" halves (1 1) #f) ("3" two-pane (2 1) #f)
-    ("4" columns (1 1 1) #f) ("5" two-chat (5 5 3) #t) ("6" free () #f)))
+    ("4" columns (1 1 1) #f) ("5" two-chat (5 5 3) #t)))
 
 (define (panes--tile-preview shares chat?)
   (let ((shares (if (and (equal? shares '(1 1 1)) (not chat?)
@@ -1214,17 +1215,17 @@
   (string-append "window-layout-" (symbol->string name)))
 
 (define-style! 'panes-layouts "
-.lt-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 104px)); justify-content: center; gap: 8px; }
-.lt-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 4px;
+.lt-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 104px)); justify-content: center; gap: 4px; }
+.lt-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 2px; min-width: 0;
   cursor: pointer; border: 1px solid transparent; }
 .lt-tile:hover { border-color: var(--border-bg); background: var(--hl-line-bg); }
 .lt-tile.selected { border-color: var(--default-fg); background: var(--hl-line-bg); }
 .lt-current { border-color: var(--accent-fg); }
-.lt-preview { display: flex; gap: 3px; width: min(88px, 100%); aspect-ratio: 16 / 10; padding: 3px; box-sizing: border-box;
+.lt-preview { display: flex; gap: 3px; width: min(88px, 100%); aspect-ratio: 16 / 10; flex: 0 0 auto; overflow: hidden; padding: 3px; box-sizing: border-box;
   border: 1.5px solid var(--dim-fg); opacity: .8; }
 .lt-free { border-style: dashed; }
-.lt-col { flex: 1; background: var(--dim-fg); opacity: .35; }
-.lt-plus { background: none; opacity: 1; color: var(--dim-fg); display: flex; align-items: center; justify-content: center; }
+.lt-col { flex: 1; min-height: 0; background: var(--dim-fg); opacity: .35; }
+.lt-plus { background: none; opacity: 1; color: var(--dim-fg); display: flex; align-items: center; justify-content: center; line-height: 1; }
 .lt-current .lt-preview { border-color: var(--accent-fg); opacity: 1; }
 .lt-current .lt-col { background: var(--accent-fg); }
 .lt-col.lt-chat { background: none; opacity: 1; border: 1px solid var(--dim-fg); display: flex; flex-direction: column;
@@ -1232,7 +1233,7 @@
 .lt-bubble { height: 4px; width: 70%; background: var(--dim-fg); opacity: .6; }
 .lt-bubble.r { align-self: flex-end; background: var(--accent-fg); opacity: 1; }
 .lt-current .lt-col.lt-chat { background: none; border-color: var(--accent-fg); }
-.lt-name { font-size: .78em; color: var(--dim-fg); }
+.lt-name { font-size: .74em; color: var(--dim-fg); white-space: nowrap; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .lt-cap { display: inline-flex; align-items: center; justify-content: center; min-width: 1.6em; height: 1.6em;
   padding: 0 4px; box-sizing: border-box; font-family: var(--font-mono); font-weight: 700; font-size: .8em;
   color: var(--default-fg); background: var(--hl-line-bg); border: 1px solid var(--border-bg); border-bottom-width: 3px; }
@@ -1243,7 +1244,7 @@
 (define-command "layout-backward" "Bring the previous window of this pane to the front" (lambda () (panes--cycle-pane-window! -1)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
-  '("window-layout" "window-layout-free" "window-layout-single" "window-layout-two-pane"
+  '("window-layout" "window-layout-single" "window-layout-two-pane"
     "window-layout-halves" "window-layout-columns" "window-layout-two-chat"
     "layout-forward" "layout-backward"))
 
@@ -1786,76 +1787,60 @@
       (set! switch-buffer-initial-tab was))))
 
 (define (pane-home--empty-blocks . title)
-  "The card: a question, the one next step as a big button, four big keys,
-   the layouts drawn small, and a quiet line for the rest. TITLE heads it in
-   place of the question (the pane card)."
-  (let* ((current (pane-home--current-layout))
-         (quest (pane-home--quest))
-         (tiles (list (pane-home--tile "b" "Switch buffer" "pane-switch-buffer")
-                      (pane-home--tile "f" "Find file" "find-file")
-                      (pane-home--tile "c" "New chat" "pane-home-new-chat")
-                      (pane-home--tile "g" "New group" "group-new")
-                      (pane-home--tile "t" "Todos" "todo")))
-         (quiet (append (if (pane-home--hidden-pane?)
-                            (list (list 'tag "div" 'class "pc-quiet-item" 'click "cmd:pane-restore"
-                                        'children (list (pane-home--key "r") (list 'tag "span" 'class "pc-quiet-label" 'text "restore pane"))))
-                            '())
-                        ;; the card over a pane with windows offers to clear it
-                        (if (pair? title)
-                            (list (list 'tag "div" 'class "pc-quiet-item" 'click "cmd:pane-clear"
-                                        'children (list (pane-home--key "x") (list 'tag "span" 'class "pc-quiet-label" 'text "clear pane"))))
-                            '())
-                        (list (list 'tag "div" 'class "pc-quiet-item" 'click "cmd:pane-remove"
-                                    'children (list (pane-home--key "k") (list 'tag "span" 'class "pc-quiet-label" 'text "remove pane")))))))
+  "The card: one row per key in groups split by a thin line, then the
+   layouts drawn small at the bottom. TITLE heads it (the pane card)."
+  (let* ((current (or (and (boundp 'pane-card--layout-tried) pane-card--layout-tried)
+                      (pane-home--current-layout)))
+         (row (lambda (key label cmd)
+                (list 'tag "div" 'class "pc-row" 'click (string-append "cmd:" cmd)
+                      'children (list (pane-home--key key)
+                                      (list 'tag "span" 'class "pc-label" 'text label)))))
+         (sep (list 'tag "div" 'class "pc-sep"))
+         (groups
+           (list
+             (list (row "b" "Switch buffer" "pane-switch-buffer")
+                   (row "f" "Find file" "find-file")
+                   (row "c" "New chat" "pane-home-new-chat")
+                   (row "g" "New group" "group-new")
+                   (row "t" "Todos" "todo"))
+             (list (row "|" "Split right" "split-window-right")
+                   (row "-" "Split below" "split-window-below")
+                   (row "u" "Unsplit" "unsplit"))
+             (append (if (pane-home--hidden-pane?) (list (row "r" "Restore pane" "pane-restore")) '())
+                     ;; the card over a pane with windows offers to clear it
+                     (if (pair? title) (list (row "x" "Clear pane" "pane-clear")) '())
+                     (list (row "k" "Remove pane" "pane-remove"))))))
     (list
       (list 'tag "div" 'class "pc"
             'children
-            (list
-              (list 'tag "div" 'class "pc-title" 'text (if (pair? title) (car title) "Empty pane"))
-              (list 'tag "div" 'class "pc-tiles" 'children tiles)
-              (list 'tag "div" 'class "pc-heading" 'text "Layout")
-              (component 'panes/layouts (list 'current (symbol->string current)))
-              ;; splitting comes right after the layouts: a layout is many splits at once
-              (list 'tag "div" 'class "pc-quiet pc-split"
-                    'children (map (lambda (s)
-                                     (list 'tag "div" 'class "pc-quiet-item" 'click (string-append "cmd:" (caddr s))
-                                           'children (list (pane-home--key (car s)) (list 'tag "span" 'class "pc-quiet-label" 'text (cadr s)))))
-                                   '(("|" "split right" "split-window-right")
-                                     ("-" "split below" "split-window-below")
-                                     ("u" "unsplit" "unsplit"))))
-              (list 'tag "div" 'class "pc-quiet" 'children quiet))))))
+            (append
+              (list (list 'tag "div" 'class "pc-title" 'text (if (pair? title) (car title) "Empty pane")))
+              (let loop ((gs groups) (out '()))
+                (if (null? gs)
+                    (reverse out)
+                    (loop (cdr gs) (append (reverse (car gs)) (if (null? out) out (cons sep out))))))
+              (list sep
+                    (component 'panes/layouts (list 'current (symbol->string current)))
+                    (list 'tag "div" 'class "pc-hint" 'text "← → try a layout · RET keeps · ESC goes back")))))))
 
 (define-style! 'pane-card "
-.pc { display: flex; flex-direction: column; align-items: stretch; gap: 14px;
-  width: min(440px, 100%); margin: 0 auto; padding: 24px 20px;
+.pc { display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+  width: min(360px, 100%); margin: 0 auto; padding: 24px 20px;
   min-height: 100%; box-sizing: border-box; justify-content: center;
   font-family: var(--font-sans); }
-.pc-title { font-size: 1.5em; font-weight: 600; color: var(--default-fg); text-align: center; margin-bottom: 4px; }
+.pc-title { font-size: 0.72em; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--dim-fg); margin-bottom: 8px; }
 .pc-cap { display: inline-flex; align-items: center; justify-content: center;
-  min-width: 1.9em; height: 1.9em; padding: 0 6px; box-sizing: border-box;
-  font-family: var(--font-mono); font-weight: 700; font-size: 0.95em; line-height: 1;
+  min-width: 1.7em; height: 1.7em; padding: 0 5px; box-sizing: border-box;
+  font-family: var(--font-mono); font-weight: 700; font-size: 0.85em; line-height: 1;
   color: var(--default-fg); background: var(--hl-line-bg);
-  border: 1px solid var(--border-bg); border-bottom-width: 3px; }
-.pc-quest { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 16px; cursor: pointer;
-  background: var(--accent-fg); color: var(--window-bg);
-  box-shadow: 4px 4px 0 var(--default-fg); }
-.pc-quest:hover { filter: brightness(1.08); }
-.pc-quest-tag { font-size: 0.72em; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; opacity: .75; }
-.pc-quest-label { flex: 1; font-size: 1.12em; font-weight: 600; }
-.pc-quest .pc-cap { background: transparent; color: var(--window-bg); border-color: var(--window-bg); }
-.pc-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.pc-tiles > :last-child:nth-child(odd) { grid-column: span 2; }
-.pc-tile { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;
   border: 1px solid var(--border-bg); }
-.pc-tile:hover { background: var(--hl-line-bg); border-color: var(--default-fg); }
-.pc-label { font-size: 1em; color: var(--default-fg); }
-.pc-heading { margin-top: 6px; font-size: 0.72em; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--dim-fg); }
-.pc-quiet { display: flex; justify-content: center; gap: 18px; margin-top: 10px; color: var(--dim-fg); font-size: 0.85em; }
-.pc-quiet-item { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.pc-quiet-item .pc-cap { min-width: 1.7em; height: 1.7em; font-size: 0.85em; color: var(--default-fg);
-  background: var(--hl-line-bg); border-color: var(--dim-fg); }
-.pc-quiet-item:hover { color: var(--default-fg); }
+.pc-row { display: flex; align-items: center; gap: 12px; padding: 4px 6px; cursor: pointer; }
+.pc-row:hover { background: var(--hl-line-bg); }
+.pc-label { color: var(--default-fg); }
+.pc-sep { height: 1px; margin: 6px 0; background: var(--border-bg); }
+.pc .lt-grid { margin-top: 6px; }
+.pc-hint { margin-top: 6px; text-align: center; font-size: 0.78em; color: var(--dim-fg); }
 ")
 
 (mode-keys! "pane-empty-mode"
@@ -1883,6 +1868,9 @@
 (define-command "pane-card-back" "Close the card: the pane shows what it showed before"
   (lambda ()
     ;; the card goes for good, so the pane never keeps an old one behind
+    ;; leaving while a layout is on show draws the frame as it was
+    (when (and (boundp 'pane-card--layout-before) pane-card--layout-before)
+      (let ((was pane-card--layout-before)) (pane-card--layout-end!) (panes-apply! was)))
     (let ((card (current-buffer)))
       (run-command "previous-buffer")
       (buffer-kill! card)))
@@ -1890,7 +1878,95 @@
 
 (mode-keys! "pane-card-mode"
   (append (keymap-bindings (mode-keymap "pane-empty-mode"))
-          '(("q" "pane-card-back") ("x" "pane-clear"))))
+          '(("q" "pane-card-back") ("x" "pane-clear")
+            ("<right>" "pane-card-layout-next") ("<left>" "pane-card-layout-previous")
+            ("RET" "pane-card-ret") ("ESC" "pane-card-layout-revert"))))
+
+;; the side arrows try the layouts the way Cmd-j does: each is a look,
+;; drawn without recording a change. The card's window comes to the front
+;; of its pane and keeps the focus, so the next arrow still reaches it.
+;; RET makes the layout on show the frame's; ESC draws the frame as it was.
+;; BEFORE is the frame before the first arrow, TRIED the layout on show,
+;; KEY the card's window; all #f when none is tried.
+(define pane-card--layout-before #f)
+(define pane-card--layout-tried #f)
+(define pane-card--layout-key #f)
+(define pane-card--layout-shown #f)
+(define pane-card--card #f)
+
+(define (pane-card--focus! . _)
+  "Select the window that shows the card"
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((equal? (window-buffer (car ws)) pane-card--card) (select-window! (car ws)))
+          (else (loop (cdr ws))))))
+
+(define (pane-card--keep-card-shown layout name)
+  "LAYOUT drawn as NAME with the card on screen and focused: a card's pane
+   past NAME's capacity first moves to its last shown place"
+  (let* ((key pane-card--layout-key)
+         (pid (panes-pane-of layout key))
+         (ids (panes-pane-ids layout))
+         (cap (or (plist-get (panes-layout-spec name) 'capacity) (length ids)))
+         (at (let loop ((xs ids) (i 0)) (cond ((null? xs) 0) ((equal? (car xs) pid) i) (else (loop (cdr xs) (+ i 1))))))
+         (moved (if (and pid (>= at cap)) (panes-move-pane layout pid (- cap 1)) layout))
+         (shown (panes-raise (panes-set-layout moved name) key)))
+    shown))
+
+(define (pane-card--layout-end!)
+  (set! pane-card--layout-before #f)
+  (set! pane-card--layout-tried #f))
+
+(define (pane-card--layout-step! step)
+  "Show the layout STEP tiles away from the one on show, as a look"
+  (let* ((names (map cadr panes-layout-tiles))
+         (now (or pane-card--layout-tried (pane-home--current-layout)))
+         (i (let loop ((ns names) (i 0)) (cond ((null? ns) 0) ((eq? (car ns) now) i) (else (loop (cdr ns) (+ i 1))))))
+         (n (length names))
+         (next (list-ref names (modulo (+ i step n) n))))
+    (unless pane-card--layout-before
+      (set! pane-card--layout-before (panes--ensure-layout!))
+      (set! pane-card--card (current-buffer))
+      (set! pane-card--layout-key (panes-key-of-handle pane-card--layout-before (active-window))))
+    (set! pane-card--layout-tried next)
+    (set! pane-card--layout-shown
+          (pane-card--keep-card-shown pane-card--layout-before next))
+    (panes-look! pane-card--layout-shown)
+    (pane-card--render! pane-card--card)
+    (message (string-append "layout " (symbol->string next) " -- RET keeps it, ESC goes back"))))
+
+(define-command "pane-card-layout-next" "Show the next layout; RET keeps it, ESC goes back"
+  (lambda () (pane-card--layout-step! 1))
+  'modes '(pane-card-mode))
+
+(define-command "pane-card-layout-previous" "Show the previous layout; RET keeps it, ESC goes back"
+  (lambda () (pane-card--layout-step! -1))
+  'modes '(pane-card-mode))
+
+(define-command "pane-card-layout-revert" "Draw the frame as it was before the side arrows, else close the card"
+  (lambda ()
+    (if pane-card--layout-before
+        (let ((was pane-card--layout-before))
+          (pane-card--layout-end!)
+          (panes-apply! was)
+          (pane-card--render! (current-buffer))
+          (message "layout back as it was"))
+        (run-command "pane-card-back")))
+  'modes '(pane-card-mode))
+
+(define-command "pane-card-ret" "Keep the layout on show, else do the card's next step"
+  (lambda ()
+    (if pane-card--layout-tried
+        (let ((name pane-card--layout-tried) (shown pane-card--layout-shown))
+          (pane-card--layout-end!)
+          ;; the layout as it showed, its empty panes filled as a chosen one is
+          (panes-apply! (if (eq? name 'free) shown
+                            (panes-fill-panes shown (panes--fill-candidates shown) panes--buffer-mode)))
+          (layout-modeline!)
+          (pane-card--focus!)
+          (message (string-append "Layout " (symbol->string name))))
+        (run-command "pane-home-next")))
+  'modes '(pane-card-mode))
 
 (define-command "pane-card" "Bring up the empty pane's card over this pane: actions, layouts and the next step"
   (lambda ()

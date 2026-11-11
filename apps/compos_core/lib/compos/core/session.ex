@@ -2039,9 +2039,15 @@ defmodule Compos.Core.Session do
           :void
         end,
       {"minibuffer-tabs!",
-       "(minibuffer-tabs! TABS) — show tabs over the open prompt's list: ((LABEL CURRENT?) ...), the current one #t; '() removes them."} =>
+       "(minibuffer-tabs! TABS) — show tabs over the open prompt's list: ((LABEL CURRENT? [KEY]) ...), the current one #t; KEY is drawn on the tab, the key SPC jumps to it with; '() removes them."} =>
         fn [tabs] ->
-          Editor.prompt_op(:set, [:tabs, for([label, current] <- tabs || [], do: %{label: s(label), current: current == true})])
+          Editor.prompt_op(:set, [
+            :tabs,
+            for(t <- tabs || [], is_list(t), length(t) >= 2) do
+              [label, current | rest] = t
+              %{label: s(label), current: current == true, key: (case rest do [k | _] when k not in [nil, false] -> s(k); _ -> nil end)}
+            end
+          ])
           :void
         end,
       {"minibuffer-input!", "(minibuffer-input! INPUT) — set the minibuffer input text."} => fn [

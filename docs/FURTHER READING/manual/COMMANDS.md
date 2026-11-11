@@ -1548,7 +1548,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `window-kill-buffers` | `C-x K` | Kill every buffer in this window: the one it shows and its whole history |
 | `window-layout` | `C-x l` | Choose this group's layout; each one shows as you move to it |
 | `window-layout-columns` |  | Equal columns |
-| `window-layout-free` |  | As many panes as you open |
 | `window-layout-halves` |  | Two equal panes |
 | `window-layout-single` |  | One window |
 | `window-layout-two-chat` |  | Two equal panes and a narrow chat |

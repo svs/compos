@@ -372,7 +372,6 @@ picks its layout at once. An arrow moves the chooser's highlight.
 | `=` | `window-layout-halves` | Two equal panes |
 | `c` | `window-layout-columns` | Three columns |
 | `r` | `window-layout-rows` | Two rows |
-| `f` | `window-layout-free` | Free layout |
 
 No key chooses the main pane's side at this time. K02 and L08 are proposed.
 
@@ -382,7 +381,6 @@ No key chooses the main pane's side at this time. K02 and L08 are proposed.
 | K01b — Scroll the layout | `M-x layout-forward`, `M-x layout-backward` | Run each command. | Move the panes one window along the frame's window ring. The ring is cyclic, so neither direction reaches an end. The window that leaves becomes hidden; it keeps its buffer, history, and point. |
 | K02 — Main direction | **Proposed:** `C-x l` plus left, right, up, down | Press C-x l followed by left, right, up, or down. | Place the main pane on the named side. Preserve logical window stacks while changing pane geometry. |
 | K03 — Chooser | `C-x l`, then `RET` / `C-g` | Press C-x l, preview layouts, then accept or cancel. | Open the chooser and follow L15–L17. Cancellation restores the original arrangement. |
-| K04 — Free layout | `window-layout-free` (`C-x l f`) | Press C-x l f. | Select free layout. Mode routing, consolidation, and group ownership still apply. |
 | K05 — Cancel prefix | `C-x l C-g` | Press C-x l and cancel before selecting a layout. | Leave windows, stacks, focus, geometry, and the layout target unchanged. |
 | K06 — After consolidation | `mode-consolidate`, then every `C-x l` layout selection | Consolidate chats, then exercise every layout shortcut. | Hidden chats never become extra windows. Displaced non-mode windows remain invisible. No shortcut imports another group's content. |
 

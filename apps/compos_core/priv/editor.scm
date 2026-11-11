@@ -7076,7 +7076,6 @@
     ("=" "window-layout-halves")
     ("c" "window-layout-columns")
     ("+" "window-layout-two-chat")
-    ("f" "window-layout-free")
     ;; the arrows walk the stack of this pane
     ("<right>" "layout-forward")
     ("<left>" "layout-backward")))

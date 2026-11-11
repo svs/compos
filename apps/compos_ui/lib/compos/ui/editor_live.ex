@@ -1207,9 +1207,9 @@ defmodule Compos.Ui.EditorLive do
           >
           <%= if mb_geom(@state.minibuffer) == "modal" do %>
             <c-group class="mb-head">
-              <c-text class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
+              <c-text :if={Map.get(@state.minibuffer, :tabs, []) == []} class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
               <c-tabs :if={Map.get(@state.minibuffer, :tabs, []) != []} class="c-tabs mb-tabs">
-                <c-tab :for={t <- @state.minibuffer.tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}>{t.label}</c-tab>
+                <c-tab :for={t <- @state.minibuffer.tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}><c-action-key :if={Map.get(t, :key)} class="mb-tab-key">{t.key}</c-action-key>{t.label}</c-tab>
               </c-tabs>
               <c-text class="mb-head-spacer"></c-text>
               <c-text class="mb-head-legend">
@@ -1222,7 +1222,7 @@ defmodule Compos.Ui.EditorLive do
               <%= case {Map.get(@state.minibuffer, :tabs, []), Map.get(@state.minibuffer, :legend, [])} do %>
                 <% {[_ | _] = tabs, _} -> %>
                   <c-tabs class="c-tabs mb-tabs">
-                    <c-tab :for={t <- tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}>{t.label}</c-tab>
+                    <c-tab :for={t <- tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}><c-action-key :if={Map.get(t, :key)} class="mb-tab-key">{t.key}</c-action-key>{t.label}</c-tab>
                   </c-tabs>
                   <c-text class="mb-tabs-hint"><c-action-key class="transient-legend-key">← →</c-action-key> tab</c-text>
                 <% {_, [_ | _] = legend} -> %>
@@ -1399,7 +1399,7 @@ defmodule Compos.Ui.EditorLive do
       <c-text :for={{c, t} <- echo_status(@state)} class={c}>{t}</c-text>
       <c-text class="ml-rule"></c-text>
       <c-key-hints class="echo-hint">
-        <%= for {k, v, cmd} <- echo_hints(@state) do %><%= if cmd do %><c-text class="ml-hint ml-link" role="link" title={cmd} phx-click="ui_cmd" phx-value-win={@state.active} phx-value-cmd={"echo:" <> cmd}>{k}</c-text><% else %><c-text class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text><% end %><% end %>
+        <%= for {k, v, cmd} <- echo_hints(@state) do %><%= if cmd do %><c-text class="ml-hint ml-link" role="link" title={cmd} phx-click="ui_cmd" phx-value-win={@state.active} phx-value-cmd={"echo:" <> cmd}><%= if v != "" do %><c-action-key>{k}</c-action-key><c-text class="ml-do">{v}</c-text><% else %>{k}<% end %></c-text><% else %><c-text class="ml-hint"><c-action-key>{k}</c-action-key><%= if v != "" do %><c-text class="ml-do">{v}</c-text><% end %></c-text><% end %><% end %>
       </c-key-hints>
     </c-statusbar>
     """
@@ -1691,7 +1691,6 @@ defmodule Compos.Ui.EditorLive do
     [
       %{key: "TAB", label: "complete"},
       %{key: "RET", label: "accept"},
-      %{key: "C-n C-p", label: "select"},
       %{key: "C-c C-o", label: "collect"},
       %{key: "C-g", label: "quit"}
     ]

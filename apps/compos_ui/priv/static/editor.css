@@ -1611,14 +1611,16 @@ c-action-key {
   text-transform: none; letter-spacing: 0;
 }
 .ml-do { color: var(--text-faint); text-transform: none; }
-.echo-hint c-action-key + .ml-do {
-  margin-left: calc(var(--s4) - var(--s9));
+/* a hint is its key and its verb, a small gap apart; the bar's gap
+   holds the hints apart */
+.echo-hint .ml-hint {
+  display: inline-flex; align-items: baseline; gap: var(--s4);
 }
 /* Chrome never spills: a bar clips its own overflow rather than
    pushing the frame wider, and the key hints are the first thing
    to give way. The frame is the container, so the bar answers the
    frame's width and not the screen's. */
-@container (max-width: 1280px) {
+@container (max-width: 760px) {
   .echo-area .echo-hint,
   .echo-area .echo-hint + .ml-rule { display: none; }
 }
@@ -1714,7 +1716,8 @@ c-action-key {
   font-size: var(--mb-fs-row); padding: 5px 18px; min-height: 30px; column-gap: 18px;
   border-left-width: 3px;
 }
-.mb-panel.palette .mb-label { max-width: 80ch; }
+.mb-panel.palette .mb-label { min-width: min(var(--mb-label-w, 0), 52ch); max-width: 52ch; }
+.mb-panel.palette .mb-hint { flex-shrink: 0; }
 .mb-panel.palette .mb-hint { font-size: var(--mb-fs-meta); }
 .mb-panel.palette .mb-sep { padding: 10px 18px 4px; }
 .mb-panel.palette .mb-sep-label { font-size: var(--mb-fs-micro); }
@@ -1737,7 +1740,7 @@ c-action-key {
 }
 .mb-head-spacer { flex: 1; }
 .mb-head-legend {
-  display: inline-flex; flex-wrap: wrap; gap: 6px 22px;
+  display: inline-flex; flex-wrap: nowrap; white-space: nowrap; gap: 6px 22px;
   color: var(--dim-fg, #8a857a); font-size: var(--mb-fs-meta, 14px);
 }
 .mb-panel.palette .mb-preview {
@@ -2059,11 +2062,17 @@ c-action-key {
 }
 /* the palette's sections sit beside its title */
 .mb-head .mb-tabs {
-  flex: 0 1 auto; margin: 0 0 0 18px; padding: 0; border-bottom: none;
+  flex: 0 0 auto; margin: 0; padding: 0; border-bottom: none;
+  flex-wrap: nowrap; white-space: nowrap;
 }
 .mb-tabs-hint {
   padding-bottom: 5px; white-space: nowrap;
   letter-spacing: 0.02em; text-transform: none;
+}
+/* the key SPC jumps to this tab with */
+.mb-tabs .mb-tab-key {
+  margin-right: 0.45em; font-weight: 700;
+  color: var(--accent-fg, #26356b); opacity: 0.85;
 }
 /* the names column expands to the longest name in the whole set
    (--mb-label-w, from the core) — marginalia sits immediately

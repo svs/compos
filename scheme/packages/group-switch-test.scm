@@ -870,7 +870,7 @@
     (t--sw-done!)))
 
 (deftest 'a-freed-frame-stays-free-in-a-new-group
-  "C-x l free is the person's choice: a group entry does not undo it"
+  "a frame gone free stays free: a group entry does not undo it"
   (lambda ()
     (t--sw-setup!)
     (let ((id (group-record-create! "zzsw-free")))

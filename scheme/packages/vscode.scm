@@ -130,8 +130,10 @@
                        (mb-select-notify!)
                        #t))))))))
 
-(define-command "vscode-buffers" "Switch buffer, the same prompt as C-x b: tabs across the top, modes in the margin, SPC leader"
-  (lambda () (switch-bare-prompt!)))
+(define-command "vscode-buffers" "Switch buffer, the same prompt as C-x b, shown as the modal"
+  (lambda ()
+    (switch-bare-prompt!)
+    (minibuffer-style! "modal")))
 
 ;; Cmd-L: the LLM of this chat. Its setup is drawn on top; the rows below
 ;; change one thing at once (the model, the effort, a saved preset, the
@@ -401,10 +403,21 @@
 (define (vscode--others)
   (remove (lambda (m) (equal? m "vscode-mode-map")) (global-minor-maps)))
 
+(define vscode--hints
+  ;; the way out of any mess, in the bottom bar while the mode is on
+  '((vscode-palette ("s-P" "commands" "command-palette"))
+    (vscode-pane ("s-p" "pane" "pane-card"))
+    (vscode-buffers ("s-b" "buffers" "vscode-buffers"))
+    (vscode-windows ("s-j" "windows" "vscode-windows"))
+    (vscode-llm ("s-l" "model" "vscode-llm"))))
+
 (define (vscode--apply! on)
   ;; global-minor-maps! republishes cmd-keys, so Cmd-W and the rest reach
   ;; the editor exactly while the mode is on
-  (global-minor-maps! (if on (cons "vscode-mode-map" (vscode--others)) (vscode--others))))
+  (global-minor-maps! (if on (cons "vscode-mode-map" (vscode--others)) (vscode--others)))
+  (for-each (lambda (h) (echo-extra-hint-set! (car h) (and on (cadr h)))) vscode--hints)
+  ;; the build line stays last
+  (when (boundp 'build-identity-publish!) (build-identity-publish!)))
 
 (defcustom 'vscode-mode #f
   "Use the VSCode keys for the palette, files and windows, in every buffer."

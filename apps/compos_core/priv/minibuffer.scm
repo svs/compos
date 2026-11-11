@@ -102,6 +102,9 @@
 ;; STEP, -1 or 1, and answers #t when it moved the tab. The preview
 ;; prompt clears it, so a stale fn never steers the next prompt.
 (define *mb-tab-fn* #f)
+;; a prompt that gives SPC KEY a meaning of its own (jump to a tab) sets
+;; this: the fn gets the key and answers #t when it took it
+(define *mb-leader-fn* #f)
 
 ;; a prompt whose rows nest folds them with TAB: the fn gets the selected
 ;; candidate and answers #t when it took the key
@@ -487,6 +490,7 @@
       (message "")
       (cond ((member k '("C-g" "ESC")) #f)
             ((equal? k "SPC") (run-command "minibuffer-confirm"))
+            ((and *mb-leader-fn* (*mb-leader-fn* k)) #t)
             ((and (pair? meta) (equal? (car meta) "command")) (run-command (cadr meta)))
             ((and (pair? own) (equal? (car own) "command")) (run-command (cadr own)))
             (else #f))))
@@ -895,7 +899,7 @@
   (let* ((rows (mb-preview-shortcut-rows cands shortcuts))
          (bindings (mb-preview-shortcuts rows on-confirm)))
     (set! *mb-shortcuts* bindings)
-    (set! *mb-tab-fn* #f)
+    (set! *mb-tab-fn* #f) (set! *mb-leader-fn* #f)
     (set! *mb-fold-fn* #f)
     (set! *mb-change-fn* #f)
     (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
@@ -904,14 +908,14 @@
         (list (list 'confirm (lambda (v)
                                 (set! *mb-shortcuts* '())
                                 (set! *mb-select-fn* #f)
-                                (set! *mb-tab-fn* #f)
+                                (set! *mb-tab-fn* #f) (set! *mb-leader-fn* #f)
                                 (set! *mb-fold-fn* #f)
                                 (set! *mb-change-fn* #f)
                                 (with-invoking-buffer (lambda () (on-confirm v)))))
               (list 'cancel  (lambda ()
                                 (set! *mb-shortcuts* '())
                                 (set! *mb-select-fn* #f)
-                                (set! *mb-tab-fn* #f)
+                                (set! *mb-tab-fn* #f) (set! *mb-leader-fn* #f)
                                 (set! *mb-fold-fn* #f)
                                 (set! *mb-change-fn* #f)
                                 (with-invoking-buffer on-cancel)))

@@ -148,7 +148,7 @@ not open or rearrange visible panes. Mode-entry layouts and automatic
 relayout hooks defer to an explicitly selected target.
 
 Relayout preserves each view's point and buffer history. The active target is saved with the desktop even without
-switching groups. `window-layout-free` releases the target. A layout holds a fixed number of panes, so work past that number does not add a pane. It takes a pane, and the window that had the pane becomes hidden. The hidden windows make the window ring with the panes, and `layout-forward` and `layout-backward` reach them. `quit-window` in the new window gives the pane back to the hidden window.
+switching groups. A layout holds a fixed number of panes, so work past that number does not add a pane. It takes a pane, and the window that had the pane becomes hidden. The hidden windows make the window ring with the panes, and `layout-forward` and `layout-backward` reach them. `quit-window` in the new window gives the pane back to the hidden window.
 
 The measured regression journeys are in `scheme/packages/layout-policy-test.scm`,
 with a disposable-frame runner and keyboard-path test in

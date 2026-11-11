@@ -146,6 +146,5 @@ No prefix key leads to `layout-map` at this time.
 | `=` | `window-layout-halves` |
 | `c` | `window-layout-columns` |
 | `r` | `window-layout-rows` |
-| `f` | `window-layout-free` |
 | `<right>` | `layout-forward` |
 | `<left>` | `layout-backward` |

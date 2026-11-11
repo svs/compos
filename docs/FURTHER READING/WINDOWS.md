@@ -69,7 +69,7 @@ they come back as they were. `(panes-waiting-windows)` lists them.
 | `C-x 0` | Close this window |
 | `C-x 1` | Keep only this window |
 | `C-x b` | Show another buffer in this window |
-| `S-<left>` | Go back to the buffer you used before |
+| `C-x <left>`, `C-x <right>` | Go back to the buffer you used before, or forward again |
 | `C-x C-b` | List every buffer, by group |
 | `C-x k` | Kill a buffer |
 | `C-M-v` | Scroll the other window, and stay here |

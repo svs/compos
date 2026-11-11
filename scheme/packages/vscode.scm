@@ -419,8 +419,8 @@
   ;; the build line stays last
   (when (boundp 'build-identity-publish!) (build-identity-publish!)))
 
-(defcustom 'vscode-mode #f
-  "Use the VSCode keys for the palette, files and windows, in every buffer."
+(defcustom 'vscode-mode #t
+  "Use the VSCode keys for the palette, files and windows, in every buffer. On for a new install; M-x vscode-mode turns it off, and the choice lasts."
   'group 'vscode 'type 'boolean
   'set vscode--apply!)
 

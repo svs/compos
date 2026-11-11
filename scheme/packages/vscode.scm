@@ -55,6 +55,15 @@
 .mb-panel.palette:has(.mb-html) .mb-preview { display: none; }
 .mb-panel.palette:has(.mb-html) .mb-head-legend { display: none; }
 .mb-panel.palette:has(.mb-html) .mb-cand { column-gap: 12px; }
+.vl-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.vl-tab { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; min-width: 0;
+  border: 1px solid var(--border-bg); }
+.vl-on { border-color: var(--accent-fg); background: var(--hl-line-bg); }
+.vl-top { display: flex; align-items: center; gap: 6px; }
+.vl-name { font-size: .75em; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); }
+.vl-on .vl-name { color: var(--default-fg); }
+.vl-value { font-size: .85em; color: var(--default-fg); max-width: 150px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 ")
 
 (define-command "vscode-windows" "Choose a layout, each one shows as you move to it; or a window of this group"
@@ -166,6 +175,13 @@
   '(("b" "b backend") ("m" "m model") ("e" "e effort") ("p" "p tools")
     ("s" "s saved") ("o" "o other")))
 
+;; the rows that are on (hint starting with the filled dot) before the rest,
+;; each part keeping its order
+(define (vscode--on-first rows . more)
+  (let* ((all (apply append rows more))
+         (on? (lambda (r) (and (> (string-length (cadr r)) 0) (equal? (substring (cadr r) 0 1) "●")))))
+    (append (filter on? all) (filter (lambda (r) (not (on? r))) all))))
+
 (define (vscode--llm-rows chat key)
   (let* ((now (llm-config-combination chat))
          (connector (plist-get now 'connector))
@@ -184,7 +200,7 @@
       (map (lambda (e) (list e (mark (equal? e effort) (if (equal? e "default") "the model decides" "reasoning effort"))))
            (cons "default" (car (chat-model-effort-info chat connector model)))))
      ((equal? key "p")
-      (append
+      (vscode--on-first
        (map (lambda (e) (list (symbol->string (car e))
                               (string-append (if (member (car e) tools) "● on   " "○ off  ")
                                              (or (plist-get (cadr e) 'description) ""))))
@@ -201,18 +217,29 @@
             (list "Switch chat" "go to another chat")
             (list "New chat" "start a chat in this group"))))))
 
-(define (vscode--llm-head chat)
-  (let ((now (llm-config-combination chat))
-        (tools (lambda (v) (let ((extra (filter (lambda (x) (not (eq? x 'compos))) (or v '()))))
-                             (if (null? extra) "editor only" (string-join (map symbol->string extra) " "))))))
+(define (vscode--llm-head chat section)
+  (let* ((now (llm-config-combination chat))
+         (tools (let ((extra (filter (lambda (x) (not (eq? x 'compos))) (or (plist-get now 'presets) '()))))
+                  (if (null? extra) "editor only" (string-join (map symbol->string extra) " "))))
+         (values (list (list "b" (plist-get now 'connector))
+                       (list "m" (plist-get now 'model))
+                       (list "e" (plist-get now 'effort))
+                       (list "p" tools)
+                       (list "s" (or (llm-config-preset-name chat) "own setup"))
+                       (list "o" "setup, chats"))))
     (blocks->html
-     (component 'ui/stats
-       (list 'stats
-             (list (list 'label "b backend" 'value (plist-get now 'connector))
-                   (list 'label "m model" 'value (plist-get now 'model))
-                   (list 'label "e effort" 'value (plist-get now 'effort))
-                   (list 'label "p tools" 'value (tools (plist-get now 'presets)))
-                   (list 'label "s saved" 'value (or (llm-config-preset-name chat) "own setup"))))))))
+     (list 'tag "div" 'class "vl-tabs"
+           'children
+           (map (lambda (s)
+                  (let ((key (car s)))
+                    (list 'tag "div" 'class (if (equal? key section) "vl-tab vl-on" "vl-tab")
+                          'children
+                          (list (list 'tag "div" 'class "vl-top"
+                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text key)
+                                                      (list 'tag "span" 'class "vl-name"
+                                                            'text (substring (cadr s) 2 (string-length (cadr s))))))
+                                (list 'tag "div" 'class "vl-value" 'text (cadr (assoc key values)))))))
+                vscode--llm-sections)))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
 ;; top; b m e p s o (on an empty input), or Left and Right, choose what the
@@ -222,10 +249,11 @@
   (let* ((section key)
          (now (llm-config-combination chat))
          (tabs (lambda () (map (lambda (s) (list (cadr s) (equal? (car s) section))) vscode--llm-sections)))
+         ;; another tab opens the dialog again: its drawing on top marks the tab
          (show! (lambda (k)
-                  (set! section k)
-                  (minibuffer-set-candidates! (vscode--llm-rows chat k))
-                  (minibuffer-tabs! (tabs))))
+                  (set! *mb-tab-fn* #f)
+                  (minibuffer-detach!)
+                  (vscode--llm-open! chat k)))
          (done! (lambda () (set! *mb-tab-fn* #f)))
          (apply! (lambda (box what)
                    (llm-bundle-apply! chat box)
@@ -234,7 +262,7 @@
                    (message (string-append chat " now runs " what)))))
     (minibuffer-read* "LLM: " (vscode--llm-rows chat section)
       (list (list 'style "modal")
-            (list 'html (vscode--llm-head chat))
+            (list 'html (vscode--llm-head chat section))
             (list 'change
                   (lambda (input)
                     (when (and (= (string-length input) 1) (assoc input vscode--llm-sections))
@@ -274,7 +302,6 @@
                      ((equal? v "Connectors") (run-command "llm-connectors"))
                      ((equal? v "Switch chat") (run-command "vscode-chats"))
                      ((equal? v "New chat") (run-command "chat-new")))))))
-    (minibuffer-tabs! (tabs))
     (set! *mb-tab-fn*
           (lambda (step)
             (let* ((keys (map car vscode--llm-sections))

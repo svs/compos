@@ -23,6 +23,10 @@ jobs:
             target: macos_arm
           - os: ubuntu-24.04
             target: linux
+            musl: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: linux_arm
+            musl: aarch64-unknown-linux-musl
     runs-on: ${{ matrix.os }}
     env:
       MIX_ENV: prod
@@ -46,14 +50,14 @@ jobs:
       - name: musl target for the Rust NIFs (Linux)
         if: runner.os == 'Linux'
         run: |
-          rustup target add x86_64-unknown-linux-musl
+          rustup target add ${{ matrix.musl }}
           pip install --quiet cargo-zigbuild
           printf '#!/bin/sh\nif [ "$1" = rustc ] || [ "$1" = build ]; then exec cargo-zigbuild "$@"; fi\nexec cargo "$@"\n' > "$RUNNER_TEMP/zcargo"
           chmod +x "$RUNNER_TEMP/zcargo"
           {
-            echo "COMPOS_NIF_TARGET=x86_64-unknown-linux-musl"
+            echo "COMPOS_NIF_TARGET=${{ matrix.musl }}"
             echo "COMPOS_CARGO=$RUNNER_TEMP/zcargo"
-            echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS=-C target-feature=-crt-static"
+            echo "CARGO_TARGET_$(echo '${{ matrix.musl }}' | tr 'a-z-' 'A-Z_')_RUSTFLAGS=-C target-feature=-crt-static"
           } >> "$GITHUB_ENV"
 
       - name: xz

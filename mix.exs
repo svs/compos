@@ -36,7 +36,8 @@ defmodule Compos.MixProject do
         burrito: [
           targets: [
             macos_arm: [os: :darwin, cpu: :aarch64],
-            linux: [os: :linux, cpu: :x86_64]
+            linux: [os: :linux, cpu: :x86_64],
+            linux_arm: [os: :linux, cpu: :aarch64]
           ]
         ]
       ]

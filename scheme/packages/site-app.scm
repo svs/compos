@@ -2816,6 +2816,8 @@
   "(site-app-read-page! NAME PAGE) — navigate the app's live tab and redraw PAGE")
 
 (effects! '(read))
+(public! 'site-app-get
+  "(site-app-get BUF KEY) — KEY of website app buffer BUF's state plist: row, data, list, spec, name, page...; #f when absent")
 (public! 'site-app-gen
   "(site-app-gen NAME) — the current render generation of a website app, or #f")
 (public! 'site-app-rows

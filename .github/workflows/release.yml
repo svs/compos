@@ -1,7 +1,8 @@
 # Builds the single-file compos executable for each target and attaches it
 # to a GitHub release. Push a tag like v0.1.0 to publish one.
 # Each target builds on its own runner: the Rust and C NIFs compile natively,
-# so Burrito never cross-compiles them.
+# so Burrito never cross-compiles them. On Linux Burrito ships a musl runtime,
+# so the Rust NIFs build for musl with cargo-zigbuild.
 name: release
 
 on:
@@ -42,6 +43,19 @@ jobs:
         with:
           version: 0.15.2
 
+      - name: musl target for the Rust NIFs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          pip install --quiet cargo-zigbuild
+          printf '#!/bin/sh\nif [ "$1" = rustc ] || [ "$1" = build ]; then exec cargo-zigbuild "$@"; fi\nexec cargo "$@"\n' > "$RUNNER_TEMP/zcargo"
+          chmod +x "$RUNNER_TEMP/zcargo"
+          {
+            echo "COMPOS_NIF_TARGET=x86_64-unknown-linux-musl"
+            echo "COMPOS_CARGO=$RUNNER_TEMP/zcargo"
+            echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS=-C target-feature=-crt-static"
+          } >> "$GITHUB_ENV"
+
       - name: xz
         run: ${{ runner.os == 'macOS' && 'brew install xz' || 'sudo apt-get install -y xz-utils' }}
 
@@ -50,6 +64,12 @@ jobs:
           mix local.hex --force && mix local.rebar --force
           mix deps.get
           mix release --overwrite
+          if [ "$RUNNER_OS" = Linux ]; then
+            for f in _build/prod/rel/compos/lib/compos_core-*/priv/native/*.so; do
+              if objdump -T "$f" | grep -q GLIBC_; then echo "$f needs glibc"; exit 1; fi
+              echo "$f"; readelf -d "$f" | grep NEEDED
+            done
+          fi
           ver="${GITHUB_REF_NAME#v}"
           mkdir dist
           cp burrito_out/compos_${{ matrix.target }} dist/compos-${ver}-${{ matrix.target }}

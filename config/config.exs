@@ -172,3 +172,14 @@ end
 #       format: "$date $time [$level] $metadata$message\n",
 #       metadata: [:user_id]
 #
+
+# A Linux release runs on Burrito's musl runtime, so its Rust NIFs must be
+# built for musl too. The release workflow sets COMPOS_NIF_TARGET and
+# COMPOS_CARGO; without them Rustler builds for the machine it runs on.
+if nif_target = System.get_env("COMPOS_NIF_TARGET") do
+  for nif <- [Compos.Core.TS, Compos.Core.RopeNif, Compos.Core.BufferHistoryNif] do
+    config :compos_core, nif,
+      target: nif_target,
+      cargo: {:bin, System.get_env("COMPOS_CARGO", "cargo")}
+  end
+end

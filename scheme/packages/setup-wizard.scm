@@ -174,8 +174,7 @@
 (define *setup-wizard--ollama-state* 'unknown)
 
 (define (setup-wizard--ollama-binary)
-  (let loop ((ps '("/opt/homebrew/bin/ollama" "/usr/local/bin/ollama")))
-    (cond ((null? ps) #f) ((file-exists? (car ps)) (car ps)) (else (loop (cdr ps))))))
+  (executable-find "ollama"))
 
 (define (setup-wizard--ollama-model)
   (list-ref (assq 'ollama *apropos-embedding-backend-specs*) 4))
@@ -196,19 +195,29 @@
     (setup-wizard-redraw-open!)))
 
 (define (setup-wizard-install-ollama!)
-  "Install or upgrade Ollama with brew, start it and pull the embedding
+  "Install or upgrade Ollama (brew on macOS, the official script on
+   Linux), start it and pull the embedding
    model, in a terminal in the other column."
   (let ((buf "*install:ollama*"))
     (buffer-create buf)
     (buffer-set-local! buf 'mode-name "term-mode")
     (buffer-set-local! buf 'terminal-command
-      (string-append "(brew upgrade ollama 2>/dev/null || brew install ollama)"
-                     " && (brew services restart ollama || (nohup ollama serve >/dev/null 2>&1 &))"
-                     " && until curl -s localhost:11434/api/version >/dev/null; do sleep 1; done"
-                     " && ollama pull " (setup-wizard--ollama-model)
-                     " && " setup--done-signal
-                     " && printf '\\nOllama is ready.\\n'"
-                     "; exec \"${SHELL:-/bin/sh}\" -l"))
+      (if (equal? (system-type) "darwin")
+          (string-append "(brew upgrade ollama 2>/dev/null || brew install ollama)"
+                         " && (brew services restart ollama || (nohup ollama serve >/dev/null 2>&1 &))"
+                         " && until curl -s localhost:11434/api/version >/dev/null; do sleep 1; done"
+                         " && ollama pull " (setup-wizard--ollama-model)
+                         " && " setup--done-signal
+                         " && printf '\\nOllama is ready.\\n'"
+                         "; exec \"${SHELL:-/bin/sh}\" -l")
+          ;; Linux: the official script installs it and its systemd service
+          (string-append "curl -fsSL https://ollama.com/install.sh | sh"
+                         " && (curl -s localhost:11434/api/version >/dev/null || (nohup ollama serve >/dev/null 2>&1 &))"
+                         " && until curl -s localhost:11434/api/version >/dev/null; do sleep 1; done"
+                         " && ollama pull " (setup-wizard--ollama-model)
+                         " && " setup--done-signal
+                         " && printf '\\nOllama is ready.\\n'"
+                         "; exec \"${SHELL:-/bin/sh}\" -l")))
     (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
     (buffer-set-local! buf 'terminal-command #f)
     (display-buffer-other-window! buf)

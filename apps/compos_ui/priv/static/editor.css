@@ -990,9 +990,6 @@ body.unfocused .window.active .cursor {
   font-size: var(--ag-base);
 }
 .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
-/* a whole transcript draws; the browser lays out only the blocks on
-   screen, and a block keeps its last measured height off screen */
-.ag-scroll > * { content-visibility: auto; contain-intrinsic-size: auto 3em; }
 .ag-label {
   font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.55); letter-spacing: 0.12em;
   color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; padding-top: 3px;

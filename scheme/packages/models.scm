@@ -757,8 +757,8 @@
 ;; the server time to bind its port before the version request.
 (define (models--serve-command)
   (string-append
-    "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin\" "
-    "nohup ollama serve >> " (compos-home) "/ollama.log 2>&1 & sleep 2"))
+    "nohup " (sh-quote (or (executable-find "ollama") "ollama"))
+    " serve >> " (compos-home) "/ollama.log 2>&1 & sleep 2"))
 
 (define (models--local-host)
   (let ((hs (filter models--local? (models-host-list))))

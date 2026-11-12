@@ -204,9 +204,12 @@
        (chat-activity! buf "streaming"))
 
       ((equal? type 'thought)
-       (let ((tail (agent-thought-note! slug (or (plist-get e 'text) ""))))
-         (when tail
-           (chat-activity! buf (agent-activity-preview tail)))))
+       ;; the run is kept for its thought block; the row under the
+       ;; transcript says only "thinking…". A preview sentence there
+       ;; changed every few tokens, read as text in the input, and
+       ;; redrew the whole chat each time.
+       (agent-thought-note! slug (or (plist-get e 'text) ""))
+       (chat-activity! buf "thinking…"))
 
       ((equal? type 'tool-call)
        (chat-activity! buf (string-append "tool · " (agent-tool-title e)))

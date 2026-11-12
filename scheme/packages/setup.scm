@@ -81,19 +81,33 @@
                  (shell-command->string
                    (string-append "command -v " program " 2>/dev/null"))) "")))
 
+(define (executable-find program)
+  "The full path of PROGRAM: on PATH, in npm's global bin, or in one of
+   setup-extra-program-dirs. #f when this machine does not have it."
+  (let ((on-path (string-trim
+                   (shell-command->string
+                     (string-append "command -v " (sh-quote program) " 2>/dev/null")))))
+    (cond ((string-prefix? "/" on-path) on-path)
+          ((setup--npm-program program))
+          (else
+            ;; a GUI-launched editor often lacks the shell's PATH; a missed
+            ;; program means a long download of what is already here
+            (let loop ((dirs setup-extra-program-dirs))
+              (cond ((null? dirs) #f)
+                    ((file-exists? (string-append (expand-file-name (car dirs)) "/" program))
+                     (string-append (expand-file-name (car dirs)) "/" program))
+                    (else (loop (cdr dirs)))))))))
+
 (define (setup--program-present? program)
-  "#t when PROGRAM is on PATH, or npm installed it where PATH does not look."
-  (or (setup--on-path? program)
-      (and (setup--npm-program program) #t)
-      ;; a GUI-launched editor often lacks the shell's PATH; the native
-      ;; installers (claude's among them) put programs in these places,
-      ;; and a missed one means a long download of what is already here
-      (and (find (lambda (dir) (file-exists? (string-append (expand-file-name dir) "/" program)))
-                 setup-extra-program-dirs)
-           #t)))
+  "#t when PROGRAM is on PATH, or installed where PATH does not look."
+  (and (executable-find program) #t))
 
 (define setup-extra-program-dirs
-  '("~/.local/bin" "~/.claude/local" "/opt/homebrew/bin" "/usr/local/bin" "~/.bun/bin"))
+  ;; where installers put programs that a GUI-launched editor's PATH can
+  ;; miss: user dirs, Homebrew (macOS and Linux), distro and snap dirs
+  '("~/.local/bin" "~/.claude/local" "~/.bun/bin" "~/.cargo/bin"
+    "/opt/homebrew/bin" "/usr/local/bin" "/home/linuxbrew/.linuxbrew/bin"
+    "~/.linuxbrew/bin" "/usr/bin" "/bin" "/snap/bin"))
 
 (define (setup--adopt-npm-command! name)
   "When the program of connector NAME is not on PATH but npm installed it,
@@ -944,6 +958,8 @@
 (public! 'bot-show-document-other-window!
   "(bot-show-document-other-window! BUFFER TITLE MARKDOWN SILENT?) — show bot documentation only in another window")
 (public! 'setup-report "(setup-report) — secret-free first-run setup report")
+(effects! '(read execute))
+(public! 'executable-find "(executable-find PROGRAM) — the full path of PROGRAM on PATH, in npm's bin or a usual install dir (macOS and Linux), else #f")
 ;; it runs `command -v` and `npm prefix -g` to look at PATH
 (effects! '(read execute))
 (public! 'setup-agent-missing-steps "(setup-agent-missing-steps NAME) — the (PROGRAM COMMAND) install steps of connector NAME whose program is not on PATH")

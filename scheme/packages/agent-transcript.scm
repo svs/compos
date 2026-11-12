@@ -1331,11 +1331,13 @@
                  'children (list (chat-view--label "YOU")
                                  (list 'tag "c-group" 'class "ag-user-text" 'text q))))
          queued)
-    (if (and (string? activity) (not (equal? activity "disconnected")))
-        (list (list 'tag "c-activity" 'class "ag-wait ag-activity"
-                    'children (list (chat-view--text "c-text" "ag-activity-text"
-                                                     (string-append "⋯ " activity)))))
-        '())
+    ;; the row is always there, blank when idle: it hides during a tool
+    ;; call and comes back for thinking, and a row that comes and goes
+    ;; moves the input up and down under the reader
+    (let ((shown (and (string? activity) (not (equal? activity "disconnected")))))
+      (list (list 'tag "c-activity" 'class (if shown "ag-wait ag-activity" "ag-wait ag-activity ag-idle")
+                  'children (list (chat-view--text "c-text" "ag-activity-text"
+                                                   (if shown (string-append "⋯ " activity) ""))))))
     ;; the images pasted since the last send, above the input they ride
     ;; with; each one's x drops it before the send
     (let ((pending (or (buffer-local-value 'chat-pending-images buf) '())))

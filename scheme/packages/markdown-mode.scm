@@ -27,6 +27,26 @@
 (defface! 'md-caption 'fg "#8a857a" 'style "italic")
 
 ;; A span at byte offsets S..E of LINE, which starts at byte START.
+;; a line that is one HTML <img> tag, as a README writes a sized picture:
+;; the src draws as the picture, its width carries as img-w-N, and the
+;; rest of the tag steps back
+(define md--html-img-pattern "^[ \t]*<img\\b[^>]*\\bsrc=\"([^\"]+)\"[^>]*>[ \t]*$")
+(define md--html-img-width-pattern "\\bwidth=\"?([0-9]+)")
+
+(define (md--html-img start line len)
+  (let ((m (re-groups md--html-img-pattern line 0)))
+    (and m
+         (let* ((src (nth 1 m))
+                (w (re-groups md--html-img-width-pattern line 0))
+                (face (if w
+                          (string-append "img-embed img-w-"
+                                         (substring-bytes line (car (nth 1 w)) (cadr (nth 1 w))))
+                          "img-embed")))
+           (list (list start (+ start len) "row-picture")
+                 (md--span start 0 (car src) "md-marker")
+                 (md--span start (car src) (cadr src) face)
+                 (md--span start (cadr src) len "md-marker"))))))
+
 (define (md--span start s e face)
   (list (+ start s) (+ start e) face))
 
@@ -491,6 +511,8 @@
       ((and (pair? caps) (pair? prev-caps) (equal? k 'text)
             (md--caption? line start caps prev prev-caps))
        (md--caption start len (md--caption? line start caps prev prev-caps)))
+      ;; a line that is one HTML <img> tag draws as its picture
+      ((md--html-img start line len) (md--html-img start line len))
       ;; a line that is one picture: the row centres it, as the page does
       ((and (pair? caps) (md--whole-line caps "image" line start))
        (cons (list start (+ start len) "row-picture") (md--inline-spans start line caps)))

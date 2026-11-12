@@ -2163,10 +2163,16 @@ defmodule Compos.Ui.EditorLive do
           assign(assigns,
             src: src,
             len: byte_size(txt),
-            image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed")
+            image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed"),
+            # img-w-N on the seg: the author's width, as <img width=N> asks
+            image_style:
+              case Regex.run(~r/\bimg-w-(\d+)\b/, cls) do
+                [_, w] -> "width: #{w}px"
+                _ -> nil
+              end
           )
 
-        ~M|<img id={@id} src={@src} class={@image_class} loading="lazy" contenteditable="false" data-len={@len} />|
+        ~M|<img id={@id} src={@src} class={@image_class} style={@image_style} loading="lazy" contenteditable="false" data-len={@len} />|
 
       cls =~ "x-embed" ->
         assigns = assign(assigns, len: byte_size(txt), card: Compos.Ui.Oembed.card(txt))

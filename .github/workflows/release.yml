@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             target: macos_arm
           - os: ubuntu-24.04
             target: linux
@@ -29,16 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Erlang and Elixir (Linux)
-        if: runner.os == 'Linux'
+      - name: Erlang and Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "28"
+          otp-version: "28.4.3"
           elixir-version: "1.19.5"
-
-      - name: Erlang and Elixir (macOS)
-        if: runner.os == 'macOS'
-        run: brew install erlang elixir
+          version-type: strict
 
       - uses: dtolnay/rust-toolchain@stable
 

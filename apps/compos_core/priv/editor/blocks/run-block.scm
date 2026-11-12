@@ -14,6 +14,8 @@
 ;;; not its byte offset. A tracking overlay (block.scm) follows the rope,
 ;;; and the result lands where it says.
 
+(require 'morg-kinds "morg/morg-kinds.scm")
+
 (package! 'morg-babel 'morg)
 (domain! 'writing)
 (effects! '(write execute))

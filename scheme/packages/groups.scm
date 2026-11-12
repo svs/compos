@@ -5,6 +5,11 @@
 ;;;; Chats contain one owning group ID and always have the role "chat".
 ;;;; This package owns membership, switching, layouts, records, and chats.
 
+(require 'window)
+(require 'modeline)
+(require 'tabulated-list)
+(require 'comint)
+
 (domain! 'buffers)
 (effects! '(write))
 

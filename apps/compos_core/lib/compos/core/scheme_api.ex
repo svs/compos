@@ -1330,6 +1330,13 @@ defmodule Compos.Core.SchemeAPI do
             {:error, _} -> true
           end
         end,
+      # A pattern walk in Scheme costs one call per folder; this is one call.
+      {"file-glob",
+       "(file-glob PATTERN [SKIP]) — return the local files PATTERN names; `*` matches within one name, `**` any depth of folders. A wildcard skips names that start with a dot, and `**` skips the folders named in the list SKIP."} =>
+        fn
+          [pattern] -> Compos.Core.Glob.files(pattern)
+          [pattern, skip] -> Compos.Core.Glob.files(pattern, skip || [])
+        end,
       {"file-directory?", "(file-directory? PATH) — return #t if PATH is a directory."} => fn [p] ->
         File.dir?(Path.expand(p))
       end,

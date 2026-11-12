@@ -21,6 +21,8 @@
 
 (require 'format)
 (require 'content-cache)
+(require 'tabulated-list)
+(require 'tools)
 
 (domain! 'web)
 (effects! '(read external))

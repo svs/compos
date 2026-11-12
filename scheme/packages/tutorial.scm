@@ -8,6 +8,10 @@
 ;;; The single TUTORIAL buffer below stays for onboarding.scm and
 ;;; training.scm, which stage it beside a guide chat.
 
+(require 'window)
+(require 'tabulated-list)
+(require 'chat-mode)
+
 (domain! 'learning)
 (effects! '(read write))
 

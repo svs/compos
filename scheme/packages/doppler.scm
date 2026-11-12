@@ -11,6 +11,7 @@
 ;;; value only ever shows up when someone asks for that exact secret.
 
 (require 'format)
+(require 'tabulated-list)
 
 (domain! 'secrets)
 (effects! '(write))

@@ -27,6 +27,7 @@ bin/test-fast                               # the suite in 4 partitions; all fou
 mix test                                    # one lane - use it when one readable log matters
 SCHEME_TESTS=keymap mix test apps/compos_core/test/compos/scheme_suite_test.exs   # one kernel test file (priv/tests)
 SCHEME_TESTS=morg mix test --include packages apps/compos_core/test/compos/package_suite_test.exs   # a package's tests
+mix test --include load_order apps/compos_core/test/compos/load_order_test.exs   # every package loads with core.scm and its own requires
 mix compos.reload scheme/packages/foo.scm   # a file outside the watched roots
 bin/docs                                    # regenerate docs/manual from the live registries (howto.scm)
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
@@ -242,7 +243,12 @@ apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 guess wrong. Read it before writing Scheme that walks JSON or scans text.
 
 Boot order is explicit: `editor.scm`, the small stdlib files, then stock
-`priv/init.scm`, which lists every bundled package in dependency order. After
+`priv/init.scm`, which lists every bundled package. `priv/core.scm` holds the
+libraries a package may use without a require (`custom`, `advice`). A package
+that needs any other package at load says `(require 'NAME)` at its top; the
+load order test fails when one is missing. The boot log lists the slowest
+files, and `(load-times-report)` gives the same list. Work that the boot does
+not need goes on `after-init-hook` with `(after-init 'FN)`. After
 stock boot, user config runs as `~/.compos/ai-config.scm`, `~/.compos/init.scm`,
 then saved `~/.compos/custom.scm`. `(load NAME)` searches `load-path`: priv, its
 packages, the project's `scheme/packages`, the config home, and its

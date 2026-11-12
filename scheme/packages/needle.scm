@@ -22,6 +22,8 @@
 ;;; package fetches its own weights, so a machine that never asks Needle
 ;;; anything pays nothing.
 
+(require 'endpoint)
+
 (domain! 'llm)
 (effects! '(write external execute))
 

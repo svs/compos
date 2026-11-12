@@ -6,6 +6,7 @@
 ;; the chats table is the mode list of chat-mode
 (require 'mode-list)
 (require 'chat-mode)
+(require 'ibuffer)
 
 (domain! 'chat)
 (effects! '(write))

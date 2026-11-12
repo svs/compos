@@ -7,6 +7,8 @@
 ;;; the rows share a trace id. This package owns the policy: row shape,
 ;;; slow threshold, filtering, and commands.
 
+(require 'tabulated-list)
+
 (domain! 'diagnostics)
 (effects! '(read))
 

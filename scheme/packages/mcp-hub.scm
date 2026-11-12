@@ -15,6 +15,8 @@
 ;;; through on-event!, because a row that sits on "connecting" forever
 ;;; reads as a broken feature, and the editor has no timer to poll with.
 
+(require 'tabulated-list)
+
 (define *mcp-hub-buffer* "*mcp-hub*")
 
 (defface! 'mcp-ready 'weight "600")

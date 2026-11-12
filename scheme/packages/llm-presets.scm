@@ -5,6 +5,8 @@
 ;;; page with every field. An edit on the page is the page's draft until
 ;;; C-c C-c saves it; the chats that ran the old preset follow the new one.
 
+(require 'tabulated-list)
+
 (package! "llm-presets")
 (domain! 'llm)
 (effects! '(read))

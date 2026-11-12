@@ -5,6 +5,9 @@
 ;; each, a few next steps picked from what is going on, and the tutorial's
 ;; lessons. Every row is a click and most have a key; q goes back.
 
+(require 'panes-mode)
+(require 'emacs-names)
+
 (domain! 'windows)
 (effects! '(write display))
 
@@ -48,10 +51,13 @@
 
 (define (pane-home--review-count)
   "The tasks of the group you are in that wait for your review: the ones
-   the todo list opens on."
-  (let ((g (frame-group)))
-    (length (filter (lambda (t) (or (not g) (equal? (plist-get t 'group) g)))
-                    (todo-list '(state "review"))))))
+   the todo list opens on. 0 until the todo files are found: a page drawn
+   when its buffer wakes must not walk the folders for a count."
+  (if (not (and (boundp 'todo-ready?) (todo-ready?)))
+      0
+      (let ((g (frame-group)))
+        (length (filter (lambda (t) (or (not g) (equal? (plist-get t 'group) g)))
+                        (todo-list '(state "review")))))))
 
 (define (pane-home--current-layout)
   (or (and (boundp 'panes-current-layout) (panes-current-layout)) 'free))

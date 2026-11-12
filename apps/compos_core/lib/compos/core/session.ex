@@ -470,6 +470,7 @@ defmodule Compos.Core.Session do
     # the load runs with promotion off: with the global frame still in the
     # local tier, every promotion re-walked every global binding.
     t0 = System.monotonic_time(:millisecond)
+    heap = boot_heap()
 
     interp =
       Compos.Scheme.Env.unpublished(fn ->
@@ -487,11 +488,18 @@ defmodule Compos.Core.Session do
     # The doubling threshold then starts from a live baseline.
     loaded = Scheme.frame_count(interp)
     interp = Scheme.flush(interp, external_roots())
+    restore_heap(heap)
 
     Logger.info(
       "scheme boot: #{loaded} frames loaded, #{Scheme.frame_count(interp)} kept, " <>
         "#{System.monotonic_time(:millisecond) - t0}ms"
     )
+
+    # the files that cost the most, so a slow boot names its cause in the log
+    case Scheme.eval_string(interp, "(load-times-report 12)") do
+      {:ok, report, _} when is_binary(report) -> Logger.info("scheme boot " <> report)
+      _ -> :ok
+    end
 
     :persistent_term.put(@pt, interp)
     :persistent_term.put(@pt_stamp, primitive_stamp())
@@ -509,10 +517,27 @@ defmodule Compos.Core.Session do
     # created above.
     report_boot_errors!()
 
+    # after-init-hook: the work a package put off until the boot is over.
+    # It runs on a lane of its own, after this init returns, so it delays
+    # neither the application start nor the first key. It waits for the
+    # desktop restore: the hook work must not take the processor from the
+    # buffers that the restore puts on screen.
+    Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+      Compos.Core.Desktop.await_boot_restore()
+
+      eval("(run-after-init-hook!)", nil, 300_000, {:system, :after_init})
+    end)
+
+    # The reload baseline reads every source file again, about 240 ms. It
+    # serves the first save, not the boot, so it runs after this init
+    # answers the callers that wait on :await_boot. A reload that arrives
+    # first builds the baseline itself.
+    send(self(), :build_reload_manifest)
+
     {:ok,
      %{
        last_live: Scheme.frame_count(interp),
-       reload_manifest: Hotload.Scheme.manifest()
+       reload_manifest: nil
      }}
   end
 
@@ -848,6 +873,13 @@ defmodule Compos.Core.Session do
   # sweep skips itself when any eval is in flight (Env.begin_gc) — a busy
   # editor just sweeps on a later tick.
 
+  def handle_info(:build_reload_manifest, state) do
+    case Map.get(state, :reload_manifest) do
+      nil -> {:noreply, Map.put(state, :reload_manifest, Hotload.Scheme.manifest())}
+      _ -> {:noreply, state}
+    end
+  end
+
   def handle_info(:gc_tick, state) do
     interp = interp()
     count = Scheme.frame_count(interp)
@@ -899,7 +931,7 @@ defmodule Compos.Core.Session do
         @bootstrap_files,
         interp,
         fn file, interp ->
-          path = Application.app_dir(:compos_core, "priv/#{file}")
+          path = bootstrap_path(file)
           # one file is one package here too
           interp = Hotload.Scheme.stamp_load_unit(interp, path, :bundled)
 
@@ -910,11 +942,15 @@ defmodule Compos.Core.Session do
           # no editor to read the error in. Emacs boots and shows you the
           # error, and so does this. record_boot_error!/2 keeps it for the
           # *Messages* buffer, and the editor comes up without that file.
+          t0 = System.monotonic_time(:millisecond)
+
           case safe_eval_string(interp, File.read!(path), file) do
             {:ok, _, interp} ->
               # a bootstrap file is provided like a loaded one, so a
               # (require 'editor) is free and the autoload harvest skips it
-              provide_feature(interp, Path.basename(file, ".scm"))
+              interp
+              |> provide_feature(Path.basename(file, ".scm"))
+              |> note_load_time(file, path, System.monotonic_time(:millisecond) - t0)
 
             {:error, msg} ->
               record_boot_error!(file, msg)
@@ -1038,6 +1074,55 @@ defmodule Compos.Core.Session do
 
   @doc "The files that did not load at boot, with the reason for each."
   def boot_errors, do: :persistent_term.get(@pt_boot_errors, [])
+
+  # The load allocates a few gigabytes of short-lived terms. With the
+  # default heap the collector ran about 860 minor and 110 major
+  # collections, 1.2 s of a 2.7 s boot. A collection costs the live data,
+  # not the heap, so a large young heap makes the collections few and the
+  # same price each. The binary heap limit grows with it: the sources and
+  # their strings are binaries, and a full binary heap forces a major
+  # collection. Both limits go back after the load, and one collection
+  # returns the memory.
+  @boot_heap_mb 128
+
+  defp boot_heap do
+    mb = Application.get_env(:compos_core, :scheme_boot_heap_mb, @boot_heap_mb)
+    words = div(mb * 1_048_576, :erlang.system_info(:wordsize))
+
+    if words > 0 do
+      {Process.flag(:min_heap_size, words), Process.flag(:min_bin_vheap_size, words)}
+    end
+  end
+
+  defp restore_heap(nil), do: :ok
+
+  defp restore_heap({heap, bin_vheap}) do
+    Process.flag(:min_heap_size, heap)
+    Process.flag(:min_bin_vheap_size, bin_vheap)
+    :erlang.garbage_collect()
+    :ok
+  end
+
+  # The package manifest is init.scm. :boot_manifest names another file in
+  # its place, so a check can boot the kernel with one package and see
+  # whether that package loads without the order init.scm gives it.
+  defp bootstrap_path("init.scm" = file),
+    do: Application.get_env(:compos_core, :boot_manifest) || Application.app_dir(:compos_core, "priv/#{file}")
+
+  defp bootstrap_path(file), do: Application.app_dir(:compos_core, "priv/#{file}")
+
+  # A bootstrap file does not go through the Scheme (load), so the loader's
+  # own record of load times would miss the three largest files. editor.scm
+  # defines the record, so its own note is the first one.
+  defp note_load_time(interp, file, path, ms) do
+    code =
+      "(load-time-note! '#{Path.basename(file, ".scm")} #{inspect(path)} #{ms} 'bundled 0)"
+
+    case Scheme.eval_string(interp, code) do
+      {:ok, _, interp2} -> interp2
+      {:error, _} -> interp
+    end
+  end
 
   defp provide_feature(interp, feature) do
     case Scheme.eval_string(interp, "(provide '#{feature})") do

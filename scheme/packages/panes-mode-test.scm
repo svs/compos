@@ -180,3 +180,12 @@
                     (check-equal! (car ring) (window-buffer (active-window)) "the focused buffer leads the ring")
                     (check-true! (and (member a ring) (member c ring) #t) "both landed buffers come first")))
                 (lambda () (pmt-done! (list a c home)))))))))))
+
+(deftest 'a-layout-preview-draws-without-a-catalog-change
+  "the first draw of a preview loads no package: a late load starts a second apropos build"
+  (lambda ()
+    (with-stubs (list (list 'window-layout-columns 3))
+      (lambda ()
+        (let ((gen (catalog-generation)))
+          (panes--tile-preview '(1 1 1) #f)
+          (check-equal! (catalog-generation) gen "the catalog generation stays the same"))))))

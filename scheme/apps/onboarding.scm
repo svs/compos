@@ -6,6 +6,8 @@
 ;;; to practise in; the guide changes what the stage shows as the lesson
 ;;; moves on, and the focus stays where the user put it.
 
+(require 'window)
+
 (domain! 'learning)
 (effects! '(write display))
 

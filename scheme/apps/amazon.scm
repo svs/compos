@@ -30,6 +30,9 @@
   "amazon-mode" "amazon-results-mode" "amazon-cart-mode" "amazon-detail-mode"
   "amazon-product-mode" "amazon-cart-item-mode")
 
+(require 'detail)
+(require 'tabulated-list)
+(require 'components)
 (require 'site-app)
 
 (domain! 'web)

@@ -20,6 +20,8 @@
 ;;; is about cost, speed and seeing everything; the answers may be wrong.
 ;;; It files no real todos and sends nothing.
 
+(require 'tabulated-list)
+
 (domain! 'system)
 (effects! '(write))
 (category! 'system)

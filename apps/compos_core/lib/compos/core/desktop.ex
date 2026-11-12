@@ -52,6 +52,38 @@ defmodule Compos.Core.Desktop do
   end
 
   @doc """
+  Wait until the boot restore puts the shown buffers back, at most
+  `timeout` ms. The boot queues the restore first, so this call gets
+  its answer after the restore. A boot with no restore answers at once.
+  A desktop that does not start within `timeout` ms is not waited for.
+  """
+  def await_boot_restore(timeout \\ 30_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    await_boot_restore_until(deadline)
+  end
+
+  # Session starts before this process, so the caller can ask first.
+  defp await_boot_restore_until(deadline) do
+    left = deadline - System.monotonic_time(:millisecond)
+
+    cond do
+      left <= 0 ->
+        :timeout
+
+      Process.whereis(__MODULE__) ->
+        try do
+          GenServer.call(__MODULE__, :await_boot_restore, left)
+        catch
+          :exit, _ -> :timeout
+        end
+
+      true ->
+        Process.sleep(min(20, left))
+        await_boot_restore_until(deadline)
+    end
+  end
+
+  @doc """
   The globals a desktop file holds, without touching the editor.
 
   Scheme installs them itself (`M-x desktop-read-globals`): this process
@@ -113,6 +145,8 @@ defmodule Compos.Core.Desktop do
     {result, state} = do_save(state)
     {:reply, result, state}
   end
+
+  defp on_call(:await_boot_restore, _from, state), do: {:reply, :ok, state}
 
   defp on_call(:restore, _from, state) do
     {result, state} = do_restore(state)

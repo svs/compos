@@ -19,6 +19,8 @@
 ;;;
 ;;; A relative PATH starts at the document's directory, as `:tangle` does.
 
+(require 'run-block "editor/blocks/run-block.scm")
+
 (define morg-show-source-parent-package *loading-package*)
 (define morg-show-source-parent-namespace *loading-namespace*)
 (define morg-show-source-parent-domain *catalog-domain*)

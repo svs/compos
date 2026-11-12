@@ -1,5 +1,10 @@
 ;;; whatsapp.scm --- Read and reply to WhatsApp chats through MCP.
 
+(require 'mcp)
+(require 'tabulated-list)
+(require 'groups)
+(require 'events)
+
 (package! "whatsapp")
 
 (domain! 'chat)

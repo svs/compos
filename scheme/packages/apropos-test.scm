@@ -303,6 +303,29 @@
           (apropos-reload-finished!)
           (check-equal! scheduled 1 "reload completion schedules one batch"))))))
 
+(deftest 'the-boot-builds-the-apropos-rows-once-on-after-init
+  "a registration during the boot schedules no build; after-init-hook schedules the one build"
+  (lambda ()
+    (let ((scheduled 0))
+      (with-stubs
+        (list (list 'apropos--schedule-embedding-sync!
+                    (lambda () (set! scheduled (+ scheduled 1))))
+              (list '*apropos--embedding-sync-pending* #f)
+              (list '*reloading?* #f)
+              (list '*after-init-done* #f))
+        (lambda ()
+          (apropos-catalog-changed! '(kind "function" name "one"))
+          (apropos-catalog-changed! '(kind "function" name "two"))
+          (check-equal! scheduled 0 "the boot does not start a build for each registration")
+          (check-true! *apropos--embedding-sync-pending* "the change waits as pending")
+          (apropos--warm-after-boot!)
+          (check-equal! scheduled 1 "the after-init function schedules one build")
+          (set! *after-init-done* #t)
+          (apropos-catalog-changed! '(kind "function" name "three"))
+          (check-equal! scheduled 2 "after the boot a registration schedules a build"))))
+    (check-true! (and (member 'apropos--warm-after-boot! (hook-functions 'after-init-hook)) #t)
+                 "the boot put the build on after-init-hook")))
+
 (deftest 'embedding-rebuild-explains-a-missing-key
   "a manual rebuild clears the cache and reports why it cannot refill"
   (lambda ()

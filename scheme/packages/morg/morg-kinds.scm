@@ -28,6 +28,8 @@
 ;;; morg.scm and markdown-mode.scm read the paint keys. morg-babel.scm reads
 ;;; the run keys and registers the bundled runners.
 
+(require 'diff-block "editor/blocks/diff-block.scm")
+
 (define morg-kinds-parent-package *loading-package*)
 (define morg-kinds-parent-namespace *loading-namespace*)
 (define morg-kinds-parent-domain *catalog-domain*)

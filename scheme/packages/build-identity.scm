@@ -8,6 +8,8 @@
 ;;; The release step in mix.exs writes priv/build-info.scm; without it a
 ;;; release still names its version, from the compos_core directory.
 
+(require 'appearance)
+
 (domain! 'system)
 (effects! '(read))
 

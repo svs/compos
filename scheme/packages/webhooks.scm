@@ -11,6 +11,8 @@
 ;;; as topic webhook:NAME, kind received. With 'data 'json the event's data
 ;;; is the parsed JSON body alone, so a listener's 'match reads the payload.
 
+(require 'tabulated-list)
+
 (package! "webhooks")
 (category! 'system)
 (domain! 'web-servers)

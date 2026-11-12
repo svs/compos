@@ -7,6 +7,8 @@
 ;;; the foreground of its shell, and its state is unknown. The rows that
 ;;; need you come first. A row's page is its shell.
 
+(require 'tabulated-list)
+
 ;;;###autoload
 (autoload-modes "herdr-mode")
 

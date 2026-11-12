@@ -17,6 +17,9 @@
 ;;; The *annotations* buffer is a standard list. Its header shows one tab
 ;;; per source filter; <left> and <right> change the tab.
 
+(require 'tabulated-list)
+(require 'window)
+
 (domain! 'editing)
 (effects! '(read))
 

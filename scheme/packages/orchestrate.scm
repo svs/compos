@@ -19,6 +19,7 @@
 ;;; No new view: the todo list shows the tree, M-x subagents the chats.
 
 (require 'todo)
+(require 'agent)
 
 (domain! 'chat)
 (effects! '(read))

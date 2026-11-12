@@ -16,6 +16,8 @@
 ;;; new connector shows up here with nothing added.
 
 (require 'setup)
+(require 'tabulated-list)
+(require 'chat-mode)
 
 (domain! 'setup)
 (effects! '(read))

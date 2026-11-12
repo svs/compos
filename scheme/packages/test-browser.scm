@@ -9,6 +9,8 @@
 ;;; a scope. mix and the editor's own Scheme tests ship here;
 ;;; test-browser-define-backend! adds another.
 
+(require 'tabulated-list)
+
 (domain! 'testing)
 (effects! '(pure))
 

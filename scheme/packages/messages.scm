@@ -1,5 +1,7 @@
 ;;; messages.scm --- Structured *Messages* list and filters.
 
+(require 'tabulated-list)
+
 (domain! 'system)
 (effects! '(write display))
 

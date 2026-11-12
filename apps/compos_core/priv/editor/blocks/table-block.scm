@@ -15,6 +15,8 @@
 ;;; view and the page draw them.
 
 ;; the block vocabulary is the editor's
+(require 'morg-kinds "morg/morg-kinds.scm")
+
 (namespace! 'editor)
 (domain! 'files)
 (effects! '(pure))

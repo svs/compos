@@ -10,6 +10,9 @@
 ;;; This is only the pipe: each mode subscribes to its own events and
 ;;; decides what makes a notice.
 
+(require 'events)
+(require 'tabulated-list)
+
 (domain! 'interaction)
 (effects! '(write))
 

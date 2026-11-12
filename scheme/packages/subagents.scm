@@ -11,6 +11,7 @@
 
 ;; the spawn edges are the chats table's other view
 (require 'agent-fleet)
+(require 'ibuffer)
 
 (domain! 'chat)
 (effects! '(read))

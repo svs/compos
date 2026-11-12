@@ -11,6 +11,8 @@
 ;;; its commands and the buffers it has open. o (or RET) opens the app,
 ;;; v visits its source.
 
+(require 'tabulated-list)
+
 (domain! 'commands)
 (effects! '(write))
 (category! 'commands)

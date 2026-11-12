@@ -3,6 +3,8 @@
 ;;; This module owns transcript blocks, overlays, folds, tool cards, waiting
 ;;; state, queued rows, and paragraph reveal. All offsets are buffer bytes.
 
+(require 'window)
+
 (domain! 'chat)
 (effects! '(write))
 (category! 'chat)

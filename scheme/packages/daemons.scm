@@ -3,6 +3,8 @@
 ;;; A daemon owns complete workspaces. The browser frame can move between
 ;;; daemons, but a workspace never has two daemon owners.
 
+(require 'tabulated-list)
+
 (package! 'daemons 'sessions)
 
 (define *daemons-buffer* "*daemons*")

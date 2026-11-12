@@ -30,6 +30,8 @@
 
 ;; the listing's tab bar takes the hand keys and / (tab-bars.scm)
 (require 'tab-bars)
+(require 'tabulated-list)
+(require 'detail)
 
 (domain! 'web)
 (effects! '(read))

@@ -10,6 +10,7 @@
 ;;; frame in one flat list, on screen and waiting.
 
 (require 'panes-mode)
+(require 'tabulated-list)
 
 (domain! 'windows)
 (effects! '(write display))

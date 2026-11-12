@@ -5,6 +5,8 @@
 ;;; rows drawn. Moving the point shows the whole event beside the list.
 ;;; While the list is on screen it follows the head of the log.
 
+(require 'tabulated-list)
+
 (domain! 'system)
 (effects! '(write))
 (category! 'system)

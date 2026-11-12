@@ -35,12 +35,22 @@
 ;; the chat hook and the boot sweep below set a prompt part
 (require 'prompts)
 (require 'app-watch)
+(require 'tab-bars)
+(require 'apps)
+(require 'events)
+(require 'transient)
+(require 'tabulated-list)
 
 (domain! 'writing)
 (effects! '(read))
 
-(defcustom 'todo-directories '("~/.compos/**/todos.md")
-  "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
+;; The default follows the home of this daemon. A daemon with its own
+;; COMPOS_HOME then does not read or write the todo files of another daemon.
+(define (todo--home-directories)
+  (list (string-append (compos-home) "/**/todos.md")))
+
+(defcustom 'todo-directories (todo--home-directories)
+  "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. The default is every todos.md under the compos home of this daemon, (compos-home). A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
 
 (defcustom 'todo-skip-directories
   '("node_modules" "_build" "deps" "target" "venv" "dead" "worktree-daemons" "chrome-profile" "grammars")
@@ -163,27 +173,13 @@
 
 ;;; --- files -------------------------------------------------------------------
 
-;; the files todo-directories names. Expanding `**` walks every folder
-;; under it, which is slow on a big tree, so the list is kept and a task
-;; renews it: at load, on `g`, and when a new project's file is written.
+;; the files todo-directories names. Expanding `**` reads every folder
+;; under it. file-glob does that in one call, a few milliseconds on a home
+;; of some hundred folders, so a caller that finds no list yet can make
+;; one in place. A task still renews the list: at load, on `g`, and when a
+;; new project's file is written.
 (define (todo--glob pattern)
-  (let walk ((dir "/") (segs (cdr (string-split (expand-path pattern) "/"))))
-    (let ((names (lambda () (let ((l (and (file-directory? dir) (list-dir dir)))) (if (pair? l) l '()))))
-          (subdirs (lambda (ns) (map (lambda (n) (substring-bytes n 0 (- (string-byte-length n) 1)))
-                                     (filter (lambda (n) (and (string-suffix? "/" n) (not (string-prefix? "." n))
-                                                              (not (member (substring-bytes n 0 (- (string-byte-length n) 1)) todo-skip-directories))))
-                                             ns)))))
-      (cond ((null? segs) (if (and (file-exists? dir) (not (file-directory? dir))) (list dir) '()))
-            ((equal? (car segs) "**")
-             (fold (lambda (acc d) (append acc (walk (todo--join dir d) segs)))
-                   (walk dir (cdr segs)) (subdirs (names))))
-            ((string-contains? (car segs) "*")
-             (let ((re (string-append "^" (string-join (map regexp-quote (string-split (car segs) "*")) "[^/]*") "$")))
-               (fold (lambda (acc n) (append acc (walk (todo--join dir n) (cdr segs))))
-                     '()
-                     (filter (lambda (n) (and (not (string-prefix? "." n)) (re-match re n)))
-                             (map (lambda (n) (if (string-suffix? "/" n) (substring-bytes n 0 (- (string-byte-length n) 1)) n)) (names))))))
-            (else (walk (todo--join dir (car segs)) (cdr segs)))))))
+  (file-glob pattern todo-skip-directories))
 
 ;; A worktree daemon keeps its own copy of ~/.compos under worktree-daemons/;
 ;; its todos.md files are stale copies of the user's, so `**` must not reach them.
@@ -193,17 +189,31 @@
 
 (define *todo-files* #f)
 
+(define (todo-ready?)
+  "(todo-ready?) — #t when the todo files are found, so a list costs no walk of the folders"
+  (and *todo-files* #t))
+
 (define (todo--files)
   (unless *todo-files* (set! *todo-files* (todo--resolve)))
   (filter file-exists? *todo-files*))
 
+;; The task parses each file too. The first list after a boot then finds
+;; the parse made; a parse that fails here fails again where it is read.
+(define (todo--resolve-and-parse)
+  (let ((files (todo--resolve)))
+    (ignore-errors (lambda () (for-each todo--parsed (filter file-exists? files))))
+    files))
+
+;; todo-files-hook: (FN) runs when the file list is new. A page that
+;; shows a count of tasks and drew before the list was there draws again.
 (define (todo--rescan!)
-  (task-run! todo--resolve
+  (task-run! todo--resolve-and-parse
     (lambda (ok? files)
       (when ok?
         (set! *todo-files* files)
         (todo--agenda-sync!)
-        (todo--refresh-all!)))))
+        (todo--refresh-all!)
+        (run-hooks 'todo-files-hook)))))
 
 ;; a project's file: the one it has, else where the first pattern puts it,
 ;; the first wildcard standing for the project and a later ** for nothing
@@ -570,6 +580,7 @@
 (public! 'todo-list "(todo-list [SPEC]) — tasks, most urgent first; SPEC keys: state, all, project, assignee (none = unassigned), tag, text, due-before, overdue, ready, parent, source")
 (public! 'todo-next "(todo-next WHO [SPEC]) — the most urgent ready task for WHO, else an unassigned one; #f when none")
 (public! 'todo-projects "(todo-projects) — every project name")
+(public! 'todo-ready? "(todo-ready?) — #t when the todo files are found, so a list costs no walk of the folders")
 
 ;;; --- the API: writing --------------------------------------------------------
 ;;; PROPS is a plist. Every writer may pass 'by, the name the change is

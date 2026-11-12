@@ -32,6 +32,8 @@
 ;;; rows in a window.
 
 (require 'format)
+(require 'window)
+(require 'groups)
 
 (domain! 'buffers)
 (effects! '(read))

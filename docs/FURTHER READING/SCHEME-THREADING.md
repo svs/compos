@@ -166,7 +166,7 @@ literal result path unchanged.
 The current implementation derives normalized apropos rows from several
 registries. It caches the rows by catalog generation. The first caller after a
 catalog change builds them under one Scheme lock. Concurrent callers reuse the
-published result. A short boot task warms this cache.
+published result. The boot builds the rows once, on `after-init-hook`. The boot does not schedule a build for each registration. A package that registers names after the boot, for example on an autoload, starts a second build.
 
 This rebuild and warm-up are transitional. They do not match the intended
 incremental library model.

@@ -1,6 +1,9 @@
 ;;; substack.scm --- subscriptions, publication pages, and post readers.
 
 ;; the major modes this file defines: a buffer restored in one loads the file
+(require 'tabulated-list)
+(require 'detail)
+
 ;;;###autoload
 (autoload-modes "substack-mode" "substack-detail-mode" "substack-reader-mode")
 

@@ -28,6 +28,9 @@
 ;;; require of a loaded file is free, so the order below can only be
 ;;; wrong about speed, never about a name.
 
+;; the libraries a package may use without a require
+(require 'core)
+
 ; the list buffer comes first: a package declares its lists at load, and
 ; dired is the first such package
 ; the transient menus come first: a package defines its prefixes at load

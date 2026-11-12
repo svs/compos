@@ -30,6 +30,7 @@
 
 ;; the workflow "cron" runs the jobs
 (require 'workflows)
+(require 'tabulated-list)
 
 (domain! 'system)
 (effects! '(pure))

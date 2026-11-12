@@ -4,6 +4,8 @@
 ;;; a normal list, so preview, narrowing, restore, and keyboard motion use the
 ;;; same contracts as ibuffer and the other result modes.
 
+(require 'tabulated-list)
+
 (category! 'search)
 (effects! '(read))
 

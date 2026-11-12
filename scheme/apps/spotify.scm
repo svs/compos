@@ -11,6 +11,10 @@
 ;;; sheets that read the pages are web/parsers/spotify-rows.xsl and
 ;;; web/parsers/spotify-detail.xsl.
 
+(require 'components)
+(require 'tools)
+(require 'tabulated-list)
+
 (package! 'spotify)
 (require 'site-app)
 (require 'cell)

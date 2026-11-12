@@ -18,6 +18,10 @@
 ;;;   'code-saved  what the mode clobbered, restored on exit
 ;;;   'code-folds  the fold ranges the mode owns, tag 'code
 
+(require 'tools)
+(require 'agent)
+(require 'chrome)
+
 (defgroup 'code-browse "Structural browsing of source files.")
 
 ;; Files with more lines than this fold their definitions on entry.

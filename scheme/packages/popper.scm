@@ -25,6 +25,7 @@
 
 ;; the popup keys take the backtick family from groups
 (require 'groups)
+(require 'window)
 
 (domain! 'windows)
 (effects! '(read))

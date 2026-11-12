@@ -11,6 +11,8 @@
 ;;; compos MCP server at user scope (claude mcp add --scope user compos --
 ;;; priv/native/compos-mcp-shim).
 
+(require 'herdr-agent)
+
 (domain! 'agents)
 (effects! '(read))
 

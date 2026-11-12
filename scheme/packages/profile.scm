@@ -19,6 +19,7 @@
 ;;; what the report says, and where it shows.
 
 (require 'format)
+(require 'tabulated-list)
 
 (domain! 'diagnostics)
 (effects! '(read))

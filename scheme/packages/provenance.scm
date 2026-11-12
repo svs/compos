@@ -16,6 +16,10 @@
 ;;; is still in the history, but reading it back means checking out the version
 ;;; before the delete, which a list of rows does not do.
 
+(require 'detail)
+(require 'tabulated-list)
+(require 'index)
+
 (domain! 'buffers)
 (effects! '(read))
 

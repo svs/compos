@@ -7,6 +7,8 @@
 ;;; One model at a time, so neither the timings nor the learned functions
 ;;; of one model reach another.
 
+(require 'tabulated-list)
+
 (domain! 'fast-code)
 (effects! '(read external spend))
 

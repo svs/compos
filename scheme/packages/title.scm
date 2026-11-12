@@ -15,6 +15,8 @@
 ;;; point of installing it: a label and a title for every chat, on device,
 ;;; for no money and no round trip.
 
+(require 'keys)
+
 (domain! 'llm)
 (effects! '(read external execute))
 

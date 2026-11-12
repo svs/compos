@@ -17,6 +17,8 @@
 ;;; from; an unbind writes the map that owns the binding, which for a
 ;;; key behind a prefix is the map the prefix leads to.
 
+(require 'tabulated-list)
+
 (domain! 'commands)
 (effects! '(read))
 

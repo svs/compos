@@ -3,9 +3,9 @@ defmodule Compos.Core.SchemeWarmup do
 
   alias Compos.Core.Session
 
-  # The catalog is complete when Session publishes its interpreter. Build the
-  # immutable apropos rows and reconcile their vectors in a shared-world task:
-  # application startup can finish, and a foreground query embeds only itself.
+  # Warm what the first use pays for, off the lanes that serve keys. The
+  # apropos rows and their vectors are not here: tools.scm builds them once
+  # on after-init-hook, when the catalog is complete.
   def start_link(_opts) do
     Task.start_link(fn ->
       Process.sleep(50)
@@ -15,18 +15,14 @@ defmodule Compos.Core.SchemeWarmup do
       # own lane, in front of every keystroke queued there. Pay it here.
       Compos.Core.ModelCatalog.warm()
 
-      # The embedding sync can call the network once per missing vector, so
-      # the first boot after the catalog grows runs for minutes. The task is
-      # temporary and owns its lane, so a long wait blocks nothing; a short
-      # timeout kills the task and leaves the caches cold.
+      # The task is temporary and owns its lane, so a long wait blocks
+      # nothing.
       Session.eval(
         """
         (begin
           ;; the catalog snapshot Elixir reads for a reasoning lookup. Built
           ;; here, once, after the catalog is warm; rebuilt by a catalog install.
-          (when (boundp 'model-rules-build!) (model-rules-build!))
-          (apropos--rows-cached)
-          (apropos-sync-embeddings!))
+          (when (boundp 'model-rules-build!) (model-rules-build!)))
         """,
         nil,
         300_000,

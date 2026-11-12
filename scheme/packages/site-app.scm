@@ -1,5 +1,7 @@
 ;;; site-app.scm --- turn a live website into a compos list-and-detail app
 
+(require 'transient)
+
 (package! 'site-app)
 (origin! 'bundled)
 

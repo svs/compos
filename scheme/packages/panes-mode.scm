@@ -13,6 +13,11 @@
 (require 'panes)
 (require 'groups)
 (require 'window-log)
+(require 'window)
+(require 'components)
+;; make-list draws the layout previews. An autoload at the first draw
+;; registers its file after the boot and starts a second apropos build.
+(require 'emacs-names)
 
 (domain! 'windows)
 (effects! '(write display))
@@ -1571,10 +1576,13 @@
 
 (define (pane-home--review-count)
   "The tasks of the group you are in that wait for your review: the ones
-   the todo list opens on."
-  (let ((g (frame-group)))
-    (length (filter (lambda (t) (or (not g) (equal? (plist-get t 'group) g)))
-                    (todo-list '(state "review"))))))
+   the todo list opens on. 0 until the todo files are found: a page drawn
+   when its buffer wakes must not walk the folders for a count."
+  (if (not (and (boundp 'todo-ready?) (todo-ready?)))
+      0
+      (let ((g (frame-group)))
+        (length (filter (lambda (t) (or (not g) (equal? (plist-get t 'group) g)))
+                        (todo-list '(state "review")))))))
 
 (define (pane-home--current-layout)
   (or (and (boundp 'panes-current-layout) (panes-current-layout)) 'free))
@@ -1754,10 +1762,18 @@
     (when (and (buffer-exists? pane-home-buffer)
                (not (equal? (pane-home--blocks) (buffer-local-value 'render-blocks pane-home-buffer))))
       (pane-home--render!))
-    (let ((card (pane-home--empty-blocks "Pane")))
+    ;; a card's text holds the count of tasks; its blocks do not
+    (let ((card (pane-home--empty-blocks "Pane")) (text (pane-home--text)))
       (for-each (lambda (b)
-                  (unless (equal? card (buffer-local-value 'render-blocks b)) (pane-card--render! b)))
+                  (unless (and (equal? card (buffer-local-value 'render-blocks b))
+                               (equal? text (buffer-text b)))
+                    (pane-card--render! b)))
                 (pane-card--buffers)))))
+
+;; the pages drew a count of 0 when they woke before the todo files were found
+(define (pane-home--todos-found!)
+  (report-errors "pane-home-todos" (lambda () (pane-home--redraw!))))
+(add-hook! 'todo-files-hook 'pane-home--todos-found!)
 
 ;; the empty pane is the home page too: its layouts, next steps and lessons
 (define (pane-home--key k)

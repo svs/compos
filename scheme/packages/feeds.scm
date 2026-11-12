@@ -11,6 +11,8 @@
 ;;; live in ~/.compos/feeds, one URL per line; the read links live in
 ;;; ~/.compos/feeds-read.
 
+(require 'tabulated-list)
+
 (domain! 'web)
 (effects! '(read external))
 

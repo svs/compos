@@ -158,6 +158,12 @@
 (define (do-pick phrase k)
   (do--ask phrase (lambda (r) (k (and (equal? (car r) 'ok) (cadr r))))))
 
-(when do-warm-on-load (do-warm!))
+;; The warm-up builds the catalog prompt from every command, so it waits
+;; for the boot to end: the catalog is complete then, and the boot does not
+;; pay for the prompt.
+(define (do--warm-on-load!)
+  (when do-warm-on-load (do-warm!)))
+
+(after-init 'do--warm-on-load!)
 
 (public! 'do-pick "(do-pick PHRASE K) — K gets the command a small local model picks for PHRASE, or #f")

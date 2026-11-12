@@ -6,6 +6,9 @@
 ;;; will do; the app never opens or focuses one by itself.
 
 ;; the major modes this file defines: a buffer restored in one loads the file
+(require 'tabulated-list)
+(require 'detail)
+
 ;;;###autoload
 (autoload-modes "insta-mode" "insta-detail-mode")
 

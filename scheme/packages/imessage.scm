@@ -4,6 +4,9 @@
 ;;; of the iPhone included once Text Message Forwarding is on. Reading it
 ;;; needs Full Disk Access for compos; a reply goes out through Messages.app.
 
+(require 'tabulated-list)
+(require 'groups)
+
 (package! "imessage")
 
 (domain! 'chat)

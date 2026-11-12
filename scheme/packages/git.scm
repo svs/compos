@@ -10,6 +10,8 @@
 ;;; subdirectory the diff covers only that subtree, and the buffer is named
 ;;; for the scope. C-x g belongs to group navigation.
 
+(require 'diff-mode)
+
 (define git-log-count 20)
 
 (define (git--ok v) (if (diff--error? v) '() v))

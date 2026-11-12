@@ -1,6 +1,9 @@
 ;;; ats.scm --- SVS recruiting as a live website app
 
 ;; the major modes this file defines: a buffer restored in one loads the file
+(require 'components)
+(require 'tabulated-list)
+
 ;;;###autoload
 (autoload-modes
   "ats-mode" "ats-detail-mode" "ats-approval-mode" "ats-candidate-mode"

@@ -10,6 +10,8 @@
 ;;; as a parameter, and calls it. That function is what is learned: it joins
 ;;; the API, and the next request of its kind is one call to it.
 
+(require 'palette)
+
 (domain! 'fast-code)
 (effects! '(read write external execute spend))
 

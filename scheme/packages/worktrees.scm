@@ -13,6 +13,8 @@
 ;;; worktree is named after the thread slug, so buffer-authors, the
 ;;; COMPOS_AGENT env, and the branch all carry the same identity.
 
+(require 'tabulated-list)
+
 (package! 'worktrees 'git)
 (domain! 'git)
 (effects! '(write external))

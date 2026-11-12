@@ -9,6 +9,7 @@
 ;;; companion workspace. `write` composes both. Knobs live in 'writing.
 
 (require 'workspace-mode)
+(require 'window)
 
 (domain! 'writing)
 (effects! '(write))

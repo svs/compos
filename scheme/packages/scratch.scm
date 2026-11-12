@@ -6,6 +6,8 @@
 ;;; work buffer in that group shares it. It inherits session settings from the
 ;;; buffer that opened it, but it does not inherit presentation modes.
 
+(require 'groups)
+
 (domain! 'buffers)
 (effects! '(write))
 

@@ -9,6 +9,8 @@
 ;;; encoding: every diagnostic and location arrives with startByte and
 ;;; endByte already computed for open buffers.
 
+(require 'tabulated-list)
+
 (category! 'code)
 (domain! 'code)
 (effects! '(write external execute))

@@ -12,6 +12,10 @@
 ;;; Make one at Linear > Settings > Security & access > Personal API keys.
 ;;; Every call is async; nothing waits on the lane.
 
+(require 'tabulated-list)
+(require 'detail)
+(require 'emacs-names)
+
 (domain! 'linear)
 (effects! '(write))
 

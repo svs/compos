@@ -37,6 +37,8 @@
 ;;; holding it up.
 
 (require 'format)
+(require 'endpoint)
+(require 'tabulated-list)
 
 (domain! 'llm)
 (effects! '(read external))

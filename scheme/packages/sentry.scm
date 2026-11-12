@@ -8,6 +8,7 @@
 ;;; The issue view keeps complete raw JSON behind a collapsed disclosure.
 
 (require 'format)
+(require 'tabulated-list)
 
 (domain! 'sentry)
 (effects! '(write))

@@ -25,6 +25,10 @@
 ;;; (the selected search line, or the thread being read), and tools let
 ;;; the model search and read mail itself.
 
+(require 'tabulated-list)
+(require 'detail)
+(require 'events)
+
 (defgroup 'notmuch "Email: notmuch search, reading, and sending.")
 
 (defcustom 'notmuch-program "notmuch"

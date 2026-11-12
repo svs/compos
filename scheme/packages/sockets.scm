@@ -13,6 +13,8 @@
 ;;; (mcp-hub-restart!, lsp-start!, agent-reconnect!, process-restart!,
 ;;; listener-restart!). This buffer only names the rows and routes the keys.
 
+(require 'tabulated-list)
+
 (domain! 'system)
 (effects! '(destroy execute))
 

@@ -14,6 +14,8 @@
 ;;; and C-q close the menu, and each one gives the selected row's config to
 ;;; the chat. Saving a draft into a preset is a separate key.
 
+(require 'transient)
+
 (domain! 'llm)
 (effects! '(write))
 

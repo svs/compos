@@ -7,6 +7,7 @@
 ;;; from init.scm before every package that opens a chat.
 
 (require 'buffer-relations)
+(require 'transient)
 
 (domain! 'chat)
 (effects! '(unknown))

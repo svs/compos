@@ -16,6 +16,8 @@
 ;;;
 ;;; Columns:  <mark> <kind> <name> <bar> <size> <modified> <perms> <vc>
 
+(require 'tabulated-list)
+
 (domain! 'files)
 (effects! '(read))
 

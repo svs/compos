@@ -49,6 +49,8 @@ twice. registry-test.scm checks it.
 
 | hook | arguments | when |
 |------|-----------|------|
+| `after-init-hook` | | once for each boot, after the packages and the user config load and after the desktop restore puts the shown buffers back. Add a function with `(after-init 'FN)`: it also runs FN at once when the file loads after the boot |
+| `todo-files-hook` | | when the todo package has found its files again: after the boot, on `g` in the list, and after a new project's file. A page that shows a count of tasks draws again here |
 | `pre-command-hook` | | before every command and every self-insert |
 | `post-command-hook` | | after every command and every self-insert |
 | `point-motion-hook` | BUF | the client's caret moved point in the editing state, with no command (editor_live.ex `sel`) |

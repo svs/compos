@@ -8,6 +8,8 @@
 ;;; and every time it fired. k cancels a live one, c shows its chat, t its
 ;;; task.
 
+(require 'tabulated-list)
+
 (domain! 'chat)
 (effects! '(write))
 (category! 'chat)

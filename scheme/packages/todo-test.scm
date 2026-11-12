@@ -12,6 +12,55 @@
       (set! *todo-chat-sigs* (filter (lambda (s) (not (equal? (car s) topic))) *todo-chat-sigs*)))))
 
 
+;; the files a pattern names: file-glob walks, todo-skip-directories decides
+(deftest 'todo-glob-reaches-any-depth-and-skips-the-named-folders
+  "** finds a todos.md at each depth, and enters no skipped folder and no dot folder"
+  (lambda ()
+    (let ((root (string-append "/tmp/zz-todo-glob-" (number->string (current-time))
+                               "-" (number->string (random 100000)))))
+      (for-each (lambda (d)
+                  (make-directory! (string-append root d))
+                  (write-file! (string-append root d "/todos.md") "# zz\n"))
+                '("/a" "/a/b" "/node_modules" "/a/.hidden"))
+      (write-file! (string-append root "/a/notes.md") "zz\n")
+      (check-equal! (todo--glob (string-append root "/**/todos.md"))
+                    (list (string-append root "/a/todos.md") (string-append root "/a/b/todos.md"))
+                    "the two files outside the skipped folders, the shallow one first")
+      (check-equal! (todo--glob (string-append root "/*/*.md"))
+                    (list (string-append root "/a/notes.md") (string-append root "/a/todos.md")
+                          (string-append root "/node_modules/todos.md"))
+                    "* stays in one name and skips nothing by name")
+      (check-equal! (todo--glob (string-append root "/none/**/todos.md")) '()
+                    "a folder that is not there names no file"))))
+
+(deftest 'todo-directories-default-follows-the-compos-home
+  "a daemon with a home of its own finds and files its todos in that home, not in ~/.compos"
+  (lambda ()
+    (check-equal! (plist-get (cadr (assoc 'todo-directories *custom-vars*)) 'default)
+                  (list (string-append (compos-home) "/**/todos.md"))
+                  "the default is the home of this daemon")
+    (with-stubs (list (list 'compos-home (lambda () "/tmp/zz-todo-home")))
+      (lambda ()
+        (check-equal! (todo--home-directories) '("/tmp/zz-todo-home/**/todos.md")
+                      "the default follows a home that COMPOS_HOME names")
+        (with-stubs (list (list 'todo-directories (todo--home-directories))
+                          (list 'todo--files (lambda () '())))
+          (lambda ()
+            (check-equal! (todo--project-file "zz-new")
+                          "/tmp/zz-todo-home/zz-new/todos.md"
+                          "a new project's file goes under that home")))))))
+
+(deftest 'a-pane-page-counts-no-tasks-until-the-todo-files-are-found
+  "a page that draws when its buffer wakes does not start the walk of the folders"
+  (lambda ()
+    (with-stubs (list (list 'todo-ready? (lambda () #f))
+                      (list 'todo-list (lambda args (error "the page read the todo list"))))
+      (lambda () (check-equal! (pane-home--review-count) 0 "0 and no read of the list")))
+    (with-stubs (list (list 'todo-ready? (lambda () #t))
+                      (list 'frame-group (lambda () #f))
+                      (list 'todo-list (lambda args '((id "zz-1") (id "zz-2")))))
+      (lambda () (check-equal! (pane-home--review-count) 2 "the count, once the files are found")))))
+
 ;; todo-assign-chat!: a new chat shows nowhere until asked, is the calling
 ;; agent's subagent, and a kept chat gives way when its backend is gone or
 ;; its connector is not the group's now.

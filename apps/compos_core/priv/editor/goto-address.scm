@@ -10,6 +10,7 @@
 
 ;; a buffer's directory is dired's
 (require 'dired)
+(require 'tabulated-list)
 
 (domain! 'interaction)
 (effects! '(read display))

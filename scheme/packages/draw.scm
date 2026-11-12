@@ -13,6 +13,8 @@
 ;;; A call picks its backend by the 'backend arg, else a "NAME:ID" doc id,
 ;;; else `draw-backend`.
 
+(require 'tools)
+
 (defgroup 'draw "Drawing canvases for system architecture.")
 
 (defcustom 'draw-backend 'tldraw

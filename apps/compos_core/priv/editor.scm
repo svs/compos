@@ -1229,6 +1229,28 @@
 (define (run-hooks &rest hooks)
   (for-each (lambda (h) (run-hook-with-args h)) hooks))
 
+;;; after-init-hook: Emacs's hook of the same name. The Session runs it once
+;;; for each boot, after the packages and the user config load and the
+;;; interpreter is published. It also waits for the desktop restore of the
+;;; shown buffers, at most 30 seconds. Work that the boot does not need goes here:
+;;; a warm-up, a scan, a service. A function on the hook can call anything,
+;;; because every package is in.
+;;;
+;;; A file that loads after the boot finds *after-init-done* true. It then
+;;; does the work at once: (after-init 'FN) is both cases.
+(define *after-init-done* #f)
+
+(define (run-after-init-hook!)
+  (unless *after-init-done*
+    (set! *after-init-done* #t)
+    (run-hooks 'after-init-hook)))
+
+(define (after-init fn)
+  (if *after-init-done*
+      (let ((p (hook--fn fn))) (when p (p)))
+      (add-hook! 'after-init-hook fn #t))
+  fn)
+
 ;; the first function that answers a true value ends the run
 (define (run-hook-with-args-until-success hook &rest args)
   (let loop ((fs (hook-functions hook)))
@@ -4633,6 +4655,55 @@
       (set-symbol-value! var (cons value cur)))
     (symbol-value var)))
 
+;;; --- load times ---------------------------------------------------------------
+;;; Every file the loader evaluates records its time, at boot and after
+;;; boot. The inclusive time contains the files this file loaded. The
+;;; exclusive time is the time of the forms of this file alone.
+
+(define *load-times* '())   ; ((FEATURE PATH INCLUSIVE-MS EXCLUSIVE-MS ORIGIN) ...), newest first
+(define *load-child-ms* 0)  ; the inclusive time of the files the current file loaded
+
+;; (load-time-note! FEATURE PATH MS ORIGIN OUTER) records one finished load.
+;; OUTER is the child time of the file that loaded it, before this load.
+(define (load-time-note! feature path ms origin outer)
+  (set! *load-times*
+        (cons (list feature path ms (max 0 (- ms *load-child-ms*)) origin) *load-times*))
+  (set! *load-child-ms* (+ outer ms)))
+
+;; THUNK loads PATH. The time is recorded when THUNK returns or raises.
+(define (load--timed feature path origin thunk)
+  (let ((t0 (monotonic-ms))
+        (outer *load-child-ms*))
+    (set! *load-child-ms* 0)
+    (unwind-protect
+      thunk
+      (lambda () (load-time-note! feature path (- (monotonic-ms) t0) origin outer)))))
+
+;; (load-times) answers the recorded loads, oldest first.
+(define (load-times) (reverse *load-times*))
+
+(define (load-times--sum rows origin)
+  (fold (lambda (acc r) (if (eq? (list-ref r 4) origin) (+ acc (list-ref r 3)) acc)) 0 rows))
+
+;; (load-times-report [N]) answers the totals for each origin and the N
+;; files with the largest exclusive time, as text.
+(define (load-times-report &optional n)
+  (let* ((rows (load-times))
+         ;; sort has no comparator: a negative key in front puts the largest first
+         (slow (map cadr (sort (map (lambda (r) (list (- (list-ref r 3)) r)) rows))))
+         (top (take slow (min (or n 15) (length slow)))))
+    (string-append
+      "load times: " (number->string (length rows)) " files, bundled "
+      (number->string (load-times--sum rows 'bundled)) "ms, user "
+      (number->string (load-times--sum rows 'user)) "ms\n"
+      (string-join
+        (map (lambda (r)
+               (string-append "  " (number->string (list-ref r 3)) "ms  ("
+                              (number->string (list-ref r 2)) "ms with its loads)  "
+                              (list-ref r 1)))
+             top)
+        "\n"))))
+
 ;; The user's config, in load order: saved customizations load last so
 ;; they win over init. Boot calls (boot-user-config!) once, after the
 ;; bundled init.scm. A file that is not there is skipped; a file that
@@ -4642,8 +4713,10 @@
 
 (define (boot-user-config!)
   (for-each (lambda (file)
-              (when (file-exists? (string-append (compos-config-dir) "/" file))
-                (builtin-load file)))
+              (let ((path (string-append (compos-config-dir) "/" file)))
+                (when (file-exists? path)
+                  (load--timed (string->symbol (load--library-name file)) path 'user
+                               (lambda () (builtin-load file))))))
             user-config-files)
   (origin! 'user))
 
@@ -4693,15 +4766,17 @@
       (set! *features-loading* (cons feature chain))
       ;; the stamps go back whether the file loads or raises: a file that
       ;; raised must not leave the loader naming it as the package
-      (let ((result (unwind-protect
-                      (lambda () (builtin-load path))
+      (let ((result (load--timed feature path (load--origin path)
                       (lambda ()
-                        (set! *features-loading* chain)
-                        (set! *loading-package* pkg)
-                        (set! *loading-namespace* ns)
-                        (set! *loading-origin* org)
-                        (set! *catalog-domain* dom)
-                        (set! *catalog-effects* eff)))))
+                        (unwind-protect
+                          (lambda () (builtin-load path))
+                          (lambda ()
+                            (set! *features-loading* chain)
+                            (set! *loading-package* pkg)
+                            (set! *loading-namespace* ns)
+                            (set! *loading-origin* org)
+                            (set! *catalog-domain* dom)
+                            (set! *catalog-effects* eff)))))))
         ;; the boot loader reports a file that did not load; a load after
         ;; boot raises instead, so the feature stays unprovided either way
         (unless (eq? result 'load-failed) (provide feature))
@@ -7607,6 +7682,8 @@
 (effects! '(read))
 (public! 'featurep "(featurep F) — #t when the feature F is provided: its file loaded, or (provide 'F) ran")
 (public! 'locate-library "(locate-library NAME) — the file (load NAME) reads, or #f")
+(public! 'load-times "(load-times) — the files the loader evaluated, oldest first: (FEATURE PATH INCLUSIVE-MS EXCLUSIVE-MS ORIGIN)")
+(public! 'load-times-report "(load-times-report [N]) — the load time totals for each origin and the N slowest files, as text")
 (public! 'autoload-file "(autoload-file NAME) — the file the autoload stub under NAME would load, or #f when NAME is defined")
 (public! 'priv-path "(priv-path REL) — the absolute path of REL in the compos_core priv directory, symlinks resolved")
 (public! 'compos-priv-dir "(compos-priv-dir) — the bundled Scheme directory, the compos_core priv dir" 'files)
@@ -7616,6 +7693,7 @@
 (public! 'expand-path "(expand-path PATH) — expand PATH to an absolute path, against the home and working directories." 'files)
 (public! 'file-realpath "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal." 'files)
 (effects! '(write))
+(public! 'after-init "(after-init 'FN) — call FN once the boot is complete: on after-init-hook during the boot, at once after it")
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
 (public! 'with-eval-after-load "(with-eval-after-load 'F THUNK) — run THUNK now when F is provided, or when it is")
@@ -7817,7 +7895,7 @@
 (effects! '(read))
 (editor--public-primitives!
   '(autoload-cookies desktop-file-globals directory-entries file-directory?
-    file-mtime file-stat file-writable? list-dir read-file-source
+    file-glob file-mtime file-stat file-writable? list-dir read-file-source
     local-directory-entries local-file-stat local-list-dir git-prefix))
 (domain! 'windows)
 (effects! '(read))

@@ -1137,12 +1137,21 @@
 
 ;; catalog-register! calls this after the entry is complete. A reload batches
 ;; all declarations until reload-finish!; an interactive declaration uses the
-;; same short debounce directly.
+;; same short debounce directly. The boot batches its declarations until
+;; after-init-hook: a build that starts before the user config loads is
+;; thrown away when the config registers its names.
 (define (apropos-catalog-changed! entry)
   (set! *apropos--embedding-sync-pending* #t)
-  (unless (and (boundp (quote *reloading?*)) *reloading?*)
+  (unless (or (and (boundp (quote *reloading?*)) *reloading?*)
+              (not *after-init-done*))
     (apropos--schedule-embedding-sync!))
   entry)
+
+;; The boot's one build of the rows and its one embedding sync.
+(define (apropos--warm-after-boot!)
+  (apropos--schedule-embedding-sync!))
+
+(after-init 'apropos--warm-after-boot!)
 
 (define (apropos-reload-finished!)
   (when *apropos--embedding-sync-pending*

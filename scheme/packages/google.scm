@@ -1,5 +1,8 @@
 ;;; google.scm --- native Google Workspace, with account-owned buffers.
 ;;; OAuth and HTTP are mechanisms. Scopes, operations, and views live here.
+(require 'tabulated-list)
+(require 'dired)
+
 (domain! 'google)
 (effects! '(write))
 (defgroup 'google "Google Workspace accounts and applications.")

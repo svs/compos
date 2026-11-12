@@ -21,6 +21,8 @@
 ;;; The same rows serve the minibuffer prompt (ibuffer-prompt, C-x b):
 ;;; one rows fn, one act fn, two surfaces.
 
+(require 'tabulated-list)
+
 (define *switch-buffer* "*switch*")
 
 ;; the seam's pick fn from the last rows fetch — a closure, so it lives

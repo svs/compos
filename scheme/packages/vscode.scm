@@ -6,6 +6,8 @@
 ;;; one global minor map, so nothing else is rebound. The choice is a
 ;;; customize variable: it lasts across sessions.
 
+(require 'appearance)
+
 (domain! 'commands)
 (effects! '(write display))
 

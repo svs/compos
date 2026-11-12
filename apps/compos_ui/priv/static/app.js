@@ -1957,6 +1957,8 @@
         if (this.scroller) this.scroller.addEventListener("scroll", this.onScroll, {passive: true});
         // a scroll request seen at mount is history: a reload must not replay it
         this.seen = this.el.dataset.scroll || "";
+        // point's line as the page last showed it: a new one is a move
+        this.pl = this.el.dataset.pl || "0";
         this.follow();
       },
       updated() {
@@ -1980,8 +1982,10 @@
       },
       keepPoint() {
         const s = this.scroller;
-        // a glide is point's own travel, and a hidden window scrolls to 0
+        // a glide is point's own travel, and a hidden window scrolls to 0;
+        // a scroll that followed point is not the reader's either
         if (!s || this.gliding || !s.isConnected || s.clientHeight === 0) return;
+        if (performance.now() - (this.ownAt || 0) < 400) return;
         const sr = s.getBoundingClientRect();
         const seen = (el) => { const r = el.getBoundingClientRect(); return r.bottom > sr.top + 1 && r.top < sr.bottom - 1; };
         const cur = this.el.querySelector(".anchor-current");
@@ -1992,13 +1996,16 @@
         if (!winEl) return;
         // the part is already in view: marking it must not glide the page
         this.lastPart = next.dataset.anchor;
-        this.pushEvent("block_point", {
-          win: parseInt(winEl.dataset.winId, 10),
-          line: parseInt(next.getAttribute("phx-value-id").split(":")[1], 10)
-        });
+        const line = parseInt(next.getAttribute("phx-value-id").split(":")[1], 10);
+        // point follows the page here: the page must not follow it back
+        this.pl = String(line);
+        this.pushEvent("block_point", { win: parseInt(winEl.dataset.winId, 10), line });
       },
       follow() {
         if (!this.scroller) return;
+        const pl = this.el.dataset.pl || "0";
+        const moved = pl !== this.pl;
+        this.pl = pl;
         const marked = this.el.querySelectorAll("[data-current]");
         const cur = marked.length ? marked[marked.length - 1] : null;
         const curKey = cur ? (cur.dataset.anchor || null) : null;
@@ -2013,10 +2020,54 @@
           return;
         }
         this.lastPart = partKey;
-        if (!cur) return;
+        if (!cur) { if (moved) this.showLine(parseInt(pl, 10)); return; }
         if (curKey !== null && curKey === this.last) return;
         this.last = curKey;
         cur.scrollIntoView({ block: "nearest" });
+      },
+      // Point moved on a page with no marked row: keep its line in view,
+      // as a text page does. Blocks with data-lines="FIRST-LAST" are the
+      // knots of a map from line to height; a line between two knots lies
+      // in proportion between them, and a page with none maps its lines
+      // evenly over its whole height. Point landing on a part's first line
+      // shows as much of that part as fits.
+      showLine(line) {
+        const s = this.scroller;
+        if (!line || !s.isConnected || s.clientHeight === 0) return;
+        const sr = s.getBoundingClientRect();
+        const zoom = (sr.height / s.offsetHeight) || 1;
+        const y = (el) => s.scrollTop + (el.getBoundingClientRect().top - sr.top) / zoom;
+        const knots = [];
+        for (const el of this.el.querySelectorAll("[data-lines]")) {
+          const [a, b] = el.dataset.lines.split("-").map(Number);
+          if (!(a > 0) || el.getClientRects().length === 0) continue;
+          const top = y(el), prev = knots[knots.length - 1];
+          // nested or out-of-order parts: the first one at a line wins
+          if (prev && (a <= prev.a || top < prev.top)) continue;
+          knots.push({ a, b, top, h: el.getBoundingClientRect().height / zoom });
+        }
+        const pn = parseInt(this.el.dataset.pn || "0", 10) || line;
+        let lo = { a: 1, top: 0, h: 0 }, hi = { a: Math.max(pn, line) + 1, top: s.scrollHeight };
+        for (const k of knots) { if (k.a <= line) lo = k; else { hi = k; break; } }
+        const cs = getComputedStyle(s);
+        const row = parseFloat(cs.lineHeight) || 1.4 * parseFloat(cs.fontSize) || 20;
+        const view = s.clientHeight, pad = Math.min(24, view / 6);
+        let top, bottom;
+        if (line === lo.a && lo.h) {
+          top = lo.top;
+          bottom = top + Math.min(lo.h, view - 2 * pad);
+        } else {
+          top = lo.top + (line - lo.a) / Math.max(1, hi.a - lo.a) * (hi.top - lo.top);
+          bottom = top + row;
+        }
+        let next = s.scrollTop;
+        if (top < next + pad) next = top - pad;
+        else if (bottom > next + view - pad) next = bottom - view + pad;
+        next = Math.max(0, Math.min(s.scrollHeight - view, next));
+        if (Math.abs(next - s.scrollTop) < 1) return;
+        this.stop();
+        this.ownAt = performance.now();
+        s.scrollTop = next;
       },
       // a part that fits stays put when it is already in full view; else it
       // comes to rest just under the top. Ease-out, quicker for short hops.

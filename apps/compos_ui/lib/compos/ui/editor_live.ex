@@ -1047,19 +1047,31 @@ defmodule Compos.Ui.EditorLive do
           raw = Compos.Core.BufferView.big_value(ref) || []
           memo = if is_map(entry), do: Map.get(entry, :memo, %{}), else: %{}
           {blocks, {span, memo}} = blocks_build(raw, text, memo, leaf.id)
+          inputs = Enum.map(blocks, &block_input?/1)
+
           %{raw: ref, span: span, bytes: binary_part(text, 0, min(span, byte_size(text))),
             blocks: blocks, memo: memo, marks: Enum.any?(blocks, &block_marks?/1),
-            inputs: Enum.map(blocks, &block_input?/1)}
+            # point's line also steers the scroll: a page whose parts name
+            # their lines scrolls the part holding it into view, and a page
+            # with no caret input and no followed tail scrolls in proportion.
+            # A chat has an input, so it pays for neither.
+            follows: Enum.any?(blocks, &block_lines?/1) or
+              not (Enum.any?(inputs) or Enum.any?(blocks, &block_follow?/1)),
+            inputs: inputs}
       end
 
-    # only a tree with point marks needs point's line; a chat has none
-    line = if entry.marks, do: Compos.Core.Text.line_index(text, leaf.point) + 1, else: 0
+    # only a tree with point marks, or one that follows point, needs point's line
+    # (an entry cached before :follows existed reads as false)
+    follows = Map.get(entry, :follows, false)
+    line = if entry.marks or follows, do: Compos.Core.Text.line_index(text, leaf.point) + 1, else: 0
+    nlines = if follows and line > 0, do: length(:binary.matches(text, "\n")) + 1, else: 0
 
     {Map.merge(leaf, %{
        lines: [],
        blk: entry.blocks,
        blk_inputs: entry.inputs,
        blk_line: line,
+       blk_nlines: nlines,
        blk_root: block_root(Map.get(leaf, :blocks_root)),
        blk_input: caret_input(leaf, Map.get(leaf, :blocks_input))
      }), Map.put(cache, {:blocks, leaf.id}, entry)}
@@ -1934,10 +1946,10 @@ defmodule Compos.Ui.EditorLive do
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
         <%!-- a c-buffer root is a static tag: a dynamic tag re-sends its
              own markup on every render --%>
-        <c-buffer :if={@node.blk_root.tag == "c-buffer"} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" data-scroll={scroll_request(@node)} {@node.blk_root.attrs}>
+        <c-buffer :if={@node.blk_root.tag == "c-buffer"} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" data-scroll={scroll_request(@node)} data-pl={@node.blk_line} data-pn={Map.get(@node, :blk_nlines, 0)} {@node.blk_root.attrs}>
           <.blocks_body node={@node} active?={@active?} completion={@completion} />
         </c-buffer>
-        <.dynamic_tag :if={@node.blk_root.tag != "c-buffer"} tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" data-scroll={scroll_request(@node)} {@node.blk_root.attrs}>
+        <.dynamic_tag :if={@node.blk_root.tag != "c-buffer"} tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} id={"blocks-#{@node.id}"} phx-hook="BlockScroll" data-scroll={scroll_request(@node)} data-pl={@node.blk_line} data-pn={Map.get(@node, :blk_nlines, 0)} {@node.blk_root.attrs}>
           <.blocks_body node={@node} active?={@active?} completion={@completion} />
         </.dynamic_tag>
       <% else %>
@@ -2383,6 +2395,7 @@ defmodule Compos.Ui.EditorLive do
       class={blk_class(@b, @line)}
       data-anchor={@b.anchor}
       data-current={if @b.anchor && blk_current?(@b, @line), do: "1"}
+      data-lines={blk_lines_attr(@b.lines)}
       phx-click={@b.click && "block_click"}
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
@@ -2406,6 +2419,7 @@ defmodule Compos.Ui.EditorLive do
       id={@b.anchor && "block-\#{@win}-\#{@b.anchor}"}
       data-anchor={@b.anchor}
       data-current={if @b.anchor && blk_current?(@b, @line), do: "1"}
+      data-lines={blk_lines_attr(@b.lines)}
       {if @b.anchor, do: [{"selected", to_string(blk_current?(@b, @line))}], else: []}
       phx-click={@b.click && "block_click"}
       phx-value-win={@b.click && @win}
@@ -2437,6 +2451,7 @@ defmodule Compos.Ui.EditorLive do
       id={@b.anchor && "block-#{@win}-#{@b.anchor}"}
       data-anchor={@b.anchor}
       data-current={if @b.anchor && blk_current?(@b, @line), do: "1"}
+      data-lines={blk_lines_attr(@b.lines)}
       {if @b.anchor, do: [{"selected", to_string(blk_current?(@b, @line))}], else: []}
       phx-click={@b.click && "block_click"}
       phx-value-win={@b.click && @win}
@@ -2610,6 +2625,16 @@ defmodule Compos.Ui.EditorLive do
 
   defp block_marks?(%{mark: m, lines: l}) when is_binary(m) and is_list(l), do: true
   defp block_marks?(%{children: cs}), do: Enum.any?(cs, &block_marks?/1)
+
+  defp block_lines?(%{lines: [a, b | _]}) when is_integer(a) and is_integer(b), do: true
+  defp block_lines?(%{children: cs}), do: Enum.any?(cs, &block_lines?/1)
+
+  defp block_follow?(%{follow: true}), do: true
+  defp block_follow?(%{children: cs}), do: Enum.any?(cs, &block_follow?/1)
+
+  # the lines a block covers, as the scroll hook reads them: "FIRST-LAST"
+  defp blk_lines_attr([a, b | _]) when is_integer(a) and is_integer(b), do: "#{a}-#{b}"
+  defp blk_lines_attr(_), do: nil
 
   defp block_range([a, b]) when is_integer(a) and is_integer(b) and a <= b, do: {a, b}
   defp block_range(_), do: nil

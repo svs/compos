@@ -80,3 +80,18 @@ The extension is what lets compos read and act in the person's own Chrome, with 
 3. **Load unpacked**, and choose `~/.compos/chrome-extension`. In the file picker, Cmd-Shift-G takes a typed path.
 
 Check: `(browser-connected?)` answers `#t`. If it does not, stay on this step. Details: [docs/CHROME_EXTENSION.md](docs/CHROME_EXTENSION.md).
+
+## The command palette
+
+Type a sentence in the command palette, for example "split this window
+vertically", and press `RET`. The palette picks the command and runs it, and
+it learns the words, so the same sentence runs again without asking.
+
+`command-palette-decide-backend` says what picks: `jev`, a `model`, or
+`local`. With `local`, a small model on this machine reads the whole command
+catalog and answers with one command name: `qwen3:4b`, served by llama.cpp's
+`llama-server` on port 8089 (`do-backend`, `do-endpoint`; Ollama on 11434
+works too). The editor checks the reply against the catalog, so the model
+cannot invent a command. The model never writes Scheme: it picks, and the
+editor acts.
+

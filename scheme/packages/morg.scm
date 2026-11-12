@@ -373,32 +373,42 @@
           ((equal? (morg-kind (car es)) 'heading) (- (car (car es)) 1))
           (else (loop (cdr es))))))
 
+(define (morg--valid-folds buf scan)
+  (filter
+    (lambda (h)
+      (let ((e (morg-entry-at scan h)))
+        (and e (= (car e) h)
+             (or (equal? (morg-kind e) 'heading)
+                 (equal? (morg-kind e) 'open)))))
+    (morg-folds buf)))
+
+(define (morg--fold-range buf scan outline? h)
+  (let* ((e (morg-entry-at scan h))
+         (eol (+ h (string-byte-length (cadr e)))))
+    (cond
+      ((and outline? (equal? (morg-kind e) 'heading))
+       (list eol (morg-heading-body-end scan buf h)))
+      ((equal? (morg-kind e) 'heading)
+       (list eol (morg-subtree-end scan buf h (morg-info e))))
+      (else
+       (list eol (morg-block-close-end scan buf h))))))
+
 (define (morg-apply-folds! buf)
   (let* ((scan (morg-scan buf))
          (outline? (morg-outline? buf))
-         (valid (filter
-                  (lambda (h)
-                    (let ((e (morg-entry-at scan h)))
-                      (and e (= (car e) h)
-                           (or (equal? (morg-kind e) 'heading)
-                               (equal? (morg-kind e) 'open)))))
-                  (morg-folds buf)))
-         (ranges
-           (map
-             (lambda (h)
-               (let* ((e (morg-entry-at scan h))
-                      (eol (+ h (string-byte-length (cadr e)))))
-                 (cond
-                   ((and outline? (equal? (morg-kind e) 'heading))
-                    (list eol (morg-heading-body-end scan buf h)))
-                   ((equal? (morg-kind e) 'heading)
-                    (list eol (morg-subtree-end scan buf h (morg-info e))))
-                   (else
-                    (list eol (morg-block-close-end scan buf h))))))
-             valid)))
+         (valid (morg--valid-folds buf scan))
+         (ranges (map (lambda (h) (morg--fold-range buf scan outline? h)) valid)))
     (fold-keys-set! buf 'morg-folds valid)
     (fold-set! buf 'morg
       (filter (lambda (r) (< (car r) (cadr r))) ranges))))
+
+(define (morg-fold-end-at buf pos)
+  (let* ((scan (morg-scan buf))
+         (outline? (morg-outline? buf))
+         (hit (filter (lambda (r) (and (= (car r) pos) (< (car r) (cadr r))))
+                      (map (lambda (h) (morg--fold-range buf scan outline? h))
+                           (morg--valid-folds buf scan)))))
+    (if (null? hit) #f (apply max (map cadr hit)))))
 
 (define (morg-set-folds! buf folds)
   (buffer-set-local! buf 'morg-outline #f)
@@ -1159,11 +1169,13 @@
   'modes '(morg-mode browse-mode))
 
 (define-command "morg-newline"
-  "Close a freshly typed fence, or insert the newline RET means here"
+  "Close a freshly typed fence, or insert the newline RET means here; at a folded heading or block, the new line goes after the folded part"
   (lambda ()
-    (if (block-electric-close!)
-        #t
-        (run-command "preview-newline")))
+    (let ((fold-end (morg-fold-end-at (current-buffer) (point))))
+      (cond
+        (fold-end (goto-char! fold-end) (insert! "\n"))
+        ((block-electric-close!) #t)
+        (else (run-command "preview-newline")))))
   'modes '(morg-mode))
 
 (define (morg-install-keys buf)

@@ -12,7 +12,7 @@
 
 - **An AI agent.** Claude Code or Codex is preferred.
 - **Google Chrome**, with the compos Chrome extension.
-- **For coding:** add JEV and an embedding model. An embedding model needs an OpenRouter or OpenAI key, which you set in `M-x setup`.
+- **For coding:** add JEV and an embedding model. An embedding model needs an OpenRouter or OpenAI key, which you set in `M-x setup` or you can use a local model.
 
 ## Install
 

@@ -413,7 +413,7 @@
           (loop (cdr rs)
                 (if hit
                     (cons (list day (+ (cadr hit) cost))
-                          (remove (lambda (e) (equal? (car e) day)) acc))
+                          (alist-delete acc day))
                     (cons (list day cost) acc)))))))
 
 ;; The chat that speaks for HERE: this buffer when it is one, else its

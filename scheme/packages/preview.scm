@@ -255,7 +255,7 @@
     (when old
       (remove-on-change! (cadr old))
       (set! *preview-csv-hooks*
-        (remove (lambda (entry) (equal? (car entry) buf)) *preview-csv-hooks*)))))
+        (alist-delete *preview-csv-hooks* buf)))))
 
 (define (preview-mode--apply! buf)
   (let ((renderer (preview-renderer-for buf)))

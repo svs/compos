@@ -287,7 +287,7 @@
     (when old
       (goto-address--drop-rule! (cadr old))
       (set! *goto-address-hooks*
-        (remove (lambda (e) (equal? (car e) buf)) *goto-address-hooks*))))
+        (alist-delete *goto-address-hooks* buf))))
   (when (buffer-exists? buf) (overlay-clear! buf 'goto-address)))
 
 ;; a buffer that appears, wakes, reaches a window, or takes a mode gets

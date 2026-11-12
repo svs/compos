@@ -46,7 +46,7 @@
 (define (predict-skip! mode keys)
   (set! *predict-skip*
     (cons (cons mode keys)
-          (remove (lambda (e) (equal? (car e) mode)) *predict-skip*)))
+          (alist-delete *predict-skip* mode)))
   (predict--publish!))
 
 (define (predict-skip-keys buf)

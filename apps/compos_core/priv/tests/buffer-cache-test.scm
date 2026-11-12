@@ -96,7 +96,7 @@
 ;; clears them. The fourth is the M-x command table, which is Elixir and
 ;; has no removal: the name stays until the next restart.
 (define (t--cache-forget-list-mode! name)
-  (set! *list-modes* (remove (lambda (e) (equal? (car e) name)) *list-modes*))
+  (set! *list-modes* (alist-delete *list-modes* name))
   (mode-forget! name)
   (set! *catalog* (remove (lambda (e) (equal? (plist-get e 'name) name)) *catalog*))
   name)

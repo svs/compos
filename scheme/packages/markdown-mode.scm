@@ -604,7 +604,7 @@
     (when old
       (remove-on-change! (cadr old))
       (set! *markdown-hooks*
-        (remove (lambda (entry) (equal? (car entry) buf)) *markdown-hooks*)))))
+        (alist-delete *markdown-hooks* buf)))))
 
 (define (markdown--apply! buf)
   (markdown--ensure-hook! buf)

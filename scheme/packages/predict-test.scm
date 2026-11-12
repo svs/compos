@@ -58,5 +58,5 @@
     (predict-skip! "zz-predict-test-mode" '("q"))
     (check-true! (member '("zz-predict-test-mode" "q") *predict-skip*) "the registry holds the entry")
     (set! *predict-skip*
-      (remove (lambda (e) (equal? (car e) "zz-predict-test-mode")) *predict-skip*))
+      (alist-delete *predict-skip* "zz-predict-test-mode"))
     (predict--publish!)))

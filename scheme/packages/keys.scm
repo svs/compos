@@ -141,7 +141,7 @@
 ;; drop VAR from the cache, so the next key-get walks the chain again
 (define (key-forget! var)
   (set! *key-cache*
-    (remove (lambda (e) (equal? (car e) var)) *key-cache*))
+    (alist-delete *key-cache* var))
   var)
 
 (define (key-forget-all!)

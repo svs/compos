@@ -110,7 +110,7 @@
   "Edit semantic ComposML documents with the built-in HTML grammar. Semantic queries select domain tag names.")
 (set! *auto-mode-alist*
   (cons '(".composml" "composml-mode")
-        (remove (lambda (entry) (equal? (car entry) ".composml")) *auto-mode-alist*)))
+        (alist-delete *auto-mode-alist* ".composml")))
 
 ;; Python, shell, Go and C read structurally once their grammar is in;
 ;; until then they outline by indentation, the way ruby and js do.

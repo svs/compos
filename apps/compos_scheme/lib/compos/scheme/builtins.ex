@@ -691,7 +691,7 @@ defmodule Compos.Scheme.Builtins do
           _ -> false
         end
       end,
-      {"alist-delete", "(alist-delete ALIST KEY) — ALIST without its KEY entry."} => fn [al, key]
+      {"alist-delete", "(alist-delete ALIST KEY) — ALIST without its entries whose car is KEY. Use it, not remove with a lambda."} => fn [al, key]
                                                                                         when is_list(
                                                                                                al
                                                                                              ) ->

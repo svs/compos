@@ -128,7 +128,7 @@
     (buffer-set-local! c 'subagent-notify #t)
     (buffer-set-local! c 'inhibit-retitle #t)
     (buffer-set-local! chat 'orchestrate-chats
-      (append (remove (lambda (e) (equal? (car e) id)) (or (buffer-local-value 'orchestrate-chats chat) '()))
+      (append (alist-delete (or (buffer-local-value 'orchestrate-chats chat) '()) id)
               (list (list id (chat-stable-id! c)))))
     (todo-log id (string-append "orchestrate-mode started it in " c) me)
     c))

@@ -640,10 +640,10 @@
   "give list mode MODE the filter PREFIX: a word PREFIXtext in the filter matches FIELD (buf entry) -> text"
   (let* ((name (if (symbol? mode) (symbol->string mode) mode))
          (e (assoc name *list-mode-filters*))
-         (rest (if e (remove (lambda (f) (equal? (car f) prefix)) (cdr e)) '())))
+         (rest (if e (alist-delete (cdr e) prefix) '())))
     (set! *list-mode-filters*
           (cons (cons name (cons (list prefix field (or doc "")) rest))
-                (remove (lambda (x) (equal? (car x) name)) *list-mode-filters*)))
+                (alist-delete *list-mode-filters* name)))
     (list-mode-filters name)))
 
 ;; the matcher one draw shares: the mode's own, or the row text, behind
@@ -780,8 +780,8 @@
                        (not (equal? (cadr old-query) ""))
                        (string-prefix? (string-downcase (cadr old-query))
                                        (string-downcase (cadr query)))
-                       (equal? (remove (lambda (f) (equal? (car f) "match")) filters)
-                               (remove (lambda (f) (equal? (car f) "match")) (cadr previous)))))
+                       (equal? (alist-delete filters "match")
+                               (alist-delete (cadr previous) "match"))))
          (rows (list-keep buf (if extend? (nth 3 previous) source))))
     (list-filter-forget! buf)
     (set! *list-filter-history*
@@ -2045,7 +2045,7 @@
     (if set
         (begin (set buf value) (list-refresh! buf) (list-goto-first-entry buf))
         (list-set-filters! buf (append (if value (list (list kind value)) '())
-                                       (remove (lambda (f) (equal? (car f) kind)) (list-filters buf)))))))
+                                       (alist-delete (list-filters buf) kind))))))
 
 (define (list-facet-display buf kind value)
   "the DISPLAY of VALUE among the options of facet KIND, else VALUE"
@@ -2576,7 +2576,7 @@
 
 (define (list-filter-row-forget! buf)
   (set! *list-filter-row-cache*
-    (remove (lambda (entry) (equal? (car entry) buf)) *list-filter-row-cache*)))
+    (alist-delete *list-filter-row-cache* buf)))
 
 ;; During a narrowing burst the source is a snapshot. Reuse the previous
 ;; draw's rows when their layout/marks agree; widening computes missing rows.
@@ -2787,7 +2787,7 @@
       (set! *list-filter-row-cache*
         (take
           (cons (list buf q ctx (list-zip-prepared (map (lambda (r) (list-prep-key buf r)) rows) prepared))
-                (remove (lambda (entry) (equal? (car entry) buf)) *list-filter-row-cache*))
+                (alist-delete *list-filter-row-cache* buf))
           32)))
     prepared))
 

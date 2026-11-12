@@ -1515,7 +1515,7 @@
 
 (define (ibuffer-search-forget! buf)
   (set! *ibuffer-search-cache*
-    (remove (lambda (entry) (equal? (car entry) buf)) *ibuffer-search-cache*)))
+    (alist-delete *ibuffer-search-cache* buf)))
 
 ;; The header is a function of the source, and typing in the filter line
 ;; cannot change the source. Asking each row its size and modified flag,
@@ -2069,7 +2069,7 @@
     (when w (window-quit-restore! w)))
   (when (buffer-known? view) (buffer-kill! view))
   (set! *ibuffer-table-snapshots*
-    (remove (lambda (e) (equal? (car e) view)) *ibuffer-table-snapshots*)))
+    (alist-delete *ibuffer-table-snapshots* view)))
 
 ;; the wall time of the last ibuffer-prompt-line!, the minibuffer setup
 ;; alone: (ibuffer-prompt-line-ms) reads it back
@@ -2850,7 +2850,7 @@
                      (or (nth 3 r) 0)))) eligible)))
     (set! *ibuffer-table-snapshots*
       (take (cons (cons buf rows)
-                    (remove (lambda (e) (equal? (car e) buf)) *ibuffer-table-snapshots*)) 16))))
+                    (alist-delete *ibuffer-table-snapshots* buf)) 16))))
 
 (define (ibuffer-table-data buf name)
   (let ((view (assoc buf *ibuffer-table-snapshots*)))

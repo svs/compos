@@ -146,7 +146,7 @@
 (define (prompt-part-remove! buf name)
   (let* ((key (if (symbol? name) (symbol->string name) name))
          (old (prompt-buffer-parts buf))
-         (next (remove (lambda (part) (equal? (car part) key)) old)))
+         (next (alist-delete old key)))
     (unless (equal? old next)
       (buffer-set-local! buf 'prompt-parts next))
     next))

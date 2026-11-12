@@ -13,7 +13,7 @@
 (define (register-set! name value)
   (set! *registers*
     (cons (cons name value)
-          (remove (lambda (e) (equal? (car e) name)) *registers*)))
+          (alist-delete *registers* name)))
   name)
 
 (define (register-get name)

@@ -605,13 +605,13 @@
         (ps (or (plist-get m 'params) '()))
         (t (or (plist-get m 'trailing) "")))
     (cond ((equal? c "321")
-           (set! *irc-lists* (cons (list name '()) (remove (lambda (e) (equal? (car e) name)) *irc-lists*))))
+           (set! *irc-lists* (alist-put *irc-lists* name '())))
           ((equal? c "322")
            (let ((rows (or (let ((e (assoc name *irc-lists*))) (and e (cadr e))) '())))
              (set! *irc-lists* (alist-put *irc-lists* name (cons (list (irc-arg ps 1) (irc-arg ps 2) (irc-plain t)) rows)))))
           ((equal? c "323")
            (let ((rows (or (let ((e (assoc name *irc-lists*))) (and e (cadr e))) '())))
-             (set! *irc-lists* (remove (lambda (e) (equal? (car e) name)) *irc-lists*))
+             (set! *irc-lists* (alist-delete *irc-lists* name))
              (irc-channels-show! name (irc-sort-channels rows)))))))
 
 (define (irc-users n)
@@ -852,7 +852,7 @@
 
 (define (irc-defcommand! word doc fn)
   (set! *irc-commands*
-    (append (remove (lambda (e) (equal? (car e) word)) *irc-commands*)
+    (append (alist-delete *irc-commands* word)
             (list (list word doc fn)))))
 
 (irc-defcommand! "join" "/join CHANNEL [KEY] — join a channel and open its buffer"

@@ -71,7 +71,7 @@
 ;; file does not double the suite.
 (define (deftest name doc thunk)
   (set! *tests*
-    (append (remove (lambda (t) (equal? (car t) name)) *tests*)
+    (append (alist-delete *tests* name)
             (list (list name doc thunk))))
   (when *test-file-needs-disposable*
     (set! *disposable-only-tests*

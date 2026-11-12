@@ -51,7 +51,7 @@
 (define (calendar-provider-define! name &rest props)
   (set! *calendar-providers*
         (cons (cons name props)
-              (remove (lambda (p) (equal? (car p) name)) *calendar-providers*)))
+              (alist-delete *calendar-providers* name)))
   name)
 
 (define (calendar-provider name)

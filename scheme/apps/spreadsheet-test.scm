@@ -22,8 +22,7 @@
       (check-contains! stored "Changed" "the registered writer owns storage")
       (buffer-kill! buffer)
       (set! *spreadsheet-backends*
-        (remove (lambda (entry) (equal? (car entry) backend))
-                *spreadsheet-backends*)))))
+        (alist-delete *spreadsheet-backends* backend)))))
 
 (deftest 'spreadsheet-agent-api-reads-and-writes-without-display
   "agents can change backend data by source without selecting a grid"
@@ -44,8 +43,7 @@
         "the source API writes through the registered backend")
       (check-contains! stored "Agent wrote this" "the agent write reached storage")
       (set! *spreadsheet-backends*
-        (remove (lambda (entry) (equal? (car entry) backend))
-                *spreadsheet-backends*)))))
+        (alist-delete *spreadsheet-backends* backend)))))
 
 (deftest 'spreadsheet-agent-api-manages-embedded-charts
   "agents can add, update, list, and delete persistent charts"
@@ -103,8 +101,7 @@
                    "a missing chart returns an error")
       (buffer-kill! buffer)
       (set! *spreadsheet-backends*
-        (remove (lambda (entry) (equal? (car entry) backend))
-                *spreadsheet-backends*)))))
+        (alist-delete *spreadsheet-backends* backend)))))
 
 (deftest 'spreadsheet-agent-api-creates-a-chart-with-safe-defaults
   "agents can create and verify a chart without choosing drawing internals"
@@ -147,8 +144,7 @@
                     '("chart-1") "the agent verifies that ECharts drew the chart")
       (buffer-kill! buffer)
       (set! *spreadsheet-backends*
-        (remove (lambda (entry) (equal? (car entry) backend))
-                *spreadsheet-backends*)))))
+        (alist-delete *spreadsheet-backends* backend)))))
 
 (deftest 'spreadsheet-agent-api-edits-one-cell
   "agents can inspect sheets and change one A1 cell without rebuilding lists"
@@ -180,8 +176,7 @@
                    "invalid A1 notation returns a useful error")
       (buffer-kill! buffer)
       (set! *spreadsheet-backends*
-        (remove (lambda (entry) (equal? (car entry) backend))
-                *spreadsheet-backends*)))))
+        (alist-delete *spreadsheet-backends* backend)))))
 
 (deftest 'the-app-bridge-reaches-a-spreadsheet-through-its-handler
   "app-request hands the HTTP method to the spreadsheet handler, and an app no package owns gets a 404"
@@ -206,7 +201,7 @@
       (buffer-kill! buffer)
       (buffer-kill! other)
       (set! *spreadsheet-backends*
-        (remove (lambda (entry) (equal? (car entry) backend)) *spreadsheet-backends*)))))
+        (alist-delete *spreadsheet-backends* backend)))))
 
 (deftest 'the-grid-page-loads-its-script-from-the-package-directory
   "the page has no inline script; the app-directory holds spreadsheet.js"

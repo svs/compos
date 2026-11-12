@@ -988,6 +988,10 @@
 (public! 'chats-row-label
   "(chats-row-label B) — the state a chat list row shows: the runtime while it works or asks, else the goal status of the newest turn")
 
+(effects! '(read))
+(public! 'chat-row-status
+  "(chat-row-status B) — the runtime status of the chat B's agent, or api for a chat with no agent")
+
 (effects! '(destroy))
 (public! 'agents-archive!
   "(agents-archive! B) — archive the chat B: stop its runtime, release its windows and kill its buffer")

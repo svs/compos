@@ -15,8 +15,7 @@
   (shell-command->string (string-append "rm -rf " t--project-defaults-root))
   (set! *project-root-cache* '())
   (set! *project-defaults*
-    (remove (lambda (entry) (equal? (car entry) t--project-defaults-root))
-            *project-defaults*)))
+    (alist-delete *project-defaults* t--project-defaults-root)))
 
 (deftest 'project-file-loads-project-defaults
   "compos.scm runs when a project file is visited"

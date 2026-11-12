@@ -162,8 +162,7 @@
     (if (not (and path (file-exists? path)))
         (begin
           (set! *project-defaults*
-            (remove (lambda (entry) (equal? (car entry) root))
-                    *project-defaults*))
+            (alist-delete *project-defaults* root))
           (project-defaults-apply-project! root)
           '())
         (let ((source (read-file path)))
@@ -485,14 +484,12 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 (define (add-project-grouping-rule! name predicate resolver)
   (set! *project-grouping-rules*
     (cons (list name predicate resolver)
-          (remove (lambda (rule) (equal? (car rule) name))
-                  *project-grouping-rules*)))
+          (alist-delete *project-grouping-rules* name)))
   name)
 
 (define (remove-project-grouping-rule! name)
   (set! *project-grouping-rules*
-    (remove (lambda (rule) (equal? (car rule) name))
-            *project-grouping-rules*))
+    (alist-delete *project-grouping-rules* name))
   name)
 
 (define (project-group-target root)

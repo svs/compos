@@ -220,8 +220,7 @@
 (define (bookmark-register-handler! kind make-fn jump-fn location-fn)
   (set! *bookmark-handlers*
     (cons (cons kind (list make-fn jump-fn location-fn))
-          (remove (lambda (entry) (equal? (car entry) kind))
-                  *bookmark-handlers*)))
+          (alist-delete *bookmark-handlers* kind)))
   kind)
 
 (define (bookmark-register-mode-handler! mode kind)

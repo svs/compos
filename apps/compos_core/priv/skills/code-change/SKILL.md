@@ -52,6 +52,9 @@ Ensure the normal package loader installs it after a daemon restart.
 5. Rebuild runtime keys, overlays, folds, and resources during mode setup.
 6. Update catalog metadata for public Scheme definitions.
 
+To remove or replace an entry of an association list by key, use `(alist-delete TABLE KEY)` or `(alist-put TABLE KEY VAL)`.
+Do not use `remove` with a lambda: `remove` calls the lambda for each row.
+
 Do not add a core primitive for convenience.
 Prefer one narrow primitive only when it unlocks Scheme policy.
 

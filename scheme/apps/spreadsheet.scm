@@ -25,8 +25,7 @@
 (define (spreadsheet-register-backend! name read write)
   (set! *spreadsheet-backends*
     (cons (list name read write)
-          (remove (lambda (entry) (equal? (car entry) name))
-                  *spreadsheet-backends*)))
+          (alist-delete *spreadsheet-backends* name)))
   name)
 
 (define (spreadsheet--backend name)

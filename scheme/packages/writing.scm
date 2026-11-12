@@ -240,7 +240,7 @@
         (begin
           (remove-on-change! (cadr hit))
           (set! *writing-hooks*
-            (remove (lambda (h) (equal? (car h) buf)) *writing-hooks*))))))
+            (alist-delete *writing-hooks* buf))))))
 
 (define (writing--update-count! buf)
   (if (minor-mode-on? buf "writing-mode")
@@ -296,7 +296,7 @@
          (width (assoc 'writing baseline)))
     (buffer-set-local! buf 'face-remap
       (append (if width (list width) '())
-              (remove (lambda (entry) (equal? (car entry) 'writing)) remap)))
+              (alist-delete remap 'writing)))
     (buffer-set-local! buf 'style (face-remap--css (buffer-local-value 'face-remap buf))))
   (text-scale-sync! buf)
   ;; Heal old desktops which had applied writing presentation to a chat.

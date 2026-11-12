@@ -52,7 +52,7 @@ parser drops it from the last field."
 (define (t--irc-clean! name)
   (for-each buffer-kill! (irc-buffers name))
   (when (buffer-known? (irc-channels-buffer name)) (buffer-kill! (irc-channels-buffer name)))
-  (set! *irc-conns* (remove (lambda (e) (equal? (car e) name)) *irc-conns*))
+  (set! *irc-conns* (alist-delete *irc-conns* name))
   (set! *irc-send* (lambda (ep text) (endpoint-send! ep text)))
   (set! *irc-cur* #f)
   (set! irc-verbose #f))

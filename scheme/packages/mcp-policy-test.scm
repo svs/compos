@@ -22,13 +22,13 @@
 (define (t--mcp-forget! &rest names)
   (for-each
     (lambda (n)
-      (set! *mcp-registry* (remove (lambda (e) (equal? (car e) n)) *mcp-registry*)))
+      (set! *mcp-registry* (alist-delete *mcp-registry* n)))
     names))
 
 (define (t--mcp-forget-preset! &rest names)
   (for-each
     (lambda (n)
-      (set! *chat-presets* (remove (lambda (e) (equal? (car e) n)) *chat-presets*)))
+      (set! *chat-presets* (alist-delete *chat-presets* n)))
     names))
 
 (define (t--mcp-kill! &rest names)
@@ -160,7 +160,7 @@
   (for-each
     (lambda (n)
       (mcp-disconnect! n)
-      (set! *mcp-registry* (remove (lambda (e) (equal? (car e) n)) *mcp-registry*)))
+      (set! *mcp-registry* (alist-delete *mcp-registry* n)))
     names)
   (shell-command->string (string-append "rm -rf " t--mcp-dir)))
 
@@ -226,7 +226,7 @@
       (check-false! (string-contains? (value->string (chat-extra-tool-specs chat)) "mcp__zzfake__")
                     "and the tools go with the preset")
       (buffer-kill! chat))
-    (set! *chat-presets* (remove (lambda (e) (equal? (car e) 'zzweb)) *chat-presets*))
+    (set! *chat-presets* (alist-delete *chat-presets* 'zzweb))
     (t--mcp-forget! 'zzfake)))
 
 (deftest 'a-call-to-a-server-that-is-not-there-fails-with-words

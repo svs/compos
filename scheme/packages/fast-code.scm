@@ -114,7 +114,7 @@
     (let ((row (car (cdr *fast-pending*))))
       (set! *fast-provisional* (remove (lambda (n) (equal? n (car row))) *fast-provisional*))
       (set! *fast-learned*
-            (append (remove (lambda (r) (equal? (car r) (car row))) *fast-learned*)
+            (append (alist-delete *fast-learned* (car row))
                     (list row)))
       (eval-string-safe (car (cdr row)))
       (fast-learned-save!)
@@ -134,7 +134,7 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
 
 (define (fast-forget! name)
   (when (assoc name *fast-learned*)
-    (set! *fast-learned* (remove (lambda (r) (equal? (car r) name)) *fast-learned*))
+    (set! *fast-learned* (alist-delete *fast-learned* name))
     (catalog-forget! 'function name)
     ;; still defined in this session, but no longer the API: free to write again
     (set! *fast-provisional* (cons name *fast-provisional*))

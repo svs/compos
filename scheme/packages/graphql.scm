@@ -266,7 +266,7 @@
 
 (define (graphql-schema-forget! name)
   (set! *graphql-schemas*
-    (remove (lambda (s) (equal? (car s) name)) *graphql-schemas*))
+    (alist-delete *graphql-schemas* name))
   name)
 
 ;; The ladder, quietly: only the last word goes to the echo area, because

@@ -168,6 +168,10 @@ loader; call `namespace!` only when the public vocabulary differs.
   adding a tool, a mode, or a second send path, check whether an existing
   mechanism plus one small primitive does it. Explain a structural change
   before building it.
+- Association lists: to remove or replace an entry by key, call
+  `(alist-delete TABLE KEY)` or `(alist-put TABLE KEY VAL)`. Do not write
+  `remove` with a lambda that tests `(car row)`: `remove` calls the lambda
+  for each row, and the primitives do the whole job in one call.
 - Move policy outward: Elixir constants become Scheme, package constants
   become `defcustom`. Every surface ships one opinionated default, and the
   setting is what makes it overridable; a setting is not a reason to hedge.

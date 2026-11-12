@@ -174,7 +174,7 @@
                   *catalog-keys*))
         (let ((key (catalog--key k (catalog--get e 'name) (catalog--get e 'qualified-name))))
           (set! *catalog-overrides*
-            (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
+            (alist-delete *catalog-overrides* key)))
         (set! *catalog*
           (remove-plists *catalog* 'kind k 'qualified-name (catalog--get e 'qualified-name)))
         (catalog--changed! #f)))
@@ -220,7 +220,7 @@
                (before (assoc key *catalog-overrides*)))
           (set! *catalog-overrides*
             (cons (cons key (catalog--merge (if before (cdr before) '()) meta))
-                  (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
+                  (alist-delete *catalog-overrides* key)))
           (set! *catalog*
             (cons updated
                   (remove-plists *catalog* 'kind (catalog--get old 'kind)
@@ -1282,7 +1282,8 @@
 ;;;
 ;;; A file that loads after the boot finds *after-init-done* true. It then
 ;;; does the work at once: (after-init 'FN) is both cases.
-(define *after-init-done* #f)
+;; a reload of this file keeps the flag: the boot is over only one time
+(define *after-init-done* (and (boundp '*after-init-done*) *after-init-done*))
 
 (define (run-after-init-hook!)
   (unless *after-init-done*
@@ -3151,9 +3152,9 @@
                     (lambda () (put initial)))))
     (set! *desktop-globals*
       (cons (list key get put reset)
-            (remove (lambda (e) (equal? (car e) key)) *desktop-globals*)))
+            (alist-delete *desktop-globals* key)))
     (when pending
-      (set! *desktop-pending* (remove (lambda (e) (equal? (car e) key)) *desktop-pending*))
+      (set! *desktop-pending* (alist-delete *desktop-pending* key))
       (put (cadr pending)))))
 
 ;; what the desktop writes
@@ -3356,7 +3357,7 @@
     (when e
       (set! *globalized-minor-modes*
         (cons (list global (nth 1 e) (nth 2 e) on?)
-              (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*))))))
+              (alist-delete *globalized-minor-modes* global))))))
 
 (define (globalized-minor-mode--apply! e buf)
   (let ((local (nth 1 e)) (eligible? (nth 2 e)))
@@ -3391,7 +3392,7 @@
 (define (define-globalized-minor-mode! global local eligible? &optional doc)
   (set! *globalized-minor-modes*
     (cons (list global local eligible? (globalized-minor-mode-on? global))
-          (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*)))
+          (alist-delete *globalized-minor-modes* global)))
   (define-command global (or doc (string-append "Toggle " local " in every buffer"))
     (lambda ()
       (if (globalized-minor-mode-on? global)
@@ -3446,7 +3447,7 @@
   (set-modeline-extra! (global-mode-string-segments)))
 
 (define (global-mode-string-set! key value)
-  (let ((rest (remove (lambda (e) (equal? (car e) key)) *global-mode-string*)))
+  (let ((rest (alist-delete *global-mode-string* key)))
     (set! *global-mode-string*
       (if (or (not value) (equal? value ""))
           rest
@@ -4452,7 +4453,7 @@
   (let ((old (assoc buf *font-lock-hooks*)))
     (when old
       (remove-on-change! (cadr old))
-      (set! *font-lock-hooks* (remove (lambda (e) (equal? (car e) buf)) *font-lock-hooks*)))
+      (set! *font-lock-hooks* (alist-delete *font-lock-hooks* buf)))
     (overlay-set! buf 'font-lock '())))
 
 (define-command "isearch-forward" "Do incremental search forward"
@@ -4594,7 +4595,7 @@
 ;; is not: no answer makes a .scm belong outside a Scheme root.
 (define (defwrite-rule! name reason confirmable? pred)
   (set! *write-rules*
-        (append (remove (lambda (r) (equal? (car r) name)) *write-rules*)
+        (append (alist-delete *write-rules* name)
                 (list (list name reason confirmable? pred))))
   name)
 
@@ -4845,7 +4846,7 @@
 (define (provide f)
   (unless (featurep f) (set! *features* (cons f *features*)))
   (let ((waiting (reverse (filter (lambda (e) (equal? (car e) f)) *after-load-thunks*))))
-    (set! *after-load-thunks* (remove (lambda (e) (equal? (car e) f)) *after-load-thunks*))
+    (set! *after-load-thunks* (alist-delete *after-load-thunks* f))
     (for-each (lambda (e) ((cadr e))) waiting))
   f)
 
@@ -4893,10 +4894,10 @@
 (define *autoloads* '())   ; ((NAME FILE) ...): NAME a symbol or a command name
 
 (define (autoload--note! name file)
-  (set! *autoloads* (cons (list name file) (remove (lambda (e) (equal? (car e) name)) *autoloads*))))
+  (set! *autoloads* (alist-put *autoloads* name file)))
 
 (define (autoload--forget! name)
-  (set! *autoloads* (remove (lambda (e) (equal? (car e) name)) *autoloads*)))
+  (set! *autoloads* (alist-delete *autoloads* name)))
 
 ;; the file an autoload stub would load for NAME, or #f when NAME is defined
 (define (autoload-file name)
@@ -6176,7 +6177,7 @@
 
 (define (command-modes! name modes)
   (set! *command-modes*
-        (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*)))
+        (alist-put *command-modes* name modes))
   (set! *command-generation* (+ *command-generation* 1))
   name)
 

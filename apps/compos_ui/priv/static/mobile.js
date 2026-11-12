@@ -195,6 +195,11 @@ const Hooks = {
 const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
   hooks: Hooks,
+  // The daemon restarts in a few seconds. The default wait between
+  // tries grows to 5 s, so the page came back seconds after the daemon
+  // did. A refused try on this machine costs nothing: try four times
+  // a second for the first minute, then every 2 s.
+  reconnectAfterMs: (tries) => (tries <= 240 ? 250 : 2000),
   params: () => ({
     _csrf_token: csrf,
     // the phone tab is its own frame, remembered per tab
@@ -202,5 +207,10 @@ const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
   })
 });
 liveSocket.connect();
+// A tab in the background runs its timers late. When it shows again
+// and the socket is down, try at once.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !liveSocket.isConnected()) liveSocket.connect();
+});
 if (liveSocket.disableDebug) liveSocket.disableDebug();
 

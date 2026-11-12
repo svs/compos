@@ -190,8 +190,7 @@ is forgotten and that group falls back to creation order in the switcher."
                   (list record)))
     (set! *pseudo-group-members*
           (cons (list id fn)
-                (remove (lambda (e) (equal? (car e) id))
-                        *pseudo-group-members*)))
+                (alist-delete *pseudo-group-members* id)))
     id))
 
 ;; take a pseudo group away again
@@ -205,7 +204,7 @@ is forgotten and that group falls back to creation order in the switcher."
             (remove (lambda (r) (equal? (group-record-id r) id))
                     *pseudo-group-records*))
       (set! *pseudo-group-members*
-            (remove (lambda (e) (equal? (car e) id)) *pseudo-group-members*)))
+            (alist-delete *pseudo-group-members* id)))
     id))
 
 (define (pseudo-group-ids)
@@ -944,8 +943,7 @@ is forgotten and that group falls back to creation order in the switcher."
           ((not (buffer-in-group? b id)) #f)
           (else
             (let ((others
-                    (remove (lambda (entry) (equal? (car entry) id))
-                            (or (buffer-local-value 'group-roles b) '()))))
+                    (alist-delete (or (buffer-local-value 'group-roles b) '()) id)))
               (buffer-set-local! b 'group-roles
                 (append others (list (list id name))))
               name)))))
@@ -2399,7 +2397,7 @@ is forgotten and that group falls back to creation order in the switcher."
               (cond ((not cell) (cons pair index))
                     ((member (cadr pair) (cdr cell)) index)
                     (else (cons (append cell (list (cadr pair)))
-                                (remove (lambda (c) (equal? (car c) (car pair))) index))))))
+                                (alist-delete index (car pair)))))))
           index (reverse extra))))
 
 ;; with no kernel index: one metadata read of every buffer
@@ -3458,7 +3456,7 @@ is forgotten and that group falls back to creation order in the switcher."
   (when tomb
     (set! *group-graveyard*
       (take (cons tomb
-                    (remove (lambda (t) (equal? (car t) (car tomb))) *group-graveyard*))
+                    (alist-delete *group-graveyard* (car tomb)))
               *group-graveyard-depth*))
     (desktop-dirty!)))
 
@@ -3483,7 +3481,7 @@ is forgotten and that group falls back to creation order in the switcher."
            (message (string-append "A group named " name " is open")) #f)
           (else
             (set! *group-graveyard*
-              (remove (lambda (t) (equal? (car t) name)) *group-graveyard*))
+              (alist-delete *group-graveyard* name))
             (let ((id (group-record-create! name)))
               (group-record-update! id 'meta (nth 1 tomb))
               (group-record-update! id 'layout (nth 2 tomb))

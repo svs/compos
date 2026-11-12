@@ -81,7 +81,7 @@
       (check-equal! (permit? buf "zz-unknown" "tool" "zz-unknown args")
                     'allow-always "an unknown tool follows the mode")
 
-      (set! *llm-tools* (remove (lambda (t) (equal? (car t) 'zz-shred)) *llm-tools*))
+      (set! *llm-tools* (alist-delete *llm-tools* 'zz-shred))
       (buffer-kill! buf))))
 
 (deftest 'a-per-agent-profile-denies-its-own-patterns
@@ -117,7 +117,7 @@
                     'ask "every other buffer asks")
 
       (set! *command-permission-rules*
-        (remove (lambda (r) (equal? (car r) "zz-reload")) *command-permission-rules*))
+        (alist-delete *command-permission-rules* "zz-reload"))
       (buffer-kill! allowed)
       (buffer-kill! other))))
 

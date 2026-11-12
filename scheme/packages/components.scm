@@ -55,7 +55,7 @@
          (ns (component--namespace qualified)))
     (set! *components*
       (cons (list qualified props example fn)
-            (remove (lambda (e) (equal? (car e) qualified)) *components*)))
+            (alist-delete *components* qualified)))
     (catalog-register! 'component short doc
       'qualified-name qualified
       'namespace (string->symbol ns)
@@ -191,7 +191,7 @@
 (define (component-imenu! name fn)
   (let ((q (component--qualified name)))
     (set! *component-imenu*
-      (cons (list q fn) (remove (lambda (e) (equal? (car e) q)) *component-imenu*)))
+      (alist-put *component-imenu* q fn))
     q))
 
 (define (component--imenu-named block qualified props)
@@ -208,7 +208,7 @@
 (define (component-actions! name actions)
   (let ((q (component--qualified name)))
     (set! *component-actions*
-      (cons (list q actions) (remove (lambda (e) (equal? (car e) q)) *component-actions*)))
+      (alist-put *component-actions* q actions))
     q))
 
 (define (component-actions name)

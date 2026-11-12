@@ -5,7 +5,7 @@
 
 (define (t--fgc-drop-dispatcher! slug)
   (set! *chat-dispatchers*
-    (remove (lambda (entry) (equal? (car entry) slug)) *chat-dispatchers*)))
+    (alist-delete *chat-dispatchers* slug)))
 
 (define (t--fgc-confirm! text)
   (minibuffer-change! text)

@@ -513,7 +513,7 @@
                    grown)))
     (set! *agent-thought-tails*
       (cons (list slug tail (+ count 1) (cons delta chunks))
-            (remove (lambda (x) (equal? (car x) slug)) *agent-thought-tails*)))
+            (alist-delete *agent-thought-tails* slug)))
     (and (= 0 (modulo count *agent-thought-label-every*)) tail)))
 
 ;; The whole buffered run as one string, or #f when none is buffered.
@@ -525,7 +525,7 @@
 
 (define (agent-thought-forget! slug)
   (set! *agent-thought-tails*
-    (remove (lambda (x) (equal? (car x) slug)) *agent-thought-tails*)))
+    (alist-delete *agent-thought-tails* slug)))
 
 ;; Write the buffered run to the transcript as one thought block. The
 ;; caller runs this before the first non-thought event of the run and at

@@ -317,7 +317,7 @@
 
 (define (echo-extra-hint-set! key hint)
   "keep HINT, a (KEY VERB [COMMAND]) list, after echo-key-hints under KEY; #f removes it"
-  (let ((rest (remove (lambda (e) (equal? (car e) key)) *echo-extra-hints*)))
+  (let ((rest (alist-delete *echo-extra-hints* key)))
     (set! *echo-extra-hints* (if hint (append rest (list (list key hint))) rest))
     (frame-chrome-set! "echo-hints" (echo-hints-of echo-key-hints))))
 

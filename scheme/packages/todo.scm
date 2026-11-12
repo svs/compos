@@ -332,7 +332,7 @@
             (let ((secs (reverse secs)))
               (set! *todo-section-cache*
                     (cons (list path secs)
-                          (remove (lambda (e) (equal? (car e) path)) *todo-section-cache*)))
+                          (alist-delete *todo-section-cache* path)))
               (filter (lambda (t) (and t (plist-get t 'id))) (map cadr secs)))
             (let* ((s (cadr (car caps)))
                    (line (+ line (- (length (string-split (substring-bytes text at s) "\n")) 1)))
@@ -376,7 +376,7 @@
         (let ((tasks (todo--parse f text)))
           (set! *todo-parse-cache*
                 (cons (list f text tasks)
-                      (remove (lambda (e) (equal? (car e) f)) *todo-parse-cache*)))
+                      (alist-delete *todo-parse-cache* f)))
           tasks))))
 
 (define (todo--all)
@@ -970,7 +970,7 @@
               'options (lambda (buf) (map (lambda (p) (list p p)) (todo-projects))))
         (list 'label "Status" 'kind "status"
               'options (lambda (buf) (map (lambda (v) (list (car v) (car v)))
-                                          (remove (lambda (v) (equal? (car v) "all")) *todo-views*)))
+                                          (alist-delete *todo-views* "all")))
               'get (lambda (buf) (let ((v (todo--view buf))) (if (equal? v "all") #f v)))
               'set (lambda (buf v) (list-tab-set! buf (or v "all"))))))
 
@@ -2004,7 +2004,7 @@
       (when (and hit id)
         (buffer-set-local! buf 'todo-child-at
           (cons (cons id (cdr hit))
-                (remove (lambda (e) (equal? (car e) id)) (or (buffer-local-value 'todo-child-at buf) '()))))))))
+                (alist-delete (or (buffer-local-value 'todo-child-at buf) '()) id)))))))
 
 (define (todo--detail-tab-set! buf name)
   (todo--detail-remember-child! buf)

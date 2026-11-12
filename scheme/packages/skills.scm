@@ -59,7 +59,7 @@
                (name (or (car parsed) dirname))
                (desc (or (cadr parsed) "")))
           (cons (list name desc dir)
-                (remove (lambda (s) (equal? (car s) name)) entries)))
+                (alist-delete entries name)))
         entries)))
 
 ;; ENTRIES with every skill under ROOTS registered over it, in order
@@ -242,8 +242,7 @@
         (map (lambda (excluded)
                (list (car excluded)
                      (skills-note-format
-                       (remove (lambda (s) (equal? (car s) (car excluded)))
-                               entries))))
+                       (alist-delete entries (car excluded)))))
              entries)))
 
 (define (skills-note-build!)

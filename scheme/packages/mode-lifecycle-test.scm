@@ -290,7 +290,7 @@
             'again (lambda () (with-current-buffer buf (lambda () (set-mode! "irc-mode"))))
             'done (lambda ()
                     (for-each buffer-kill! (irc-buffers "zz-ml"))
-                    (set! *irc-conns* (remove (lambda (e) (equal? (car e) "zz-ml")) *irc-conns*)))))))
+                    (set! *irc-conns* (alist-delete *irc-conns* "zz-ml")))))))
 
 ;; morg: a restart drops the hidden ranges and keeps the 'morg-folds local
 (define ml--morg-buf "zz-ml-morg.md")

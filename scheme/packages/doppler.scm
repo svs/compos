@@ -121,7 +121,7 @@
   (dp--fallback-drop! project config)
   (let ((key (dp--cache-key project config name)))
     (set! *dp-value-cache*
-      (remove (lambda (e) (equal? (car e) key)) *dp-value-cache*))))
+      (alist-delete *dp-value-cache* key))))
 
 (define (doppler-forget!)
   (set! *dp-value-cache* '())

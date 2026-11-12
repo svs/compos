@@ -195,7 +195,7 @@
                    (es (if (string? text) (agenda--text-entries path text) '())))
               (set! *agenda-cache*
                 (cons (list path mt es)
-                      (remove (lambda (e) (equal? (car e) path)) *agenda-cache*)))
+                      (alist-delete *agenda-cache* path)))
               es)))))
 
 ;; the configured files, plus .md files under the configured directories

@@ -958,11 +958,11 @@
           this.socket = new Phoenix.Socket("/terminal", {});
           this.socket.connect();
           this.channel = this.socket.channel("terminal", { buffer: this.el.dataset.buffer });
-          const write64 = (encoded) => {
-            if (!encoded || !this.term) return;
+          const write64 = (encoded, done) => {
+            if (!encoded || !this.term) { if (done) done(); return; }
             const raw = atob(encoded);
             const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
-            this.term.write(bytes);
+            this.term.write(bytes, done);
           };
           this.channel.on("output", ({ data }) => write64(data));
           this.channel.on("exit", ({ status }) => {
@@ -972,14 +972,20 @@
             .receive("ok", ({ history, cols, rows }) => {
               // wear the PTY's size, replay, then take the pane's size back
               if (cols > 0 && rows > 0) this.term.resize(cols, rows);
-              write64(history);
+              // the history holds old queries (OSC 11, cursor reports);
+              // xterm answers them again, and the shell would read the
+              // answers as typed text. Send nothing while it replays.
+              this.replaying = true;
+              write64(history, () => { this.replaying = false; });
               this.fit();
             })
             .receive("error", ({ reason }) => {
               this.term.write(`\r\n[terminal unavailable: ${reason}]\r\n`);
             });
 
-          this.dataSub = this.term.onData(data => this.channel.push("input", { data }));
+          this.dataSub = this.term.onData(data => {
+            if (!this.replaying) this.channel.push("input", { data });
+          });
         };
         // the movement state: keys go to the editor until it arms editing
         const ownWin = this.el.closest(".window");

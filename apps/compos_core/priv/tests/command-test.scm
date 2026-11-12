@@ -145,6 +145,19 @@
     (undefine-command "zz-command-test-held")
     (check-equal! (zz-command-test-held) 'function "undefine-command leaves it too")))
 
+(deftest 'a-command-row-holds-no-copy-of-the-command
+  "the row of a command with no spec names the closure in the command table; a reload on the same name still rebinds it, and undefine frees the name"
+  (lambda ()
+    (define-command "zz-command-test-row" "Test: a row with no copy" (lambda () 'one))
+    (check-equal! (cadr (assoc "zz-command-test-row" *command-functions*)) 'entry
+                  "the row names the command's closure")
+    (check-equal! (zz-command-test-row) 'one "the name calls the command")
+    (define-command "zz-command-test-row" "Test: a row with no copy" (lambda () 'two))
+    (check-equal! (zz-command-test-row) 'two "a second define rebinds the name")
+    (check-true! (commandp (symbol-value 'zz-command-test-row)) "the function is a command")
+    (undefine-command "zz-command-test-row")
+    (check-false! (boundp 'zz-command-test-row) "undefine frees the name")))
+
 (deftest 'a-command-defined-on-its-function
   "define-command on the function its name holds makes that function the command: code passes the arguments, M-x collects them with a procedure spec, 'show gets the answer, a second define does not wrap it twice, undefine gives the function back"
   (lambda ()

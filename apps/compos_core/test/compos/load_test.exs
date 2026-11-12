@@ -155,6 +155,31 @@ defmodule Compos.LoadTest do
     assert elapsed < 5_000_000
   end
 
+  # The reload evaluates inside the Session process. Without a collection
+  # the process keeps a heap the size of the reload: 255 MB on a dev daemon.
+  test "a reload of a whole file leaves no large heap in the Session process" do
+    editor = Application.app_dir(:compos_core, "priv/editor.scm")
+
+    assert {:ok, _} = GenServer.call(Session, {:reload_files, [editor], [whole: true]}, 60_000)
+
+    {:total_heap_size, words} = Process.info(Process.whereis(Session), :total_heap_size)
+    assert words * :erlang.system_info(:wordsize) < 32_000_000
+  end
+
+  # The rebind reads every global. Each read caches a copy of the value in
+  # the reading process, and the Session kept about 100 MB of them.
+  test "a primitive refresh leaves no copy of the globals in the Session process" do
+    assert :ok = Session.refresh_primitives()
+
+    pid = Process.whereis(Session)
+    {:dictionary, dict} = Process.info(pid, :dictionary)
+    assert map_size(Keyword.get(dict, :scheme_cache, %{})) < 100
+
+    :erlang.garbage_collect(pid)
+    {:total_heap_size, words} = Process.info(pid, :total_heap_size)
+    assert words * :erlang.system_info(:wordsize) < 32_000_000
+  end
+
   # Mix symlinks priv into _build, so Application.app_dir/2 and a reload
   # request name the same file with two different strings. The boot manifest
   # is keyed by one and looked up by the other. Before Session.canonical/1 the

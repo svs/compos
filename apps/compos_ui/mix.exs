@@ -30,6 +30,7 @@ defmodule Compos.Ui.MixProject do
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.1"},
       {:phoenix_live_reload, "~> 1.6", only: :dev},
+      {:phoenix_live_dashboard, "~> 0.8"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:lazy_html, ">= 0.1.0", only: :test}

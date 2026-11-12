@@ -299,9 +299,41 @@
 ;; Emacs: (save-buffer) and (forward-char 3) run from code. A name that
 ;; already holds a function or a variable keeps it; the command stays in
 ;; the command table and command-call runs it. A reload rebinds only the
-;; names define-command bound. Rows are (NAME CALLABLE ENTRY).
+;; names define-command bound. Rows are (NAME CALLABLE ADOPTED).
+;;
+;; A row does not hold a second copy of a function the command table
+;; holds: the table stores every value by copy, and 1850 rows of two
+;; functions each were 19 MB. CALLABLE and ADOPTED are the symbol entry
+;; when the function is the command's own closure, which (command-fn NAME)
+;; answers. A command with a spec keeps its callable: that one is a
+;; wrapper, and no other place holds it.
+(define (command--row-part name part)
+  (if (equal? part 'entry) (command-fn name) part))
+
+;; the function define-command gave the name
+(define (command--row-callable row)
+  (command--row-part (car row) (cadr row)))
+
+;; the function the name held before the command took it, or #f
+(define (command--row-adopted row)
+  (and (pair? (cddr row)) (command--row-part (car row) (caddr row))))
+
+(define (command--row name callable adopted entry)
+  (list name
+        (if (and entry (eq? callable entry)) 'entry callable)
+        (cond ((not adopted) #f)
+              ((and entry (eq? adopted entry)) 'entry)
+              (else adopted))))
+
+;; a row of the form before this one, (NAME CALLABLE ENTRY ADOPTED), which
+;; a daemon that reloads this file still holds
+(define (command--compact-row row)
+  (if (= (length row) 4)
+      (command--row (car row) (cadr row) (cadddr row) (command-fn (car row)))
+      row))
+
 (define *command-functions*
-  (if (boundp '*command-functions*) *command-functions* '()))
+  (if (boundp '*command-functions*) (map command--compact-row *command-functions*) '()))
 
 ;; what a spec code gives a call from code that leaves the argument out:
 ;; no prefix, the current buffer, point, the region; a prompt has none
@@ -335,25 +367,29 @@
                          (error (string-append name ": missing argument for "
                                                (if (string? (car codes)) (car codes) "spec"))))))))))))
 
-(define (command--bind! name callable entry fn)
+(define (command--bind! name callable entry fn last-callable last-adopted)
   ;; A name binds when it is free, when it holds this command's last
   ;; callable, or when it already holds the command's own function: the
   ;; function then is the command, one name and one thing. The row
   ;; remembers that function, so undefine-command gives the name back.
+  ;; LAST-CALLABLE and LAST-ADOPTED are the parts of the row the command
+  ;; had, read before the command table took the new closure.
   (let* ((sym (string->symbol name))
-         (row (assoc name *command-functions*))
-         (adopted (if (and row (eq? (symbol-value sym) (cadr row)))
-                      (and (pair? (cdddr row)) (cadddr row))
+         (held-last? (and last-callable (boundp sym) (eq? (symbol-value sym) last-callable)))
+         (adopted (if held-last?
+                      last-adopted
                       (and (boundp sym) (eq? (symbol-value sym) fn) fn))))
     (if (and (procedure? callable)
              (or (not (boundp sym))
                  (eq? (symbol-value sym) fn)
-                 (and row (eq? (symbol-value sym) (cadr row)))))
+                 held-last?))
         (begin
           (set-symbol-value! sym callable)
           (set! *command-functions*
-                (cons (list name callable entry adopted)
-                      (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
+                (cons (command--row name callable adopted entry)
+                      ;; alist-delete, not remove with a lambda: remove calls
+                      ;; the lambda for each row, at each of 1700 commands
+                      (alist-delete *command-functions* name)))
           #t)
         #f)))
 
@@ -363,7 +399,8 @@
   (cond ((string? f) (if (command-function f) #t #f))
         ((symbol? f) (commandp (symbol->string f)))
         ((procedure? f)
-         (pair? (filter (lambda (r) (or (eq? (cadr r) f) (eq? (caddr r) f)))
+         (pair? (filter (lambda (r) (or (eq? (command-fn (car r)) f)
+                                        (and (procedure? (cadr r)) (eq? (cadr r) f))))
                         *command-functions*)))
         (else #f)))
 
@@ -377,10 +414,14 @@
          (fn0 (if spec0 (cadr rest) (car rest)))
          ;; a command defined again on the name's own callable keeps the
          ;; function it was made from, so a reload does not wrap it twice
-         (fn (let ((row (assoc name *command-functions*)))
-               (if (and row (eq? fn0 (cadr row)) (pair? (cdddr row)) (cadddr row))
-                   (cadddr row)
-                   fn0)))
+         ;; the row the command had, read here: its parts can name the
+         ;; closure in the command table, which this define replaces below
+         (last-row (assoc name *command-functions*))
+         (last-callable (and last-row (command--row-callable last-row)))
+         (last-adopted (and last-row (command--row-adopted last-row)))
+         (fn (if (and last-callable (eq? fn0 last-callable) last-adopted)
+                 last-adopted
+                 fn0))
          (opts (if spec0 (cddr rest) (cdr rest)))
          (modes (let ((m (memq 'modes opts))) (and m (pair? (cdr m)) (cadr m))))
          ;; 'show PROC: run from M-x, the command hands the function's
@@ -405,9 +446,10 @@
         (define-command--raw name entry))
     (when modes
       (set! *command-modes*
-            (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
+            (cons (list name modes) (alist-delete *command-modes* name))))
     (set! *command-generation* (+ *command-generation* 1))
-    (let ((bound (command--bind! name (command--callable name spec fn) entry fn)))
+    (let ((bound (command--bind! name (command--callable name spec fn) entry fn
+                                 last-callable last-adopted)))
       (catalog-register! 'command name doc
         'use (string-append "(run-command \"" name "\")")
         'spec (and spec (map (lambda (c) (if (procedure? c) 'list c)) spec))
@@ -430,20 +472,22 @@
 (define (call-interactively name) (run-command name))
 
 (define (undefine-command name)
-  (undefine-command--raw name)
-  (set! *command-generation* (+ *command-generation* 1))
-  (catalog-forget! 'command name)
-  ;; the function define-command bound goes with it; one the name held
-  ;; before, or got since, stays
-  (let ((row (assoc name *command-functions*))
-        (sym (string->symbol name)))
-    (when (and row (boundp sym) (eq? (symbol-value sym) (cadr row)))
-      (let ((adopted (and (pair? (cdddr row)) (cadddr row))))
-        (if adopted
-            (set-symbol-value! sym adopted)
-            (unbind-global! sym))))
+  ;; read the row before the command table drops the closure its parts name
+  (let* ((row (assoc name *command-functions*))
+         (callable (and row (command--row-callable row)))
+         (adopted (and row (command--row-adopted row)))
+         (sym (string->symbol name)))
+    (undefine-command--raw name)
+    (set! *command-generation* (+ *command-generation* 1))
+    (catalog-forget! 'command name)
+    ;; the function define-command bound goes with it; one the name held
+    ;; before, or got since, stays
+    (when (and callable (boundp sym) (eq? (symbol-value sym) callable))
+      (if adopted
+          (set-symbol-value! sym adopted)
+          (unbind-global! sym)))
     (set! *command-functions*
-          (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
+          (alist-delete *command-functions* name)))
   name)
 
 ;;; --- public API registry -----------------------------------------------------

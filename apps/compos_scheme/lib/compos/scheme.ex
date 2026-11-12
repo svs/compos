@@ -124,7 +124,13 @@ defmodule Compos.Scheme do
     # A primitive this version ADDS, which no name holds yet. Anything the
     # frame already binds is left alone: a host that redefined a primitive
     # in Scheme and kept no alias must keep its redefinition.
-    register(%{interp | store: store}, Map.drop(fresh, Env.frame_names(store, interp.global)))
+    interp = register(%{interp | store: store}, Map.drop(fresh, Env.frame_names(store, interp.global)))
+
+    # The walk read every global name, and each read cached a copy of the
+    # value in this process: about 100 MB in the Session, which no eval
+    # clears because the Session runs none. Drop the copies.
+    Env.forget_cached_reads()
+    interp
   end
 
   @doc "Snapshot the shared Scheme world for an isolated actor."

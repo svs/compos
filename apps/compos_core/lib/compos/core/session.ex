@@ -822,6 +822,16 @@ defmodule Compos.Core.Session do
     do: handle_call({:reload_files, paths, []}, from, state)
 
   def handle_call({:reload_files, paths, opts}, _from, state) do
+    reply = reload_files_reply(paths, opts, state)
+    # The reload evaluates in this process and leaves its heap at the peak
+    # of that work. This process then allocates almost nothing, so the VM
+    # starts no collection and keeps the dead heap: 255 MB on a dev daemon.
+    # Collect here, with the forms of the reload out of scope.
+    :erlang.garbage_collect()
+    reply
+  end
+
+  defp reload_files_reply(paths, opts, state) do
     # A dev code reload keeps the existing GenServer state. Seed the new
     # manifest lazily so adding this mechanism does not require a restart.
     manifest = Map.get(state, :reload_manifest) || Hotload.Scheme.manifest()
@@ -894,6 +904,10 @@ defmodule Compos.Core.Session do
         state
       end
 
+    # A sweep, and any other work this process did since the last tick,
+    # leaves a heap the VM does not collect while the process stays idle.
+    # A collection of a small heap costs microseconds.
+    :erlang.garbage_collect()
     Process.send_after(self(), :gc_tick, @gc_interval)
     {:noreply, state}
   end

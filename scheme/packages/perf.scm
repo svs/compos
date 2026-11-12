@@ -1,10 +1,11 @@
 ;;; perf.scm --- the system monitor: lane contention, live, in one buffer.
 ;;;
-;;; The *perf* buffer draws two panels. The first holds every lane the telemetry stamped a
+;;; The *perf* buffer draws three panels. The first holds every lane the telemetry stamped a
 ;;; job on in the last *perf-lane-window-ms*, the lane that waited longest
 ;;; first. Wait is the time a job sat queued behind the lane's earlier
 ;;; jobs, so a lane with wait is a lane with contention. The second is
-;;; the host memory in use and the apps that hold the most of it.
+;;; the host memory in use and the apps that hold the most of it. The
+;;; third is the VM memory split and the BEAM processes that hold the most.
 ;;;
 ;;; The buffer text is a plain table of the same numbers, for a reader
 ;;; without the blocks view.
@@ -22,6 +23,10 @@
 
 (defcustom 'perf-tick-ms 2000
   "Milliseconds between two samples of a shown *perf* buffer. Every sample is one patch to the browser."
+  'group 'perf 'type 'number)
+
+(defcustom 'perf-vm-process-rows 15
+  "The number of BEAM processes the compos memory tab of *perf* shows, the process that holds the most memory first."
   'group 'perf 'type 'number)
 
 (define *perf-lane-window-ms* 30000)
@@ -111,6 +116,8 @@
       (list 'perf-lanes (perf--lanes (telemetry-events 1000))
             'perf-mem (list (perf--get os 'mem-total 0) (perf--get os 'mem-free 0)
                             (perf--get (perf--get s 'memory '()) 'total 0))
+            'perf-vm (perf--get s 'memory '())
+            'perf-procs (perf--get (vm-processes perf-vm-process-rows "memory" "") 'rows '())
             'perf-tick (+ 1 (or (buffer-local-value 'perf-tick buf) 0))))))
 
 ;;; --- the apps ----------------------------------------------------------------------
@@ -177,7 +184,37 @@
            (map (lambda (r) (string-append (string-pad-right (perf--clip (car r) 38) 40)
                                            (string-pad-left (number->string (caddr r)) 6)
                                            (string-pad-left (perf--bytes (* 1024 (cadr r))) 12) "\n"))
-                (or (buffer-local-value 'perf-apps buf) '())))))
+                (or (buffer-local-value 'perf-apps buf) '())))
+    "\n" (perf--vm-summary (or (buffer-local-value 'perf-vm buf) '())) "\n\n"
+    (string-pad-right "PROCESS" 40) (string-pad-left "PID" 16) (string-pad-left "MEMORY" 12) "\n"
+    (apply string-append
+           (map (lambda (r) (string-append (string-pad-right (perf--clip (perf--process-name r) 38) 40)
+                                           (string-pad-left (perf--get r 'pid "") 16)
+                                           (string-pad-left (perf--bytes (perf--get r 'memory 0)) 12) "\n"))
+                (perf--by-memory (or (buffer-local-value 'perf-procs buf) '()))))))
+
+;; "total 314 MiB = processes 73 MiB + ets 134 MiB + binary 25 MiB + code 28 MiB + other 54 MiB"
+;; The total is all the memory the BEAM allocated for this daemon. The
+;; four named parts do not reach it: other is the rest, the atoms and the
+;; VM's own structures.
+(define (perf--vm-summary mem)
+  (let* ((total (perf--get mem 'total 0))
+         (part (lambda (k) (perf--get mem k 0)))
+         (other (max 0 (- total (+ (part 'processes) (part 'ets) (part 'binary) (part 'code))))))
+    (string-append "total " (perf--bytes total)
+                   " = processes " (perf--bytes (part 'processes))
+                   " + ets " (perf--bytes (part 'ets))
+                   " + binary " (perf--bytes (part 'binary))
+                   " + code " (perf--bytes (part 'code))
+                   " + other " (perf--bytes other))))
+
+;; the registered name, else the pid
+(define (perf--process-name r)
+  (or (perf--get r 'name #f) (perf--get r 'pid "")))
+
+;; the process rows, the most memory first
+(define (perf--by-memory rows)
+  (map cdr (sort (map (lambda (r) (cons (- (perf--get r 'memory 0)) r)) rows))))
 
 ;; "used 20 GiB of 24 GiB · 84% · compos 697 MiB"
 (define (perf--mem-summary buf)
@@ -264,19 +301,62 @@
             (list (component 'ui/empty '(text "reading ps")))
             (map (lambda (r) (perf--app-row r (quotient total 1024))) apps))))))
 
+(define (perf--process-row r total)
+  (let* ((bytes (perf--get r 'memory 0))
+         (pct (perf--pct bytes total)))
+    (perf--div "perf-arow perf-vrow"
+      (perf--txt "perf-name" (perf--process-name r))
+      (perf--txt "perf-num perf-dim" (perf--get r 'pid ""))
+      (perf--txt "perf-num perf-strong" (perf--bytes bytes))
+      (perf--meter pct (cond ((>= pct 20) "perf-hot") ((>= pct 8) "perf-warm") (else ""))))))
+
+;; MEM is the memory plist of (vm-sample); ROWS are the rows of (vm-processes)
+(define (perf--vm-panel mem rows)
+  (let ((total (perf--get mem 'total 0)))
+    (perf--div "perf-panel"
+      (perf--div "perf-head"
+        (perf--txt "perf-strong" "Memory · compos")
+        (perf--txt "perf-spacer" "")
+        (perf--txt "" (perf--vm-summary mem)))
+      (perf--div "perf-arow perf-vrow perf-phead"
+        (perf--txt "" "process") (perf--txt "perf-num" "pid") (perf--txt "perf-num" "memory")
+        (perf--txt "" "share of total"))
+      (perf--div "perf-list"
+        (if (null? rows)
+            (list (component 'ui/empty '(text "no processes")))
+            (map (lambda (r) (perf--process-row r total)) (perf--by-memory rows)))))))
+
 (define (perf--footer buf)
   (perf--div "perf-bar"
     (perf--txt "perf-strong" *perf-buffer*)
+    (perf--txt "" "1 system") (perf--txt "" "2 compos memory")
     (perf--txt "" "g refresh") (perf--txt "" "SPC pause") (perf--txt "" "q quit")
     (perf--txt "perf-spacer" "")
     (perf--txt (if (buffer-local-value 'perf-paused buf) "perf-warm" "perf-dim")
                (if (buffer-local-value 'perf-paused buf) "paused" (string-append "tick " (number->string (or (buffer-local-value 'perf-tick buf) 0)))))))
 
+;; the tab the buffer shows: "system", the lanes and the host memory, or
+;; "compos", the memory of this daemon
+(define (perf--tab buf)
+  (if (equal? (buffer-local-value 'perf-tab buf) "compos") "compos" "system"))
+
+(define (perf--tabs buf)
+  (let ((tab (perf--tab buf)))
+    (component 'ui/tabs
+      (list 'class "perf-tabs"
+            'tabs (list (list "perf-tab-system" "system" (equal? tab "system") "1")
+                        (list "perf-tab-compos" "compos memory" (equal? tab "compos") "2"))))))
+
 (define (perf--blocks buf)
-  (list (perf--div "perf-root"
-          (perf--lanes-panel (or (buffer-local-value 'perf-lanes buf) '()))
-          (perf--memory-panel buf)
-          (perf--footer buf))))
+  (list (apply perf--div "perf-root"
+          (append
+            (list (perf--tabs buf))
+            (if (equal? (perf--tab buf) "compos")
+                (list (perf--vm-panel (or (buffer-local-value 'perf-vm buf) '())
+                                      (or (buffer-local-value 'perf-procs buf) '())))
+                (list (perf--lanes-panel (or (buffer-local-value 'perf-lanes buf) '()))
+                      (perf--memory-panel buf)))
+            (list (perf--footer buf))))))
 
 ;;; --- the tick ---------------------------------------------------------------------
 
@@ -316,7 +396,7 @@
 
 ;;; --- the mode ------------------------------------------------------------------------
 
-(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-apps perf-ps-busy perf-tick))
+(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-vm perf-procs perf-apps perf-ps-busy perf-tick))
 
 (define (perf--setup! buf)
   (buffer-set-read-only! buf #t)
@@ -331,14 +411,16 @@
   (lambda () (perf--setup! (current-buffer))))
 
 (mode-keys! "perf-mode"
-  '(("g" "perf-refresh")
+  '(("1" "perf-tab-system")
+    ("2" "perf-tab-compos")
+    ("g" "perf-refresh")
     ("SPC" "perf-pause")
     ("n" "next-line")
     ("p" "previous-line")
     ("q" "quit-window")))
 
 (mode-doc! "perf-mode"
-  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. g samples now, SPC pauses, q quits.")
+  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, and the perf-vm-process-rows BEAM processes that hold the most memory. 1 and 2 take the tabs, g samples now, SPC pauses, q quits.")
 
 (register-context-provider! "perf-mode"
   (lambda (buf)
@@ -357,6 +439,19 @@
 
 (define-command "perf-refresh" "Sample the lanes now"
   (lambda () (perf--refresh! (current-buffer)))
+  'modes '(perf-mode))
+
+(define (perf--show-tab! tab)
+  (let ((buf (current-buffer)))
+    (buffer-set-local! buf 'perf-tab tab)
+    (perf--render! buf)))
+
+(define-command "perf-tab-system" "Show the lanes and the host memory"
+  (lambda () (perf--show-tab! "system"))
+  'modes '(perf-mode))
+
+(define-command "perf-tab-compos" "Show the memory of this daemon and the processes that hold it"
+  (lambda () (perf--show-tab! "compos"))
   'modes '(perf-mode))
 
 (define-command "perf-pause" "Pause or resume the samples"
@@ -453,6 +548,7 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
 .perf-phead { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); }
 .perf-name { color: var(--default-fg); }
 .perf-arow { display: grid; grid-template-columns: minmax(0, 1.4fr) 56px 88px minmax(0, 2fr); gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; }
+.perf-arow.perf-vrow { grid-template-columns: minmax(0, 1.4fr) 104px 88px minmax(0, 2fr); }
 .perf-arow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perf-meter { height: 8px; margin: 6px 12px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
 .perf-arow .perf-meter { margin: 0; }

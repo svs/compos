@@ -35,6 +35,16 @@ defmodule Compos.Ui.Router do
     live("/b/:buffer", Compos.Ui.EditorLive)
   end
 
+  # The VM as Phoenix LiveDashboard shows it: processes by memory, ETS
+  # tables, allocators, ports. Compos.Ui.Reach guards the route as it
+  # guards the editor.
+  import Phoenix.LiveDashboard.Router
+
+  scope "/" do
+    pipe_through(:browser)
+    live_dashboard("/dashboard")
+  end
+
   # the same buffer as plain text, for a terminal or an agent that holds a
   # link. Loopback only, and the answer carries no CORS header: a page you
   # visit can send this request but cannot read the reply.

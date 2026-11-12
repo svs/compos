@@ -38,6 +38,46 @@
                    "the blocks are runtime state the desktop skips")
       (buffer-kill! buf))))
 
+;; every text in a block tree, in draw order
+(define (perf-test--texts b)
+  (if (pair? b)
+      (fold (lambda (acc kid) (append acc (perf-test--texts kid)))
+            (let ((t (perf--get b 'text #f))) (if (string? t) (list t) '()))
+            (let ((kids (perf--get b 'children '()))) (if (pair? kids) kids '())))
+      '()))
+
+(deftest 'perf-tabs-keep-the-compos-memory-apart
+  "the system tab holds the lanes and the apps, the compos tab holds the daemon's memory"
+  (lambda ()
+    (let ((buf (perf-test--buffer)))
+      (buffer-create buf)
+      (with-current-buffer buf (lambda () (set-mode! "perf-mode")))
+      (let ((system (perf-test--texts (car (buffer-local-value 'render-blocks buf)))))
+        (check-true! (member "Lanes · contention" system) "the system tab holds the lanes")
+        (check-true! (not (member "Memory · compos" system)) "the system tab holds no daemon memory"))
+      (with-current-buffer buf (lambda () (run-command "perf-tab-compos")))
+      (let ((compos (perf-test--texts (car (buffer-local-value 'render-blocks buf)))))
+        (check-true! (member "Memory · compos" compos) "the compos tab holds the daemon memory")
+        (check-true! (not (member "Lanes · contention" compos)) "the compos tab holds no lanes"))
+      (buffer-kill! buf))))
+
+(deftest 'perf-vm-panel-shows-the-split-and-the-largest-processes
+  "the VM panel shows the memory split, then the processes, the most memory first"
+  (lambda ()
+    (let* ((mem (list 'total 1073741824 'processes 536870912 'ets 268435456
+                      'binary 134217728 'code 67108864 'atom 1024))
+           (rows (list (list 'name "Compos.Core.Desktop" 'pid "<0.933.0>" 'memory 14680064)
+                       (list 'name "Compos.Core.Session" 'pid "<0.900.0>" 'memory 267386880)
+                       (list 'name "Compos.Core.Buffer.init/1" 'pid "<0.956.0>" 'memory 1048576)))
+           (texts (perf-test--texts (perf--vm-panel mem rows))))
+      (check-true! (member "total 1.0 GiB = processes 512 MiB + ets 256 MiB + binary 128 MiB + code 64 MiB + other 64 MiB" texts)
+                   "the head holds the split, and the parts sum to the total")
+      (check-equal! (filter (lambda (t) (string-prefix? "Compos." t)) texts)
+                    '("Compos.Core.Session" "Compos.Core.Desktop" "Compos.Core.Buffer.init/1")
+                    "the process names, the most memory first")
+      (check-true! (member "255 MiB" texts) "the row holds the memory")
+      (check-true! (member "<0.900.0>" texts) "the row holds the pid"))))
+
 (deftest 'display-memory-text-expands-every-token
   "the format names the numbers; unknown text stays"
   (lambda ()

@@ -1220,9 +1220,7 @@ defmodule Compos.Ui.EditorLive do
           <%= if mb_geom(@state.minibuffer) == "modal" do %>
             <c-group class="mb-head">
               <c-text :if={Map.get(@state.minibuffer, :tabs, []) == []} class="mb-head-title">{String.trim_trailing(@state.minibuffer.prompt, ": ")}</c-text>
-              <c-tabs :if={Map.get(@state.minibuffer, :tabs, []) != []} class="c-tabs mb-tabs">
-                <c-tab :for={t <- @state.minibuffer.tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}><c-action-key :if={Map.get(t, :key)} class="mb-tab-key">{t.key}</c-action-key>{t.label}</c-tab>
-              </c-tabs>
+              <.mb_tab_row :if={Map.get(@state.minibuffer, :tabs, []) != []} tabs={@state.minibuffer.tabs} />
               <c-text class="mb-head-spacer"></c-text>
               <c-text class="mb-head-legend">
                 <c-text :if={Map.get(@state.minibuffer, :tabs, []) != []} class="transient-legend"><c-action-key class="transient-legend-key">← →</c-action-key> tab</c-text>
@@ -1233,9 +1231,7 @@ defmodule Compos.Ui.EditorLive do
             <c-group class="mb-label-row">
               <%= case {Map.get(@state.minibuffer, :tabs, []), Map.get(@state.minibuffer, :legend, [])} do %>
                 <% {[_ | _] = tabs, _} -> %>
-                  <c-tabs class="c-tabs mb-tabs">
-                    <c-tab :for={t <- tabs} class={"c-tab #{if t.current, do: "c-tab-on"}"} current={to_string(t.current)}><c-action-key :if={Map.get(t, :key)} class="mb-tab-key">{t.key}</c-action-key>{t.label}</c-tab>
-                  </c-tabs>
+                  <.mb_tab_row tabs={tabs} />
                   <c-text class="mb-tabs-hint"><c-action-key class="transient-legend-key">← →</c-action-key> tab</c-text>
                 <% {_, [_ | _] = legend} -> %>
                   <c-text :for={row <- legend} class="transient-legend"><c-action-key class="transient-legend-key">{row.key}</c-action-key> {row.label}</c-text>
@@ -1404,6 +1400,37 @@ defmodule Compos.Ui.EditorLive do
   # there (echo-status), a rule, then the keys that matter where you are
   # standing. It
   # sits under every window unless echo-area-position says top.
+  # The prompt's tab row. SPC leads it once when a tab has a key, and the
+  # key is the marked letter inside the tab's name: SPC b reads off the row.
+  defp mb_tab_row(assigns) do
+    ~M"""
+    <c-tabs class="c-tabs mb-tabs"><c-action-key :if={Enum.any?(@tabs, &Map.get(&1, :key))} class="mb-tabs-leader" title="SPC and a marked letter jump to its tab">SPC</c-action-key><c-tab :for={t <- @tabs} class={"c-tab " <> if(t.current, do: "c-tab-on", else: "")} current={to_string(t.current)}><%= case mb_tab_split(t) do %><% {pre, k, post} -> %>{pre}<c-text class="mb-tab-key">{k}</c-text>{post}<% {:badge, k} -> %><c-action-key class="mb-tab-key-badge">{k}</c-action-key>{t.label}<% _ -> %>{t.label}<% end %></c-tab></c-tabs>
+    """
+  end
+
+  # {before, letter, after} when the tab's key is a letter of its label;
+  # {:badge, key} when it is not; nil without a key
+  defp mb_tab_split(t) do
+    label = to_string(Map.get(t, :label, ""))
+
+    case Map.get(t, :key) do
+      nil ->
+        nil
+
+      key ->
+        key = to_string(key)
+        letters = String.graphemes(label)
+
+        case Enum.find_index(letters, &(String.downcase(&1) == String.downcase(key))) do
+          nil ->
+            {:badge, key}
+
+          i ->
+            {Enum.join(Enum.take(letters, i)), Enum.at(letters, i), Enum.join(Enum.drop(letters, i + 1))}
+        end
+    end
+  end
+
   defp frame_echo(assigns) do
     ~M"""
     <c-statusbar class="echo-area" role="status">

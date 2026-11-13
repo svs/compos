@@ -2067,7 +2067,16 @@ c-action-key {
   letter-spacing: 0.02em; text-transform: none;
 }
 /* the key SPC jumps to this tab with */
+/* SPC leads the tab row once; each tab marks the letter SPC takes */
+.mb-tabs .mb-tabs-leader {
+  align-self: center; margin-right: 0.2em;
+  font-size: 0.85em; opacity: 0.75;
+}
 .mb-tabs .mb-tab-key {
+  text-decoration: underline; text-underline-offset: 0.18em;
+  text-decoration-thickness: 1.5px;
+}
+.mb-tabs .mb-tab-key-badge {
   margin-right: 0.45em; font-weight: 700;
   color: var(--accent-fg, #26356b); opacity: 0.85;
 }

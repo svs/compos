@@ -169,3 +169,40 @@
                                             (string-append "Install compos " (car latest) " as the stable compos"))
                                         " and restart it? ")
                          (lambda () (apply release-update! latest))))))))))
+
+(effects! '(write))
+
+(defcustom 'release-check-updates #t
+  "Look for a newer compos release at start and every few hours, and show a notice when there is one. The notice runs compos-update."
+  'group 'release 'type 'boolean)
+
+(define *release--notified* #f)
+
+(effects! '(read external display))
+
+(define (release-check!)
+  "ask GitHub for the newest release; when it is newer than the running compos, show a notice that runs compos-update, once per version. A checkout runs no release, so it is never told"
+  (let ((now (release-running-version)))
+    (when (and release-check-updates now)
+      (release-latest
+        (lambda (latest)
+          (when (and latest
+                     (release-version<? now (car latest))
+                     (not (equal? *release--notified* (car latest))))
+            (set! *release--notified* (car latest))
+            (notify! "compos" (string-append "compos " (car latest) " is out")
+                     (string-append "You run " now ". Click to update and restart.")
+                     (list 'command "compos-update" 'sticky #t))))))))
+
+(define-command "compos-check-update" "Look for a newer compos release now"
+  (lambda ()
+    (if (release-running-version)
+        (begin (set! *release--notified* #f) (release-check!))
+        (message "this compos runs from a checkout, not a release"))))
+
+(effects! '(write))
+
+(require 'cron)
+(cron-define! "compos-update-check" "0 */6 * * *" 'call 'release-check! 'save #f)
+(release-check!)
+

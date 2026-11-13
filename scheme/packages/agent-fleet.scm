@@ -1171,28 +1171,17 @@
   (lambda () (chat-list-open!)))
 
 ;;; --- the minibuffer form ------------------------------------------------------
-;;; C-x c is these rows in the minibuffer's form, the way C-x b is the
-;;; buffers': a popup under the work with its filter line already open.
-;;; You type, the rows narrow, RET takes the row and the popup goes.
-;;; The form keeps its own view buffer, so the sort, folds and grouping
-;;; of the application on C-x C-c stay what you set them to — the
-;;; application has one state and this borrows none of it.
-
-(define *chat-prompt-buffer* " *chats*")
-(add-display-rule! *chat-prompt-buffer* 'shaped '(side bottom size 0.4))
-(ibuffer-view! *chat-prompt-buffer* 'sort 'recent 'grouping 'group)
+;;; C-x c is C-x b for chats: the minibuffer prompt with tabs (switch.scm).
+;;; The list on C-x C-c keeps its own state.
 
 (define (chat-prompt-open!)
-  ;; a heading is folded by the prompt line itself, so PICK only ever
-  ;; sees a chat: a live one by name, an archived one by its .chat path
-  (ibuffer-prompt! 'chat-list *chat-prompt-buffer* "chat-list-mode" "Chat: "
-    (lambda (row close!)
-      (ibuffer-pick! row close!)
-      (group-current-recalculate!))
-    "minibuffer"))
+  ;; C-x c is C-x b for chats: the same minibuffer prompt, with the
+  ;; Group, All and Running tabs and the SPC leader. The list, archived
+  ;; chats too, stays on C-x C-c
+  (switch-bare-prompt! 'chat))
 
 (define-command "chat-prompt"
-  "Switch to a chat with the plain minibuffer list"
+  "Switch to a chat in the minibuffer: Group, All and Running tabs"
   (lambda () (chat-prompt-open!)))
 
 ;; the name is gone but the words are not: you remember what the chat said

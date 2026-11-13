@@ -1148,6 +1148,11 @@ the next row down. STEP is kept for the callers."
                 (m (and r (nth 3 r))))
            (if m (filter (lambda (x) (equal? (nth 3 x) m)) rows) '())))
         ((eq? tab 'family) (switch-family-rows rows group))
+        ;; a chat whose turn runs, starts or waits on the user now
+        ((eq? tab 'running)
+         (filter (lambda (r) (or (memq (chat-row-status (car r)) '(running starting needs_attention))
+                                 (ibuffer-row-local (car r) 'chat-turn-active)))
+                 rows))
         ((string? tab)
          (if group
              (filter (lambda (r) (and (switch-row-in-group? r group)
@@ -1169,20 +1174,28 @@ the next row down. STEP is kept for the callers."
 
 
 
-(define (switch-bare-prompt!)
+;; C-x b, and C-x c with KIND 'chat: the same prompt, its tabs and its
+;; SPC leader; for chats only the chat rows, on the chat tabs
+(define *switch-chat-tabs* '((group "Group") (all "All") (running "Running")))
+(defvar '*switch-last-chat-tab* 'group)
+
+(define (switch-bare-prompt! &optional kind)
   (let* ((start (monotonic-ms))
+         (chats? (eq? kind 'chat))
          (home (active-window))
          (here (or (window-buffer home) (current-buffer)))
          (group (or (buffer-group here) (frame-local 'current-group)))
-         (rows (filter (lambda (r) (ibuffer-workspace-path? (cadr r)))
+         (rows (filter (lambda (r) (and (ibuffer-workspace-path? (cadr r))
+                                        (or (not chats?) (equal? (nth 3 r) "chat-mode"))))
                        (switch-prompt-rows here (active-window))))
          (names (map car rows))
          ;; Emacs names the buffer an empty RET takes: the window's history
          ;; leads the rows, so its first row is that default
          (dflt (switch-first-choice rows here))
-         (label (if dflt
-                    (string-append "Switch to (default " dflt "): ")
-                    "Switch to: "))
+         (label (let ((what (if chats? "Chat" "Switch to")))
+                  (if dflt
+                      (string-append what " (default " dflt "): ")
+                      (string-append what ": "))))
          (candidates (switch-bare-candidates names))
          (display (if ibuffer-info
                       (switch-buffer-info-candidates candidates rows (ibuffer-table-group-labels))
@@ -1196,8 +1209,10 @@ the next row down. STEP is kept for the callers."
          (sleep-woken! (lambda (keep)
                          (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)
                          (set! woken '()))))
-    (let* ((want (if (eq? switch-buffer-initial-tab 'last) *switch-last-tab* switch-buffer-initial-tab))
-           (tabs (switch-tab-list rows group))
+    (let* ((want (cond (chats? *switch-last-chat-tab*)
+                       ((eq? switch-buffer-initial-tab 'last) *switch-last-tab*)
+                       (else switch-buffer-initial-tab)))
+           (tabs (if chats? *switch-chat-tabs* (switch-tab-list rows group)))
            ;; never open on a tab that has nothing: with no current group the
            ;; Group tab is empty, so C-x b opened on a blank picker.
            (tab (let loop ((ks (let ((w (if (assoc want tabs) want 'group)))
@@ -1249,7 +1264,7 @@ the next row down. STEP is kept for the callers."
       (minibuffer-tabbed! tabs tab
         (lambda (next)
           (set! tab next)
-          (set! *switch-last-tab* next)
+          (if chats? (set! *switch-last-chat-tab* next) (set! *switch-last-tab* next))
           (minibuffer-preview-candidates! (tab-display next) on-confirm))))
     (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) start))))
 

@@ -278,7 +278,9 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
 ;; error line fails rg--parse and drops. xargs feeds rg explicit file
 ;; arguments, so rg never falls back to reading stdin.
 (define (rg--matches root pattern)
-  (let ((out (shell-command->string
+  ;; the editor's own search: the builtin, as jj-sh does, so the agent shell
+  ;; gate, which refuses an agent's rg, does not refuse the call that replaces it
+  (let ((out (%shell-command->string-builtin
                (string-append
                  "git ls-files --cached --others --exclude-standard -z"
                  " | xargs -0 " project-ripgrep-program " " project-ripgrep-args

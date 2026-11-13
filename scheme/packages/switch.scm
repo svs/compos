@@ -1042,8 +1042,6 @@ the next row down. STEP is kept for the callers."
 ;; TAB locked it. The lock is the switcher's TAB lock, on a tab: TAB in the
 ;; modal switcher keeps one group's rows; TAB in the plain prompt keeps one
 ;; tab's rows, and its completion, until TAB again or the prompt closes.
-(define (switch-tab-move tab step tabs locked)
-  (if locked tab (switch-tab-step tab step tabs)))
 
 ;; the slug of the chat that spawned chat NAME, and NAME's own slug
 (define (switch-chat-parent name)
@@ -1169,35 +1167,7 @@ the next row down. STEP is kept for the callers."
           (loop (cdr wins)
                 (append acc (if b (list b) '()) (window-prev-buffers (car wins))))))))
 
-(define (switch-tab-keys tabs)
-  ;; a key for every tab: the first letter of its label no other tab
-  ;; took, else the first free letter; a separator takes none
-  (let loop ((ts tabs) (used '()) (out '()))
-    (if (null? ts)
-        (reverse out)
-        (let* ((label (string-downcase (cadr (car ts))))
-               (free (lambda (c) (and (string<=? "a" c) (string<=? c "z") (not (member c used)))))
-               (pick (let try ((i 0))
-                       (cond ((>= i (string-length label))
-                              (let alpha ((cs (string-split "abcdefghijklmnopqrstuvwxyz" "")))
-                                (cond ((null? cs) #f)
-                                      ((free (car cs)) (car cs))
-                                      (else (alpha (cdr cs))))))
-                             ((free (substring label i (+ i 1))) (substring label i (+ i 1)))
-                             (else (try (+ i 1)))))))
-          (if (or (equal? label "") (not pick))
-              (loop (cdr ts) used out)
-              (loop (cdr ts) (cons pick used) (cons (list (car (car ts)) pick) out)))))))
 
-(define (switch-tab-row-keyed tab tabs locked keys)
-  ;; switch-tab-row with each tab's key, for SPC KEY to jump to it
-  (let ((row (map (lambda (t)
-                    (let ((k (assoc (car t) keys)))
-                      (if k
-                          (list (cadr t) (equal? (car t) tab) (cadr k))
-                          (list (cadr t) (equal? (car t) tab)))))
-                  tabs)))
-    (if locked (filter cadr row) row)))
 
 (define (switch-bare-prompt!)
   (let* ((start (monotonic-ms))
@@ -1228,7 +1198,6 @@ the next row down. STEP is kept for the callers."
                          (set! woken '()))))
     (let* ((want (if (eq? switch-buffer-initial-tab 'last) *switch-last-tab* switch-buffer-initial-tab))
            (tabs (switch-tab-list rows group))
-           (keys (switch-tab-keys tabs))
            ;; never open on a tab that has nothing: with no current group the
            ;; Group tab is empty, so C-x b opened on a blank picker.
            (tab (let loop ((ks (let ((w (if (assoc want tabs) want 'group)))
@@ -1246,7 +1215,6 @@ the next row down. STEP is kept for the callers."
            (choices (append candidates (map car family)))
            ;; DISPLAY and CANDIDATES come in the same order, so one walk
            ;; keeps the rows of a tab
-           (locked #f)
            (tab-display (lambda (tab)
                           (if (eq? tab 'family)
                               (map cadr family)
@@ -1277,37 +1245,12 @@ the next row down. STEP is kept for the callers."
         ;; a modified buffer's annotation leads with *, so match three
         ;; fields to keep its mode and group in reach
         (if ibuffer-info 3 #t) "minibuffer")
-      (minibuffer-tabs! (switch-tab-row-keyed tab tabs #f keys))
-      ;; SPC KEY on an empty prompt jumps to the tab that KEY marks
-      (set! *mb-leader-fn* (lambda (k)
-                             (let ((hit (let find-key ((ks keys))
-                                          (cond ((null? ks) #f)
-                                                ((equal? (cadr (car ks)) k) (car (car ks)))
-                                                (else (find-key (cdr ks)))))))
-                               (and hit
-                                    (begin
-                                      (set! locked #f)
-                                      (set! tab hit)
-                                      (set! *switch-last-tab* tab)
-                                      (minibuffer-tabs! (switch-tab-row-keyed tab tabs #f keys))
-                                      (minibuffer-preview-candidates! (tab-display tab) on-confirm)
-                                      #t)))))
-      (set! *mb-tab-fn* (lambda (step)
-                          (and (not locked)
-                               (begin
-                                 (set! tab (switch-tab-move tab step tabs locked))
-                                 (set! *switch-last-tab* tab)
-                                 (minibuffer-tabs! (switch-tab-row-keyed tab tabs #f keys))
-                                 (minibuffer-preview-candidates! (tab-display tab) on-confirm)
-                                 #t))))
-      ;; TAB locks the list to the tab it shows; TAB again unlocks
-      (set! *mb-fold-fn* (lambda (sel)
-                           (set! locked (not locked))
-                           (minibuffer-tabs! (switch-tab-row-keyed tab tabs locked keys))
-                           (message (if locked
-                                        (string-append "in " (cadr (assoc tab tabs)) " -- TAB unlocks")
-                                        "all tabs -- the side arrows move"))
-                           #t)))
+      ;; the shared tab row: the side arrows step, SPC KEY jumps, TAB locks
+      (minibuffer-tabbed! tabs tab
+        (lambda (next)
+          (set! tab next)
+          (set! *switch-last-tab* next)
+          (minibuffer-preview-candidates! (tab-display next) on-confirm))))
     (set! *ibuffer-prompt-last-ms* (- (monotonic-ms) start))))
 
 (define-command "ibuffer-prompt" "Switch to a buffer with the plain minibuffer list"

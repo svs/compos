@@ -592,12 +592,16 @@
     ". Find the cause, inspect the related source, and propose or implement a fix. "
     "Do not resolve the Sentry issue until I ask."))
 
+(define (sentry--issue-chat! buf prompt)
+  "BUF's own chat in the Sentry group, the one M-o opens from BUF: a new
+issue starts its chat with PROMPT; an issue that has one keeps it."
+  (car (assign-chat! buf *sentry-group* prompt)))
+
 (define (sentry--ask-agent! buf)
   (let ((issue (buffer-local-value 'sentry-detail-issue buf)))
     (when issue
-      (let ((chat (group-chat *sentry-group*)))
-        (*sentry-agent-send* chat (sentry--agent-prompt buf issue))
-        (group-chat-show! *sentry-group*)))))
+      (group-chat-buffer-show!
+        (sentry--issue-chat! buf (sentry--agent-prompt buf issue))))))
 
 (define (sentry--open-in-sentry! buf)
   (let* ((issue (buffer-local-value 'sentry-detail-issue buf))
@@ -658,26 +662,18 @@
                       acc))))))
 
 (define-command "sentry-list-ask-agent"
-  "Send the marked issues, or the one at point, to the Sentry group agent"
+  "Send the marked issues, or the one at point, each to its own chat"
   (lambda ()
     (let ((issues (list-targets *sentry-buffer*)))
       (unless (null? issues)
-        (for-each (lambda (i)
-                    (sentry--ensure-detail! (sentry--text (plist-get i 'id))))
-                  issues)
-        (let ((chat (group-chat *sentry-group*)))
-          (*sentry-agent-send* chat
-            (if (null? (cdr issues))
-                (sentry--agent-prompt
-                  (sentry--detail-buffer (sentry--text (plist-get (car issues) 'id)))
-                  (car issues))
-                (string-append
-                  "Investigate these Sentry issues:\n"
-                  (sentry--agent-prompt-lines issues)
-                  "\nFind the causes, inspect the related source, and propose"
-                  " or implement fixes. Do not resolve the Sentry issues"
-                  " until I ask.")))
-          (group-chat-show! *sentry-group*)))))
+        (let ((chats
+                (map (lambda (i)
+                       (let* ((id (sentry--text (plist-get i 'id)))
+                              (buf (begin (sentry--ensure-detail! id)
+                                          (sentry--detail-buffer id))))
+                         (sentry--issue-chat! buf (sentry--agent-prompt buf i))))
+                     issues)))
+          (group-chat-buffer-show! (car chats))))))
   'modes '(sentry-mode))
 
 (define-command "sentry-list-open-web"
@@ -793,7 +789,7 @@
              buf
              ". Read that buffer for the complete payload.")))))
 
-(define-command "sentry-ask-agent" "Send this issue to the Sentry group agent"
+(define-command "sentry-ask-agent" "Send this issue to its own chat"
   (lambda () (sentry--ask-agent! (current-buffer)))
   'modes '(sentry-detail-mode))
 

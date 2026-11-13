@@ -568,15 +568,27 @@
               (loop (cdr cs) (+ k 1)
                     (if (and (= k 0) (null? out)) (cons (list "Recent" 0) out) out)))))))
 
+(define (command-palette--tab-keys)
+  ;; each section's SPC key, as every tabbed prompt picks them: ((I KEY) ...)
+  (minibuffer-tab-keys
+    (let loop ((ss *command-palette--sections*) (i 0) (out '()))
+      (if (null? ss) (reverse out) (loop (cdr ss) (+ i 1) (cons (list i (car (car ss))) out))))))
+
 (define (command-palette--tabs!)
   ;; one section alone needs no tabs
   (minibuffer-tabs!
     (if (< (length *command-palette--sections*) 2)
         '()
-        (let loop ((ss *command-palette--sections*) (i 0) (out '()))
-          (if (null? ss)
-              (reverse out)
-              (loop (cdr ss) (+ i 1) (cons (list (car (car ss)) (= i *command-palette--tab*)) out)))))))
+        (let ((keys (command-palette--tab-keys)))
+          (let loop ((ss *command-palette--sections*) (i 0) (out '()))
+            (if (null? ss)
+                (reverse out)
+                (loop (cdr ss) (+ i 1)
+                      (cons (let ((k (assv i keys)))
+                              (if k
+                                  (list (car (car ss)) (= i *command-palette--tab*) (cadr k))
+                                  (list (car (car ss)) (= i *command-palette--tab*))))
+                            out))))))))
 
 (define (command-palette--rest! cands)
   ;; the resting list is up: note its sections and show their tabs
@@ -585,18 +597,27 @@
   (set! *command-palette--tab* 0)
   (command-palette--tabs!))
 
+(define (command-palette--tab-go! i)
+  ;; the highlight goes to the first row of section I
+  (set! *command-palette--tab* i)
+  (command-palette--tabs!)
+  (minibuffer--move! (- *command-palette--total*))
+  (let ((k (cadr (nth i *command-palette--sections*))))
+    (when (> k 0) (minibuffer--move! k)))
+  #t)
+
 (define (command-palette--tab-step! step)
   ;; left and right step the tabs only while nothing is typed
   (let ((n (length *command-palette--sections*)))
     (and (equal? (string-trim (minibuffer-input)) "")
          (>= n 2)
-         (begin
-           (set! *command-palette--tab* (modulo (+ *command-palette--tab* step) n))
-           (command-palette--tabs!)
-           (minibuffer--move! (- *command-palette--total*))
-           (let ((k (cadr (nth *command-palette--tab* *command-palette--sections*))))
-             (when (> k 0) (minibuffer--move! k)))
-           #t))))
+         (command-palette--tab-go! (modulo (+ *command-palette--tab* step) n)))))
+
+(define (command-palette--leader! key)
+  ;; SPC and a section's letter jump to it, as in every tabbed prompt
+  (and (>= (length *command-palette--sections*) 2)
+       (let ((hit (find (lambda (k) (equal? (cadr k) key)) (command-palette--tab-keys))))
+         (and hit (command-palette--tab-go! (car hit))))))
 
 (define-command "command-palette"
   "Find a command by what it does"
@@ -615,10 +636,11 @@
                 (set! *mb-history-key* #f)
                 (set! *mb-row-delete-fn* #f)
                 (set! *mb-tab-fn* #f)
+                (set! *mb-leader-fn* #f)
                 ;; only a command that runs goes on the history: the run
                 ;; pushes it, and words that found none stay out
                 (command-palette--run choice)))
-            (list 'cancel (lambda () (set! *mb-history-key* #f) (set! *mb-row-delete-fn* #f) (set! *mb-tab-fn* #f)))
+            (list 'cancel (lambda () (set! *mb-history-key* #f) (set! *mb-row-delete-fn* #f) (set! *mb-tab-fn* #f) (set! *mb-leader-fn* #f)))
             (list 'change
               (lambda (input)
                 ;; RET must never pick a row the input has left behind: the
@@ -641,7 +663,8 @@
             (list 'filter #f)
             (list 'style "palette")))
     (command-palette--rest! rest)
-    (set! *mb-tab-fn* command-palette--tab-step!))))
+    (set! *mb-tab-fn* command-palette--tab-step!)
+    (set! *mb-leader-fn* command-palette--leader!))))
 
 ;; the eval that scores what RET runs for the words you type
 (load "palette-eval.scm")

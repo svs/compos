@@ -254,9 +254,6 @@
                            (list (tab-bars--name e entries)
                                  (string-append (cadr e) (if (and (> (length t) 2) (list-ref t 2)) "  ●" "")))))
                        (ordered))))
-         (row (lambda () (let loop ((bs bars) (i 0) (out '()))
-                           (if (null? bs) (reverse out)
-                               (loop (cdr bs) (+ i 1) (cons (list (car bs) (= i tab)) out))))))
          ;; text that names no tab narrows the index's rows, as / does in a list
          (ix (car (tab-bars-pair buf)))
          ;; each minibuffer tab starts on its bar's selected tab
@@ -284,17 +281,16 @@
         (message "No tab bars here")
         (begin
           (minibuffer-read-preview "Tab: " (cands) light! on-confirm (lambda () (tab-bars--light! buf #f)) #f "minibuffer")
-          (minibuffer-tabs! (row))
+          ;; the shared tab row: the side arrows step, SPC KEY jumps, TAB locks
+          (minibuffer-tabbed! (map (lambda (b) (list b b)) bars) (list-ref bars tab)
+            (lambda (bar)
+              (set! tab (let loop ((bs bars) (i 0)) (cond ((null? bs) tab) ((equal? (car bs) bar) i) (else (loop (cdr bs) (+ i 1))))))
+              (mb-tab-remember! (string-append "tab-bars:" buf) bar)
+              (minibuffer-preview-candidates! (cands) on-confirm)
+              (land!)
+              (light! (or (minibuffer-selected) (car (car (cands)))))))
           (land!)
-          (light! (or (minibuffer-selected) (car (car (cands)))))
-          (set! *mb-tab-fn* (lambda (step)
-                              (set! tab (modulo (+ tab step) (length bars)))
-                              (mb-tab-remember! (string-append "tab-bars:" buf) (list-ref bars tab))
-                              (minibuffer-tabs! (row))
-                              (minibuffer-preview-candidates! (cands) on-confirm)
-                              (land!)
-                              (light! (or (minibuffer-selected) (car (car (cands)))))
-                              #t))))))
+          (light! (or (minibuffer-selected) (car (car (cands)))))))))
 
 (public! 'tab-bars-pick! "(tab-bars-pick! BUF) — one minibuffer over every tab bar of BUF and the pane paired with it; typing filters them all")
 

@@ -461,7 +461,7 @@
       (message "Slides: → next, ← back, o overview, f maximize, ? keys. C-g gives the keyboard back.")))
   'modes '(morg-mode slides-deck-mode))
 
-(define-command "slides-reload" "Redraw the slides from their deck, from the slide at its point"
+(define-command "slides-reload" "Redraw the slides from their deck, at the slide they show"
   (lambda ()
     (let ((source (slides--deck (current-buffer))))
       (if source

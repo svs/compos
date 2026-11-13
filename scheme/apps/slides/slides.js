@@ -718,11 +718,12 @@ sections.forEach((s, n) => { if (+s.dataset.line <= (DATA.line || 0)) startAt = 
 fit();
 go(startAt, { instant: true, allSteps: !!DATA.live });
 if (!DATA.live) {
-  // The same rendering loaded again (f remounts the frame): resume there.
+  // A reload (g, f remounting the frame, a hot reload of this file) comes
+  // back to the slide and step the page last showed, of any rendering.
   const done = () => { resuming = false; report(); };
   fetch('_compos/app').then(r => r.json()).then(at => {
     resuming = false;
-    if (at && at.stamp === DATA.stamp && at.slide < sections.length) {
+    if (at && at.slide != null && at.slide < sections.length) {
       go(at.slide, { instant: true });
       setSteps(sections[idx], at.steps || 0, true);
     } else {

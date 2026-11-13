@@ -1467,7 +1467,30 @@
 (effects! '(read))
 
 ;; -> (LINE KIND NAME DOC) rows, the outline contract
+;; every tab the app shows, the list's and its page's, is a row of kind tab:
+;; picking it takes the tab as a click does. A tab the index already names
+;; (a page of parts lists its tabs) stays where it is
+(define (imenu--tab-rows buf base)
+  (if (or (not (boundp 'tab-bars-every))
+          (find (lambda (r) (equal? (cadr r) "tab")) base))
+      '()
+      (let ((names (map caddr base))
+            (owner (and (boundp 'detail-owner) (detail-owner buf))))
+        (filter (lambda (r) r)
+         (map
+          (lambda (e)
+            (let* ((b (car e)) (tab (caddr e)) (label (cadr tab))
+                   (where (cond ((equal? b buf) (cadr e)) ((equal? b owner) "list") (else "page"))))
+              (and (string? label) (not (member label names))
+                   (list 1 "tab" label where (lambda () (tab-bars-take! b tab)) where #f
+                         (and (> (length tab) 2) (caddr tab))))))
+          (tab-bars-every buf))))))
+
 (define (imenu-rows buf)
+  (let ((base (imenu--own-rows buf)))
+    (append base (imenu--tab-rows buf base))))
+
+(define (imenu--own-rows buf)
   ;; a mode can own the index: the buffer-local imenu-index-function names a
   ;; function from BUF to rows, the way Emacs's imenu-create-index-function does
   (cond ((symbol? (buffer-local-value 'imenu-index-function buf))
@@ -1514,7 +1537,7 @@
                               (string-append name " (L" (number->string line) ")"))
                           name))
                ;; a row with no kind is a part of a page: its words say more than its line
-               (hint (if (equal? kind "")
+               (hint (if (member kind '("" "tab"))
                          (imenu--snip (or doc ""))
                          (string-append
                            kind " · L" (number->string line)
@@ -1584,8 +1607,15 @@
     (let* ((all (imenu-rows (current-buffer)))
            (source (current-buffer))
            (orig (point))
+           ;; moving over a tab row takes it; leaving without a pick takes back the tabs that were on
+           (touched #f)
            ;; a page whose rows reach past what it shows (another tab) says how to put it back
-           (restore (let ((f (buffer-local-value 'imenu-snapshot source))) (and (symbol? f) ((eval f) source))))
+           (restore (let ((f (buffer-local-value 'imenu-snapshot source)))
+                      (if (symbol? f)
+                          ((eval f) source)
+                          (let ((on (filter (lambda (r) (and (equal? (cadr r) "tab") (imenu--at r 7))) all)))
+                            (and (pair? on)
+                                 (lambda () (when touched (for-each (lambda (r) ((nth 4 r))) on))))))))
            ;; tracks and albums, functions and modules: each kind is a tab, the arrows of the tab row step
            (kinds (imenu--kinds all))
            (tabbed? (> (length kinds) 1))
@@ -1613,10 +1643,6 @@
                                        (list "source" source) (list "line" (number->string (car row)))
                                        (list "doc" (imenu--snip (or (nth 3 row) "")))))))
                            (cands)))))
-           (tab-row (lambda ()
-                      (let loop ((ks kinds) (i 0) (out '()))
-                        (if (null? ks) (reverse out)
-                            (loop (cdr ks) (+ i 1) (cons (list (imenu--plural (car ks)) (= i tab)) out))))))
            (line-of (lambda (label) (let ((c (assoc label (cands)))) (and c (cadr c)))))
            ;; a row with a KEY is taken by M-KEY while imenu is up: typing filters, M- acts.
            ;; Without any, M-1..M-9 take the rows by place
@@ -1635,9 +1661,11 @@
            ;; a page of parts marks and scrolls to the part point is in; the
            ;; prompt has the keys, so the page's own hook never runs: imenu marks it
            (mark! (lambda () (when (minor-mode-on? source "anchor-mode") (anchor-sync! source))))
+           (tab-row? (lambda (label) (let ((c (assoc label (cands)))) (and c (equal? (cadr (nth 3 c)) "tab")))))
            (on-confirm (lambda (label)
                          (let ((l (line-of label)) (go (target-of label)))
-                           (goto-char! (if l (line-start-position l) orig))
+                           ;; a tab is no place in the text: point stays
+                           (goto-char! (if (and l (not (tab-row? label))) (line-start-position l) orig))
                            (mark!)
                            (when go (go))))))
       (if (null? all)
@@ -1647,7 +1675,7 @@
               (lambda (label)
                 ;; a row with a target previews by it: the page takes the tab, then the part
                 (let ((l (line-of label)) (go (target-of label)))
-                  (cond (go (go) (mark!))
+                  (cond (go (when (tab-row? label) (set! touched #t)) (go) (mark!))
                         (l (goto-char! (line-start-position l)) (mark!)))))
               on-confirm
               (lambda () (when restore (restore)) (goto-char! orig) (mark!))
@@ -1658,6 +1686,14 @@
                   (cond ((null? cs) best)
                         ((<= (cadr (car cs)) here) (find (cdr cs) (car (car cs))))
                         (else (find (cdr cs) best))))))
+            ;; the kinds are the prompt's tabs: the side arrows step, SPC and a
+            ;; tab's letter jumps, TAB on a row with nothing under it locks the tab
+            (when tabbed?
+              (minibuffer-tabbed! (map (lambda (k) (list k (imenu--plural k))) kinds) (nth tab kinds)
+                (lambda (kind)
+                  (set! tab (let loop ((ks kinds) (i 0)) (cond ((null? ks) tab) ((equal? (car ks) kind) i) (else (loop (cdr ks) (+ i 1))))))
+                  (mb-tab-remember! (string-append "imenu:" source) kind)
+                  (minibuffer-preview-candidates! (shown) on-confirm (keys)))))
             (set! *mb-change-fn*
               (lambda (input)
                 (let ((now (not (equal? input ""))))
@@ -1665,10 +1701,13 @@
                     (set! searching now)
                     (minibuffer-preview-candidates! (shown) on-confirm (keys))))))
             (set! *mb-fold-fn*
+              (let ((lock *mb-fold-fn*))
               (lambda (label)
                 (let* ((c (assoc label (cands)))
                        (r (and c (imenu--orig (nth 3 c)))))
-                  (when (and r (imenu--opens? (kind-rows) r))
+                  (if (not (and r (imenu--opens? (kind-rows) r)))
+                      (if lock (lock label) #t)
+                  (begin
                     (set! folded (if (memq r folded) (remove (lambda (x) (eq? x r)) folded) (cons r folded)))
                     (minibuffer-preview-candidates! (shown) on-confirm (keys))
                     ;; the selection stays on the row folded
@@ -1676,17 +1715,9 @@
                       (let step ((n (length (cands))))
                         (when (and want (> n 0) (not (equal? (minibuffer-selected) want)))
                           (minibuffer-next!)
-                          (step (- n 1))))))
-                  ;; a row with nothing under it takes TAB too: it completes nothing
-                  #t)))
-            (when tabbed?
-              (minibuffer-tabs! (tab-row))
-              (set! *mb-tab-fn* (lambda (step)
-                                  (set! tab (modulo (+ tab step) (length kinds)))
-                                  (mb-tab-remember! (string-append "imenu:" source) (nth tab kinds))
-                                  (minibuffer-tabs! (tab-row))
-                                  (minibuffer-preview-candidates! (shown) on-confirm (keys))
-                                  #t))))))))
+                          (step (- n 1)))))
+                    ;; a row with nothing under it takes TAB too: it completes nothing
+                    #t)))))))))))
 
 (define-key "goto-map" "i" "imenu")
 (define-key "global" "s-i" "imenu")

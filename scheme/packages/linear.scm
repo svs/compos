@@ -590,23 +590,6 @@
          (let ((name (substring id 11 (string-length id))))
            (and (assoc name *linear-views*) (begin (linear--view-set! buf name) #t))))))
 
-;; imenu on the list offers the status tabs; leaving it without a pick puts the tab back
-(define (linear--imenu-rows buf)
-  (map (lambda (v)
-         (let ((n (linear--view-count buf v)))
-           (list 1 "tab" (car v) (if n (string-append (number->string n) " issues") "")
-                 (lambda () (linear--view-set! buf (car v))))))
-       *linear-views*))
-
-(define (linear--imenu-snapshot buf)
-  (let ((was (linear--view buf)))
-    (lambda () (unless (equal? (linear--view buf) was) (linear--view-set! buf was)))))
-
-(define (linear--imenu-setup!)
-  (buffer-set-local! (current-buffer) 'imenu-index-function 'linear--imenu-rows)
-  (buffer-set-local! (current-buffer) 'imenu-snapshot 'linear--imenu-snapshot))
-(add-hook! 'linear-mode-hook 'linear--imenu-setup!)
-
 ;; / filters with tabs: Team, Assignee, Priority, and Status, which is the tab
 (define (linear--facet buf kind) (let ((f (assoc kind (list-filters buf)))) (and f (cadr f))))
 (define (linear--viewer-id) (and *linear-teams* (plist-get (plist-get *linear-teams* 'viewer) 'id)))

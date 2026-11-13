@@ -2655,29 +2655,6 @@
 ;; moving does not open the page, so the highlighted row says RET does
 (define-style! 'todo-list ".window[data-buffer^=\"*Todos*\"] c-line.hl-line::after { content: \"\\23CE\"; margin-left: auto; padding: 0 0.6em; opacity: 0.55; }")
 
-;; imenu on the list offers the status tabs above it; a pick shows that tab
-(define (todo--imenu-rows buf)
-  (let ((counts (todo--tab-counts buf (todo--all))))
-    (let loop ((vs *todo-views*) (cs counts) (out '()))
-      (if (null? vs)
-          (reverse out)
-          (let ((name (car (car vs))))
-            (loop (cdr vs) (cdr cs)
-                  (cons (list 1 "tab" name (string-append (number->string (car cs)) " tasks")
-                              (lambda () (todo--view-set! buf name)))
-                        out)))))))
-
-;; leaving imenu without a pick puts the tab back
-(define (todo--imenu-snapshot buf)
-  (let ((was (todo--view buf)))
-    (lambda () (unless (equal? (todo--view buf) was) (todo--view-set! buf was)))))
-
-(define (todo--imenu-setup!)
-  (buffer-set-local! (current-buffer) 'imenu-index-function 'todo--imenu-rows)
-  (buffer-set-local! (current-buffer) 'imenu-snapshot 'todo--imenu-snapshot))
-
-(add-hook! 'todo-mode-hook 'todo--imenu-setup!)
-
 ;; a, on the list: the moves and edits of the task at point, as a menu
 (define (todo--action-groups buf)
   (let* ((t (with-current-buffer buf todo--at))

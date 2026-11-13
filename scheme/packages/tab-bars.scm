@@ -72,9 +72,63 @@
                            (tab-bars-provider b)))
                     (get-visible-buffers))))))
 
+;; every ui/tabs block in BLOCKS, in the order they draw: each one's TABS
+(define (tab-bars--block-tabs blocks)
+  (let walk ((bs (if (list? blocks) blocks '())) (acc '()))
+    (cond ((null? bs) acc)
+          ((not (pair? (car bs))) (walk (cdr bs) acc))
+          (else
+            (let* ((b (car bs))
+                   (d (plist-get b 'anchor-data))
+                   (ts (and (pair? d) (symbol? (car d)) (plist-get d 'tabs)))
+                   (acc (if (pair? ts) (append acc (list ts)) acc))
+                   (kids (plist-get b 'children)))
+              (walk (cdr bs) (walk (if (list? kids) kids '()) acc)))))))
+
+;; every tab bar BUF shows, declared or drawn: its bars, then every ui/tabs
+;; in its page and in a list's header line, each tab once
+(define (tab-bars-all buf)
+  (if (not (and buf (buffer-known? buf)))
+      '()
+      (let* ((declared (tab-bars buf))
+             (head (let ((f (and (list-mode-of buf) (list-opt buf 'head-blocks))))
+                     (if (procedure? f) (or (f buf) '()) '())))
+             (blocks (append (if (list? head) head (list head))
+                             (let ((r (buffer-local-value 'render-blocks buf))) (if (list? r) r '())))))
+        (let loop ((bars (tab-bars--block-tabs blocks))
+                   (seen (apply append (map (lambda (bar) (map car (cadr bar))) declared)))
+                   (out (reverse declared)))
+          (if (null? bars)
+              (reverse out)
+              (let ((fresh (filter (lambda (t) (not (member (car t) seen))) (car bars))))
+                (loop (cdr bars) (append (map car fresh) seen)
+                      (if (pair? fresh) (cons (list "Tabs" fresh) out) out))))))))
+
+;; BUF and the pane it pairs with: the list a page came from, or the page
+;; beside a list; no bars need be declared
+(define (tab-bars-near buf)
+  (let ((owner (and (boundp 'detail-owner) (detail-owner buf))))
+    (filter (lambda (b) b)
+            (if owner
+                (list owner buf)
+                (list buf (find (lambda (b) (and (not (equal? b buf)) (boundp 'detail-owner)
+                                                 (equal? (detail-owner b) buf)))
+                                (get-visible-buffers)))))))
+
+;; every tab of BUF and its pair as (BUF BAR TAB), the list's first
+(define (tab-bars-every buf)
+  (let ((near (tab-bars-near buf)))
+    (apply append
+           (map (lambda (b) (apply append (map (lambda (bar) (map (lambda (t) (list b (car bar) t)) (cadr bar)))
+                                               (tab-bars-all b))))
+                near))))
+
+(public! 'tab-bars-all "(tab-bars-all BUF) — every tab bar BUF shows, declared or drawn as ui/tabs, as ((LABEL TABS) ...)")
+(public! 'tab-bars-every "(tab-bars-every BUF) — every tab of BUF and the pane paired with it as (BUF BAR TAB), the list's first")
 (public! 'tab-bars "(tab-bars BUF) — BUF's tab bars as ((LABEL TABS) ...), TABS as ui/tabs takes them")
 (public! 'tab-bars-provider "(tab-bars-provider BUF) — the function that answers BUF's tab bars, its own or its mode's, or #f")
 (public! 'tab-bars-pair "(tab-bars-pair BUF) — (INDEX DETAIL): BUF and the detail beside it, or the index BUF came from and BUF")
+(public! 'tab-bars-near "(tab-bars-near BUF) — BUF and the pane paired with it: the list a page came from, or the page beside a list")
 
 (effects! '(write))
 

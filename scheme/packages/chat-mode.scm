@@ -794,6 +794,31 @@
 
 (add-hook! 'chat-mode-hook 'chat--source-modes-hook!)
 
+;; imenu in a chat walks its turns: one row per message you sent, oldest
+;; first, so moving through the rows scrolls the chat a turn at a time.
+;; The live input is not a turn yet and has no row.
+(effects! '(read))
+(define (chat--imenu-rows buf)
+  "(LINE KIND NAME DOC) for each message sent in the chat BUF: its line, and its first words"
+  (let ((input (with-current-buffer buf (lambda () (line-number-at-pos (chat-input-start buf)))))
+        (tag (substring *chat-input-marker* 1 (string-length *chat-input-marker*))))
+    (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1) (turn 1) (acc '()))
+      (cond ((or (null? ls) (>= n input)) (reverse acc))
+            ((string-prefix? tag (car ls))
+             (let ((text (string-trim (substring (car ls) (string-length tag) (string-length (car ls))))))
+               (loop (cdr ls) (+ n 1) (+ turn 1)
+                     (cons (list n "turn"
+                                 (if (> (string-length text) 90) (string-append (substring text 0 89) "…") text)
+                                 (string-append "turn " (number->string turn)))
+                           acc))))
+            (else (loop (cdr ls) (+ n 1) turn acc))))))
+
+(effects! '(write))
+(define (chat--imenu-setup!)
+  (buffer-set-local! (current-buffer) 'imenu-index-function 'chat--imenu-rows))
+(add-hook! 'chat-mode-hook 'chat--imenu-setup!)
+
+
 ;; a page that takes no text, an app page, talks in its chat: M-o pops it up
 (define (llm-companion-ensure! buf &optional group)
   ;; BUF's chat, the one M-o opens, made quietly when it has none: (CHAT NEW?).

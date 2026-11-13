@@ -576,7 +576,7 @@
 
 (define (command-palette--tabs!)
   ;; one section alone needs no tabs
-  (minibuffer-tabs!
+  (minibuffer-tab-row!
     (if (< (length *command-palette--sections*) 2)
         '()
         (let ((keys (command-palette--tab-keys)))

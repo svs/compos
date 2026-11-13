@@ -175,13 +175,27 @@
     (if locked (filter cadr row) row)))
 
 (effects! '(write display))
+(define (minibuffer-tab-row! rows)
+  ;; ROWS is ((LABEL CURRENT? [KEY]) ...): the ui/tabs component draws the
+  ;; row, SPC once and each KEY marked inside its name, and the prompt
+  ;; shows that markup. '() takes the row away
+  (if (null? rows)
+      (minibuffer-tabs! '())
+      (minibuffer-tabs! rows
+        (blocks->html
+          (component 'ui/tabs
+            (list 'leader "SPC" 'class "mb-tabs"
+                  'tabs (map (lambda (r) (list (car r) (car r) (and (pair? (cdr r)) (cadr r))
+                                               (and (pair? (cdr r)) (pair? (cddr r)) (caddr r))))
+                             rows)))))))
+
 (define (minibuffer-tabbed! tabs tab show)
   ;; Give the open prompt TABS, on TAB. SHOW gets the ID of each tab the
   ;; user goes to and redraws the rows. The side arrows step, SPC KEY jumps
   ;; to a tab, and TAB locks the prompt on its tab.
   (let* ((keys (minibuffer-tab-keys tabs))
          (locked #f)
-         (draw! (lambda () (minibuffer-tabs! (minibuffer-tab-row tab tabs locked keys))))
+         (draw! (lambda () (minibuffer-tab-row! (minibuffer-tab-row tab tabs locked keys))))
          (go! (lambda (next) (set! tab next) (draw!) (show tab) #t)))
     (draw!)
     (set! *mb-leader-fn*
@@ -201,6 +215,7 @@
                      "all tabs -- the side arrows move"))
         #t))))
 (public! 'minibuffer-tabbed! "(minibuffer-tabbed! TABS TAB SHOW) — give the open prompt a tab row: TABS is ((ID LABEL) ...), 'sep is a gap; it opens on TAB. SHOW gets the ID of each tab the user goes to and redraws the rows. The side arrows step, SPC KEY jumps (KEY is a letter of the tab's name), TAB locks the prompt on its tab.")
+(public! 'minibuffer-tab-row! "(minibuffer-tab-row! ROWS) — draw the open prompt's tab row through the ui/tabs component: ROWS is ((LABEL CURRENT? [KEY]) ...); SPC leads it once and each KEY is marked inside its name; '() removes it. minibuffer-tabbed! calls it.")
 (effects! '(unknown))
 
 (define-command "minibuffer-rail-enter"

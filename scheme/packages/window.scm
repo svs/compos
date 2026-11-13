@@ -577,14 +577,19 @@
   (when (and (boundp 'panes--door?) (panes--door?)) (panes--focus-follows! win))
   (apply raw-select-window! (cons win more)))
 
+;; #t: a show is a use and goes to the top of the buffer list (C-x b).
+;; A display that is no use, a list's detail page as you move over its
+;; rows, sets it to #f around the show, as Emacs display-buffer does
+(define *window-show-records* #t)
+
 (define (window-set-buffer! win buf)
-  "(window-set-buffer! WIN BUF) -> #t: WIN shows BUF without being selected; the buffer list and WIN's history record it"
+  "(window-set-buffer! WIN BUF) -> #t: WIN shows BUF without being selected; WIN's history records it, and the buffer list too unless *window-show-records* is #f"
   ;; outside a draw the panes model places BUF first: a buffer of another
   ;; mode goes to its own window, and the show lands there, not on WIN
   (let* ((win (or (and (boundp 'panes--door?) (panes--door?) (panes--show-follows! win buf))
                   win))
          (before (window--before win))
-         (ok (raw-window-set-buffer! win buf #t)))
+         (ok (raw-window-set-buffer! win buf (if *window-show-records* #t 'quiet))))
     (when ok (window--visited! win before buf))
     ok))
 

@@ -754,6 +754,15 @@ defmodule Compos.Core.Editor do
       {_f, {:error, reason}} ->
         {:reply, {:error, reason}, state}
 
+      # a quiet show is a display like any other, point and scroll kept, but
+      # no use: the recent order (C-x b) stays, as Emacs display-buffer
+      # leaves the buffer list. A list's detail page shows so as you move
+      {f, _started} when bump? == :quiet ->
+        Buffer.touch(buffer)
+        leaf = find_leaf(f.tree, win_id)
+        tree = replace_leaf(f.tree, win_id, visit_buffer(leaf, buffer))
+        changed(:ok, resync_swap(put_frame(state, %{f | tree: tree})), f.id)
+
       # a look shows the buffer from its top and leaves the ring as it was
       {f, _started} when not bump? ->
         Buffer.touch(buffer)
@@ -2134,7 +2143,7 @@ defmodule Compos.Core.Editor do
 
   # the prompt owns its style (its shape), its rail and its tabs; the same
   # input, rows and selection carry over, and nothing is inferred here
-  defp on_prompt(:set, [key, value], %{minibuffer: %{} = mb} = f) when key in [:style, :rail, :tabs],
+  defp on_prompt(:set, [key, value], %{minibuffer: %{} = mb} = f) when key in [:style, :rail, :tabs, :tabs_html],
     do: {:put, :ok, %{f | minibuffer: Map.put(mb, key, value)}}
 
   defp on_prompt(:start, [], %{completion: %{start: start}}), do: start
@@ -2259,6 +2268,8 @@ defmodule Compos.Core.Editor do
           tabs when is_list(tabs) -> tabs
           _ -> []
         end,
+      # the tab row as the ui/tabs component drew it, markup drawn as it is
+      tabs_html: (is_binary(Map.get(mb, :tabs_html)) && mb.tabs_html) || nil,
       legend:
         case Map.get(mb, :legend) do
           rows when is_list(rows) ->

@@ -55,7 +55,7 @@
          (ns (component--namespace qualified)))
     (set! *components*
       (cons (list qualified props example fn)
-            (alist-delete *components* qualified)))
+            (remove (lambda (e) (equal? (car e) qualified)) *components*)))
     (catalog-register! 'component short doc
       'qualified-name qualified
       'namespace (string->symbol ns)
@@ -191,7 +191,7 @@
 (define (component-imenu! name fn)
   (let ((q (component--qualified name)))
     (set! *component-imenu*
-      (alist-put *component-imenu* q fn))
+      (cons (list q fn) (remove (lambda (e) (equal? (car e) q)) *component-imenu*)))
     q))
 
 (define (component--imenu-named block qualified props)
@@ -208,7 +208,7 @@
 (define (component-actions! name actions)
   (let ((q (component--qualified name)))
     (set! *component-actions*
-      (alist-put *component-actions* q actions))
+      (cons (list q actions) (remove (lambda (e) (equal? (car e) q)) *component-actions*)))
     q))
 
 (define (component-actions name)
@@ -286,14 +286,33 @@
                          (list (list "c-action-label" (cadr action))))))
                (component--get p 'actions '())))))
 
+(define (tabs--led-segs label key)
+  ;; a led tab's name in lowercase with its key letter drawn as a key inside
+  ;; it (keys are case sensitive); a key not in the name leads it
+  (let* ((name (string-downcase label))
+         (at (and key (string-search key name))))
+    (cond ((not key) (list (list "c-tab-label c-action-label" name)))
+          (at (filter (lambda (s) (not (equal? (cadr s) "")))
+                      (list (list "c-tab-label c-action-label" (substring name 0 at))
+                            (list "c-tab-key" key "c-action-key")
+                            (list "c-tab-label c-action-label" (substring name (+ at (string-length key)) (string-length name))))))
+          (else (list (list "c-tab-key" key "c-action-key")
+                      (list "c-tab-label c-action-label" (string-append " " name)))))))
+
 (defcomponent 'ui/tabs
-  "One row of choices over the same view, with the current one marked. A tab is (CLICK LABEL [CURRENT? [KEY]]). As a part of the page the row brings its own keys: a tab's KEY takes it, and the arrows step."
-  '((tabs list required) (class string optional))
+  "One row of choices over the same view, with the current one marked. A tab is (CLICK LABEL [CURRENT? [KEY]]). As a part of the page the row brings its own keys: a tab's KEY takes it, and the arrows step. With LEADER (\"SPC\"), the row starts with that key once, the names draw in lowercase and each KEY is the letter marked inside its name: LEADER KEY takes the tab. Every prompt with tabs draws its row so."
+  '((tabs list required) (class string optional) (leader string optional))
   '(tabs (("history" "history" #t "1") ("job" "job" #f "2")))
   (lambda (p)
+    (let ((leader (component--get p 'leader #f))
+          (tabs (component--get p 'tabs '())))
     (list 'tag "c-tabs"
-          'class (string-append "c-tabs " (component--get p 'class ""))
+          'class (string-append "c-tabs " (if leader "c-tabs-led " "") (component--get p 'class ""))
           'children
+          (append
+           (if (and leader (find (lambda (t) (and (> (length t) 3) (nth 3 t))) tabs))
+               (list (list 'tag "c-action-key" 'class "c-tabs-leader" 'text leader))
+               '())
           (map (lambda (tab)
                  (let ((id (car tab))
                        (label (cadr tab))
@@ -303,12 +322,14 @@
                          'class (if current? "c-tab c-tab-on" "c-tab")
                          'click id
                          'attrs (list (list "current" (if current? "true" "false")))
-                         'segs (append (if key (list (list "c-tab-key c-action-key" (key-symbols key))) '())
-                                       (list (list "c-tab-label c-action-label" label))))))
-               (component--get p 'tabs '()))
+                         'segs (if leader
+                                   (tabs--led-segs label key)
+                                   (append (if key (list (list "c-tab-key c-action-key" (key-symbols key))) '())
+                                           (list (list "c-tab-label c-action-label" label)))))))
+               tabs))
           ;; in force once the row, or a part that holds it, is named
           'anchor-keymap "tabs-map"
-          'anchor-data (list 'tabs (component--get p 'tabs '())))))
+          'anchor-data (list 'tabs tabs)))))
 
 ;; The keys of a tabs row: the anchor at point names its tabs, and a key
 ;; clicks one the way the mouse does
@@ -787,6 +808,9 @@
 .c-tab:hover { background: var(--hl-line-bg); color: var(--fg); }
 .c-tab-on { color: var(--fg); border-color: var(--border-bg); background: var(--hl-line-bg); }
 .c-tab-key { color: var(--accent-fg); font-weight: 600; }
+.c-tabs-led { align-items: center; }
+.c-tabs-led .c-tab { gap: 0; }
+.c-tabs-led .c-tabs-leader { margin-right: 4px; }
 .c-tab-pick { color: var(--fg); outline: 1px solid var(--accent-fg); outline-offset: -1px; }
 .c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 0; cursor: pointer; font-family: var(--font-mono); font-size: .85em; }
 .c-action:hover { background: var(--hl-line-bg); border-color: var(--dim-fg); }
@@ -926,7 +950,17 @@ c-header.c-group { padding: 10px 14px; }
          (apply string-append
                 (map (lambda (a) (attr (format "~a" (car a)) (cadr a))) (or (plist-get b 'attrs) '())))
          (if click (attr "data-pick" click) "")
-         ">" (if (string? text) (html-escape text) "") (blocks->html kids) "</" tag ">"))))
+         ">" (if (string? text) (html-escape text) "")
+         ;; segs draw as the page draws them: (CLASS TEXT [TAG]), a c-text by default
+         (apply string-append
+                (map (lambda (s)
+                       (let ((stag (if (and (> (length s) 2) (string? (nth 2 s))) (nth 2 s) "c-text")))
+                         (string-append "<" stag
+                                        (if (equal? (car s) "") "" (attr "class" (car s)))
+                                        ">" (html-escape (cadr s)) "</" stag ">")))
+                     (filter (lambda (s) (and (pair? s) (pair? (cdr s)) (string? (cadr s))))
+                             (or (plist-get b 'segs) '()))))
+         (blocks->html kids) "</" tag ">"))))
 
 (define (blocks->html blocks)
   (cond ((null? blocks) "")

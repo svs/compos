@@ -2142,8 +2142,10 @@ defmodule Compos.Core.Session do
           :void
         end,
       {"minibuffer-tabs!",
-       "(minibuffer-tabs! TABS) — show tabs over the open prompt's list: ((LABEL CURRENT? [KEY]) ...), the current one #t; KEY is drawn on the tab, the key SPC jumps to it with; '() removes them."} =>
-        fn [tabs] ->
+       "(minibuffer-tabs! TABS [HTML]) — show tabs over the open prompt's list: ((LABEL CURRENT? [KEY]) ...), the current one #t; KEY is the key SPC jumps to it with; HTML is the row as the ui/tabs component drew it; '() removes them. Scheme calls minibuffer-tab-row!, which draws the HTML."} =>
+        fn args ->
+          [tabs | more] = args
+
           Editor.prompt_op(:set, [
             :tabs,
             for(t <- tabs || [], is_list(t), length(t) >= 2) do
@@ -2151,6 +2153,8 @@ defmodule Compos.Core.Session do
               %{label: s(label), current: current == true, key: (case rest do [k | _] when k not in [nil, false] -> s(k); _ -> nil end)}
             end
           ])
+
+          Editor.prompt_op(:set, [:tabs_html, (case more do [h | _] when is_binary(h) -> h; _ -> nil end)])
           :void
         end,
       {"minibuffer-input!", "(minibuffer-input! INPUT) — set the minibuffer input text."} => fn [

@@ -2174,7 +2174,7 @@ c-action-key {
 /* a prompt with tabs keeps one height, eight rows: a tab with fewer rows
    leaves room below them, so the prompt does not jump as you move between
    tabs. A row is 2.073em (29px at 14px). */
-.mb-panel:not(.palette):has(.mb-tabs) .mb-cands { height: min(16.6em, 48dvh); }
+.mb-panel:not(.palette):has(.mb-tabs) .mb-cands { height: min(16.6em, 48dvh); align-content: start; }
 /* em, like the palette: a fixed 18px read louder than the buffers the
    prompt sits under. The prompt is a label for the input, so it steps
    back in colour and weight and the typed text leads. */

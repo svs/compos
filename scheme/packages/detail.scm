@@ -162,10 +162,16 @@
                                 (and (not (equal? w me))
                                      (equal? (buffer-relation (window-buffer w) 'detail) o)))
                               (display--work-windows)))))
-         ;; else it opens in the pane beside its list, never on top of it
-         (win (or shown
-                  (and last (window-set-buffer! last name) last)
-                  (panes-display-beside! name o))))
+         ;; else it opens in the pane beside its list, never on top of it.
+         ;; A detail shown is no use: C-x b's order stays until you go to it
+         (win (let ((was *window-show-records*))
+                (set! *window-show-records* #f)
+                (unwind-protect
+                  (lambda ()
+                    (or shown
+                        (and last (window-set-buffer! last name) last)
+                        (panes-display-beside! name o)))
+                  (lambda () (set! *window-show-records* was))))))
     (when win
       (detail-window-note! o win)
       (detail-adopt! o name)

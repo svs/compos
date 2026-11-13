@@ -1625,8 +1625,13 @@
                     (let loop ((ks kinds) (i 0))
                       (cond ((null? ks) 0) ((equal? (car ks) want) i) (else (loop (cdr ks) (+ i 1))))))))
            ;; TAB folds a row with rows under it, and unfolds it. It opens all
-           ;; folded; a filter typed searches every row, folded or not
-           (folded (filter (lambda (r) (imenu--opens? all r)) all))
+           ;; folded; a filter typed searches every row, folded or not --
+           ;; except a tab's one and only group, which opens already
+           (openers (filter (lambda (r) (and (= (imenu--depth r) 0) (imenu--opens? all r))) all))
+           (solo-kinds (filter (lambda (k) (= (length (filter (lambda (r) (equal? (cadr r) k)) openers)) 1)) kinds))
+           (folded (filter (lambda (r) (and (imenu--opens? all r)
+                                             (not (and (= (imenu--depth r) 0) (member (cadr r) solo-kinds)))))
+                           all))
            (searching #f)
            (kind-rows (lambda () (if tabbed? (filter (lambda (r) (equal? (cadr r) (nth tab kinds))) all) all)))
            (rows (lambda () (if searching (kind-rows) (imenu--fold-rows (kind-rows) folded))))

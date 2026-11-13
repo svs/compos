@@ -60,6 +60,8 @@
   (let ((kind (and row (plist-get row 'kind))))
     (cond ((equal? kind "chat") '(("RET" "presets") ("b" "backend") ("m" "model") ("e" "effort") ("u" "tools")
                                      ("s" "save new") ("U" "update preset") ("G" "group default") ("A" "global default")))
+          ((equal? kind "group-default") '(("p" "pick preset") ("c" "follow global")))
+          ((equal? kind "global-default") '(("p" "pick preset")))
           ((equal? kind "preset") '(("a" "apply") ("G" "group default") ("A" "global default")))
           ((equal? kind "prompt") '(("o" "on/off") ("v" "edit")))
           ((equal? kind "connector") '(("t" "test") ("i" "install") ("l" "sign in") ("k" "key") ("d" "default") ("P" "full page")))
@@ -91,12 +93,19 @@
 ;; --- the rows --------------------------------------------------------
 
 (define (ai--setup-rows)
-  (append (list (ai--sep "setup" "This chat")
-                (list 'kind "chat" 'tab "setup" 'id "chat" 'name (or (ai--chat) "no chat")))
-          (if (null? *llm-bundles*) '()
-              (cons (ai--sep "setup" "Presets")
-                    (map (lambda (b) (list 'kind "preset" 'tab "setup" 'id (llm-bundle-name b) 'name (llm-bundle-name b)))
-                         *llm-bundles*)))))
+  (let ((g (ai--group-of (ai--chat))))
+    (append (list (ai--sep "setup" "This chat")
+                  (list 'kind "chat" 'tab "setup" 'id "chat" 'name (or (ai--chat) "no chat")))
+            (if g
+                (list (ai--sep "setup" "This group")
+                      (list 'kind "group-default" 'tab "setup" 'id "group" 'name (group-name g) 'group g))
+                '())
+            (list (ai--sep "setup" "Compos default")
+                  (list 'kind "global-default" 'tab "setup" 'id "global" 'name "Compos default"))
+            (if (null? *llm-bundles*) '()
+                (cons (ai--sep "setup" "Presets")
+                      (map (lambda (b) (list 'kind "preset" 'tab "setup" 'id (llm-bundle-name b) 'name (llm-bundle-name b)))
+                           *llm-bundles*))))))
 
 (define (ai--prompt-rows)
   (let ((files (prompt-files)))
@@ -180,6 +189,18 @@
                     "dim"))))
      ((equal? kind "suggest")
       (list (plist-get r 'name) (list "not installed" "dim") (list (plist-get r 'about) "dim")))
+     ((equal? kind "group-default")
+      (let ((b (and (plist-get r 'group) (llm-group-bundle (plist-get r 'group)))))
+        (if (not b)
+            (list (plist-get r 'name) (list "follows the global default" "dim") "")
+            (list (plist-get r 'name) (list (or (ai--setup-name b) "a custom setup") "success")
+                  (list (ai--bundle-detail b) "dim")))))
+     ((equal? kind "global-default")
+      (let ((b (llm-default-bundle-record)))
+        (if (not b)
+            (list (plist-get r 'name) (list "none set" "dim") "")
+            (list (plist-get r 'name) (list (or (ai--setup-name b) "a custom setup") "success")
+                  (list (ai--bundle-detail b) "dim")))))
      (else (list (or (plist-get r 'name) "") "" "")))))
 
 ;; --- the pages -------------------------------------------------------
@@ -222,6 +243,8 @@
         ((string? b) b)
         ((plist-get b 'name))
         (else (string-append (or (plist-get b 'connector) "?") " · " (or (plist-get b 'model) "default")))))
+
+(define (ai--bundle-detail b) (string-append (llm-bundle-get b 'connector "") " · " (llm-bundle-get b 'model "default")))
 
 (define (ai--tool-rows on)
   ;; (NAME ABOUT ON?): the toolsets, then the MCP servers no toolset names
@@ -281,6 +304,35 @@
                         (ai--group (string-append "Connector · " conn)
                           (list (ai--kv (cons (list "About" (llm-connectors--about conn))
                                               (ai--test-pairs (llm-connectors-test-result conn)))))))))))))
+
+(define (ai--group-default-page row)
+  (let* ((g (plist-get row 'group)) (b (and g (llm-group-bundle g))))
+    (ai--page (string-append "This group · " (group-name g)) (if b "set" "follows global") (if b "good" "")
+      (ai--meta (list (if b (ai--bundle-detail b) "no default of its own")))
+      (append (list (list "ai-pick-default" "Pick a preset…" "p" "good"))
+              (if b (list (list "ai-clear-default" "Clear: follow the global default" "c")) '()))
+      (list (list "Setup"
+                  (ai--group "Setup"
+                    (if (not b)
+                        (list (ai--prose "New chats in this group start with the global default. p picks a preset just for this group."))
+                        (list (ai--kv (list (list "Preset" (or (ai--setup-name b) "a custom setup, not a saved preset"))
+                                            (list "Connector" (llm-bundle-get b 'connector ""))
+                                            (list "Model" (llm-bundle-get b 'model "default"))
+                                            (list "Effort" (llm-bundle-get b 'effort "default"))))))))))))
+
+(define (ai--global-default-page row)
+  (let* ((b (llm-default-bundle-record)))
+    (ai--page "Compos default" (if b "set" "none") (if b "good" "")
+      (ai--meta (list (if b (ai--bundle-detail b) "no default: a new chat elsewhere takes the first connector ready")))
+      (list (list "ai-pick-default" "Pick a preset…" "p" "good"))
+      (list (list "Setup"
+                  (ai--group "Setup"
+                    (if (not b)
+                        (list (ai--prose "Nothing set. p picks a preset new chats start with everywhere a group names none."))
+                        (list (ai--kv (list (list "Preset" (or (ai--setup-name b) "a custom setup, not a saved preset"))
+                                            (list "Connector" (llm-bundle-get b 'connector ""))
+                                            (list "Model" (llm-bundle-get b 'model "default"))
+                                            (list "Effort" (llm-bundle-get b 'effort "default"))))))))))))
 
 (define (ai--preset-page row)
   (let* ((name (plist-get row 'name))
@@ -370,6 +422,8 @@
 (define (ai--page-of row)
   (let ((kind (plist-get row 'kind)))
     (cond ((equal? kind "chat") (ai--chat-page))
+          ((equal? kind "group-default") (ai--group-default-page row))
+          ((equal? kind "global-default") (ai--global-default-page row))
           ((equal? kind "preset") (ai--preset-page row))
           ((equal? kind "prompt") (ai--prompt-page row))
           ((equal? kind "connector") (ai--connector-page row))
@@ -486,6 +540,8 @@
   (lambda ()
     (let* ((r (ai--at)) (kind (and r (plist-get r 'kind))))
       (cond ((equal? kind "chat") (ai--dialog! "p"))
+            ((equal? kind "group-default") (run-command "ai-pick-default"))
+            ((equal? kind "global-default") (run-command "ai-pick-default"))
             ((equal? kind "preset") (run-command "ai-apply"))
             ((equal? kind "prompt") (run-command "ai-toggle"))
             ((equal? kind "connector") (run-command "ai-test"))
@@ -556,6 +612,33 @@
               (begin (llm-default-save! (if (string? setup) (llm-bundle-named setup) setup))
                      (ai--redraw!)
                      (message (string-append "new chats start with " (ai--setup-name setup) " where the group names none"))))))))
+  'modes '(ai-mode ai-detail-mode))
+
+(define-command "ai-pick-default" "Choose the preset the row's group, or the whole app, starts new chats with"
+  (lambda ()
+    (ai--with '("group-default" "global-default") "pick"
+      (lambda (r)
+        (minibuffer-read "Preset: " (map llm-bundle-name *llm-bundles*)
+          (lambda (name)
+            (let ((n (string-trim name)))
+              (cond ((not (llm-bundle-named n)) (message (string-append "no preset named " n)))
+                    ((equal? (plist-get r 'kind) "group-default")
+                     (group-llm! n (plist-get r 'group))
+                     (ai--redraw!)
+                     (message (string-append (group-name (plist-get r 'group)) ": new chats start with " n)))
+                    (else
+                     (llm-default-save! (llm-bundle-named n))
+                     (ai--redraw!)
+                     (message (string-append "new chats start with " n " where the group names none"))))))))))
+  'modes '(ai-mode ai-detail-mode))
+
+(define-command "ai-clear-default" "Make this group follow the global default again"
+  (lambda ()
+    (ai--with '("group-default") "clear"
+      (lambda (r)
+        (group-llm! #f (plist-get r 'group))
+        (ai--redraw!)
+        (message (string-append (group-name (plist-get r 'group)) ": follows the global default again")))))
   'modes '(ai-mode ai-detail-mode))
 
 (define-command "ai-apply" "Run the preset on this row in the chat"
@@ -666,15 +749,17 @@
   '(("RET" "ai-do") ("b" "ai-backend") ("m" "ai-model") ("e" "ai-effort") ("u" "ai-tools")
     ("s" "ai-save") ("U" "ai-update-preset") ("G" "ai-group-default") ("A" "ai-global-default") ("a" "ai-apply") ("o" "ai-toggle") ("v" "ai-visit") ("t" "ai-test")
     ("i" "ai-install") ("l" "ai-sign-in") ("k" "ai-key") ("d" "ai-default") ("P" "ai-page")
+    ("p" "ai-pick-default") ("c" "ai-clear-default")
     ("x" "ai-load") ("D" "ai-uninstall") ("g" "ai-refresh") ("q" "quit-window")))
 
 (define *ai-doc*
   (string-append
     "The LLM setup in one place, in four tabs; <left> and <right> step them. Moving the point shows the row's page beside the list, "
-    "and every key works the same on the list and on the page. setup: the chat the app was opened from, and the presets. "
+    "and every key works the same on the list and on the page. setup: the chat the app was opened from, this group's default, the Compos default, and the presets. "
     "RET picks a preset, b the backend, m the model, e the effort, u the tools, s saves the setup as a new preset, U writes it into the preset the chat runs, "
     "G makes it what new chats in this group start with, A what new chats start with elsewhere; "
-    "on a preset a applies it, and G and A make the preset a default. prompts: every prompt section, o turns it on or off in the chat, v edits its file. "
+    "on a preset a applies it, and G and A make the preset a default; on this group's default or the Compos default, p picks a preset for it and c (group only) makes it follow the global default again. "
+    "prompts: every prompt section, o turns it on or off in the chat, v edits its file. "
     "connectors: t tests one and times the reply, i installs its agent program, l signs in, k adds an API key, "
     "d makes it the default for new chats, P shows it in the connectors app. models: what each model host holds, "
     "and models to install on this machine: x loads one, i installs, D uninstalls. g reads everything again, / narrows, q quits."))
@@ -727,6 +812,8 @@
   (let ((kind (plist-get r 'kind)))
     (cond ((equal? kind "connector") (llm-connectors--title (plist-get r 'name)))
           ((equal? kind "chat") (string-append "this chat · " (ai--clip (plist-get r 'name) 50)))
+          ((equal? kind "group-default") (string-append "this group · " (ai--clip (plist-get r 'name) 40)))
+          ((equal? kind "global-default") "Compos default")
           (else (plist-get r 'name)))))
 
 (define (ai--goto! buf r)

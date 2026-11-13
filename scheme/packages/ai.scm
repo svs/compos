@@ -20,7 +20,7 @@
 (effects! '(write))
 
 (define *ai-buffer* "*ai*")
-(define *ai-tabs* '("setup" "prompts" "connectors" "models"))
+(define *ai-tabs* '("chat" "group" "global" "presets" "prompts" "connectors" "models"))
 
 (defcustom 'ai-suggested-models
   '(("qwen3:8b" "Qwen 3, 8B: a strong all-round model for a laptop")
@@ -60,8 +60,8 @@
   (let ((kind (and row (plist-get row 'kind))))
     (cond ((equal? kind "chat") '(("RET" "presets") ("b" "backend") ("m" "model") ("e" "effort") ("u" "tools")
                                      ("s" "save new") ("U" "update preset") ("G" "group default") ("A" "global default")))
-          ((equal? kind "group-default") '(("p" "pick preset") ("c" "follow global")))
-          ((equal? kind "global-default") '(("p" "pick preset")))
+          ((equal? kind "group-default") '(("b" "backend") ("m" "model") ("e" "effort") ("u" "tools") ("p" "preset") ("c" "follow global")))
+          ((equal? kind "global-default") '(("b" "backend") ("m" "model") ("e" "effort") ("u" "tools") ("p" "preset")))
           ((equal? kind "preset") '(("a" "apply") ("G" "group default") ("A" "global default")))
           ((equal? kind "prompt") '(("o" "on/off") ("v" "edit")))
           ((equal? kind "connector") '(("t" "test") ("i" "install") ("l" "sign in") ("k" "key") ("d" "default") ("P" "full page")))
@@ -92,20 +92,19 @@
 
 ;; --- the rows --------------------------------------------------------
 
-(define (ai--setup-rows)
+(define (ai--chat-rows)
+  (list (list 'kind "chat" 'tab "chat" 'id "chat" 'name (or (ai--chat) "no chat"))))
+
+(define (ai--group-rows)
   (let ((g (ai--group-of (ai--chat))))
-    (append (list (ai--sep "setup" "This chat")
-                  (list 'kind "chat" 'tab "setup" 'id "chat" 'name (or (ai--chat) "no chat")))
-            (if g
-                (list (ai--sep "setup" "This group")
-                      (list 'kind "group-default" 'tab "setup" 'id "group" 'name (group-name g) 'group g))
-                '())
-            (list (ai--sep "setup" "Compos default")
-                  (list 'kind "global-default" 'tab "setup" 'id "global" 'name "Compos default"))
-            (if (null? *llm-bundles*) '()
-                (cons (ai--sep "setup" "Presets")
-                      (map (lambda (b) (list 'kind "preset" 'tab "setup" 'id (llm-bundle-name b) 'name (llm-bundle-name b)))
-                           *llm-bundles*))))))
+    (if g (list (list 'kind "group-default" 'tab "group" 'id "group" 'name (group-name g) 'group g)) '())))
+
+(define (ai--global-rows)
+  (list (list 'kind "global-default" 'tab "global" 'id "global" 'name "Compos default")))
+
+(define (ai--preset-rows)
+  (map (lambda (b) (list 'kind "preset" 'tab "presets" 'id (llm-bundle-name b) 'name (llm-bundle-name b)))
+       *llm-bundles*))
 
 (define (ai--prompt-rows)
   (let ((files (prompt-files)))
@@ -147,7 +146,7 @@
                          offer)))))))
 
 (define (ai--rows buf)
-  (append (ai--setup-rows) (ai--prompt-rows) (ai--connector-rows) (ai--model-rows)))
+  (append (ai--chat-rows) (ai--group-rows) (ai--global-rows) (ai--preset-rows) (ai--prompt-rows) (ai--connector-rows) (ai--model-rows)))
 
 (define (ai--cells buf r)
   (let* ((kind (plist-get r 'kind))
@@ -245,6 +244,74 @@
         (else (string-append (or (plist-get b 'connector) "?") " · " (or (plist-get b 'model) "default")))))
 
 (define (ai--bundle-detail b) (string-append (llm-bundle-get b 'connector "") " · " (llm-bundle-get b 'model "default")))
+(define (ai--bare-bundle) (list 'connector *default-connector* 'model "default" 'effort "default" 'presets '()))
+
+(define (ai--level-of row)
+  (let ((kind (plist-get row 'kind)))
+    (cond ((equal? kind "group-default") (list 'group (plist-get row 'group)))
+          ((equal? kind "global-default") (list 'global #f))
+          (else #f))))
+
+(define (ai--level-bundle level)
+  (if (eq? (car level) 'group)
+      (or (llm-group-bundle (cadr level)) (llm-chat-bundle (cadr level)) (ai--bare-bundle))
+      (or (llm-default-bundle-record) (ai--bare-bundle))))
+
+(define (ai--level-save! level box what)
+  (if (eq? (car level) 'group)
+      (let ((g (cadr level)))
+        (group-llm! box g) (ai--redraw!)
+        (message (string-append (group-name g) ": new chats start with " what)))
+      (begin (llm-default-save! box) (ai--redraw!)
+             (message (string-append "new chats start with " what " where the group names none")))))
+
+(define (ai--level-pick-backend! row)
+  (let* ((level (ai--level-of row)) (now (ai--level-bundle level)) (names (connector-names)))
+    (minibuffer-read "Backend: " names
+      (lambda (name)
+        (let ((n (string-trim name)))
+          (if (not (member n names))
+              (message (string-append "no backend named " n))
+              (ai--level-save! level
+                (vscode--plist-set (vscode--plist-set (vscode--plist-set now 'connector n) 'model "default") 'effort "default")
+                n)))))))
+
+(define (ai--level-pick-model! row)
+  (let* ((level (ai--level-of row)) (now (ai--level-bundle level)) (connector (plist-get now 'connector))
+         (options (map car (chat-model-options *ai-buffer* connector))))
+    (minibuffer-read "Model: " options
+      (lambda (name)
+        (let ((n (string-trim name)))
+          (if (not (member n options))
+              (message (string-append "no model named " n))
+              (ai--level-save! level (vscode--plist-set (vscode--plist-set now 'model n) 'effort "default") n)))))))
+
+(define (ai--level-pick-effort! row)
+  (let* ((level (ai--level-of row)) (now (ai--level-bundle level))
+         (connector (plist-get now 'connector)) (model (or (plist-get now 'model) "default"))
+         (efforts (cons "default" (car (chat-model-effort-info *ai-buffer* connector model)))))
+    (minibuffer-read "Effort: " efforts
+      (lambda (name)
+        (let ((n (string-trim name)))
+          (if (not (member n efforts))
+              (message (string-append "no effort named " n))
+              (ai--level-save! level (vscode--plist-set now 'effort n)
+                (string-append (or (plist-get now 'model) "model") " at " n " effort"))))))))
+
+(define (ai--level-pick-tool! row)
+  (let* ((level (ai--level-of row)) (now (ai--level-bundle level)) (on (or (plist-get now 'presets) '()))
+         (names (append (map (lambda (e) (symbol->string (car e))) *chat-presets*)
+                        (map (lambda (s) (symbol->string (car s)))
+                             (filter (lambda (s) (not (assq (car s) *chat-presets*))) *mcp-registry*)))))
+    (minibuffer-read "Toggle tool: " names
+      (lambda (name)
+        (let* ((n (string-trim name)) (sym (string->symbol n)))
+          (cond ((not (member n names)) (message (string-append "no tool named " n)))
+                ((eq? sym 'compos) (message "The compos tools are the editor bridge: they stay on"))
+                (else (ai--level-save! level
+                        (vscode--plist-set now 'presets (if (memq sym on) (filter (lambda (x) (not (eq? x sym))) on) (cons sym on)))
+                        (string-append n (if (memq sym on) " off" " on"))))))))))
+
 
 (define (ai--tool-rows on)
   ;; (NAME ABOUT ON?): the toolsets, then the MCP servers no toolset names
@@ -306,33 +373,48 @@
                                               (ai--test-pairs (llm-connectors-test-result conn)))))))))))))
 
 (define (ai--group-default-page row)
-  (let* ((g (plist-get row 'group)) (b (and g (llm-group-bundle g))))
+  (let* ((g (plist-get row 'group)) (level (list 'group g)) (b (llm-group-bundle g)) (now (ai--level-bundle level))
+         (on (or (plist-get now 'presets) '())))
     (ai--page (string-append "This group · " (group-name g)) (if b "set" "follows global") (if b "good" "")
-      (ai--meta (list (if b (ai--bundle-detail b) "no default of its own")))
-      (append (list (list "ai-pick-default" "Pick a preset…" "p" "good"))
+      (ai--meta (list (if b "a default of its own" "follows the global default")))
+      (append (list (list "ai-backend" "Backend" "b") (list "ai-model" "Model" "m") (list "ai-effort" "Effort" "e") (list "ai-tools" "Tools" "u")
+                    (list "ai-pick-default" "Apply a saved preset" "p" "good"))
               (if b (list (list "ai-clear-default" "Clear: follow the global default" "c")) '()))
       (list (list "Setup"
-                  (ai--group "Setup"
-                    (if (not b)
-                        (list (ai--prose "New chats in this group start with the global default. p picks a preset just for this group."))
-                        (list (ai--kv (list (list "Preset" (or (ai--setup-name b) "a custom setup, not a saved preset"))
-                                            (list "Connector" (llm-bundle-get b 'connector ""))
-                                            (list "Model" (llm-bundle-get b 'model "default"))
-                                            (list "Effort" (llm-bundle-get b 'effort "default"))))))))))))
+                  (component 'ui/stats
+                    (list 'stats (list (list 'label "Backend" 'value (plist-get now 'connector))
+                                       (list 'label "Model" 'value (plist-get now 'model))
+                                       (list 'label "Effort" 'value (plist-get now 'effort))
+                                       (list 'label "Tools" 'value (number->string (length on)) 'sub "on")))))
+            (list "Tools"
+                  (ai--group (string-append "Tools · " (number->string (length on)) " on")
+                    (list (component 'ui/table
+                            (list 'columns '(("tool") ("about") ("in this group"))
+                                  'rows (map (lambda (t) (list (car t) (ai--clip (cadr t) 70)
+                                                               (if (caddr t) (list "● on" "good") "○ off")))
+                                             (ai--tool-rows on))))
+                          (ai--prose "u turns them on and off."))))))))
 
 (define (ai--global-default-page row)
-  (let* ((b (llm-default-bundle-record)))
-    (ai--page "Compos default" (if b "set" "none") (if b "good" "")
-      (ai--meta (list (if b (ai--bundle-detail b) "no default: a new chat elsewhere takes the first connector ready")))
-      (list (list "ai-pick-default" "Pick a preset…" "p" "good"))
+  (let* ((level (list 'global #f)) (now (ai--level-bundle level)) (on (or (plist-get now 'presets) '())))
+    (ai--page "Compos default" (if (llm-default-bundle-record) "set" "none") (if (llm-default-bundle-record) "good" "")
+      (ai--meta (list (if (llm-default-bundle-record) "this app's own default" "new chats take the first connector ready")))
+      (list (list "ai-backend" "Backend" "b") (list "ai-model" "Model" "m") (list "ai-effort" "Effort" "e") (list "ai-tools" "Tools" "u")
+            (list "ai-pick-default" "Apply a saved preset" "p" "good"))
       (list (list "Setup"
-                  (ai--group "Setup"
-                    (if (not b)
-                        (list (ai--prose "Nothing set. p picks a preset new chats start with everywhere a group names none."))
-                        (list (ai--kv (list (list "Preset" (or (ai--setup-name b) "a custom setup, not a saved preset"))
-                                            (list "Connector" (llm-bundle-get b 'connector ""))
-                                            (list "Model" (llm-bundle-get b 'model "default"))
-                                            (list "Effort" (llm-bundle-get b 'effort "default"))))))))))))
+                  (component 'ui/stats
+                    (list 'stats (list (list 'label "Backend" 'value (plist-get now 'connector))
+                                       (list 'label "Model" 'value (plist-get now 'model))
+                                       (list 'label "Effort" 'value (plist-get now 'effort))
+                                       (list 'label "Tools" 'value (number->string (length on)) 'sub "on")))))
+            (list "Tools"
+                  (ai--group (string-append "Tools · " (number->string (length on)) " on")
+                    (list (component 'ui/table
+                            (list 'columns '(("tool") ("about") ("everywhere a group names none"))
+                                  'rows (map (lambda (t) (list (car t) (ai--clip (cadr t) 70)
+                                                               (if (caddr t) (list "● on" "good") "○ off")))
+                                             (ai--tool-rows on))))
+                          (ai--prose "u turns them on and off."))))))))
 
 (define (ai--preset-page row)
   (let* ((name (plist-get row 'name))
@@ -550,10 +632,22 @@
             (else #f))))
   'modes '(ai-mode ai-detail-mode))
 
-(define-command "ai-backend" "Choose the backend of the chat" (lambda () (ai--with '("chat") "change" (lambda (r) (ai--dialog! "b")))) 'modes '(ai-mode ai-detail-mode))
-(define-command "ai-model" "Choose the model of the chat" (lambda () (ai--with '("chat") "change" (lambda (r) (ai--dialog! "m")))) 'modes '(ai-mode ai-detail-mode))
-(define-command "ai-effort" "Choose the reasoning effort of the chat" (lambda () (ai--with '("chat") "change" (lambda (r) (ai--dialog! "e")))) 'modes '(ai-mode ai-detail-mode))
-(define-command "ai-tools" "Turn the chat's tools and MCP servers on and off" (lambda () (ai--with '("chat") "change" (lambda (r) (ai--dialog! "t")))) 'modes '(ai-mode ai-detail-mode))
+(define-command "ai-backend" "Choose the backend of the chat, this group, or the Compos default"
+  (lambda () (ai--with '("chat" "group-default" "global-default") "change"
+               (lambda (r) (if (equal? (plist-get r 'kind) "chat") (ai--dialog! "b") (ai--level-pick-backend! r)))))
+  'modes '(ai-mode ai-detail-mode))
+(define-command "ai-model" "Choose the model of the chat, this group, or the Compos default"
+  (lambda () (ai--with '("chat" "group-default" "global-default") "change"
+               (lambda (r) (if (equal? (plist-get r 'kind) "chat") (ai--dialog! "m") (ai--level-pick-model! r)))))
+  'modes '(ai-mode ai-detail-mode))
+(define-command "ai-effort" "Choose the reasoning effort of the chat, this group, or the Compos default"
+  (lambda () (ai--with '("chat" "group-default" "global-default") "change"
+               (lambda (r) (if (equal? (plist-get r 'kind) "chat") (ai--dialog! "e") (ai--level-pick-effort! r)))))
+  'modes '(ai-mode ai-detail-mode))
+(define-command "ai-tools" "Turn a tool or MCP server on or off for the chat, this group, or the Compos default"
+  (lambda () (ai--with '("chat" "group-default" "global-default") "change"
+               (lambda (r) (if (equal? (plist-get r 'kind) "chat") (ai--dialog! "t") (ai--level-pick-tool! r)))))
+  'modes '(ai-mode ai-detail-mode))
 (define (ai--setup-of r)
   ;; what a save or a default takes: the chat's whole setup, or the preset's name
   (if (equal? (plist-get r 'kind) "chat")
@@ -754,11 +848,11 @@
 
 (define *ai-doc*
   (string-append
-    "The LLM setup in one place, in four tabs; <left> and <right> step them. Moving the point shows the row's page beside the list, "
-    "and every key works the same on the list and on the page. setup: the chat the app was opened from, this group's default, the Compos default, and the presets. "
-    "RET picks a preset, b the backend, m the model, e the effort, u the tools, s saves the setup as a new preset, U writes it into the preset the chat runs, "
-    "G makes it what new chats in this group start with, A what new chats start with elsewhere; "
-    "on a preset a applies it, and G and A make the preset a default; on this group's default or the Compos default, p picks a preset for it and c (group only) makes it follow the global default again. "
+    "The LLM setup in one place, in tabs; <left> and <right> step them. Moving the point shows the row's page beside the list, "
+    "and every key works the same on the list and on the page. chat: the chat the app was opened from. group: this group's own default, if it has one. "
+    "global: the Compos default, where a group names none. Each of the three works the same: b the backend, m the model, e the effort, u turns a tool or MCP server on or off, "
+    "p applies a saved preset wholesale. On the chat tab, s also saves the setup as a new preset and U writes it into the preset it runs; G makes it this group's default and A the Compos default. "
+    "On the group tab, c clears its own default and goes back to following the Compos default. presets: every saved preset, a applies it to the chat, G and A make it a default. "
     "prompts: every prompt section, o turns it on or off in the chat, v edits its file. "
     "connectors: t tests one and times the reply, i installs its agent program, l signs in, k adds an API key, "
     "d makes it the default for new chats, P shows it in the connectors app. models: what each model host holds, "

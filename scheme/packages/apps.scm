@@ -293,12 +293,12 @@
             (else (message "App pulled into this group"))))))
 (catalog-meta! 'command "app-pull" 'domain 'windows 'effects '(write display))
 
-(define-command "app-push"
-  "Push this app to another group: every one of its buffers goes there"
+(define-command "app-move-to-group"
+  "Move this app to another group: every one of its buffers goes there"
   (lambda ()
     (let ((id (app-id (current-buffer))))
       (if id (app-push-read! id) (message "This buffer belongs to no app")))))
-(catalog-meta! 'command "app-push" 'domain 'windows 'effects '(write display))
+(catalog-meta! 'command "app-move-to-group" 'domain 'windows 'effects '(write display))
 
 ;;; The app's own windows, and nothing else: app-swap-windows trades the
 ;;; panes of its listing's window and its pages' window, each pane keeping

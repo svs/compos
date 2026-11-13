@@ -132,6 +132,75 @@
 (define (mb-tab-remember! key label)
   (set! *mb-tab-memory* (cons (list key label) (filter (lambda (e) (not (equal? (car e) key))) *mb-tab-memory*))))
 
+;; One tab row for every prompt that has tabs, so C-x b, C-x c and the rest
+;; read the same. TABS is ((ID LABEL) ...); an ID of 'sep is a gap, no tab.
+(effects! '(pure))
+(define (minibuffer-tab-keys tabs)
+  ;; each tab's SPC key: the first free letter of its name, else of the
+  ;; alphabet. ((ID KEY) ...); a gap gets none.
+  (let loop ((ts tabs) (used '()) (out '()))
+    (if (null? ts)
+        (reverse out)
+        (let* ((label (string-downcase (cadr (car ts))))
+               (free (lambda (c) (and (string<=? "a" c) (string<=? c "z") (not (member c used)))))
+               (pick (let try ((i 0))
+                       (cond ((>= i (string-length label))
+                              (let alpha ((cs (string-split "abcdefghijklmnopqrstuvwxyz" "")))
+                                (cond ((null? cs) #f) ((free (car cs)) (car cs)) (else (alpha (cdr cs))))))
+                             ((free (substring label i (+ i 1))) (substring label i (+ i 1)))
+                             (else (try (+ i 1)))))))
+          (if (or (equal? label "") (eq? (car (car ts)) 'sep) (not pick))
+              (loop (cdr ts) used out)
+              (loop (cdr ts) (cons pick used) (cons (list (car (car ts)) pick) out)))))))
+
+(define (minibuffer-tab-step tab step tabs)
+  ;; the tab STEP away from TAB, round the row, over the gaps
+  (let* ((ids (map car (filter (lambda (t) (not (eq? (car t) 'sep))) tabs)))
+         (n (length ids))
+         (i (let loop ((ks ids) (i 0))
+              (cond ((null? ks) 0) ((equal? (car ks) tab) i) (else (loop (cdr ks) (+ i 1)))))))
+    (if (= n 0) tab (nth (modulo (+ i step n) n) ids))))
+
+(define (minibuffer-tab-row tab tabs locked keys)
+  ;; what minibuffer-tabs! draws: ((LABEL CURRENT? [KEY]) ...); a locked
+  ;; prompt shows its own tab only
+  (let ((row (map (lambda (t)
+                    (let ((k (assoc (car t) keys)))
+                      (if k
+                          (list (cadr t) (equal? (car t) tab) (cadr k))
+                          (list (cadr t) (equal? (car t) tab)))))
+                  tabs)))
+    (if locked (filter cadr row) row)))
+
+(effects! '(write display))
+(define (minibuffer-tabbed! tabs tab show)
+  ;; Give the open prompt TABS, on TAB. SHOW gets the ID of each tab the
+  ;; user goes to and redraws the rows. The side arrows step, SPC KEY jumps
+  ;; to a tab, and TAB locks the prompt on its tab.
+  (let* ((keys (minibuffer-tab-keys tabs))
+         (locked #f)
+         (draw! (lambda () (minibuffer-tabs! (minibuffer-tab-row tab tabs locked keys))))
+         (go! (lambda (next) (set! tab next) (draw!) (show tab) #t)))
+    (draw!)
+    (set! *mb-leader-fn*
+      (lambda (k)
+        (let find-key ((ks keys))
+          (cond ((null? ks) #f)
+                ((equal? (cadr (car ks)) k) (set! locked #f) (go! (car (car ks))))
+                (else (find-key (cdr ks)))))))
+    (set! *mb-tab-fn*
+      (lambda (step) (and (not locked) (go! (minibuffer-tab-step tab step tabs)))))
+    (set! *mb-fold-fn*
+      (lambda (sel)
+        (set! locked (not locked))
+        (draw!)
+        (message (if locked
+                     (string-append "in " (cadr (assoc tab tabs)) " -- TAB unlocks")
+                     "all tabs -- the side arrows move"))
+        #t))))
+(public! 'minibuffer-tabbed! "(minibuffer-tabbed! TABS TAB SHOW) — give the open prompt a tab row: TABS is ((ID LABEL) ...), 'sep is a gap; it opens on TAB. SHOW gets the ID of each tab the user goes to and redraws the rows. The side arrows step, SPC KEY jumps (KEY is a letter of the tab's name), TAB locks the prompt on its tab.")
+(effects! '(unknown))
+
 (define-command "minibuffer-rail-enter"
   "Move the arrows into the list on the right of the palette, or to the next tab"
   (lambda () (cond ((mb-rail-enter!) #t) ((mb-tab-step! 1) #t) (else (run-command "forward-char"))))

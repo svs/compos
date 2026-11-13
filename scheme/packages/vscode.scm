@@ -155,9 +155,9 @@
 
 (define vscode--llm-sections
   ;; (KEY TAB-LABEL); on an empty input the key goes to that tab
-  '(("b" "b backend") ("m" "m model") ("e" "e effort") ("t" "t tools")
-    ("p" "p presets") ("s" "s save")
-    ("o" "o other")))
+  ;; C-l l is the quick change: presets and tools. Backend, model, effort
+  ;; and the rest are in the advanced setup, C-l C-l (SPC a here).
+  '(("p" "p presets") ("t" "t tools") ("s" "s save")))
 
 ;; the rows that are on (hint starting with the filled dot) before the rest,
 ;; each part keeping its order, a separator between the two
@@ -246,10 +246,10 @@
                        (list (list 'tag "div" 'class "vl-top"
                                    'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text "SPC a")
                                                    (list 'tag "span" 'class "vl-name" 'text "advanced")))
-                             (list 'tag "div" 'class "vl-value" 'text "full setup menu")))))))))
+                             (list 'tag "div" 'class "vl-value" 'text "LLM setup buffer")))))))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
-;; top; M-b M-m M-e M-t M-p M-s M-o, or Left and Right, choose what the
+;; top; SPC p, SPC t, SPC s, or Left and Right, choose what the
 ;; rows set: the backend, the model, the effort, the tools, a saved setup,
 ;; or the other actions. RET applies at once. Tools toggle and stay open.
 (define (vscode--llm-open! chat key . at)
@@ -332,14 +332,14 @@
                                (or (member section '("b" "m" "e" "t" "p"))
                                    (and (equal? section "s") (not (equal? v "Save as a new preset")))))
                       (vscode--llm-open! chat section v))))))
-    ;; Meta and the tab's letter choose the tab; plain letters type
+    ;; SPC and the tab's letter choose the tab; plain letters type
     (set! *mb-shortcuts*
           (cons (list "a" (lambda ()
-                              ;; advanced: the full setup menu, on this chat
+                              ;; advanced: the setup buffer, as C-l C-l
                               (set! *mb-tab-fn* #f)
                               (set! *mb-shortcuts* '())
                               (minibuffer-detach!)
-                              (with-current-buffer chat (lambda () (run-command "llm-configure")))))
+                              (run-command "llm-connectors")))
                 (map (lambda (s) (list (car s) (lambda () (show! (car s))))) vscode--llm-sections)))
     (set! *mb-tab-fn*
           (lambda (step)
@@ -348,9 +348,9 @@
               (show! (list-ref keys (modulo (+ i step) (length keys))))
               #t)))))
 
-(define-command "vscode-llm" "Change this chat's backend, model, effort, tools or saved setup"
+(define-command "vscode-llm" "Change this chat's preset or tools"
   (lambda ()
-    (vscode--llm-open! (llm-config-session (or (window-buffer (active-window)) (current-buffer))) "m")))
+    (vscode--llm-open! (llm-config-session (or (window-buffer (active-window)) (current-buffer))) "p")))
 
 (define-command "vscode-chats" "Choose a chat, in a modal"
   (lambda ()
@@ -370,7 +370,6 @@
     ("s-p" "pane-card")
     ("s-j" "vscode-windows")
     ("s-b" "vscode-buffers")
-    ("s-l" "vscode-llm")
     ;; switch between buffers and windows
     ("s-{" "window-previous-buffer")
     ("s-}" "window-next-buffer")
@@ -411,7 +410,7 @@
     (vscode-pane ("s-p" "pane" "pane-card"))
     (vscode-buffers ("s-b" "buffers" "vscode-buffers"))
     (vscode-windows ("s-j" "windows" "vscode-windows"))
-    (vscode-llm ("s-l" "model" "vscode-llm"))))
+    (vscode-llm ("C-l l" "presets" "vscode-llm"))))
 
 (define (vscode--apply! on)
   ;; global-minor-maps! republishes cmd-keys, so Cmd-W and the rest reach
@@ -446,7 +445,7 @@
       (string-append (number->string (monotonic-ms)) (if vscode-keyboard-lock " lock" "")))))
 
 (mode-doc! "vscode-mode"
-  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-G is the group keys: Cmd-G n makes a group, Cmd-G g goes to one. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-L changes this chat's model, effort, preset or connector. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
+  "The VSCode keys, in every buffer. Cmd-K, Cmd-Shift-P or F1 opens the command palette, with Start here first. Cmd-G is the group keys: Cmd-G n makes a group, Cmd-G g goes to one. Cmd-P shows this pane's card. Cmd-J chooses a layout, or a window. Cmd-B chooses a buffer of this group, then a file of its project. Cmd-O opens a file, Cmd-Shift-F searches the project and Cmd-Shift-E shows its files. Cmd-Shift-[ and ] step through this window's buffers, and Cmd-1 to Cmd-9 go to a window by its place. Cmd-\\ splits to the side. Cmd-W closes the buffer. Cmd-Z undoes and Cmd-Shift-Z redoes. Ctrl-Cmd-Left/Right move this window to the pane beside it. M-x vscode-mode turns it on or off, and the choice lasts. In a Chrome tab the browser keeps Cmd-W, Cmd-T, Cmd-N, Cmd-1 to Cmd-9 and Ctrl-Tab. Turn on vscode-keyboard-lock, then M-x toggle-frame-fullscreen: in fullscreen these keys come to compos. Hold Esc, or run the command again, to leave fullscreen and give the keys back.")
 
 (vscode--apply! vscode-mode)
 

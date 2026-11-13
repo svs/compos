@@ -155,3 +155,10 @@ A row of `![alt](url)` sits side by side {step up}
 # Thanks {pop}
 
 Press `o` to see every slide at once {step type}
+
+---
+
+<!-- scene: logo; transition: fade -->
+# compos
+
+`<!-- scene: logo -->` plays a scene: motion as a function of time

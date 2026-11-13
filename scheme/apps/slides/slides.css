@@ -4,12 +4,18 @@ html[data-theme=light]{--bg:#fbfaf7;--fg:#1d1d1f;--muted:#6e6e73;--accent:#d9480
 html[data-theme=paper]{--bg:#f4efe4;--fg:#2b2620;--muted:#7a7064;--accent:#b0413e;--accent2:#35637a;--code-bg:#e8e0cf;--rule:rgba(0,0,0,.12);--font:Spectral,Georgia,serif}
 html[data-theme=neon]{--bg:#07060d;--fg:#f1eefe;--muted:#8d86b3;--accent:#ff3cac;--accent2:#2bd2ff;--code-bg:#15122a}
 html[data-theme=ocean]{--bg:#0b1d2a;--fg:#e3f1f7;--muted:#7fa3b5;--accent:#4fd1c5;--accent2:#f6ad55;--code-bg:#11293a}
-html[data-theme=compos]{--bg:#1e1f22;--fg:#d6d8de;--muted:#8b8fa3;--accent:#7aa2f7;--accent2:#e0af68;--code-bg:#23242a;--rule:#454754;--head:var(--mono)}
+html[data-theme=compos]{--bg:#0c0c10;--fg:#f1ede4;--muted:#8a8795;--accent:#ff4fa3;--accent2:#3cc6ea;--accent3:#f7c600;--code-bg:#121217;--rule:#2c2b35;--head:var(--mono)}
 html[data-theme=compos] .slide h1,html[data-theme=compos] .slide h2{font-weight:700;letter-spacing:-.01em}
+html[data-theme=compos] .slide h1{color:var(--accent)}
+html[data-theme=compos] .slide h2{color:var(--accent2)}
+html[data-theme=compos] .slide h3{color:var(--accent3)}
+html[data-theme=compos] .slide a{color:var(--accent2)}
+html[data-theme=compos] .slide mark{background:#4a3d00;color:var(--fg)}
+html[data-theme=compos] .slide li::marker{color:var(--accent)}
 html[data-theme=compos] .slide :is(code,pre.code,img,mark,.box),html[data-theme=compos] .thumb{border-radius:0}
-html[data-theme=compos] .slide pre.code{border:1px solid #15161a;box-shadow:0 2px 14px rgba(0,0,0,.4)}
+html[data-theme=compos] .slide pre.code{border:1px solid #2c2b35;box-shadow:0 14px 40px rgba(0,0,0,.7)}
 html[data-theme=compos] .slide blockquote{border-left-width:3px}
-html[data-theme=compos] .slide strong{color:var(--accent2)}
+html[data-theme=compos] .slide strong{color:var(--accent3)}
 html[data-theme=compos] #progress{height:2px}
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg)}
@@ -142,3 +148,12 @@ body.pointer #nav{opacity:.9;pointer-events:auto}
 body.notes-on #nav{bottom:calc(32vh + 40px)}
 #nav button{width:44px;height:44px;border:1px solid var(--rule);background:var(--code-bg);color:var(--fg);font:26px/1 var(--font);cursor:pointer}
 #nav button:hover{color:var(--accent)}
+
+/* ---- Motion: scenes (slides.js SCENES) ---- */
+.slide.scene .content{position:relative;height:100%}
+.logo-scene{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;height:100%}
+.logo-scene .beam{position:absolute;left:6%;right:6%;top:50%;height:2px;background:linear-gradient(90deg,transparent,var(--accent2),var(--accent),transparent);box-shadow:0 0 18px var(--accent2);transform:scaleX(0)}
+.slide .logo-scene .mark{width:240px;height:240px;max-height:none;object-fit:contain;border-radius:0;opacity:0;will-change:transform,filter}
+.logo-scene .word{font:700 120px/1 var(--mono);letter-spacing:-.03em;color:var(--fg);white-space:nowrap}
+.logo-scene .word span{display:inline-block;opacity:0;will-change:transform}
+.logo-scene .tag{font-size:32px;color:var(--muted);opacity:0}

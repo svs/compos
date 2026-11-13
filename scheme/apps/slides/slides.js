@@ -244,6 +244,91 @@ nav.innerHTML = `<button class='back' aria-label='back'>‹</button><button clas
 viewport.appendChild(stage);
 [viewport, progress, counter, toastEl, black, help, ov, notesEl, nav].forEach(e => document.body.appendChild(e));
 
+// ---- Motion -------------------------------------------------------------
+// Remotion's idea: a scene is a function of time. render(t) draws second t,
+// so any moment can be drawn: the overview shows the last frame, a live
+// redraw lands on a finished scene, and arriving plays it from 0.
+// <!-- scene: NAME; key: value --> on a slide hands the slide to SCENES[NAME].
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const EASE = {
+  linear: x => x, out: x => 1 - Math.pow(1 - x, 3), in: x => x * x * x,
+  inOut: x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+};
+// the value at time t of a tween from v0 at t0 to v1 at t1, held at both ends
+function interpolate(t, [t0, t1], [v0, v1], ease) {
+  return v0 + (v1 - v0) * (ease || EASE.out)(clamp01((t - t0) / (t1 - t0)));
+}
+// a damped spring from 0 to 1, released at delay; it overshoots when damping is low
+function spring(t, o) {
+  o = o || {};
+  const x = t - (o.delay || 0);
+  if (x <= 0) return 0;
+  const k = o.stiffness || 170, c = o.damping || 14, m = o.mass || 1;
+  const w = Math.sqrt(k / m), z = c / (2 * Math.sqrt(k * m));
+  if (z >= 1) return 1 - Math.exp(-w * x) * (1 + w * x);
+  const wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x));
+}
+
+// logo: a beam draws across, the mark springs in out of a blur with its
+// colours split pink and cyan, the letters of the slide's heading spring up
+// one by one, then its first paragraph rises. The mark breathes after.
+function logoScene(sec, d) {
+  const content = sec.querySelector('.content');
+  const h = content.querySelector('h1,h2'), p = content.querySelector('p');
+  const word = h ? h.textContent.trim() : 'compos';
+  content.innerHTML = `<div class='logo-scene'><div class='beam'></div>` +
+    `<img class='mark' src='${q(d.src || 'compos-logo.png')}' alt=''>` +
+    `<div class='word'>${[...word].map(c => `<span>${c === ' ' ? '&nbsp;' : esc(c)}</span>`).join('')}</div>` +
+    (p ? `<div class='tag'>${p.innerHTML}</div>` : '') + `</div>`;
+  const beam = content.querySelector('.beam'), mark = content.querySelector('.mark');
+  const letters = [...content.querySelectorAll('.word span')], tag = content.querySelector('.tag');
+  const end = 1.1 + letters.length * .06 + .9;
+  return {
+    dur: end,
+    render(t) {
+      beam.style.transform = `scaleX(${interpolate(t, [0, .5], [0, 1])})`;
+      beam.style.opacity = 1 - interpolate(t, [.5, 1.2], [0, 1]);
+      const s = spring(t, { delay: .35, stiffness: 120, damping: 11 });
+      const split = (1 - spring(t, { delay: .35, stiffness: 90, damping: 9 })) * 14;
+      const glow = t > end ? (1 - Math.cos((t - end) * 1.6)) / 2 : 0;
+      mark.style.opacity = clamp01(s * 1.5);
+      mark.style.transform = `scale(${.4 + .6 * s}) rotate(${(1 - s) * -10}deg)`;
+      mark.style.filter = `blur(${clamp01(1 - s) * 16}px)` +
+        ` drop-shadow(${split}px 0 0 rgba(255,79,163,.85)) drop-shadow(${-split}px 0 0 rgba(60,198,234,.85))` +
+        ` drop-shadow(0 0 ${18 + glow * 18}px rgba(60,198,234,${.2 + glow * .25}))`;
+      letters.forEach((l, k) => {
+        const v = spring(t, { delay: 1.1 + k * .06, stiffness: 200, damping: 15 });
+        l.style.opacity = clamp01(v * 1.4);
+        l.style.transform = `translateY(${(1 - v) * 48}px)`;
+      });
+      if (tag) {
+        const v = interpolate(t, [end - .7, end - .1], [0, 1]);
+        tag.style.opacity = v;
+        tag.style.transform = `translateY(${(1 - v) * 16}px)`;
+      }
+    },
+  };
+}
+const SCENES = { logo: logoScene };
+
+// The current slide's scene runs on one frame loop, from when the slide's
+// transition is mostly done; an instant arrival starts at the last frame.
+let clock = 0;
+function play(s, instant) {
+  cancelAnimationFrame(clock);
+  const sc = s.scene;
+  if (!sc) return;
+  const t0 = performance.now() + (instant ? -sc.dur * 1000 : +s.dataset.dur * .45);
+  sc.render(instant ? sc.dur : 0);
+  const tick = now => {
+    if (life.signal.aborted || sections[idx] !== s) return;
+    sc.render(Math.max(0, (now - t0) / 1000));
+    clock = requestAnimationFrame(tick);
+  };
+  clock = requestAnimationFrame(tick);
+}
+
 const sections = deck.slides.map(s => {
   const [text, d] = directives(s.text);
   const sec = el('section', '', 'slide');
@@ -276,6 +361,11 @@ const sections = deck.slides.map(s => {
   sec.dataset.dur = parseInt(d.duration, 10) || DEF_DUR;
   sec.dataset.line = s.line;
   sec.notes = s.notes ? md(s.notes) : '';
+  if (d.scene && SCENES[d.scene]) {
+    sec.classList.add('scene', 'scene-' + d.scene);
+    sec.scene = SCENES[d.scene](sec, d);
+    sec.scene.render(sec.scene.dur);
+  }
   stage.appendChild(sec);
   return sec;
 });
@@ -301,6 +391,7 @@ function arrive(s, instant) {
   s.style.setProperty('--base', instant ? '0ms' : Math.round(s.dataset.dur * 0.45) + 'ms');
   s.classList.toggle('instant', instant);
   s.querySelectorAll('.enter').forEach(e => { e.classList.remove('go'); void e.offsetWidth; e.classList.add('go'); });
+  play(s, instant);
 }
 
 function finish() { if (pending) { const p = pending; pending = null; p(); } }
@@ -591,6 +682,7 @@ return {
   },
   stop() {
     life.abort();
+    cancelAnimationFrame(clock);
     clearTimeout(hudTimer);
     clearTimeout(toastTimer);
     clearTimeout(navTimer);

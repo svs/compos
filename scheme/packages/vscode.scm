@@ -52,20 +52,23 @@
   width: fit-content;
   min-width: calc(420px / var(--ui-zoom, 1));
   max-width: min(calc(720px / var(--ui-zoom, 1)), calc(88vw / var(--ui-zoom, 1)));
-  height: calc(52dvh / var(--ui-zoom, 1));
+  height: calc(64dvh / var(--ui-zoom, 1));
 }
 .mb-panel.palette:has(.mb-html) .mb-preview { display: none; }
 .mb-panel.palette:has(.mb-html) .mb-head-legend { display: none; }
 .mb-panel.palette:has(.mb-html) .mb-cand { column-gap: 12px; }
-.vl-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
-.vl-tab { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; min-width: 0;
-  border: 1px solid var(--border-bg); }
+.vl-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; font-size: .82em; }
+.vl-tab { display: flex; align-items: baseline; gap: 5px; padding: 1px 7px; min-width: 0;
+  border: 1px solid transparent; border-radius: 3px; white-space: nowrap; }
 .vl-on { border-color: var(--accent-fg); background: var(--hl-line-bg); }
-.vl-top { display: flex; align-items: center; gap: 6px; }
-.vl-name { font-size: .75em; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); }
+.vl-top { display: contents; }
+.vl-tab .transient-legend-key { font-size: 1em; }
+.vl-name { color: var(--dim-fg); }
 .vl-on .vl-name { color: var(--default-fg); }
-.vl-advanced { border-style: dashed; margin-left: auto; }
-.vl-value { font-size: .85em; color: var(--default-fg); max-width: 260px; overflow-wrap: anywhere; }
+.vl-advanced { border: 1px dashed var(--border-bg); }
+.vl-value { color: var(--default-fg); max-width: 14ch; overflow: hidden; text-overflow: ellipsis; }
+.vl-value:empty { display: none; }
+.vl-hint { color: var(--dim-fg); margin-left: auto; padding: 0 4px; }
 ")
 
 (define-command "vscode-windows" "Choose a layout, each one shows as you move to it; or a window of this group"
@@ -240,8 +243,8 @@
                        (list "t" tools)
                        (list "c" (llm-connectors-state (plist-get now 'connector)))
                        (list "p" (or (llm-config-preset-name chat) "own setup"))
-                       (list "s" "preset, default")
-                       (list "o" "setup, chats"))))
+                       (list "s" "")
+                       (list "o" ""))))
     (blocks->html
      (list 'tag "div" 'class "vl-tabs"
            'children
@@ -251,20 +254,21 @@
                     (list 'tag "div" 'class (if (equal? key section) "vl-tab vl-on" "vl-tab")
                           'children
                           (list (list 'tag "div" 'class "vl-top"
-                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text (string-append "SPC " key))
+                                      'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text key)
                                                       (list 'tag "span" 'class "vl-name"
                                                             'text (substring (cadr s) 2 (string-length (cadr s))))))
                                 (list 'tag "div" 'class "vl-value" 'text (cadr (assoc key values)))))))
                 (vscode--llm-sections))
+           (list (list 'tag "span" 'class "vl-hint" 'text "SPC + letter"))
            ;; not a tab: it leaves the quick change for the advanced view
            (if *vscode-llm-advanced*
                '()
            (list (list 'tag "div" 'class "vl-tab vl-advanced"
                        'children
                        (list (list 'tag "div" 'class "vl-top"
-                                   'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text "SPC a")
+                                   'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text "a")
                                                    (list 'tag "span" 'class "vl-name" 'text "advanced")))
-                             (list 'tag "div" 'class "vl-value" 'text "every setting"))))))))))
+                             (list 'tag "div" 'class "vl-value" 'text ""))))))))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
 ;; top; SPC p, SPC t, SPC s, or Left and Right, choose what the
@@ -360,9 +364,10 @@
            (if *vscode-llm-advanced*
                '()
                (list (list "a" (lambda ()
-                                   ;; advanced: every tab, as C-l C-l
-                                   (set! *vscode-llm-advanced* #t)
-                                   (show! section)))))
+                                   ;; advanced: the AI app, as C-l C-l
+                                   (done!)
+                                   (minibuffer-detach!)
+                                   (run-command "ai")))))
            (map (lambda (s) (list (car s) (lambda () (show! (car s))))) (vscode--llm-sections))))
     (set! *mb-tab-fn*
           (lambda (step)

@@ -3375,6 +3375,9 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (public! 'list-entries
   "(list-entries BUF) — the rows list BUF holds now, after its filters; () when none"
   'ui)
+(public! 'list-offsets
+  "(list-offsets BUF) — the byte offset where each drawn row of list BUF starts; () when none"
+  'ui)
 (public! 'list-current
   "(list-current BUF) — the row at list BUF's point, or #f when there is none or it cannot be selected"
   'ui)

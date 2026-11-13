@@ -200,7 +200,7 @@
   "(TEXT BLOCKS): a title, a meta line, the action bar, then PARTS, each (NAME BLOCK) and one anchor"
   (let* ((stop (lambda (blk name i) (append blk (list 'anchor-name name 'lines (list i i)))))
          (head (stop (component 'ui/title (append (list 'text title) (if badge (list 'badge badge 'tone (or tone "")) '())))
-                     "Title" 1))
+                     title 1))
          (body (let loop ((ps parts) (i 2) (acc '()))
                  (if (null? ps) (reverse acc)
                      (loop (cdr ps) (+ i 1) (cons (stop (cadr (car ps)) (car (car ps)) i) acc))))))
@@ -718,6 +718,69 @@
 (define-command "ai-scroll-line-up" "Scroll the page three lines up"
   (lambda () (scroll-window! (active-window) -3))
   'modes '(ai-detail-mode))
+
+;; --- imenu: every row of every tab, under its section -----------------
+
+(define (ai--row-key r) (string-append (plist-get r 'kind) ":" (plist-get r 'id)))
+
+(define (ai--row-label r)
+  (let ((kind (plist-get r 'kind)))
+    (cond ((equal? kind "connector") (llm-connectors--title (plist-get r 'name)))
+          ((equal? kind "chat") (string-append "this chat · " (ai--clip (plist-get r 'name) 50)))
+          (else (plist-get r 'name)))))
+
+(define (ai--goto! buf r)
+  "show ROW's tab in BUF, put point on its line and its page beside the list"
+  (unless (equal? (car (list-tab-current buf)) (plist-get r 'tab))
+    (list-tab-go! buf (plist-get r 'tab)))
+  (let loop ((os (list-offsets buf)) (es (list-entries buf)))
+    (cond ((or (null? os) (null? es)) #f)
+          ((and (not (ai--sep? (car es))) (equal? (ai--row-key (car es)) (ai--row-key r)))
+           (with-current-buffer buf (lambda () (goto-char! (car os))))
+           (when (equal? (window-buffer (active-window)) buf) (window-set-point! (active-window) (car os))))
+          (else (loop (cdr os) (cdr es)))))
+  (ai-show-detail! r))
+
+;; The target of an imenu row, made here and not inside the loop of
+;; ai--imenu-rows. A lambda keeps every local it can see. Inside the loop
+;; it kept the list of the rows before it, and each of those rows holds
+;; a lambda that kept its own list: the daemon reads such a value in
+;; time that doubles with each row, and Cmd-i stopped the editor.
+(define (ai--imenu-target buf row) (lambda () (ai--goto! buf row)))
+
+(define (ai--imenu-rows buf)
+  ;; (LINE KIND NAME DOC TARGET WHERE): the kind is the tab, so the prompt
+  ;; has a tab for each; a section heads its rows, which fold under it
+  (let loop ((rs (ai--rows buf)) (sec #f) (acc '()))
+    (if (null? rs) (reverse acc)
+        (let ((r (car rs)))
+          (cond ((ai--sep? r)
+                 (let ((first (find (lambda (x) (not (ai--sep? x))) (cdr rs))))
+                   (loop (cdr rs) (plist-get r 'title)
+                         (if (and first (equal? (plist-get first 'tab) (plist-get r 'tab)) (not (equal? (plist-get first 'kind) "note")))
+                             (cons (list 1 (plist-get r 'tab) (plist-get r 'title) "" (ai--imenu-target buf first) "list") acc)
+                             acc))))
+                ((equal? (plist-get r 'kind) "note") (loop (cdr rs) sec acc))
+                (else
+                 (let ((cells (ai--cells buf r)))
+                   (loop (cdr rs) sec
+                         (cons (list 1 (plist-get r 'tab) (string-append "   " (ai--row-label r))
+                                     (let ((s (cadr cells))) (if (pair? s) (car s) s))
+                                     (ai--imenu-target buf r) (or sec "list"))
+                               acc)))))))))
+
+(define (ai--imenu-snapshot buf)
+  ;; a preview moves the tab and point: C-g puts both back
+  (let ((tab (car (list-tab-current buf))) (pt (with-current-buffer buf (lambda () (point)))))
+    (lambda ()
+      (unless (equal? (car (list-tab-current buf)) tab) (list-tab-go! buf tab))
+      (with-current-buffer buf (lambda () (goto-char! pt)))
+      (let ((r (list-current buf))) (when (and r (not (ai--sep? r))) (ai-show-detail! r))))))
+
+(define (ai--imenu-setup!)
+  (buffer-set-local! (current-buffer) 'imenu-index-function 'ai--imenu-rows)
+  (buffer-set-local! (current-buffer) 'imenu-snapshot 'ai--imenu-snapshot))
+(add-hook! 'ai-mode-hook 'ai--imenu-setup!)
 
 (define-mode "ai-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
 ;; a page is read, not typed in: SPC and the arrows scroll it

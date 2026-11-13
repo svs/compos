@@ -136,16 +136,15 @@
 ;; read the same. TABS is ((ID LABEL) ...); an ID of 'sep is a gap, no tab.
 (effects! '(pure))
 (define (minibuffer-tab-keys tabs)
-  ;; each tab's SPC key: the first free letter of its name as written,
-  ;; case and all (Group takes SPC G), else of the alphabet. Keys are
-  ;; case sensitive. ((ID KEY) ...); a gap gets none.
+  ;; each tab's SPC key: the first free letter of its name, else of the
+  ;; alphabet, always lowercase (Group takes SPC g). Keys are case
+  ;; sensitive, so the tab row draws the names in lowercase too.
+  ;; ((ID KEY) ...); a gap gets none.
   (let loop ((ts tabs) (used '()) (out '()))
     (if (null? ts)
         (reverse out)
-        (let* ((label (cadr (car ts)))
-               (free (lambda (c) (and (or (and (string<=? "a" c) (string<=? c "z"))
-                                          (and (string<=? "A" c) (string<=? c "Z")))
-                                      (not (member c used)))))
+        (let* ((label (string-downcase (cadr (car ts))))
+               (free (lambda (c) (and (string<=? "a" c) (string<=? c "z") (not (member c used)))))
                (pick (let try ((i 0))
                        (cond ((>= i (string-length label))
                               (let alpha ((cs (string-split "abcdefghijklmnopqrstuvwxyz" "")))

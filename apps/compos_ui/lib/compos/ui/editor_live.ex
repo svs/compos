@@ -1404,7 +1404,7 @@ defmodule Compos.Ui.EditorLive do
   # key is the marked letter inside the tab's name: SPC b reads off the row.
   defp mb_tab_row(assigns) do
     ~M"""
-    <c-tabs class="c-tabs mb-tabs"><c-action-key :if={Enum.any?(@tabs, &Map.get(&1, :key))} class="mb-tabs-leader" title="SPC and a marked letter jump to its tab">SPC</c-action-key><c-tab :for={t <- @tabs} class={"c-tab " <> if(t.current, do: "c-tab-on", else: "")} current={to_string(t.current)}><%= case mb_tab_split(t) do %><% {pre, k, post} -> %>{pre}<c-text class="mb-tab-key">{k}</c-text>{post}<% {:badge, k} -> %><c-action-key class="mb-tab-key-badge">{k}</c-action-key>{t.label}<% _ -> %>{t.label}<% end %></c-tab></c-tabs>
+    <c-tabs class="c-tabs mb-tabs"><c-action-key :if={Enum.any?(@tabs, &Map.get(&1, :key))} title="SPC and a marked letter jump to its tab">SPC</c-action-key><c-tab :for={t <- @tabs} class={"c-tab " <> if(t.current, do: "c-tab-on", else: "")} current={to_string(t.current)}><%= case mb_tab_split(t) do %><% {pre, k, post} -> %><c-text class="mb-tab-name">{pre}<c-action-key>{k}</c-action-key>{post}</c-text><% {:badge, k} -> %><c-action-key>{k}</c-action-key> {String.downcase(t.label)}<% _ -> %>{String.downcase(t.label)}<% end %></c-tab></c-tabs>
     """
   end
 
@@ -1412,7 +1412,9 @@ defmodule Compos.Ui.EditorLive do
   # case and all (keys are case sensitive);
   # {:badge, key} when it is not; nil without a key
   defp mb_tab_split(t) do
-    label = to_string(Map.get(t, :label, ""))
+    # keys are lowercase and case sensitive: the name draws in lowercase,
+    # so the letter drawn as a key is the key
+    label = String.downcase(to_string(Map.get(t, :label, "")))
 
     case Map.get(t, :key) do
       nil ->

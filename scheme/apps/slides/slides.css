@@ -163,3 +163,53 @@ body.notes-on #nav{bottom:calc(32vh + 40px)}
 .le-tag{margin-top:5px;font:25px/1.3 Inter,var(--font);color:#16161a}
 .le-tag .hl{color:#e0147a;font-weight:600}
 .le-kicker{margin-top:29px;font:600 15px Inter,var(--font);letter-spacing:7px;text-transform:uppercase;color:rgba(22,22,26,.5)}
+
+/* llm-sentry: a terminal agent asked about Sentry, beat by beat */
+.slide.scene-llm-sentry{padding:0}
+.llm{position:absolute;inset:0;background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidden}
+.llm-beat{display:none}
+.llm-head{position:absolute;left:56px;right:56px;top:28px;height:56px;display:flex;align-items:center;justify-content:space-between}
+.slide .llm-head h2{margin:0;font-size:40px;color:var(--accent2)}
+.llm-meters{display:flex;gap:28px;font-size:19px;color:var(--muted)}
+.llm-meters b{color:var(--fg);font-weight:600}
+.llm-wait{transition:opacity .4s}
+.llm-wait.hot,.llm-wait.hot b{color:var(--accent)}
+.llm-term{position:absolute;left:56px;top:100px;bottom:40px;width:1168px;display:flex;flex-direction:column;background:var(--code-bg);border:1px solid var(--rule);box-shadow:0 14px 40px rgba(0,0,0,.7)}
+.llm-bar{flex:none;height:34px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--rule);font-size:14px;color:var(--muted)}
+.llm-bar i{width:11px;height:11px;border-radius:50%;background:var(--rule)}
+.llm-bar span{margin-left:10px}
+/* the log fills the body and grows past its top: the newest line stays in view, in the overview too */
+.llm-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;padding:0 22px}
+.llm-log{flex:none;min-height:100%;padding:14px 0;font-size:18px;line-height:1.45}
+.llm-log>div{white-space:pre-wrap;margin:0 0 2px}
+.llm-log .llm-you{margin-top:14px}
+.llm-you::before{content:'› ';color:var(--accent)}
+.llm-tool{color:var(--accent2)}
+.llm-dim{color:var(--muted)}
+.llm-say code{font-size:.9em;padding:0 .2em;background:#1d1c25}
+.llm-log .llm-issue,.llm-log .llm-wall{white-space:pre;overflow:hidden;text-overflow:ellipsis}
+.llm-issue .id{color:var(--accent3)}
+.llm-issue .n{color:var(--muted)}
+.llm-log .llm-wall{margin:0;font-size:13px;line-height:1.3;color:#6f6c7a}
+.llm-spin{color:var(--accent3)}
+.llm-spin .k{color:var(--muted)}
+.llm-spin.done{color:var(--muted)}
+.llm-flag{color:var(--accent)}
+.llm-cur{display:inline-block;width:.55em;height:1.05em;vertical-align:text-bottom;background:var(--fg)}
+.llm-input{flex:none;height:48px;display:flex;align-items:center;gap:10px;padding:0 22px;border-top:1px solid var(--rule);font-size:18px}
+.llm-input .p{color:var(--accent)}
+.llm-input.busy .p{color:var(--muted)}
+.llm-input .ph{color:var(--muted);font-style:italic}
+.llm-input .q{margin-left:auto;padding:2px 8px;border:1px solid var(--accent3);color:var(--accent3);font-size:14px}
+.llm-cap{position:absolute;right:96px;top:170px;max-width:480px;padding:18px 22px;background:var(--accent);color:var(--bg);font:700 26px/1.25 var(--mono);box-shadow:0 18px 50px rgba(0,0,0,.6);opacity:0}
+.llm-subs{position:absolute;left:700px;right:56px;top:100px;bottom:40px;display:flex;flex-direction:column;gap:12px}
+.llm-card{flex:1;padding:14px 18px;background:var(--code-bg);border:1px solid var(--rule);border-left:4px solid var(--accent2);opacity:0;overflow:hidden}
+.llm-card .t{font-size:15px;color:var(--muted);white-space:pre;overflow:hidden;text-overflow:ellipsis}
+.llm-card .t b{color:var(--fg)}
+.llm-card .s{margin-top:8px;font-size:18px;color:var(--accent2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.llm-card.q{border-left-color:var(--accent3)}
+.llm-card.q .s{color:var(--accent3);white-space:normal}
+.llm-card.lost{border-left-color:var(--muted)}
+.llm-card.lost .s{color:var(--muted);font-style:italic}
+.llm-card.done .s{color:#7bd88f}
+.llm-punch{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 140px;text-align:center;background:rgba(12,12,16,.84);font:700 64px/1.15 var(--mono);color:var(--accent)}

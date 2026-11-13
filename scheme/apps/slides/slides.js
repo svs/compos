@@ -373,7 +373,207 @@ function logoScene(sec, d) {
     },
   };
 }
-const SCENES = { logo: logoScene };
+// llm-sentry: "I ask my LLM". A terminal agent, asked about Sentry errors,
+// one beat per key press: the list; the details as a wall of text; a fix
+// that eats the session; subagents that get lost and ask questions while a
+// meter counts who waits on you; the question. Hidden .step markers count
+// the beats and time inside a beat drives the motion. The agent's clock runs
+// LS_RATE times faster than ours: it is slow.
+const LS_RATE = 9, LS_SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+const lsTime = s => { s = Math.floor(s); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
+const lsGlyph = t => LS_SPIN[Math.floor(Math.max(0, t) * 12) % LS_SPIN.length];
+const LS_WALL = [
+  '{',
+  '  "id": "9f2c41e07ab84d0c9b1e6a3f5d27c810", "issue": "SHOP-3F2", "level": "error", "platform": "javascript",',
+  '  "firstSeen": "2026-11-12T08:14:03Z", "lastSeen": "2026-11-14T02:29:51Z", "count": 1204, "userCount": 377,',
+  '  "exception": { "type": "TypeError", "value": "Cannot read properties of undefined (reading \'price\')",',
+  '    "mechanism": { "type": "onerror", "handled": false },',
+  '    "stacktrace": { "frames": [',
+  '      { "filename": "webpack-internal:///./src/checkout/cart.ts", "lineno": 88, "function": "lineTotal" },',
+  '      { "filename": "webpack-internal:///./src/checkout/cart.ts", "lineno": 112, "function": "Array.reduce" },',
+  '      { "filename": "webpack-internal:///./src/checkout/Summary.tsx", "lineno": 41, "function": "Summary" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 15486, "function": "renderWithHooks" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 20103, "function": "updateFunctionComponent" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 21626, "function": "beginWork" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 27465, "function": "performUnitOfWork" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 26599, "function": "workLoopSync" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 26505, "function": "renderRootSync" },',
+  '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 25889, "function": "performSyncWorkOnRoot" },',
+  '      { "filename": "node_modules/scheduler/cjs/scheduler.development.js", "lineno": 178, "function": "flushWork" }',
+  '    ] } },',
+  '  "breadcrumbs": [',
+  '    { "timestamp": "02:29:41", "category": "navigation", "data": { "from": "/p/oat-milk-1l", "to": "/cart" } },',
+  '    { "timestamp": "02:29:43", "category": "ui.click", "message": "div.cart-row > button.qty-minus" },',
+  '    { "timestamp": "02:29:44", "category": "fetch", "data": { "method": "PATCH", "url": "/api/cart/items/77", "status_code": 200 } },',
+  '    { "timestamp": "02:29:46", "category": "ui.click", "message": "form#coupon > button[type=submit]" },',
+  '    { "timestamp": "02:29:47", "category": "fetch", "data": { "method": "POST", "url": "/api/cart/coupon", "status_code": 200 } },',
+  '    { "timestamp": "02:29:47", "category": "console", "level": "warning", "message": "[cart] hydrate: 3 items, 2 prices" },',
+  '    { "timestamp": "02:29:51", "category": "sentry.event", "message": "TypeError" }',
+  '  ],',
+  '  "tags": { "browser": "Chrome Mobile 131", "os": "Android 14", "device": "Pixel 7", "release": "shop-web@4.18.2",',
+  '    "environment": "production", "transaction": "/cart", "url": "https://shop.example.com/cart?coupon=DIWALI25" },',
+  '  "contexts": { "browser": { "name": "Chrome Mobile", "version": "131.0.6778" }, "os": { "name": "Android", "version": "14" },',
+  '    "device": { "family": "Pixel 7", "model": "GVU6C" },',
+  '    "trace": { "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "span_id": "00f067aa0ba902b7" } },',
+  '  "user": { "id": "u_51983", "ip_address": "{{auto}}", "geo": { "country_code": "IN", "city": "Pune" } },',
+  '  "sdk": { "name": "sentry.javascript.react", "version": "8.42.0" }, "fingerprint": ["{{ default }}"],',
+  '  "_meta": { "request": { "headers": { "": { "rem": [["@password:filter", "s"]] } } } }',
+  '}',
+];
+const LS_WORK = ['Reading checkout/cart.ts', 'Reading 14 files', 'Searching for "price"', 'Reading 38 files', 'Running npm test',
+  'Reading node_modules/react-dom/cjs/react-dom.development.js', 'Rethinking the cart', 'Reading 112 files', 'Running npm test again'];
+function llmSentryScene(sec, d) {
+  const h = sec.querySelector('.content h1,.content h2');
+  const title = h ? h.textContent.trim() : 'I ask my LLM';
+  const DUR = 30, END = 60, BEATS = 5;
+  // seconds of each beat the clock counts; beats 2 and 3 tick until the key
+  const CAP = [8, 11, Infinity, Infinity, Infinity], NOM = [8, 11, 9, 12];
+  const BASE = [0];
+  NOM.forEach((v, k) => BASE.push(BASE[k] + v * LS_RATE));
+  const issues = [
+    ['SHOP-3F2', "TypeError: Cannot read properties of undefined (reading 'price')", '1,204'],
+    ['SHOP-3E9', 'ConnectionTimeout: payments-gw did not answer in 30000ms', '412'],
+    ['SHOP-3D1', 'UnhandledRejection: InvalidCouponError', '88'],
+    ['SHOP-3C7', 'ChunkLoadError: Loading chunk 742 failed', '2,931'],
+    ['SHOP-3A0', 'RangeError: Maximum call stack size exceeded', '7'],
+  ];
+  const subs = [
+    { what: 'cart price undefined', ev: [[2.6, 'work', 'reading checkout/cart.ts'], [5.2, 'q', 'Should a missing item cost 0, or throw?']] },
+    { what: 'payments timeout', ev: [[2.85, 'work', 'reading payments/client.ts'],
+      [4.4, 'lost', x => `lost · reading node_modules/aws-sdk/… file ${Math.floor(214 + x * 137)} of ?`], [8.6, 'lost', 'lost · now refactoring the logger']] },
+    { what: 'InvalidCouponError', ev: [[3.1, 'work', 'grepping for "coupon"'], [6.4, 'q', 'Should expired coupons throw?']] },
+    { what: 'ChunkLoadError', ev: [[3.35, 'work', 'reading webpack.config.js'], [5.8, 'done', '✓ added a retry · tests not run'], [7.8, 'q', 'Can I push to main?']] },
+    { what: 'max call stack', ev: [[3.6, 'work', 'thinking']] },
+  ];
+  // the log: each line belongs to a beat and shows from its time in that beat
+  const L = [];
+  const you = (beat, at, text) => L.push({ beat, at, kind: 'you', text });
+  const line = (beat, at, html, cls) => L.push({ beat, at, kind: 'line', html, cls });
+  const spin = (beat, at, end, label, done) => L.push({ beat, at, end, kind: 'spin', label, done });
+  you(0, .3, "what's breaking in prod?");
+  spin(0, 1.6, 4.4, () => 'Thinking', f => `· thought for ${lsTime(f)}`);
+  line(0, 4.5, '◇ sentry.list_issues(project: "shop-web", status: "unresolved")', 'tool');
+  line(0, 4.9, '  5 issues', 'dim');
+  issues.forEach((r, k) => line(0, 5.2 + k * .3, `<span class='id'>${r[0]}</span>  ${esc(r[1])}  <span class='n'>${r[2]}</span>`, 'issue'));
+  line(0, 7, 'Here are the 5 unresolved issues. Want me to look into any of them?', 'say');
+  you(1, .2, 'show me the details of the first one');
+  spin(1, 1.7, 5.6, x => ['Fetching the issue', 'Fetching the latest event', 'Reading the stack trace'][Math.min(2, Math.floor(x / 1.4))], f => `· fetched for ${lsTime(f)}`);
+  line(1, 5.7, '◇ sentry.get_issue(id: "SHOP-3F2")', 'tool');
+  line(1, 5.9, '◇ sentry.get_event(issue: "SHOP-3F2", event: "latest")', 'tool');
+  LS_WALL.forEach((w, k) => line(1, 6.2 + k * .05, esc(w), 'wall'));
+  const sum = 6.4 + LS_WALL.length * .05;
+  line(1, sum, 'So <code>item</code> is undefined when <code>lineTotal</code> runs. This could be caused by several factors:', 'say');
+  ['a race in cart hydration', 'a coupon response that drops an item', 'a stale service-worker cache', 'something else']
+    .forEach((s, k) => line(1, sum + .3 + k * .2, `  ${k + 1}. ${s}`, 'say'));
+  line(1, sum + 1.4, 'Would you like me to investigate further, or attempt a fix?', 'say');
+  you(2, .2, 'fix it');
+  spin(2, .8, Infinity, x => LS_WORK[Math.floor(x / 1.5) % LS_WORK.length], '⏹ interrupted · 0 bugs fixed');
+  you(3, .3, 'use subagents. one per issue. go.');
+  line(3, 1.4, '◇ spawn_subagents(5)', 'tool');
+  line(3, 1.8, "5 subagents are running in the background. I'll tell you when they need you.", 'say');
+  subs.forEach((s, k) => s.ev.forEach(e => {
+    if (e[1] === 'q') line(3, e[0], `⚑ sub-${k + 1} is waiting on you: ${esc(e[2])}`, 'flag');
+    if (e[1] === 'done') line(3, e[0], `✓ sub-${k + 1} says it's done`, 'dim');
+  }));
+
+  sec.innerHTML = `<div class='llm'>` +
+    `<div class='llm-head'><h2>${esc(title)}</h2><div class='llm-meters'>` +
+    `<span>⏱ <b class='llm-clock'>0s</b></span><span>fixed <b>0</b></span>` +
+    `<span class='llm-wait'>waiting on you <b>0</b></span></div></div>` +
+    `<div class='llm-term'><div class='llm-bar'><i></i><i></i><i></i><span>agent — ~/src/shop-web</span></div>` +
+    `<div class='llm-body'><div class='llm-log'>` + L.map(() => '<div></div>').join('') + `</div></div>` +
+    `<div class='llm-input'><span class='p'>›</span><span class='tx'></span><i class='llm-cur'></i><span class='q'>queued</span></div></div>` +
+    `<div class='llm-subs'>` + subs.map((s, k) => `<div class='llm-card'><div class='t'><b>sub-${k + 1}</b>  ${issues[k][0]} · ${esc(s.what)}</div><div class='s'></div></div>`).join('') + `</div>` +
+    `<div class='llm-cap'>Forgot to say “use a subagent”.<br>There goes your focus.</div>` +
+    `<div class='llm-punch'>How many can you handle in parallel?</div>` +
+    '<i class="step llm-beat"></i>'.repeat(BEATS - 1) + `</div>`;
+  const $ = s => sec.querySelector(s);
+  const log = $('.llm-log'), term = $('.llm-term'), clockEl = $('.llm-clock');
+  const wait = $('.llm-wait'), waitN = $('.llm-wait b'), cap = $('.llm-cap'), punch = $('.llm-punch');
+  const input = $('.llm-input'), inputTx = $('.llm-input .tx'), cur = $('.llm-cur'), queued = $('.llm-input .q');
+  [...log.children].forEach((e, k) => { L[k].el = e; });
+  [...sec.querySelectorAll('.llm-card')].forEach((e, k) => { subs[k].el = e; subs[k].s = e.querySelector('.s'); });
+  const set = (r, cls, html) => { if (r.html_ !== html || r.cls_ !== cls) { r.el.className = cls; r.el.innerHTML = html; r.html_ = html; r.cls_ = cls; } };
+  const typed = (text, x) => Math.min(text.length, Math.max(0, Math.floor(x / .04)));
+  const ping = () => { tone(988, { type: 'sine', dur: .3, gain: .07 }); tone(1319, { type: 'sine', at: .09, dur: .45, gain: .07 }); };
+
+  let lastN = null, lastT = -1, beatT0 = 0, live = false, clock0 = 0, clockNow = 0, waiting = 0;
+  // beat N at U seconds into it; LIVE when it was reached by one key forward
+  function draw(n, u, live) {
+    L.forEach(r => {
+      const on = r.beat < n || (r.beat === n && u >= r.at);
+      r.el.style.display = on ? '' : 'none';
+      if (!on) return;
+      const past = r.beat < n, x = past ? END : u - r.at;
+      if (r.kind === 'you') {
+        const k = typed(r.text, x);
+        set(r, 'llm-you', esc(r.text.slice(0, k)) + (k < r.text.length ? `<i class='llm-cur'></i>` : ''));
+      } else if (r.kind === 'spin') {
+        if (!past && u < r.end) set(r, 'llm-spin', `${lsGlyph(x)} ${esc(r.label(x))}… ${lsTime(x * LS_RATE)}` + (r.end === Infinity ? ` <span class='k'>· esc to interrupt</span>` : ''));
+        else set(r, 'llm-spin done', esc(typeof r.done === 'function' ? r.done((r.end - r.at) * LS_RATE) : r.done));
+      } else set(r, 'llm-' + r.cls, r.html);
+    });
+    // the input: busy while the fix eats the session, a question typed into the queue
+    const busy = n === 2 && u > .8, q = 'wait, what about the payments one?';
+    input.classList.toggle('busy', busy);
+    const k = busy ? typed(q, u - 3.2) : 0;
+    inputTx.textContent = busy ? (k ? q.slice(0, k) : 'agent is working…') : '';
+    inputTx.classList.toggle('ph', busy && !k);
+    cur.style.opacity = Math.floor(u * 2) % 2 && !(busy && k && k < q.length) ? .15 : 1;
+    queued.style.opacity = busy && k === q.length ? 1 : 0;
+    const co = n === 2 ? spring(u - 5, { damping: 12 }) : 0;
+    cap.style.opacity = Math.min(1, co * 1.5);
+    cap.style.transform = `rotate(2deg) scale(${.7 + .3 * co})`;
+    // subagents fan out to the right
+    term.style.width = (n < 3 ? 1168 : n > 3 ? 620 : interpolate(u, [1.9, 2.7], [1168, 620], EASE.inOut)) + 'px';
+    const cu = n < 3 ? -1 : n === 3 ? u : 20 + u;
+    let w = 0;
+    subs.forEach((s, k) => {
+      const a = n < 3 ? 0 : n > 3 ? 1 : spring(u - 2.1 - k * .22, { damping: 16 });
+      s.el.style.opacity = Math.min(1, a * 1.5);
+      s.el.style.transform = `translateX(${(1 - a) * 80}px)`;
+      let e = null;
+      s.ev.forEach(v => { if (cu >= v[0]) e = v; });
+      const kind = e ? e[1] : 'start';
+      if (kind === 'q') w++;
+      const x = e ? cu - e[0] : 0;
+      const text = !e ? `${lsGlyph(cu)} starting…`
+        : kind === 'work' ? `${lsGlyph(cu)} ${e[2]} · ${lsTime((cu - s.ev[0][0]) * LS_RATE)}`
+        : kind === 'q' ? '? ' + e[2] : typeof e[2] === 'function' ? e[2](x) : e[2];
+      s.el.className = 'llm-card ' + kind;
+      if (s.s.textContent !== text) s.s.textContent = text;
+    });
+    if (live && w > waiting && d.sound !== 'off') ping();
+    waiting = w;
+    waitN.textContent = w;
+    wait.style.opacity = n >= 3 ? 1 : 0;
+    wait.classList.toggle('hot', w > 0);
+    clockNow = clock0 + Math.min(u, CAP[n]) * LS_RATE;
+    clockEl.textContent = lsTime(clockNow);
+    const po = n === 4 ? interpolate(u, [.2, .9], [0, 1]) : 0;
+    punch.style.display = po ? '' : 'none';
+    punch.style.opacity = po;
+    punch.style.transform = `scale(${.94 + .06 * po})`;
+  }
+  return {
+    dur: DUR,
+    render(t) {
+      // t = dur draws the last frame: the overview and an instant arrival
+      if (t === DUR) { clock0 = BASE[BEATS - 1]; draw(BEATS - 1, END, false); lastN = null; return; }
+      const n = Math.min(BEATS - 1, sec.querySelectorAll('.llm-beat.shown').length);
+      if (lastN === null || t < lastT || n !== lastN) {
+        live = lastN === null || t < lastT ? n === 0 : n === lastN + 1;
+        beatT0 = live ? t : t - END;
+        clock0 = live && n ? clockNow : BASE[n];
+        if (!live) waiting = 0;
+      }
+      lastN = n;
+      lastT = t;
+      draw(n, t - beatT0, live);
+    },
+  };
+}
+const SCENES = { logo: logoScene, 'llm-sentry': llmSentryScene };
 
 // The current slide's scene runs on one frame loop, from when the slide's
 // transition is mostly done; an instant arrival starts at the last frame.
@@ -627,6 +827,8 @@ function overview(on) {
   sections.forEach((s, n) => {
     const t = el('div', '', 'thumb');
     t.style.setProperty('--k', n);
+    // a scene shows its last frame; the current slide shows where it is
+    if (s.scene && s !== sections[idx]) s.scene.render(s.scene.dur);
     const c = s.cloneNode(true);
     c.classList.remove('leaving');
     c.classList.add('current', 'instant');

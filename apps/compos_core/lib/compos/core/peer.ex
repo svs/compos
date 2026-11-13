@@ -70,10 +70,7 @@ defmodule Compos.Core.Peer do
   defp send_over_ssh(spec, line) do
     [host, path] = String.split(spec, ":", parts: 2)
 
-    case Remote.sh(host, "printf %s " <> shell_quote(line) <> " | nc -U " <> shell_quote(path)) do
-      {:ok, out} -> {:ok, out}
-      other -> other
-    end
+    Remote.sh(host, "printf %s " <> shell_quote(line) <> " | nc -U " <> shell_quote(path))
   end
 
   defp shell_quote(s), do: "'" <> String.replace(s, "'", "'\\''") <> "'"

@@ -1258,7 +1258,7 @@ defmodule Compos.Ui.EditorLive do
                   <c-group class="mb-sep"><c-text class="mb-sep-label">{c.label}</c-text></c-group>
                 <% else %>
                   <.dynamic_tag tag_name={if Map.get(c, :kind) == "symbol", do: "symbol-entry", else: "c-completion"}
-                    selected={to_string(c.selected)} class={"mb-cand #{if c.selected, do: "selected"}"}
+                    {[{"selected", to_string(c.selected)}]} class={"mb-cand #{if c.selected, do: "selected"}"}
                     {if Map.get(c, :kind) == "symbol", do: symbol_attrs(c), else: []}>
                     <%= if Map.get(c, :kind) == "symbol" do %>
                       <symbol-name class={"mb-label #{candidate_face_class(c)}"}>{c.label}</symbol-name>
@@ -2047,7 +2047,7 @@ defmodule Compos.Ui.EditorLive do
           <.dynamic_tag :for={ln <- group.lines} tag_name={group.tag} {group.attrs}
             id={"ln-#{@node.id}-#{ln.num}"}
             class={"line line-content semantic-direct #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
-            data-s={ln.start} data-line={ln.num} selected={to_string(ln.current)}><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={true} /></.dynamic_tag>
+            data-s={ln.start} data-line={ln.num} {[{"selected", to_string(ln.current)}]}><.semantic_line id_prefix={"sg-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={true} /></.dynamic_tag>
         <% else %>
         <.dynamic_tag tag_name={group.tag} class="semantic-record" style="display: contents" {group.attrs}>
         <c-line
@@ -2352,7 +2352,7 @@ defmodule Compos.Ui.EditorLive do
       phx-value-id={@b.click}
       onclick={@b.click && "event.preventDefault()"}
       {@b.attrs}
-    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></summary>
+    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} {[{"face", block_faces(c)}]}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></summary>
     """
   end
 
@@ -2386,7 +2386,7 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp blk_node(%{b: %{tag: "span"}} = assigns) do
-    ~M|<c-text class={blk_class(@b, @line)}><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %></c-text>|
+    ~M|<c-text class={blk_class(@b, @line)}><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} {[{"face", block_faces(c)}]}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %></c-text>|
   end
 
   defp blk_node(%{b: %{tag: "div"}} = assigns) do
@@ -2400,7 +2400,7 @@ defmodule Compos.Ui.EditorLive do
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></c-group>
+    ><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} {[{"face", block_faces(c)}]}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></c-group>
     """
   end
 
@@ -2457,7 +2457,7 @@ defmodule Compos.Ui.EditorLive do
       phx-value-win={@b.click && @win}
       phx-value-id={@b.click}
       {@b.attrs}
-    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} face={block_faces(c)}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></.dynamic_tag>
+    ><c-text :if={{"marked", "true"} in @b.attrs} class="list-mark" aria-label="Marked">✱</c-text><.dynamic_tag :for={{c, t, tag} <- @b.semantic_segs} tag_name={tag} class={c} {[{"face", block_faces(c)}]}>{t}</.dynamic_tag><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} ctx={@ctx} /></.dynamic_tag>
     """
   end
 

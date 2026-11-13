@@ -269,6 +269,18 @@ function spring(t, o) {
   const wd = w * Math.sqrt(1 - z * z);
   return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x));
 }
+// CSS's cubic-bezier(x1, y1, x2, y2) as a function of progress, for interpolate
+function bezier(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = s => ((ax * s + bx) * s + cx) * s, dX = s => (3 * ax * s + 2 * bx) * s + cx;
+  return x => {
+    let s = x;
+    for (let k = 0; k < 8; k++) { const err = X(s) - x, dv = dX(s); if (Math.abs(err) < 1e-6 || !dv) break; s -= err / dv; }
+    s = clamp01(s);
+    return ((ay * s + by) * s + cy) * s;
+  };
+}
 
 // ---- Sound ----------------------------------------------------------------
 // Scenes play stings synthesised here, so a deck needs no audio files. The
@@ -298,75 +310,66 @@ function tone(freq, o) {
   osc.stop(t + dur + .05);
 }
 
-// logo: the three notes of the mark fly in from three sides, each sounding
-// its pitch as it lands. Where all three overlap is the lambda: when the last
-// lands it flashes, a shockwave rings out, the stage shudders and a chord
-// hits. Then the heading's letters spring up and its first paragraph rises.
-// The geometry is the logo's own (scratch/logo-designer.html).
-const LOGO = [
-  { x: 366, y: 260, rot: 166, s: 2.07, color: '#ff4d6d', from: [0, -1500, -200], delay: .2, note: 392 },
-  { x: 296, y: 575, rot: 32, s: 2.36, color: '#38bdf8', from: [-2100, 700, 160], delay: .38, note: 523.25 },
-  { x: 494, y: 582, rot: -32, s: 2.36, color: '#fbbf24', from: [2100, 700, -160], delay: .56, note: 659.25 },
-];
-const LOGO_FONT = `'Noto Music','Apple Symbols','Segoe UI Symbol','Symbola','DejaVu Sans',serif`;
-const LOGO_SPRING = { stiffness: 140, damping: 13 };
-let logoN = 0;
+// logo: the compos ending, ported frame for frame from the launch film's
+// LogoEnd (~/src/compos-launch-video/src/LogoEnd.tsx), at 30 frames a second.
+// (compos) is typed on the dark; when it runs, paper floods out from the
+// middle, the logo's three inks burst in as light and lock into the logo,
+// then the name, the tagline and the kicker rise in. The slide's heading is
+// the name and its first paragraph the tagline; typed, highlight and kicker
+// are directives. A chord stings as the inks burst in; sound: off keeps it quiet.
+const LE = { dim: '#6e6e7a', cyan: '#00a3cc' };
+const LE_EASE = bezier(.2, 0, 0, 1);
 function logoScene(sec, d) {
   const content = sec.querySelector('.content');
   const h = content.querySelector('h1,h2'), p = content.querySelector('p');
-  const word = h ? h.textContent.trim() : 'compos';
-  const id = 'logo' + (logoN++);
-  const glyph = fill => `<text x='0' y='0' font-size='300' text-anchor='middle' dominant-baseline='central' fill='${fill}' font-family="${LOGO_FONT}">♩</text>`;
-  const masks = LOGO.map((l, i) => `<mask id='${id}m${i}' maskUnits='userSpaceOnUse' x='-400' y='-400' width='1600' height='1600'>` +
-    `<rect x='-400' y='-400' width='1600' height='1600' fill='black'/><g class='mg'>${glyph('#fff')}</g></mask>`).join('');
-  const marks = LOGO.map(l => `<g class='mk'><g transform='scale(1)'>${glyph(l.color).replace('<text', `<text stroke='${l.color}' stroke-width='8' paint-order='stroke'`)}</g></g>`).join('');
-  const inter = fill => LOGO.reduce((inner, l, i) => `<g mask='url(#${id}m${i})'>${inner}</g>`, `<rect x='-400' y='-400' width='1600' height='1600' fill='${fill}'/>`);
-  content.innerHTML = `<div class='logo-scene'>` +
-    `<svg class='mark' viewBox='0 0 800 800' overflow='visible'><defs>${masks}</defs>` +
-    `<circle class='wave' cx='400' cy='430' r='0' fill='none' stroke='#3cc6ea' stroke-width='6'/>` +
-    `<g class='marks'>${marks}</g><g class='lam'>${inter('#0f172a')}</g><g class='flash'>${inter('#ffffff')}</g></svg>` +
-    `<div class='word'>${[...word].map(c => `<span>${c === ' ' ? '&nbsp;' : esc(c)}</span>`).join('')}</div>` +
-    (p ? `<div class='tag'>${p.innerHTML}</div>` : '') + `</div>`;
-  const svg = content.querySelector('svg'), wave = content.querySelector('.wave');
-  const mk = [...content.querySelectorAll('.mk')], mg = [...content.querySelectorAll('.mg')];
-  const lam = content.querySelector('.lam'), flash = content.querySelector('.flash');
-  const letters = [...content.querySelectorAll('.word span')], tag = content.querySelector('.tag');
-  const HIT = LOGO[2].delay + .3, W0 = HIT + .45, end = W0 + letters.length * .06 + .9;
-  const sound = d.sound !== 'off';
+  const name = h ? h.textContent.trim() : 'compos';
+  const tagline = p ? p.textContent.trim() : 'the hackable harness for power users';
+  const typed = d.typed || '(' + name + ')';
+  const highlight = d.highlight != null ? d.highlight : 'power users';
+  const kicker = d.kicker || '';
+  const FPS = 30, typeAt = 6, e = 34, unit = H / 1080;
+  const cut = highlight ? tagline.indexOf(highlight) : -1;
+  const tag = cut < 0 ? esc(tagline)
+    : esc(tagline.slice(0, cut)) + `<span class='hl'>${esc(highlight)}</span>` + esc(tagline.slice(cut + highlight.length));
+  const code = [...typed].map(ch => `<span style='color:${ch === '(' || ch === ')' ? LE.dim : LE.cyan}'>${esc(ch)}</span>`).join('');
+  sec.innerHTML = `<div class='logo-end'>` +
+    `<div class='le-dark'><div class='le-typed'>${code}<i class='le-cursor'></i></div></div>` +
+    `<div class='le-paper'><div class='le-logo'>` +
+    ['c', 'm', 'y'].map(k => `<img class='le-ink' src='logo-${k}.png' alt=''>`).join('') +
+    `<img class='le-full' src='compos-logo-clear.png' alt=''></div>` +
+    `<div class='le-name le-rise'>${esc(name)}</div><div class='le-tag le-rise'>${tag}</div>` +
+    (kicker ? `<div class='le-kicker le-rise'>${esc(kicker)}</div>` : '') + `</div></div>`;
+  const keys = [...sec.querySelectorAll('.le-typed span')], cursor = sec.querySelector('.le-cursor');
+  const paper = sec.querySelector('.le-paper'), inks = [...sec.querySelectorAll('.le-ink')], full = sec.querySelector('.le-full');
+  const rises = [...sec.querySelectorAll('.le-rise')], riseAt = [34, 48, 66];
   return {
-    dur: end,
-    cues: !sound ? [] : LOGO.map(l => ({ at: l.delay + .3, play: () => tone(l.note, { dur: .45, gain: .14 }) })).concat([{ at: HIT + .02, play: () => {
-      tone(110, { type: 'sine', to: 38, dur: .7, gain: .5 });
-      [130.81, 261.63, 392, 523.25, 659.25].forEach((f, k) => tone(f, { type: k ? 'triangle' : 'sine', dur: 2.2, gain: k ? .07 : .2 }));
-      tone(1046.5, { type: 'sine', at: .04, dur: 1.4, gain: .04 });
-    } }]),
+    dur: (e + 110) / FPS,
+    cues: d.sound === 'off' ? [] : [{ at: (e + 2) / FPS, play: () => {
+      tone(110, { type: 'sine', to: 38, dur: .7, gain: .45 });
+      [130.81, 261.63, 392, 523.25, 659.25].forEach((fq, k) => tone(fq, { type: k ? 'triangle' : 'sine', at: .03, dur: 2.2, gain: k ? .06 : .18 }));
+    } }],
     render(t) {
-      LOGO.forEach((l, i) => {
-        const v = spring(t, Object.assign({ delay: l.delay }, LOGO_SPRING)), u = 1 - v;
-        const tr = `translate(${l.x + l.from[0] * u} ${l.y + l.from[1] * u}) rotate(${l.rot + l.from[2] * u}) scale(${l.s})`;
-        mk[i].setAttribute('transform', tr);
-        mk[i].style.opacity = clamp01(v * 3);
-        mg[i].setAttribute('transform', tr);
+      const f = t * FPS;
+      const ramp = (a, b) => LE_EASE(clamp01((f - a) / (b - a)));
+      const n = Math.floor(typed.length * clamp01((f - typeAt) / (e - 8 - typeAt)));
+      keys.forEach((k, i) => { k.style.display = i < n ? '' : 'none'; });
+      cursor.style.display = f < e ? '' : 'none';
+      cursor.style.opacity = Math.floor(f / 8) % 2 ? .2 : 1;
+      paper.style.clipPath = `circle(${ramp(e, e + 18) * 80}% at 50% 50%)`;
+      const resolved = ramp(e + 34, e + 44);
+      inks.forEach((img, i) => {
+        const s = spring((f - e - 2 - i * 4) / FPS, { stiffness: 100, damping: 15, mass: 1.1 }), u = 1 - s;
+        const a = i * 2.1 + f / 8;
+        img.style.opacity = (1 - resolved) * Math.min(1, s * 2);
+        img.style.filter = `blur(${u * 30 * unit}px)`;
+        img.style.transform = `translate(${Math.cos(a) * 260 * unit * u}px, ${Math.sin(a) * 220 * unit * u}px) rotate(${u * (i - 1) * 60}deg) scale(${1 + u * 1.4})`;
       });
-      const since = t - HIT, hit = since > 0 ? Math.exp(-since * 5) : 0;
-      lam.style.opacity = since > 0 ? .95 : 0;
-      flash.style.opacity = hit;
-      wave.setAttribute('r', since > 0 ? interpolate(since, [0, .7], [40, 520]) : 0);
-      wave.style.opacity = since > 0 ? 1 - interpolate(since, [0, .7], [0, 1], EASE.linear) : 0;
-      const shake = hit * 10;
-      const glow = t > end ? (1 - Math.cos((t - end) * 1.6)) / 2 : 0;
-      svg.style.transform = `translate(${Math.sin(t * 91) * shake}px, ${Math.cos(t * 73) * shake}px) scale(${1 + hit * .06})`;
-      svg.style.filter = `drop-shadow(0 0 ${14 + hit * 40 + glow * 16}px rgba(60,198,234,${.18 + hit * .5 + glow * .2}))`;
-      letters.forEach((el, k) => {
-        const v = spring(t, { delay: W0 + k * .06, stiffness: 200, damping: 15 });
-        el.style.opacity = clamp01(v * 1.4);
-        el.style.transform = `translateY(${(1 - v) * 48}px)`;
+      full.style.opacity = resolved;
+      rises.forEach((el, i) => {
+        const v = ramp(e + riseAt[i], e + riseAt[i] + 16);
+        el.style.opacity = v;
+        el.style.transform = `translateY(${(1 - v) * 22 * unit}px)`;
       });
-      if (tag) {
-        const v = interpolate(t, [end - .7, end - .1], [0, 1]);
-        tag.style.opacity = v;
-        tag.style.transform = `translateY(${(1 - v) * 16}px)`;
-      }
     },
   };
 }

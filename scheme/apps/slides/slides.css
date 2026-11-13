@@ -150,9 +150,16 @@ body.notes-on #nav{bottom:calc(32vh + 40px)}
 #nav button:hover{color:var(--accent)}
 
 /* ---- Motion: scenes (slides.js SCENES) ---- */
-.slide.scene .content{position:relative;height:100%}
-.logo-scene{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;height:100%}
-.slide .logo-scene .mark{width:300px;height:300px;overflow:visible;will-change:transform,filter}
-.logo-scene .word{font:700 120px/1 var(--mono);letter-spacing:-.03em;color:var(--fg);white-space:nowrap}
-.logo-scene .word span{display:inline-block;opacity:0;will-change:transform}
-.logo-scene .tag{font-size:32px;color:var(--muted);opacity:0}
+.slide.scene-logo{padding:0}
+.logo-end{position:absolute;inset:0;background:#0b0b0e;overflow:hidden}
+.le-dark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.le-typed{font:64px/1.2 var(--mono);white-space:pre;text-shadow:0 0 30px rgba(0,163,204,.4)}
+.le-cursor{display:inline-block;width:.55em;height:1em;vertical-align:text-bottom;background:#00a3cc}
+.le-paper{position:absolute;inset:0;background:#f3f1ec;display:flex;flex-direction:column;align-items:center;justify-content:center;clip-path:circle(0% at 50% 50%)}
+.le-logo{position:relative;width:213px;height:213px}
+.slide .le-logo img{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;border-radius:0;box-shadow:none}
+.le-ink{mix-blend-mode:multiply}
+.le-name{margin-top:12px;font:700 79px/1.1 var(--mono);letter-spacing:-2px;color:#16161a}
+.le-tag{margin-top:5px;font:25px/1.3 Inter,var(--font);color:#16161a}
+.le-tag .hl{color:#e0147a;font-weight:600}
+.le-kicker{margin-top:29px;font:600 15px Inter,var(--font);letter-spacing:7px;text-transform:uppercase;color:rgba(22,22,26,.5)}

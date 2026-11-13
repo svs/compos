@@ -158,7 +158,7 @@ Press `o` to see every slide at once {step type}
 
 ---
 
-<!-- scene: logo; transition: fade -->
+<!-- scene: logo; transition: fade; kicker: coming soon -->
 # compos
 
-`<!-- scene: logo -->` plays a scene: motion as a function of time
+the hackable harness for power users

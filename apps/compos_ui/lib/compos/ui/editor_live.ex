@@ -1693,12 +1693,6 @@ defmodule Compos.Ui.EditorLive do
   # the palette's head row legend: the prompt's own, else the completion keys
   defp palette_legend(%{legend: [_ | _] = rows}), do: rows
 
-  # the label of the row the highlight is on, so the prompt's own HTML can
-  # mark the element that stands for it
-  defp mb_selected_label(mb) do
-    Enum.find_value(mb.candidates, "", fn c -> if c.selected, do: c.label end)
-  end
-
   defp palette_legend(_mb) do
     [
       %{key: "TAB", label: "complete"},
@@ -1706,6 +1700,12 @@ defmodule Compos.Ui.EditorLive do
       %{key: "C-c C-o", label: "collect"},
       %{key: "C-g", label: "quit"}
     ]
+  end
+
+  # the label of the row the highlight is on, so the prompt's own HTML can
+  # mark the element that stands for it
+  defp mb_selected_label(mb) do
+    Enum.find_value(mb.candidates, "", fn c -> if c.selected, do: c.label end)
   end
 
   # The rail as a list: the prompt wrote the rows, so the view only says

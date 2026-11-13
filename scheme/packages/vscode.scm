@@ -153,11 +153,22 @@
   (llm-config-changed! chat)
   (message (string-append chat " now runs " what)))
 
-(define vscode--llm-sections
+(define vscode--llm-quick-sections
   ;; (KEY TAB-LABEL); on an empty input the key goes to that tab
   ;; C-l l is the quick change: presets and tools. Backend, model, effort
-  ;; and the rest are in the advanced setup, C-l C-l (SPC a here).
+  ;; and the rest are in the advanced view, C-l C-l (SPC a here).
   '(("p" "p presets") ("t" "t tools") ("s" "s save")))
+
+(define vscode--llm-advanced-sections
+  ;; C-l C-l: every part of the setup, the connectors last
+  '(("p" "p presets") ("b" "b backend") ("m" "m model") ("e" "e effort")
+    ("t" "t tools") ("s" "s save") ("c" "c connectors")))
+
+;; #t while the dialog shows the advanced view
+(define *vscode-llm-advanced* #f)
+
+(define (vscode--llm-sections)
+  (if *vscode-llm-advanced* vscode--llm-advanced-sections vscode--llm-quick-sections))
 
 ;; the rows that are on (hint starting with the filled dot) before the rest,
 ;; each part keeping its order, a separator between the two
@@ -195,6 +206,10 @@
        (map (lambda (srv) (list (symbol->string (car srv))
                                 (string-append (if (member (car srv) tools) "● on   " "○ off  ") "MCP server")))
             (filter (lambda (srv) (not (assq (car srv) *chat-presets*))) *mcp-registry*))))
+     ((equal? key "c")
+      (map (lambda (n) (list n (mark (equal? n connector)
+                                     (string-append (llm-connectors-kind n) ", " (llm-connectors-state n)))))
+           (filter string? (llm-connectors-rows))))
      ((equal? key "p")
       (map (lambda (b) (list (llm-bundle-name b) (mark (equal? (llm-bundle-name b) preset) (or (llm-bundle-label b) ""))))
            *llm-bundles*))
@@ -223,6 +238,7 @@
                        (list "m" (plist-get now 'model))
                        (list "e" (plist-get now 'effort))
                        (list "t" tools)
+                       (list "c" (llm-connectors-state (plist-get now 'connector)))
                        (list "p" (or (llm-config-preset-name chat) "own setup"))
                        (list "s" "preset, default")
                        (list "o" "setup, chats"))))
@@ -239,14 +255,16 @@
                                                       (list 'tag "span" 'class "vl-name"
                                                             'text (substring (cadr s) 2 (string-length (cadr s))))))
                                 (list 'tag "div" 'class "vl-value" 'text (cadr (assoc key values)))))))
-                vscode--llm-sections)
-           ;; not a tab: it leaves for the full setup menu
+                (vscode--llm-sections))
+           ;; not a tab: it leaves the quick change for the advanced view
+           (if *vscode-llm-advanced*
+               '()
            (list (list 'tag "div" 'class "vl-tab vl-advanced"
                        'children
                        (list (list 'tag "div" 'class "vl-top"
                                    'children (list (list 'tag "c-action-key" 'class "transient-legend-key" 'text "SPC a")
                                                    (list 'tag "span" 'class "vl-name" 'text "advanced")))
-                             (list 'tag "div" 'class "vl-value" 'text "LLM setup buffer")))))))))
+                             (list 'tag "div" 'class "vl-value" 'text "every setting"))))))))))
 
 ;; Cmd-L: the LLM of this chat, one thing at a time. The setup is drawn on
 ;; top; SPC p, SPC t, SPC s, or Left and Right, choose what the
@@ -255,7 +273,7 @@
 (define (vscode--llm-open! chat key . at)
   (let* ((section key)
          (now (llm-config-combination chat))
-         (tabs (lambda () (map (lambda (s) (list (cadr s) (equal? (car s) section))) vscode--llm-sections)))
+         (tabs (lambda () (map (lambda (s) (list (cadr s) (equal? (car s) section))) (vscode--llm-sections))))
          ;; another tab opens the dialog again: its drawing on top marks the tab
          (show! (lambda (k)
                   (set! *mb-tab-fn* #f)
@@ -323,6 +341,10 @@
                           (buffer-set-local! chat 'llm-preset v)
                           (llm-config-changed! chat)
                           (message (string-append chat " now runs " v))))))
+                     ((equal? section "c")
+                      (set! *vscode-llm-advanced* #f)
+                      (run-command "llm-connectors")
+                      (llm-connectors-show-detail! v))
                      ((equal? v "Full setup") (with-current-buffer chat (lambda () (run-command "llm-configure"))))
                      ((equal? v "Connectors") (run-command "llm-connectors"))
                      ((equal? v "Switch chat") (run-command "vscode-chats"))
@@ -334,22 +356,29 @@
                       (vscode--llm-open! chat section v))))))
     ;; SPC and the tab's letter choose the tab; plain letters type
     (set! *mb-shortcuts*
-          (cons (list "a" (lambda ()
-                              ;; advanced: the setup buffer, as C-l C-l
-                              (set! *mb-tab-fn* #f)
-                              (set! *mb-shortcuts* '())
-                              (minibuffer-detach!)
-                              (run-command "llm-connectors")))
-                (map (lambda (s) (list (car s) (lambda () (show! (car s))))) vscode--llm-sections)))
+          (append
+           (if *vscode-llm-advanced*
+               '()
+               (list (list "a" (lambda ()
+                                   ;; advanced: every tab, as C-l C-l
+                                   (set! *vscode-llm-advanced* #t)
+                                   (show! section)))))
+           (map (lambda (s) (list (car s) (lambda () (show! (car s))))) (vscode--llm-sections))))
     (set! *mb-tab-fn*
           (lambda (step)
-            (let* ((keys (map car vscode--llm-sections))
+            (let* ((keys (map car (vscode--llm-sections)))
                    (i (let loop ((ks keys) (n 0)) (cond ((null? ks) 0) ((equal? (car ks) section) n) (else (loop (cdr ks) (+ n 1)))))))
               (show! (list-ref keys (modulo (+ i step) (length keys))))
               #t)))))
 
 (define-command "vscode-llm" "Change this chat's preset or tools"
   (lambda ()
+    (set! *vscode-llm-advanced* #f)
+    (vscode--llm-open! (llm-config-session (or (window-buffer (active-window)) (current-buffer))) "p")))
+
+(define-command "vscode-llm-advanced" "Change every part of this chat's LLM setup, the connectors last"
+  (lambda ()
+    (set! *vscode-llm-advanced* #t)
     (vscode--llm-open! (llm-config-session (or (window-buffer (active-window)) (current-buffer))) "p")))
 
 (define-command "vscode-chats" "Choose a chat, in a modal"

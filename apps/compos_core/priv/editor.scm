@@ -7149,9 +7149,9 @@
 (global-set-key "<next>" "scroll-up-command")
 (global-set-key "<prior>" "scroll-down-command")
 ;; C-l is the LLM prefix: C-l l changes this chat's model in a popup,
-;; C-l C-l opens the full connector setup in a buffer.
+;; C-l C-l opens the advanced LLM view: every tab, the connectors last.
 (global-set-key "C-l l" "vscode-llm")
-(global-set-key "C-l C-l" "llm-connectors")
+(global-set-key "C-l C-l" "vscode-llm-advanced")
 (global-set-key "C-M-i" "completion-at-point")
 (global-set-key "M-/" "completion-at-point")
 (global-set-key "C-M-f" "forward-sexp")

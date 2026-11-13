@@ -264,40 +264,81 @@
 
 (public! 'app-dismiss! "(app-dismiss! ID) — take app ID off the screen; its buffers stay alive and its columns go to other work")
 
+(define (app--shown-ids)
+  ;; the apps with a window on screen, the one of this buffer first
+  (let* ((here (app-id (current-buffer)))
+         (ids (fold (lambda (acc w)
+                      (let ((id (app-id (window-buffer w))))
+                        (if (and id (not (member id acc))) (cons id acc) acc)))
+                    '() (display--work-windows))))
+    (if (member here ids) (cons here (filter (lambda (i) (not (equal? i here))) ids)) (reverse ids))))
+
 (define-command "app-dismiss"
-  "Put this app away: its windows leave the screen, its buffers keep running"
+  "Choose an app on screen and put it away: its windows leave the screen, its buffers keep running"
   (lambda ()
-    (let ((id (app-id (current-buffer))))
-      (cond ((not id) (message "This buffer belongs to no app"))
-            ((not (app-dismiss! id)) (message "Nothing else to show in its place"))))))
+    (let ((ids (app--shown-ids)))
+      (if (null? ids)
+          (message "No app is on screen")
+          (completing-read "Dismiss app: "
+            (map (lambda (id) (list id (string-join (map cadr (app-windows id)) ", "))) ids)
+            (lambda (id)
+              (cond ((not (member id ids)) (message "No such app on screen"))
+                    ((not (app-dismiss! id)) (message "Nothing else to show in its place"))))
+            'require-match #t 'default (car ids))))))
 
 (global-set-key "C-c D" "app-dismiss")
 (catalog-meta! 'command "app-dismiss" 'domain 'windows 'effects '(write display))
 
 (define (app-push-read! id)
-  (minibuffer-read "Push app to group: " (group-names)
+  (minibuffer-read "Move app to group: " (group-names)
     (lambda (input)
       (let ((name (string-trim input)))
         (if (equal? name "")
             (message "Group needs a name")
             (let ((gid (or (group-resolve-id name) (group-record-create! name))))
               (app-move-buffers! id gid)
-              (message (string-append "App pushed to " name))))))))
+              (message (string-append "App moved to " name))))))))
 
-(define-command "app-pull"
-  "Pull this app into this group: every one of its buffers comes along"
+(define (app--ids keep?)
+  ;; every app with a buffer KEEP? takes, the one of this buffer first
+  (let* ((here (app-id (current-buffer)))
+         (ids (reverse
+               (fold (lambda (acc buf)
+                       (let ((id (app-id buf)))
+                         (if (and id (keep? buf) (not (member id acc))) (cons id acc) acc)))
+                     '() (buffer-list)))))
+    (if (member here ids) (cons here (filter (lambda (i) (not (equal? i here))) ids)) ids)))
+
+(define (app--choose prompt ids none then)
+  ;; ask for one of IDS, each shown with its buffers, and give it to THEN
+  (if (null? ids)
+      (message none)
+      (completing-read prompt
+        (map (lambda (id) (list id (string-join (app-buffers id) ", "))) ids)
+        (lambda (id) (if (member id ids) (then id) (message "No such app")))
+        'require-match #t 'default (car ids))))
+
+(define-command "app-pull-from-group"
+  "Choose an app from another group and pull it into this group: every one of its buffers comes along"
   (lambda ()
-    (let ((id (app-id (current-buffer))))
-      (cond ((not id) (message "This buffer belongs to no app"))
-            ((not (app-move-buffers! id (frame-group))) (message "Nothing of this app to pull"))
-            (else (message "App pulled into this group"))))))
-(catalog-meta! 'command "app-pull" 'domain 'windows 'effects '(write display))
+    (let ((g (frame-group)))
+      (app--choose "Pull app into this group: "
+        (app--ids (lambda (buf) (not (and g (buffer-in-group? buf g)))))
+        "Every app is already in this group"
+        (lambda (id)
+          (if (app-move-buffers! id g)
+              (message "App pulled into this group")
+              (message "Nothing of this app to pull")))))))
+(catalog-meta! 'command "app-pull-from-group" 'domain 'windows 'effects '(write display))
 
 (define-command "app-move-to-group"
-  "Move this app to another group: every one of its buffers goes there"
+  "Choose an app in this group and move it to another group: every one of its buffers goes there"
   (lambda ()
-    (let ((id (app-id (current-buffer))))
-      (if id (app-push-read! id) (message "This buffer belongs to no app")))))
+    (let ((g (frame-group)))
+      (app--choose "Move app: "
+        (app--ids (lambda (buf) (or (not g) (buffer-in-group? buf g))))
+        "No app is in this group"
+        app-push-read!))))
 (catalog-meta! 'command "app-move-to-group" 'domain 'windows 'effects '(write display))
 
 ;;; The app's own windows, and nothing else: app-swap-windows trades the

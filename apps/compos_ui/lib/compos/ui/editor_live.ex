@@ -1408,7 +1408,8 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
-  # {before, letter, after} when the tab's key is a letter of its label;
+  # {before, letter, after} when the tab's key is a letter of its label,
+  # case and all (keys are case sensitive);
   # {:badge, key} when it is not; nil without a key
   defp mb_tab_split(t) do
     label = to_string(Map.get(t, :label, ""))
@@ -1421,7 +1422,7 @@ defmodule Compos.Ui.EditorLive do
         key = to_string(key)
         letters = String.graphemes(label)
 
-        case Enum.find_index(letters, &(String.downcase(&1) == String.downcase(key))) do
+        case Enum.find_index(letters, &(&1 == key)) do
           nil ->
             {:badge, key}
 

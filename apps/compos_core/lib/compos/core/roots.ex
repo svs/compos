@@ -70,4 +70,32 @@ defmodule Compos.Core.Roots do
 
   @doc "Every entry, for the GC's root set."
   def all, do: if(table?(), do: :ets.tab2list(@table), else: [])
+
+  @doc """
+  The entries grouped by the kind of their key, largest first: a list of
+  `{kind, count, bytes, largest_key}`. It reads one entry at a time, so
+  the caller never holds a copy of the whole table.
+  """
+  def summary do
+    if table?() do
+      word = :erlang.system_info(:wordsize)
+
+      fn {key, value}, acc ->
+        bytes = :erts_debug.flat_size(value) * word
+        Map.update(acc, kind(key), {1, bytes, bytes, key}, &add(&1, bytes, key))
+      end
+      |> :ets.foldl(%{}, @table)
+      |> Enum.map(fn {kind, {count, bytes, _max, key}} -> {kind, count, bytes, key} end)
+      |> Enum.sort_by(&elem(&1, 2), :desc)
+    else
+      []
+    end
+  end
+
+  defp add({count, bytes, max, _key}, more, key) when more > max, do: {count + 1, bytes + more, more, key}
+  defp add({count, bytes, max, key}, more, _key), do: {count + 1, bytes + more, max, key}
+
+  defp kind(key) when is_tuple(key) and tuple_size(key) > 0, do: kind(elem(key, 0))
+  defp kind(key) when is_atom(key), do: Atom.to_string(key)
+  defp kind(_key), do: "other"
 end

@@ -63,6 +63,44 @@ defmodule Compos.SchemeTaskTest do
     end
   end
 
+  # task-run! cancels its task after the callback. A cancel stops the task
+  # with an exit signal, so the task itself never drops its root: each
+  # task left its result in the root table, 196 MB on a dev daemon.
+  test "a task that task-run! completed leaves no root" do
+    task_roots = fn ->
+      Enum.find_value(Compos.Core.Roots.summary(), 0, fn
+        {"scheme_task", count, _bytes, _key} -> count
+        _ -> nil
+      end)
+    end
+
+    before = task_roots.()
+    eval!("(define *task-root-result* #f)")
+
+    eval!("""
+    (task-run!
+      (lambda () (list 1 2 3))
+      (lambda (ok value) (set! *task-root-result* (list ok value))))
+    """)
+
+    eventually(fn -> Session.eval("*task-root-result*") == {:ok, "(#t (1 2 3))"} end)
+    eventually(fn -> task_roots.() <= before end)
+  end
+
+  # A task that the heap bound kills, or a daemon from before the cancel
+  # fix, has a root and no process. The second sweep drops it.
+  test "the sweep drops the root of a task with no process, on its second pass" do
+    id = :erlang.unique_integer([:positive, :monotonic])
+    Compos.Core.Roots.put({:scheme_task, id}, {:ok, [1, 2, 3]})
+
+    seen = Compos.Core.SchemeTask.sweep_roots(MapSet.new())
+    assert id in seen
+    assert Compos.Core.Roots.get({:scheme_task, id}) != nil
+
+    Compos.Core.SchemeTask.sweep_roots(seen)
+    assert Compos.Core.Roots.get({:scheme_task, id}) == nil
+  end
+
   test "task-run returns immediately and delivers its result to Scheme" do
     eval!("(define *task-run-result* #f)")
 

@@ -422,6 +422,29 @@ defmodule Compos.Core.SysMon do
   defp ancestor(p) when is_pid(p), do: pid_string(p)
   defp ancestor(other), do: inspect(other)
 
+  @doc """
+  Collect the heap of each process that waits for a message and holds
+  more than MIN_BYTES. An idle process keeps its garbage until its next
+  collection, and a process that gets few messages has none for hours.
+  Answers `{processes, bytes_freed}`.
+  """
+  def collect(min_bytes) when is_integer(min_bytes) do
+    before = :erlang.memory(:processes)
+
+    count =
+      Enum.count(Process.list(), fn pid ->
+        with true <- pid != self(),
+             [memory: memory, status: :waiting] <- Process.info(pid, [:memory, :status]),
+             true <- memory > min_bytes do
+          :erlang.garbage_collect(pid)
+        else
+          _ -> false
+        end
+      end)
+
+    {count, max(before - :erlang.memory(:processes), 0)}
+  end
+
   @doc "Exit PID with reason kill. Returns true when the pid parsed and was alive."
   def kill(pid_text) when is_binary(pid_text) do
     case parse_pid(pid_text) do

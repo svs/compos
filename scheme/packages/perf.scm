@@ -646,6 +646,30 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
 
 (debounce! 'fd-check fd-check-ms fd--tick #f)
 
+;; An idle process keeps its garbage until its next collection, and a
+;; process that gets few messages has none for hours: 120 MB on a dev
+;; daemon. The check collects the idle processes above a size.
+(effects! '(pure))
+
+(defcustom 'vm-collect-ms 60000
+  "Milliseconds between two collections of the idle processes. 0 stops the collection."
+  'group 'perf 'type 'number)
+
+(defcustom 'vm-collect-min-bytes 1048576
+  "The collection skips a process that holds less than this."
+  'group 'perf 'type 'number)
+
+(effects! '(write))
+
+(define (vm-collect--tick arg)
+  (when (> vm-collect-ms 0)
+    (run-on-lane! 'vm-collect
+      (lambda ()
+        (vm-collect! vm-collect-min-bytes)
+        (debounce! 'vm-collect vm-collect-ms vm-collect--tick #f)))))
+
+(debounce! 'vm-collect vm-collect-ms vm-collect--tick #f)
+
 ;; The VM sizes its descriptor table when it starts, so only the launch
 ;; can raise the limit: `ulimit -n 65536` in the shell, or
 ;; M-x restart-daemon, which raises it before the relaunch.

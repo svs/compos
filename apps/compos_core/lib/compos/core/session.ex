@@ -904,6 +904,10 @@ defmodule Compos.Core.Session do
         state
       end
 
+    # A task that an exit signal stopped left its root: drop it one tick
+    # later. Map.get/put: a Session from before this field has no key.
+    state = Map.put(state, :task_orphans, SchemeTask.sweep_roots(Map.get(state, :task_orphans, MapSet.new())))
+
     # A sweep, and any other work this process did since the last tick,
     # leaves a heap the VM does not collect while the process stays idle.
     # A collection of a small heap costs microseconds.

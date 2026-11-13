@@ -615,6 +615,19 @@ defmodule Compos.Core.SchemeAPI do
           [limit] ->
             SysMon.processes(trunc(limit), "reds", "")
         end,
+      {"vm-collect!",
+       "(vm-collect! [MIN-BYTES]) — collect the heap of each idle process above MIN-BYTES (default 1 MiB); (PROCESSES BYTES-FREED)."} =>
+        fn
+          [] -> SysMon.collect(1_048_576) |> Tuple.to_list()
+          [min] -> SysMon.collect(trunc(min)) |> Tuple.to_list()
+        end,
+      {"vm-roots",
+       "(vm-roots) — the Scheme values that Elixir holds as GC roots, grouped by kind, largest first: a list of (KIND COUNT BYTES LARGEST-KEY)."} =>
+        fn [] ->
+          Enum.map(Compos.Core.Roots.summary(), fn {kind, count, bytes, key} ->
+            [kind, count, bytes, inspect(key, limit: 8, printable_limit: 80)]
+          end)
+        end,
       {"vm-process-info",
        "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone."} =>
         fn [pid] -> SysMon.process_info(sysmon_text(pid)) end,

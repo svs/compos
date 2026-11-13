@@ -93,17 +93,41 @@ defmodule Compos.Core.SchemeTask do
   end
 
   def cancel(%Ref{} = ref) do
-    case whereis(ref) do
-      nil ->
-        :ok
+    result =
+      case whereis(ref) do
+        nil ->
+          :ok
 
-      pid ->
-        case DynamicSupervisor.terminate_child(@supervisor, pid) do
-          :ok -> :ok
-          {:error, :not_found} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
-    end
+        pid ->
+          case DynamicSupervisor.terminate_child(@supervisor, pid) do
+            :ok -> :ok
+            {:error, :not_found} -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+      end
+
+    # The supervisor stops the task with an exit signal, and so does the
+    # heap bound: `terminate/2` does not run. Drop the root here, or each
+    # cancelled task keeps its result in the root table until a restart.
+    Roots.drop({:scheme_task, ref.id})
+    result
+  end
+
+  @doc """
+  Drop the roots of tasks that have no process, and answer the ids that
+  have none now. A root is dropped only when its id was also in SEEN, the
+  answer of the call before: a task that starts puts its root before its
+  process has a name, and one call must not take that root.
+  """
+  def sweep_roots(seen) do
+    orphans =
+      for id <- :ets.select(Roots.table(), [{{{:scheme_task, :"$1"}, :_}, [], [:"$1"]}]),
+          Registry.lookup(@registry, id) == [],
+          do: id
+
+    {old, new} = Enum.split_with(orphans, &(&1 in seen))
+    Enum.each(old, &Roots.drop({:scheme_task, &1}))
+    MapSet.new(new)
   end
 
   def alive?(%Ref{} = ref), do: is_pid(whereis(ref))

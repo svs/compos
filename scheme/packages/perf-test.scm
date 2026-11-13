@@ -163,3 +163,11 @@
                       "a second check inside fd-warn-every-ms publishes nothing"))
       (set! fd-warn-ratio saved-ratio)
       (set! *fd-last-warn* saved-last))))
+
+(deftest 'vm-collect-answers-a-count-and-the-bytes
+  "the collection of idle processes answers a count and the bytes, and the roots list their kinds"
+  (lambda ()
+    (let ((r (vm-collect! 0)))
+      (check-true! (> (car r) 0) "the collection reaches idle processes")
+      (check-true! (>= (cadr r) 0) "the bytes are not negative")
+      (check-true! (pair? (assoc "recent" (vm-roots))) "the roots list the recent results"))))

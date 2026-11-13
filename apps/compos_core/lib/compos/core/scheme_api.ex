@@ -615,6 +615,19 @@ defmodule Compos.Core.SchemeAPI do
           [limit] ->
             SysMon.processes(trunc(limit), "reds", "")
         end,
+      {"vm-collect!",
+       "(vm-collect! [MIN-BYTES]) — collect the heap of each idle process above MIN-BYTES (default 1 MiB); (PROCESSES BYTES-FREED)."} =>
+        fn
+          [] -> SysMon.collect(1_048_576) |> Tuple.to_list()
+          [min] -> SysMon.collect(trunc(min)) |> Tuple.to_list()
+        end,
+      {"vm-roots",
+       "(vm-roots) — the Scheme values that Elixir holds as GC roots, grouped by kind, largest first: a list of (KIND COUNT BYTES LARGEST-KEY)."} =>
+        fn [] ->
+          Enum.map(Compos.Core.Roots.summary(), fn {kind, count, bytes, key} ->
+            [kind, count, bytes, inspect(key, limit: 8, printable_limit: 80)]
+          end)
+        end,
       {"vm-process-info",
        "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone."} =>
         fn [pid] -> SysMon.process_info(sysmon_text(pid)) end,
@@ -1329,6 +1342,13 @@ defmodule Compos.Core.SchemeAPI do
             {:ok, stat} -> stat.access in [:write, :read_write]
             {:error, _} -> true
           end
+        end,
+      # A pattern walk in Scheme costs one call per folder; this is one call.
+      {"file-glob",
+       "(file-glob PATTERN [SKIP]) — return the local files PATTERN names; `*` matches within one name, `**` any depth of folders. A wildcard skips names that start with a dot, and `**` skips the folders named in the list SKIP."} =>
+        fn
+          [pattern] -> Compos.Core.Glob.files(pattern)
+          [pattern, skip] -> Compos.Core.Glob.files(pattern, skip || [])
         end,
       {"file-directory?", "(file-directory? PATH) — return #t if PATH is a directory."} => fn [p] ->
         File.dir?(Path.expand(p))
@@ -3302,7 +3322,7 @@ defmodule Compos.Core.SchemeAPI do
   # Roots until the callback fires, which protects it from the GC.
   defp async_dispatch(callback, work) do
     key = {:async_call, make_ref()}
-    rooted? = Roots.put(key, callback)
+    rooted? = Roots.hold(key, callback)
     # the callback comes back to the lane, frame, and buffer that asked, as
     # a task-run! callback does; a poll on its own lane stays off :ui
     fid = Compos.Core.Frame.current()
@@ -3436,6 +3456,7 @@ defmodule Compos.Core.SchemeAPI do
   defp mb_view_field("style", v), do: {:style, v}
   defp mb_view_field("note", v), do: {:note, v}
   defp mb_view_field("legend", v), do: {:legend, v}
+  defp mb_view_field("html", v), do: {:html, v}
   defp mb_view_field("selected", v), do: {:selected, v}
   defp mb_view_field(_, _), do: nil
 

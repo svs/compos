@@ -51,6 +51,7 @@ body.outline .slide.current *:not(span,em,strong,code,a,kbd,br){outline:1px soli
 .slide th,.slide td{padding:.38em .9em;border-bottom:1px solid var(--rule);text-align:left}
 .slide th{color:var(--accent);font-weight:700}
 .slide.title,.slide.center{text-align:center;align-items:center}
+.slide.title :is(ul,ol),.slide.center :is(ul,ol){list-style:none;padding-left:0}
 .slide.title h1{font-size:112px}
 .slide.title p{color:var(--muted);font-size:40px}
 .slide.top{justify-content:flex-start}

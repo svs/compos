@@ -22,7 +22,7 @@ defmodule Compos.Core.Browser.Prims do
                                                                                              callback
                                                                                            ] ->
         key = {:browser, make_ref()}
-        Roots.put(key, callback)
+        Roots.hold(key, callback)
         # the frame that asked, carried across the round-trip: a command that
         # queries the browser and only then prompts must prompt in the frame
         # it came from, not in whichever was last active when the reply landed

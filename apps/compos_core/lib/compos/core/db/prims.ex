@@ -85,7 +85,7 @@ defmodule Compos.Core.DB.Prims do
 
   defp db_cb(callback) do
     refkey = {:db_call, make_ref()}
-    Roots.put(refkey, callback)
+    Roots.hold(refkey, callback)
 
     fn result ->
       try do

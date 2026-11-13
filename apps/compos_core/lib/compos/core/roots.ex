@@ -17,9 +17,16 @@ defmodule Compos.Core.Roots do
   Two kinds of entry:
 
     * a slot: a single handler under a fixed key such as `{:on_event, "lsp"}`,
-      set by a Scheme primitive and read on every event;
+      set by a Scheme primitive and read on every event. `put/2` stores
+      the value, because the table is also where the reader finds it;
     * a hold: a callback under a fresh key such as `{:llm, ref}`, put
-      before the value escapes and dropped once the callback fired.
+      before the value escapes and dropped once the callback fired. The
+      owner keeps the value, and no code reads a hold back. `hold/2`
+      stores only the frames the value captures.
+
+  ETS copies a term on each write and each read. A hold that stored its
+  value kept a second copy of each callback body and each task result:
+  196 MB of task results on a dev daemon.
   """
 
   @table :compos_escaped_closures
@@ -37,6 +44,18 @@ defmodule Compos.Core.Roots do
     else
       false
     end
+  end
+
+  @doc """
+  Root the frames that VALUE captures under KEY, and not VALUE itself.
+  Use it for a value that its owner keeps and no code reads back from
+  the table. The entry is one closure with no body for each frame, so
+  the GC and every other reader of the table see a term they know.
+  Answers false when there is no table.
+  """
+  def hold(key, value) do
+    frames = value |> Compos.Scheme.Env.closure_refs([]) |> Enum.uniq()
+    put(key, Enum.map(frames, &{:closure, [], [], &1}))
   end
 
   @doc "The value under KEY, or nil."

@@ -3312,7 +3312,7 @@ defmodule Compos.Core.SchemeAPI do
   # Roots until the callback fires, which protects it from the GC.
   defp async_dispatch(callback, work) do
     key = {:async_call, make_ref()}
-    rooted? = Roots.put(key, callback)
+    rooted? = Roots.hold(key, callback)
     # the callback comes back to the lane, frame, and buffer that asked, as
     # a task-run! callback does; a poll on its own lane stays off :ui
     fid = Compos.Core.Frame.current()

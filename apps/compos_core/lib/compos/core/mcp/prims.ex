@@ -64,7 +64,7 @@ defmodule Compos.Core.MCP.Prims do
 
           [server, tool, args, callback] ->
             key = {:mcp_call, make_ref()}
-            Roots.put(key, callback)
+            Roots.hold(key, callback)
             {server, tool, args} = {s(server), s(tool), mcp_args(args)}
             # the callback comes back to the frame and buffer that asked, as a
             # task-run! callback does; a failure then reaches that chat

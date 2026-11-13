@@ -775,7 +775,7 @@ defmodule Compos.Core.Session do
   # until they land somewhere rooted or age out of the ring
   defp root_result(val) when is_list(val) or is_map(val) or is_tuple(val) do
     idx = :ets.update_counter(Roots.table(), :recent_idx, {2, 1, 31, 0}, {:recent_idx, -1})
-    Roots.put({:recent, idx}, val)
+    Roots.hold({:recent, idx}, val)
     :ok
   end
 
@@ -1286,7 +1286,7 @@ defmodule Compos.Core.Session do
           # the callback vanishes into an opaque fun until the reply arrives —
           # root it for the GC, and unroot once it has fired
           key = {:llm, make_ref()}
-          Roots.put(key, callback)
+          Roots.hold(key, callback)
 
           Compos.Core.LLM.complete(prompt, fn text ->
             try do
@@ -1302,7 +1302,7 @@ defmodule Compos.Core.Session do
        "(llm-with-model PROMPT MODEL CALLBACK [ON-ERROR]) — async completion on MODEL; CALLBACK gets the reply text, ON-ERROR the error text."} =>
         fn [prompt, model, callback | rest] ->
           key = {:llm, make_ref()}
-          Roots.put(key, {callback, rest})
+          Roots.hold(key, {callback, rest})
 
           on_error =
             case rest do
@@ -1348,7 +1348,7 @@ defmodule Compos.Core.Session do
           usage_cb = List.first(rest)
           requested_model = Enum.at(rest, 1)
           key = {:llm_tools, make_ref()}
-          Roots.put(key, [dispatcher, callback, usage_cb])
+          Roots.hold(key, [dispatcher, callback, usage_cb])
 
           on_usage =
             usage_cb &&
@@ -2044,7 +2044,7 @@ defmodule Compos.Core.Session do
 
           # the Reactor holds the callback inside an opaque fun — root it for
           # the GC for as long as the rule lives
-          Roots.put({:reactor, id}, callback)
+          Roots.hold({:reactor, id}, callback)
           id
         end,
       {"remove-on-change!", "(remove-on-change! ID) — remove a change handler by its id."} => fn [
@@ -2211,7 +2211,7 @@ defmodule Compos.Core.Session do
         fn [key, thunk] ->
           # rooted while it waits in the queue: a GC sweep must not take its frames
           root = {:run_on_lane, make_ref()}
-          Roots.put(root, thunk)
+          Roots.hold(root, thunk)
           fid = Frame.current()
           buffer = Frame.buffer_context()
 
@@ -2316,7 +2316,7 @@ defmodule Compos.Core.Session do
     case SchemeTask.start(closure, [], label: task_label(closure)) do
       {:ok, task} ->
         key = {:scheme_task_callback, task.id}
-        Roots.put(key, callback)
+        Roots.hold(key, callback)
         fid = Frame.current()
         buffer = Frame.buffer_context()
         lane = Lane.current() || :ui

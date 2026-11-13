@@ -79,7 +79,7 @@ defmodule Compos.Core.Endpoint.Prims do
   # conn process, so the Scheme apply always moves to a task.
   defp endpoint_cb(callback) do
     refkey = {:endpoint_call, make_ref()}
-    Roots.put(refkey, callback)
+    Roots.hold(refkey, callback)
 
     fn result ->
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->

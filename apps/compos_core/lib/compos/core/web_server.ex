@@ -193,7 +193,7 @@ defmodule Compos.Core.WebServer do
              startup_log: false
            ),
          {:ok, {_address, bound_port}} <- ThousandIsland.listener_info(bandit) do
-      Roots.put({:web_server_handler, name}, handler)
+      Roots.hold({:web_server_handler, name}, handler)
 
       {:ok,
        %{

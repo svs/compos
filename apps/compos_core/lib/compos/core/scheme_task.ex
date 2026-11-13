@@ -28,7 +28,7 @@ defmodule Compos.Core.SchemeTask do
     id = :erlang.unique_integer([:positive, :monotonic])
     ref = %Ref{id: id}
     root = {:scheme_task, id}
-    Roots.put(root, closure)
+    Roots.hold(root, closure)
 
     spec = %{
       id: {__MODULE__, id},
@@ -176,7 +176,7 @@ defmodule Compos.Core.SchemeTask do
       %{task: state.ref.id, status: status, label: state.label}
     )
 
-    Roots.put(state.root, result)
+    Roots.hold(state.root, result)
     Process.send_after(self(), :retire, @retire_after)
     {:noreply, %{state | closure: nil, args: nil, interp: nil, result: result}}
   end

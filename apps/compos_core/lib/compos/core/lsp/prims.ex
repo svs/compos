@@ -128,7 +128,7 @@ defmodule Compos.Core.LSP.Prims do
   # environment is not published yet.
   defp lsp_cb(callback, _key) do
     refkey = {:lsp_call, make_ref()}
-    Roots.put(refkey, callback)
+    Roots.hold(refkey, callback)
 
     fn result ->
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->

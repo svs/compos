@@ -53,10 +53,10 @@ defmodule Compos.Core.Roots do
   the GC and every other reader of the table see a term they know.
   Answers false when there is no table.
   """
-  def hold(key, value) do
-    frames = value |> Compos.Scheme.Env.closure_refs([]) |> Enum.uniq()
-    put(key, Enum.map(frames, &{:closure, [], [], &1}))
-  end
+  # Turned off: the walk of a large value passed the heap limit of the
+  # calling process, and the VM killed it. Until the walk is bounded, a
+  # hold stores the value, as before.
+  def hold(key, value), do: put(key, value)
 
   @doc "The value under KEY, or nil."
   def get(key) do

@@ -384,14 +384,14 @@ const lsTime = s => { s = Math.floor(s); return s < 60 ? s + 's' : Math.floor(s 
 const lsGlyph = t => LS_SPIN[Math.floor(Math.max(0, t) * 12) % LS_SPIN.length];
 const LS_WALL = [
   '{',
-  '  "id": "9f2c41e07ab84d0c9b1e6a3f5d27c810", "issue": "SHOP-3F2", "level": "error", "platform": "javascript",',
-  '  "firstSeen": "2026-11-12T08:14:03Z", "lastSeen": "2026-11-14T02:29:51Z", "count": 1204, "userCount": 377,',
-  '  "exception": { "type": "TypeError", "value": "Cannot read properties of undefined (reading \'price\')",',
-  '    "mechanism": { "type": "onerror", "handled": false },',
+  '  "id": "9f2c41e07ab84d0c9b1e6a3f5d27c810", "issue": "SHOP-3D1", "level": "error", "platform": "javascript",',
+  '  "firstSeen": "2026-11-12T08:14:03Z", "lastSeen": "2026-11-14T02:29:51Z", "count": 88, "userCount": 61,',
+  '  "exception": { "type": "InvalidCouponError", "value": "Coupon DIWALI25 is not valid for this cart",',
+  '    "mechanism": { "type": "onunhandledrejection", "handled": false },',
   '    "stacktrace": { "frames": [',
-  '      { "filename": "webpack-internal:///./src/checkout/cart.ts", "lineno": 88, "function": "lineTotal" },',
-  '      { "filename": "webpack-internal:///./src/checkout/cart.ts", "lineno": 112, "function": "Array.reduce" },',
-  '      { "filename": "webpack-internal:///./src/checkout/Summary.tsx", "lineno": 41, "function": "Summary" },',
+  '      { "filename": "webpack-internal:///./src/checkout/coupon.ts", "lineno": 54, "function": "applyCoupon" },',
+  '      { "filename": "webpack-internal:///./src/checkout/cart.ts", "lineno": 131, "function": "CartStore.applyCoupon" },',
+  '      { "filename": "webpack-internal:///./src/checkout/CouponForm.tsx", "lineno": 27, "function": "onSubmit" },',
   '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 15486, "function": "renderWithHooks" },',
   '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 20103, "function": "updateFunctionComponent" },',
   '      { "filename": "node_modules/react-dom/cjs/react-dom.development.js", "lineno": 21626, "function": "beginWork" },',
@@ -420,14 +420,19 @@ const LS_WALL = [
   '  "_meta": { "request": { "headers": { "": { "rem": [["@password:filter", "s"]] } } } }',
   '}',
 ];
-const LS_WORK = ['Reading checkout/cart.ts', 'Reading 14 files', 'Searching for "price"', 'Reading 38 files', 'Running npm test',
+// the first spinner's verbs: busy, and getting nowhere
+const LS_VERBS = ['Lollygagging', 'Tiddlywinking', 'Dillydallying', 'Flibbertigibbeting', 'Moseying', 'Kerfuffling',
+  'Shillyshallying', 'Noodling', 'Hornswoggling', 'Discombobulating', 'Faffing about', 'Bamboozling'];
+const LS_WORK = ['Reading checkout/coupon.ts', 'Reading 14 files', 'Searching for "coupon"', 'Reading 38 files', 'Running npm test',
   'Reading node_modules/react-dom/cjs/react-dom.development.js', 'Rethinking the cart', 'Reading 112 files', 'Running npm test again'];
 function llmSentryScene(sec, d) {
   const h = sec.querySelector('.content h1,.content h2');
   const title = h ? h.textContent.trim() : 'I ask my LLM';
-  const DUR = 30, END = 60, BEATS = 5;
-  // seconds of each beat the clock counts; beats 2 and 3 tick until the key
-  const CAP = [8, 11, Infinity, Infinity, Infinity], NOM = [8, 11, 9, 12];
+  // the beats, one key each
+  const B = { list: 0, which: 1, details: 2, fix: 3, subs: 4, punch: 5 };
+  const DUR = 30, END = 60, BEATS = 6;
+  // seconds of each beat the clock counts; fix and subs tick until the key
+  const CAP = [8, 7, 10.5, Infinity, Infinity, Infinity], NOM = [8, 7, 10.5, 9, 12];
   const BASE = [0];
   NOM.forEach((v, k) => BASE.push(BASE[k] + v * LS_RATE));
   const issues = [
@@ -450,30 +455,36 @@ function llmSentryScene(sec, d) {
   const you = (beat, at, text) => L.push({ beat, at, kind: 'you', text });
   const line = (beat, at, html, cls) => L.push({ beat, at, kind: 'line', html, cls });
   const spin = (beat, at, end, label, done) => L.push({ beat, at, end, kind: 'spin', label, done });
-  you(0, .3, "what's breaking in prod?");
-  spin(0, 1.6, 4.4, () => 'Thinking', f => `· thought for ${lsTime(f)}`);
-  line(0, 4.5, '◇ sentry.list_issues(project: "shop-web", status: "unresolved")', 'tool');
-  line(0, 4.9, '  5 issues', 'dim');
-  issues.forEach((r, k) => line(0, 5.2 + k * .3, `<span class='id'>${r[0]}</span>  ${esc(r[1])}  <span class='n'>${r[2]}</span>`, 'issue'));
-  line(0, 7, 'Here are the 5 unresolved issues. Want me to look into any of them?', 'say');
-  you(1, .2, 'show me the details of the first one');
-  spin(1, 1.7, 5.6, x => ['Fetching the issue', 'Fetching the latest event', 'Reading the stack trace'][Math.min(2, Math.floor(x / 1.4))], f => `· fetched for ${lsTime(f)}`);
-  line(1, 5.7, '◇ sentry.get_issue(id: "SHOP-3F2")', 'tool');
-  line(1, 5.9, '◇ sentry.get_event(issue: "SHOP-3F2", event: "latest")', 'tool');
-  LS_WALL.forEach((w, k) => line(1, 6.2 + k * .05, esc(w), 'wall'));
-  const sum = 6.4 + LS_WALL.length * .05;
-  line(1, sum, 'So <code>item</code> is undefined when <code>lineTotal</code> runs. This could be caused by several factors:', 'say');
-  ['a race in cart hydration', 'a coupon response that drops an item', 'a stale service-worker cache', 'something else']
-    .forEach((s, k) => line(1, sum + .3 + k * .2, `  ${k + 1}. ${s}`, 'say'));
-  line(1, sum + 1.4, 'Would you like me to investigate further, or attempt a fix?', 'say');
-  you(2, .2, 'fix it');
-  spin(2, .8, Infinity, x => LS_WORK[Math.floor(x / 1.5) % LS_WORK.length], '⏹ interrupted · 0 bugs fixed');
-  you(3, .3, 'use subagents. one per issue. go.');
-  line(3, 1.4, '◇ spawn_subagents(5)', 'tool');
-  line(3, 1.8, "5 subagents are running in the background. I'll tell you when they need you.", 'say');
+  you(B.list, .3, "what's breaking in prod?");
+  spin(B.list, 1.6, 4.4, x => LS_VERBS[Math.floor(x / .45) % LS_VERBS.length], f => `· lollygagged for ${lsTime(f)}`);
+  line(B.list, 4.5, '◇ sentry.list_issues(project: "shop-web", status: "unresolved")', 'tool');
+  line(B.list, 4.9, '  5 issues', 'dim');
+  issues.forEach((r, k) => line(B.list, 5.2 + k * .3, `<span class='id'>${k + 1}. ${r[0]}</span>  ${esc(r[1])}  <span class='n'>${r[2]}</span>`, 'issue'));
+  line(B.list, 7, 'Here are the 5 unresolved issues. Want me to look into any of them?', 'say');
+  // you have to name it by number, and even that is slow
+  you(B.which, .2, "what's 3?");
+  spin(B.which, .9, 4.6, x => ['Working out which one is 3', 'Counting to 3', 'Recounting', 'Fetching the list again'][Math.min(3, Math.floor(x / .95))], f => `· pondered for ${lsTime(f)}`);
+  line(B.which, 4.7, '◇ sentry.list_issues(project: "shop-web", status: "unresolved")', 'tool');
+  line(B.which, 5.0, '◇ sentry.get_issue(id: "SHOP-3D1")', 'tool');
+  line(B.which, 5.5, '3 is <code>SHOP-3D1</code>: an unhandled <code>InvalidCouponError</code>, 88 events since Tuesday, mostly on /cart. Want the details?', 'say');
+  you(B.details, .2, 'yes, show me the details');
+  spin(B.details, 1.4, 5.3, x => ['Fetching the issue', 'Fetching the latest event', 'Reading the stack trace'][Math.min(2, Math.floor(x / 1.4))], f => `· fetched for ${lsTime(f)}`);
+  line(B.details, 5.4, '◇ sentry.get_issue(id: "SHOP-3D1")', 'tool');
+  line(B.details, 5.6, '◇ sentry.get_event(issue: "SHOP-3D1", event: "latest")', 'tool');
+  LS_WALL.forEach((w, k) => line(B.details, 5.9 + k * .05, esc(w), 'wall'));
+  const sum = 6.1 + LS_WALL.length * .05;
+  line(B.details, sum, 'So <code>applyCoupon</code> rejects and nothing catches it. This could be caused by several factors:', 'say');
+  ['an expired coupon', 'a coupon that does not apply to this cart', 'a stale service-worker cache', 'something else']
+    .forEach((s, k) => line(B.details, sum + .3 + k * .2, `  ${k + 1}. ${s}`, 'say'));
+  line(B.details, sum + 1.4, 'Would you like me to investigate further, or attempt a fix?', 'say');
+  you(B.fix, .2, 'fix it');
+  spin(B.fix, .8, Infinity, x => LS_WORK[Math.floor(x / 1.5) % LS_WORK.length], '⏹ interrupted · 0 bugs fixed');
+  you(B.subs, .3, 'use subagents. one per issue. go.');
+  line(B.subs, 1.4, '◇ spawn_subagents(5)', 'tool');
+  line(B.subs, 1.8, "5 subagents are running in the background. I'll tell you when they need you.", 'say');
   subs.forEach((s, k) => s.ev.forEach(e => {
-    if (e[1] === 'q') line(3, e[0], `⚑ sub-${k + 1} is waiting on you: ${esc(e[2])}`, 'flag');
-    if (e[1] === 'done') line(3, e[0], `✓ sub-${k + 1} says it's done`, 'dim');
+    if (e[1] === 'q') line(B.subs, e[0], `⚑ sub-${k + 1} is waiting on you: ${esc(e[2])}`, 'flag');
+    if (e[1] === 'done') line(B.subs, e[0], `✓ sub-${k + 1} says it's done`, 'dim');
   }));
 
   sec.innerHTML = `<div class='llm'>` +
@@ -514,22 +525,22 @@ function llmSentryScene(sec, d) {
       } else set(r, 'llm-' + r.cls, r.html);
     });
     // the input: busy while the fix eats the session, a question typed into the queue
-    const busy = n === 2 && u > .8, q = 'wait, what about the payments one?';
+    const busy = n === B.fix && u > .8, q = 'wait, what about the payments one?';
     input.classList.toggle('busy', busy);
     const k = busy ? typed(q, u - 3.2) : 0;
     inputTx.textContent = busy ? (k ? q.slice(0, k) : 'agent is working…') : '';
     inputTx.classList.toggle('ph', busy && !k);
     cur.style.opacity = Math.floor(u * 2) % 2 && !(busy && k && k < q.length) ? .15 : 1;
     queued.style.opacity = busy && k === q.length ? 1 : 0;
-    const co = n === 2 ? spring(u - 5, { damping: 12 }) : 0;
+    const co = n === B.fix ? spring(u - 5, { damping: 12 }) : 0;
     cap.style.opacity = Math.min(1, co * 1.5);
     cap.style.transform = `rotate(2deg) scale(${.7 + .3 * co})`;
     // subagents fan out to the right
-    term.style.width = (n < 3 ? 1168 : n > 3 ? 620 : interpolate(u, [1.9, 2.7], [1168, 620], EASE.inOut)) + 'px';
-    const cu = n < 3 ? -1 : n === 3 ? u : 20 + u;
+    term.style.width = (n < B.subs ? 1168 : n > B.subs ? 620 : interpolate(u, [1.9, 2.7], [1168, 620], EASE.inOut)) + 'px';
+    const cu = n < B.subs ? -1 : n === B.subs ? u : 20 + u;
     let w = 0;
     subs.forEach((s, k) => {
-      const a = n < 3 ? 0 : n > 3 ? 1 : spring(u - 2.1 - k * .22, { damping: 16 });
+      const a = n < B.subs ? 0 : n > B.subs ? 1 : spring(u - 2.1 - k * .22, { damping: 16 });
       s.el.style.opacity = Math.min(1, a * 1.5);
       s.el.style.transform = `translateX(${(1 - a) * 80}px)`;
       let e = null;
@@ -546,11 +557,11 @@ function llmSentryScene(sec, d) {
     if (live && w > waiting && d.sound !== 'off') ping();
     waiting = w;
     waitN.textContent = w;
-    wait.style.opacity = n >= 3 ? 1 : 0;
+    wait.style.opacity = n >= B.subs ? 1 : 0;
     wait.classList.toggle('hot', w > 0);
     clockNow = clock0 + Math.min(u, CAP[n]) * LS_RATE;
     clockEl.textContent = lsTime(clockNow);
-    const po = n === 4 ? interpolate(u, [.2, .9], [0, 1]) : 0;
+    const po = n === B.punch ? interpolate(u, [.2, .9], [0, 1]) : 0;
     punch.style.display = po ? '' : 'none';
     punch.style.opacity = po;
     punch.style.transform = `scale(${.94 + .06 * po})`;

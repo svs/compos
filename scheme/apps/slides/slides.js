@@ -270,37 +270,97 @@ function spring(t, o) {
   return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x));
 }
 
-// logo: a beam draws across, the mark springs in out of a blur with its
-// colours split pink and cyan, the letters of the slide's heading spring up
-// one by one, then its first paragraph rises. The mark breathes after.
+// ---- Sound ----------------------------------------------------------------
+// Scenes play stings synthesised here, so a deck needs no audio files. The
+// browser lets a page sound only after a key or click on it.
+let actx = null;
+function audio() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  } catch (err) { return null; }
+}
+// one note: FREQ Hz, AT seconds from now, decaying over DUR
+function tone(freq, o) {
+  const a = audio();
+  if (!a) return;
+  o = o || {};
+  const t = a.currentTime + (o.at || 0), dur = o.dur || .5, g = a.createGain(), osc = a.createOscillator();
+  osc.type = o.type || 'triangle';
+  osc.frequency.setValueAtTime(freq, t);
+  if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(o.gain || .16, t + .008);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  osc.connect(g).connect(a.destination);
+  osc.start(t);
+  osc.stop(t + dur + .05);
+}
+
+// logo: the three notes of the mark fly in from three sides, each sounding
+// its pitch as it lands. Where all three overlap is the lambda: when the last
+// lands it flashes, a shockwave rings out, the stage shudders and a chord
+// hits. Then the heading's letters spring up and its first paragraph rises.
+// The geometry is the logo's own (scratch/logo-designer.html).
+const LOGO = [
+  { x: 366, y: 260, rot: 166, s: 2.07, color: '#ff4d6d', from: [0, -1500, -200], delay: .2, note: 392 },
+  { x: 296, y: 575, rot: 32, s: 2.36, color: '#38bdf8', from: [-2100, 700, 160], delay: .38, note: 523.25 },
+  { x: 494, y: 582, rot: -32, s: 2.36, color: '#fbbf24', from: [2100, 700, -160], delay: .56, note: 659.25 },
+];
+const LOGO_FONT = `'Noto Music','Apple Symbols','Segoe UI Symbol','Symbola','DejaVu Sans',serif`;
+const LOGO_SPRING = { stiffness: 140, damping: 13 };
+let logoN = 0;
 function logoScene(sec, d) {
   const content = sec.querySelector('.content');
   const h = content.querySelector('h1,h2'), p = content.querySelector('p');
   const word = h ? h.textContent.trim() : 'compos';
-  content.innerHTML = `<div class='logo-scene'><div class='beam'></div>` +
-    `<img class='mark' src='${q(d.src || 'compos-logo.png')}' alt=''>` +
+  const id = 'logo' + (logoN++);
+  const glyph = fill => `<text x='0' y='0' font-size='300' text-anchor='middle' dominant-baseline='central' fill='${fill}' font-family="${LOGO_FONT}">♩</text>`;
+  const masks = LOGO.map((l, i) => `<mask id='${id}m${i}' maskUnits='userSpaceOnUse' x='-400' y='-400' width='1600' height='1600'>` +
+    `<rect x='-400' y='-400' width='1600' height='1600' fill='black'/><g class='mg'>${glyph('#fff')}</g></mask>`).join('');
+  const marks = LOGO.map(l => `<g class='mk'><g transform='scale(1)'>${glyph(l.color).replace('<text', `<text stroke='${l.color}' stroke-width='8' paint-order='stroke'`)}</g></g>`).join('');
+  const inter = fill => LOGO.reduce((inner, l, i) => `<g mask='url(#${id}m${i})'>${inner}</g>`, `<rect x='-400' y='-400' width='1600' height='1600' fill='${fill}'/>`);
+  content.innerHTML = `<div class='logo-scene'>` +
+    `<svg class='mark' viewBox='0 0 800 800' overflow='visible'><defs>${masks}</defs>` +
+    `<circle class='wave' cx='400' cy='430' r='0' fill='none' stroke='#3cc6ea' stroke-width='6'/>` +
+    `<g class='marks'>${marks}</g><g class='lam'>${inter('#0f172a')}</g><g class='flash'>${inter('#ffffff')}</g></svg>` +
     `<div class='word'>${[...word].map(c => `<span>${c === ' ' ? '&nbsp;' : esc(c)}</span>`).join('')}</div>` +
     (p ? `<div class='tag'>${p.innerHTML}</div>` : '') + `</div>`;
-  const beam = content.querySelector('.beam'), mark = content.querySelector('.mark');
+  const svg = content.querySelector('svg'), wave = content.querySelector('.wave');
+  const mk = [...content.querySelectorAll('.mk')], mg = [...content.querySelectorAll('.mg')];
+  const lam = content.querySelector('.lam'), flash = content.querySelector('.flash');
   const letters = [...content.querySelectorAll('.word span')], tag = content.querySelector('.tag');
-  const end = 1.1 + letters.length * .06 + .9;
+  const HIT = LOGO[2].delay + .3, W0 = HIT + .45, end = W0 + letters.length * .06 + .9;
+  const sound = d.sound !== 'off';
   return {
     dur: end,
+    cues: !sound ? [] : LOGO.map(l => ({ at: l.delay + .3, play: () => tone(l.note, { dur: .45, gain: .14 }) })).concat([{ at: HIT + .02, play: () => {
+      tone(110, { type: 'sine', to: 38, dur: .7, gain: .5 });
+      [130.81, 261.63, 392, 523.25, 659.25].forEach((f, k) => tone(f, { type: k ? 'triangle' : 'sine', dur: 2.2, gain: k ? .07 : .2 }));
+      tone(1046.5, { type: 'sine', at: .04, dur: 1.4, gain: .04 });
+    } }]),
     render(t) {
-      beam.style.transform = `scaleX(${interpolate(t, [0, .5], [0, 1])})`;
-      beam.style.opacity = 1 - interpolate(t, [.5, 1.2], [0, 1]);
-      const s = spring(t, { delay: .35, stiffness: 120, damping: 11 });
-      const split = (1 - spring(t, { delay: .35, stiffness: 90, damping: 9 })) * 14;
+      LOGO.forEach((l, i) => {
+        const v = spring(t, Object.assign({ delay: l.delay }, LOGO_SPRING)), u = 1 - v;
+        const tr = `translate(${l.x + l.from[0] * u} ${l.y + l.from[1] * u}) rotate(${l.rot + l.from[2] * u}) scale(${l.s})`;
+        mk[i].setAttribute('transform', tr);
+        mk[i].style.opacity = clamp01(v * 3);
+        mg[i].setAttribute('transform', tr);
+      });
+      const since = t - HIT, hit = since > 0 ? Math.exp(-since * 5) : 0;
+      lam.style.opacity = since > 0 ? .95 : 0;
+      flash.style.opacity = hit;
+      wave.setAttribute('r', since > 0 ? interpolate(since, [0, .7], [40, 520]) : 0);
+      wave.style.opacity = since > 0 ? 1 - interpolate(since, [0, .7], [0, 1], EASE.linear) : 0;
+      const shake = hit * 10;
       const glow = t > end ? (1 - Math.cos((t - end) * 1.6)) / 2 : 0;
-      mark.style.opacity = clamp01(s * 1.5);
-      mark.style.transform = `scale(${.4 + .6 * s}) rotate(${(1 - s) * -10}deg)`;
-      mark.style.filter = `blur(${clamp01(1 - s) * 16}px)` +
-        ` drop-shadow(${split}px 0 0 rgba(255,79,163,.85)) drop-shadow(${-split}px 0 0 rgba(60,198,234,.85))` +
-        ` drop-shadow(0 0 ${18 + glow * 18}px rgba(60,198,234,${.2 + glow * .25}))`;
-      letters.forEach((l, k) => {
-        const v = spring(t, { delay: 1.1 + k * .06, stiffness: 200, damping: 15 });
-        l.style.opacity = clamp01(v * 1.4);
-        l.style.transform = `translateY(${(1 - v) * 48}px)`;
+      svg.style.transform = `translate(${Math.sin(t * 91) * shake}px, ${Math.cos(t * 73) * shake}px) scale(${1 + hit * .06})`;
+      svg.style.filter = `drop-shadow(0 0 ${14 + hit * 40 + glow * 16}px rgba(60,198,234,${.18 + hit * .5 + glow * .2}))`;
+      letters.forEach((el, k) => {
+        const v = spring(t, { delay: W0 + k * .06, stiffness: 200, damping: 15 });
+        el.style.opacity = clamp01(v * 1.4);
+        el.style.transform = `translateY(${(1 - v) * 48}px)`;
       });
       if (tag) {
         const v = interpolate(t, [end - .7, end - .1], [0, 1]);
@@ -321,9 +381,14 @@ function play(s, instant) {
   if (!sc) return;
   const t0 = performance.now() + (instant ? -sc.dur * 1000 : +s.dataset.dur * .45);
   sc.render(instant ? sc.dur : 0);
+  // a cue (a sound) fires once, as time passes it; an instant arrival is past them all
+  let last = instant ? Infinity : -1;
   const tick = now => {
     if (life.signal.aborted || sections[idx] !== s) return;
-    sc.render(Math.max(0, (now - t0) / 1000));
+    const t = Math.max(0, (now - t0) / 1000);
+    (sc.cues || []).forEach(c => { if (last < c.at && c.at <= t) c.play(); });
+    last = t;
+    sc.render(t);
     clock = requestAnimationFrame(tick);
   };
   clock = requestAnimationFrame(tick);

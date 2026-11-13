@@ -152,8 +152,7 @@ body.notes-on #nav{bottom:calc(32vh + 40px)}
 /* ---- Motion: scenes (slides.js SCENES) ---- */
 .slide.scene .content{position:relative;height:100%}
 .logo-scene{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;height:100%}
-.logo-scene .beam{position:absolute;left:6%;right:6%;top:50%;height:2px;background:linear-gradient(90deg,transparent,var(--accent2),var(--accent),transparent);box-shadow:0 0 18px var(--accent2);transform:scaleX(0)}
-.slide .logo-scene .mark{width:240px;height:240px;max-height:none;object-fit:contain;border-radius:0;opacity:0;will-change:transform,filter}
+.slide .logo-scene .mark{width:300px;height:300px;overflow:visible;will-change:transform,filter}
 .logo-scene .word{font:700 120px/1 var(--mono);letter-spacing:-.03em;color:var(--fg);white-space:nowrap}
 .logo-scene .word span{display:inline-block;opacity:0;will-change:transform}
 .logo-scene .tag{font-size:32px;color:var(--muted);opacity:0}

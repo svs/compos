@@ -6,7 +6,6 @@
 ;; the chats table is the mode list of chat-mode
 (require 'mode-list)
 (require 'chat-mode)
-(require 'ibuffer)
 
 (domain! 'chat)
 (effects! '(write))
@@ -281,6 +280,40 @@
 
 ;; a chat needing a reply wears its alert glyph in the name itself, so it
 ;; survives even a narrow table that drops the dot and label columns
+;; a chat that works a task wears the task's mark before its name: an
+;; open task a hollow diamond, a closed one a tick. One read of the todo
+;; files serves a whole draw; the index is read again after a second.
+(define *chats-todo-index* (list #f '()))
+
+(define (chats-todo-index)
+  (let ((now (monotonic-ms)))
+    (if (and (car *chats-todo-index*) (< (- now (car *chats-todo-index*)) 1000))
+        (cadr *chats-todo-index*)
+        (let ((idx (if (todo-ready?)
+                       (fold
+                         (lambda (acc t)
+                           (let ((ids (todo-chats t))
+                                 (open? (not (member (plist-get t 'state) '("done" "cancelled")))))
+                             (if (null? ids)
+                                 acc
+                                 (let ((prev (assoc (car ids) acc)))
+                                   ;; an open task outranks a closed one
+                                   (if (and prev (cdr prev))
+                                       acc
+                                       (cons (cons (car ids) open?) acc))))))
+                         '()
+                         (todo-list '(all #t)))
+                       '())))
+          (set! *chats-todo-index* (list now idx))
+          idx))))
+
+(define (chats-todo-glyph b)
+  (let* ((id (buffer-local-value 'chat-id b))
+         (hit (and id (assoc id (chats-todo-index)))))
+    (cond ((not hit) "")
+          ((cdr hit) "◇ ")
+          (else "✓ "))))
+
 (define (chats-alert-name b)
   (if (equal? (chat-row-status b) 'needs_attention)
       (string-append "! " (chats-title b))
@@ -308,7 +341,7 @@
                (let ((s (chat-row-status b)))
                  (list (if (equal? s 'needs_attention) "!" "●")
                        (chats-state-face s))))
-        'name (lambda (b) (list "" (chats-alert-name b)))
+        'name (lambda (b) (list (chats-todo-glyph b) (chats-alert-name b)))
         ;; by name, never by value: a reload redefines the function and a
         ;; kind registered with the old one keeps calling it
         'size (lambda (b) (chats-filesize b))
@@ -988,10 +1021,6 @@
 (public! 'chats-row-label
   "(chats-row-label B) — the state a chat list row shows: the runtime while it works or asks, else the goal status of the newest turn")
 
-(effects! '(read))
-(public! 'chat-row-status
-  "(chat-row-status B) — the runtime status of the chat B's agent, or api for a chat with no agent")
-
 (effects! '(destroy))
 (public! 'agents-archive!
   "(agents-archive! B) — archive the chat B: stop its runtime, release its windows and kill its buffer")
@@ -1171,17 +1200,28 @@
   (lambda () (chat-list-open!)))
 
 ;;; --- the minibuffer form ------------------------------------------------------
-;;; C-x c is C-x b for chats: the minibuffer prompt with tabs (switch.scm).
-;;; The list on C-x C-c keeps its own state.
+;;; C-x c is these rows in the minibuffer's form, the way C-x b is the
+;;; buffers': a popup under the work with its filter line already open.
+;;; You type, the rows narrow, RET takes the row and the popup goes.
+;;; The form keeps its own view buffer, so the sort, folds and grouping
+;;; of the application on C-x C-c stay what you set them to — the
+;;; application has one state and this borrows none of it.
+
+(define *chat-prompt-buffer* " *chats*")
+(add-display-rule! *chat-prompt-buffer* 'shaped '(side bottom size 0.4))
+(ibuffer-view! *chat-prompt-buffer* 'sort 'recent 'grouping 'group)
 
 (define (chat-prompt-open!)
-  ;; C-x c is C-x b for chats: the same minibuffer prompt, with the
-  ;; Group, All and Running tabs and the SPC leader. The list, archived
-  ;; chats too, stays on C-x C-c
-  (switch-bare-prompt! 'chat))
+  ;; a heading is folded by the prompt line itself, so PICK only ever
+  ;; sees a chat: a live one by name, an archived one by its .chat path
+  (ibuffer-prompt! 'chat-list *chat-prompt-buffer* "chat-list-mode" "Chat: "
+    (lambda (row close!)
+      (ibuffer-pick! row close!)
+      (group-current-recalculate!))
+    "minibuffer"))
 
 (define-command "chat-prompt"
-  "Switch to a chat in the minibuffer: Group, All and Running tabs"
+  "Switch to a chat with the plain minibuffer list"
   (lambda () (chat-prompt-open!)))
 
 ;; the name is gone but the words are not: you remember what the chat said

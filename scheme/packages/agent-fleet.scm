@@ -502,6 +502,7 @@
   'modes '(chat-list-mode))
 
 (catalog-meta! 'command "chat-retitle-at-point" 'domain 'chat 'effects '(write external spend))
+(catalog-meta! 'command "chat-goto-todo-at-point" 'domain 'chat 'effects '(write display))
 
 ;; A chat's subject tells the chats of one group apart: the goal chats
 ;; from the editor chats, say. It rides in the .chat header beside the
@@ -559,6 +560,14 @@
       (if (chat-buffer? b)
           (chat-subject-read! b)
           (message "not a chat")))))
+
+(define-command "chat-goto-todo-at-point" "Show the task the chat at point works as its own page; with several, ask which"
+  (lambda ()
+    (let ((chat (agents-current-buf)))
+      (if (not chat)
+          (message "No chat at point")
+          (with-current-buffer chat (lambda () (run-command "chat-goto-todo"))))))
+  'modes '(chat-list-mode))
 
 (define-command "chat-set-subject-at-point" "Give the chat at point a subject"
   (lambda ()
@@ -1150,8 +1159,8 @@
                "chat you used last at the top. f filters every chat, by title, "
                "state, model, and by a word somebody said in it; / has a Status tab "
                "(working, needs you, ...), and is:needs types the same filter. < cycles the "
-               "sections (group, subject, none: the most recent first), > the order, t "
-               "turns the sections off and on. RET enters the chat; on a saved "
+               "sections (group, subject, none: the most recent first), > the order. t "
+               "shows the task the chat works. RET enters the chat; on a saved "
                "conversation at the bottom, RET reads it back. SPC marks, as in "
                "ibuffer. s steers the chat at point or the marked ones, y and d "
                "answer a permission, r gives a title, k kills, a archives, D deletes, "
@@ -1176,6 +1185,7 @@
         'keys '(("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh") ("w" "chats-watch")
+                ("t" "chat-goto-todo-at-point")
                 ("+" "agent-open")
                 ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")
                 ;; / is the Status picker, not ibuffer's old / prefix

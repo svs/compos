@@ -571,7 +571,7 @@
            (chat (and (string? row) (buffer-known? row) (chat-buffer? row) row)))
       (if (not chat)
           (message "No chat at point")
-          (with-current-buffer chat (lambda () (run-command "chat-goto-todo"))))))
+          (todo--show-chat-task! chat))))
   'modes '(chat-list-mode ibuffer-mode))
 
 (define-command "chat-set-subject-at-point" "Give the chat at point a subject"

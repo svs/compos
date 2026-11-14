@@ -1712,7 +1712,14 @@
 (define *todo-detail-buffer* "*Todo*")
 
 (define (todo--detail-group)
-  (let ((l (todo--list-buffer))) (or (and l (buffer-group l)) (group-here))))
+  "the group a task page opens in: this todo list's, else the group you are in"
+  (if (equal? (buffer-local-value 'list-mode (current-buffer)) "todo-mode")
+      (buffer-group (current-buffer))
+      (group-here)))
+
+(define (todo--group-list group)
+  "the todo list GROUP keeps, or #f; a page never opens beside another group's list"
+  (find (lambda (b) (equal? (buffer-group b) group)) (todo--buffers)))
 
 (define (todo--detail-buffer)
   "the task page of the group you are in, or #f; a group keeps its own"
@@ -2056,7 +2063,7 @@
   (let ((buf (todo--group-buffer "todo-detail-mode" *todo-detail-buffer* (todo--detail-group))))
     (buffer-set-local! buf 'todo-id id)
     (let ((buf (todo--detail-render! buf)))
-      (display-buffer-detail! buf (todo--list-buffer))
+      (display-buffer-detail! buf (todo--group-list (buffer-group buf)))
       buf)))
 ;; highlighting a row also brings up its chat, where chats live, without
 ;; taking focus: the pane already showing a chat, else a spare window, else
@@ -2504,21 +2511,17 @@
 
 (add-hook! 'chat-status-hook 'todo--on-chat-status!)
 
-(define-command "chat-goto-todo" "Show the task this chat works as its own page; with several, ask which"
-  (lambda ()
-    (let ((chat (current-buffer)))
-      (if (not (chat-buffer? chat))
-          (message "Not a chat")
-          (let ((ts (todo--chat-tasks chat)))
-            (cond ((null? ts) (message "This chat holds no task; C-c t files one"))
-                  ((null? (cdr ts)) (todo-show-detail! (plist-get (car ts) 'id)))
-                  (else
-                    (let ((labels (map (lambda (t) (list (string-append (plist-get t 'id) "  " (plist-get t 'title)) (plist-get t 'id))) ts)))
-                      (minibuffer-read* "Task: " (map car labels)
-                        (list (list 'confirm (lambda (l) (let ((hit (assoc l labels))) (when hit (todo-show-detail! (cadr hit)))))))))))))))
-  'modes '(chat-mode))
+(define (todo--show-chat-task! chat)
+  "show the task CHAT works as its own page; with several, ask which"
+  (let ((ts (todo--chat-tasks chat)))
+    (cond ((null? ts) (message "This chat holds no task; C-c t files one"))
+          ((null? (cdr ts)) (todo-show-detail! (plist-get (car ts) 'id)))
+          (else
+            (let ((labels (map (lambda (t) (list (string-append (plist-get t 'id) "  " (plist-get t 'title)) (plist-get t 'id))) ts)))
+              (minibuffer-read* "Task: " (map car labels)
+                (list (list 'confirm (lambda (l) (let ((hit (assoc l labels))) (when hit (todo-show-detail! (cadr hit)))))))))))))
 
-(define-command "chat-todo" "Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes. The chat's agent then writes the task's notes, status and log; when the chat already holds a task, it brings that one up to date"
+(define-command "chat-todo" "This chat's task: show its page, and have the chat's agent bring the task up to date. A chat with no task asks to file one: assigned to the chat, in doing; a blank title takes the chat's title, with its running summary as the notes"
   (lambda ()
     (let* ((chat (current-buffer))
            (who (and (chat-buffer? chat) (chat-stable-id! chat)))
@@ -2526,25 +2529,28 @@
       (cond ((not who) (message "Not a chat"))
             ((pair? held)
              (let ((id (plist-get (car held) 'id)))
+               (todo--show-chat-task! chat)
                (todo--ask-update! chat id)
                (message (string-append "Updating " id " from this chat"))))
             (else
-             (read-string "Task (blank: from the chat): "
-               (lambda (s)
-                 (let* ((blank? (todo--blank? s))
-                        (title (if blank? (chat-title-of chat) s))
-                        (summary (buffer-local-value 'chat-summary chat))
-                        (g (buffer-group chat))
-                        (name (and g (group-name g)))
-                        (id (todo-create title (append (list 'project (if (member name (todo-projects)) name todo-default-project)
-                                                             'state "doing" 'assignee who 'group g)
-                                                       (if (and blank? (string? summary) (not (todo--blank? summary)))
-                                                           (list 'notes summary)
-                                                           '())))))
-                   (todo--refresh-all!)
-                   (todo--ask-update! chat id)
-                   (message (string-append "Filed " id ": " title))))
-               'initial chat)))))
+             (y-or-n "Create a todo for this chat? "
+               (lambda ()
+                 (read-string "Task (blank: from the chat): "
+                   (lambda (s)
+                     (let* ((blank? (todo--blank? s))
+                            (title (if blank? (chat-title-of chat) s))
+                            (summary (buffer-local-value 'chat-summary chat))
+                            (g (buffer-group chat))
+                            (name (and g (group-name g)))
+                            (id (todo-create title (append (list 'project (if (member name (todo-projects)) name todo-default-project)
+                                                                 'state "doing" 'assignee who 'group g)
+                                                           (if (and blank? (string? summary) (not (todo--blank? summary)))
+                                                               (list 'notes summary)
+                                                               '())))))
+                       (todo--refresh-all!)
+                       (todo--ask-update! chat id)
+                       (message (string-append "Filed " id ": " title))))
+                   'initial chat)))))))
   'modes '(chat-mode))
 
 (define (todo--view-set! buf name)

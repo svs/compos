@@ -174,7 +174,7 @@
                   *catalog-keys*))
         (let ((key (catalog--key k (catalog--get e 'name) (catalog--get e 'qualified-name))))
           (set! *catalog-overrides*
-            (alist-delete *catalog-overrides* key)))
+            (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
         (set! *catalog*
           (remove-plists *catalog* 'kind k 'qualified-name (catalog--get e 'qualified-name)))
         (catalog--changed! #f)))
@@ -220,7 +220,7 @@
                (before (assoc key *catalog-overrides*)))
           (set! *catalog-overrides*
             (cons (cons key (catalog--merge (if before (cdr before) '()) meta))
-                  (alist-delete *catalog-overrides* key)))
+                  (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
           (set! *catalog*
             (cons updated
                   (remove-plists *catalog* 'kind (catalog--get old 'kind)
@@ -299,41 +299,9 @@
 ;; Emacs: (save-buffer) and (forward-char 3) run from code. A name that
 ;; already holds a function or a variable keeps it; the command stays in
 ;; the command table and command-call runs it. A reload rebinds only the
-;; names define-command bound. Rows are (NAME CALLABLE ADOPTED).
-;;
-;; A row does not hold a second copy of a function the command table
-;; holds: the table stores every value by copy, and 1850 rows of two
-;; functions each were 19 MB. CALLABLE and ADOPTED are the symbol entry
-;; when the function is the command's own closure, which (command-fn NAME)
-;; answers. A command with a spec keeps its callable: that one is a
-;; wrapper, and no other place holds it.
-(define (command--row-part name part)
-  (if (equal? part 'entry) (command-fn name) part))
-
-;; the function define-command gave the name
-(define (command--row-callable row)
-  (command--row-part (car row) (cadr row)))
-
-;; the function the name held before the command took it, or #f
-(define (command--row-adopted row)
-  (and (pair? (cddr row)) (command--row-part (car row) (caddr row))))
-
-(define (command--row name callable adopted entry)
-  (list name
-        (if (and entry (eq? callable entry)) 'entry callable)
-        (cond ((not adopted) #f)
-              ((and entry (eq? adopted entry)) 'entry)
-              (else adopted))))
-
-;; a row of the form before this one, (NAME CALLABLE ENTRY ADOPTED), which
-;; a daemon that reloads this file still holds
-(define (command--compact-row row)
-  (if (= (length row) 4)
-      (command--row (car row) (cadr row) (cadddr row) (command-fn (car row)))
-      row))
-
+;; names define-command bound. Rows are (NAME CALLABLE ENTRY).
 (define *command-functions*
-  (if (boundp '*command-functions*) (map command--compact-row *command-functions*) '()))
+  (if (boundp '*command-functions*) *command-functions* '()))
 
 ;; what a spec code gives a call from code that leaves the argument out:
 ;; no prefix, the current buffer, point, the region; a prompt has none
@@ -367,29 +335,25 @@
                          (error (string-append name ": missing argument for "
                                                (if (string? (car codes)) (car codes) "spec"))))))))))))
 
-(define (command--bind! name callable entry fn last-callable last-adopted)
+(define (command--bind! name callable entry fn)
   ;; A name binds when it is free, when it holds this command's last
   ;; callable, or when it already holds the command's own function: the
   ;; function then is the command, one name and one thing. The row
   ;; remembers that function, so undefine-command gives the name back.
-  ;; LAST-CALLABLE and LAST-ADOPTED are the parts of the row the command
-  ;; had, read before the command table took the new closure.
   (let* ((sym (string->symbol name))
-         (held-last? (and last-callable (boundp sym) (eq? (symbol-value sym) last-callable)))
-         (adopted (if held-last?
-                      last-adopted
+         (row (assoc name *command-functions*))
+         (adopted (if (and row (eq? (symbol-value sym) (cadr row)))
+                      (and (pair? (cdddr row)) (cadddr row))
                       (and (boundp sym) (eq? (symbol-value sym) fn) fn))))
     (if (and (procedure? callable)
              (or (not (boundp sym))
                  (eq? (symbol-value sym) fn)
-                 held-last?))
+                 (and row (eq? (symbol-value sym) (cadr row)))))
         (begin
           (set-symbol-value! sym callable)
           (set! *command-functions*
-                (cons (command--row name callable adopted entry)
-                      ;; alist-delete, not remove with a lambda: remove calls
-                      ;; the lambda for each row, at each of 1700 commands
-                      (alist-delete *command-functions* name)))
+                (cons (list name callable entry adopted)
+                      (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
           #t)
         #f)))
 
@@ -399,8 +363,7 @@
   (cond ((string? f) (if (command-function f) #t #f))
         ((symbol? f) (commandp (symbol->string f)))
         ((procedure? f)
-         (pair? (filter (lambda (r) (or (eq? (command-fn (car r)) f)
-                                        (and (procedure? (cadr r)) (eq? (cadr r) f))))
+         (pair? (filter (lambda (r) (or (eq? (cadr r) f) (eq? (caddr r) f)))
                         *command-functions*)))
         (else #f)))
 
@@ -414,14 +377,10 @@
          (fn0 (if spec0 (cadr rest) (car rest)))
          ;; a command defined again on the name's own callable keeps the
          ;; function it was made from, so a reload does not wrap it twice
-         ;; the row the command had, read here: its parts can name the
-         ;; closure in the command table, which this define replaces below
-         (last-row (assoc name *command-functions*))
-         (last-callable (and last-row (command--row-callable last-row)))
-         (last-adopted (and last-row (command--row-adopted last-row)))
-         (fn (if (and last-callable (eq? fn0 last-callable) last-adopted)
-                 last-adopted
-                 fn0))
+         (fn (let ((row (assoc name *command-functions*)))
+               (if (and row (eq? fn0 (cadr row)) (pair? (cdddr row)) (cadddr row))
+                   (cadddr row)
+                   fn0)))
          (opts (if spec0 (cddr rest) (cdr rest)))
          (modes (let ((m (memq 'modes opts))) (and m (pair? (cdr m)) (cadr m))))
          ;; 'show PROC: run from M-x, the command hands the function's
@@ -446,10 +405,9 @@
         (define-command--raw name entry))
     (when modes
       (set! *command-modes*
-            (cons (list name modes) (alist-delete *command-modes* name))))
+            (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
     (set! *command-generation* (+ *command-generation* 1))
-    (let ((bound (command--bind! name (command--callable name spec fn) entry fn
-                                 last-callable last-adopted)))
+    (let ((bound (command--bind! name (command--callable name spec fn) entry fn)))
       (catalog-register! 'command name doc
         'use (string-append "(run-command \"" name "\")")
         'spec (and spec (map (lambda (c) (if (procedure? c) 'list c)) spec))
@@ -472,22 +430,20 @@
 (define (call-interactively name) (run-command name))
 
 (define (undefine-command name)
-  ;; read the row before the command table drops the closure its parts name
-  (let* ((row (assoc name *command-functions*))
-         (callable (and row (command--row-callable row)))
-         (adopted (and row (command--row-adopted row)))
-         (sym (string->symbol name)))
-    (undefine-command--raw name)
-    (set! *command-generation* (+ *command-generation* 1))
-    (catalog-forget! 'command name)
-    ;; the function define-command bound goes with it; one the name held
-    ;; before, or got since, stays
-    (when (and callable (boundp sym) (eq? (symbol-value sym) callable))
-      (if adopted
-          (set-symbol-value! sym adopted)
-          (unbind-global! sym)))
+  (undefine-command--raw name)
+  (set! *command-generation* (+ *command-generation* 1))
+  (catalog-forget! 'command name)
+  ;; the function define-command bound goes with it; one the name held
+  ;; before, or got since, stays
+  (let ((row (assoc name *command-functions*))
+        (sym (string->symbol name)))
+    (when (and row (boundp sym) (eq? (symbol-value sym) (cadr row)))
+      (let ((adopted (and (pair? (cdddr row)) (cadddr row))))
+        (if adopted
+            (set-symbol-value! sym adopted)
+            (unbind-global! sym))))
     (set! *command-functions*
-          (alist-delete *command-functions* name)))
+          (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
   name)
 
 ;;; --- public API registry -----------------------------------------------------
@@ -1273,29 +1229,6 @@
 (define (run-hooks &rest hooks)
   (for-each (lambda (h) (run-hook-with-args h)) hooks))
 
-;;; after-init-hook: Emacs's hook of the same name. The Session runs it once
-;;; for each boot, after the packages and the user config load and the
-;;; interpreter is published. It also waits for the desktop restore of the
-;;; shown buffers, at most 30 seconds. Work that the boot does not need goes here:
-;;; a warm-up, a scan, a service. A function on the hook can call anything,
-;;; because every package is in.
-;;;
-;;; A file that loads after the boot finds *after-init-done* true. It then
-;;; does the work at once: (after-init 'FN) is both cases.
-;; a reload of this file keeps the flag: the boot is over only one time
-(define *after-init-done* (and (boundp '*after-init-done*) *after-init-done*))
-
-(define (run-after-init-hook!)
-  (unless *after-init-done*
-    (set! *after-init-done* #t)
-    (run-hooks 'after-init-hook)))
-
-(define (after-init fn)
-  (if *after-init-done*
-      (let ((p (hook--fn fn))) (when p (p)))
-      (add-hook! 'after-init-hook fn #t))
-  fn)
-
 ;; the first function that answers a true value ends the run
 (define (run-hook-with-args-until-success hook &rest args)
   (let loop ((fs (hook-functions hook)))
@@ -1363,8 +1296,6 @@
         (else (find pred (cdr lst)))))
 (public! 'find "(find PRED LST) — the first element of LST that PRED holds for, or #f")
 (catalog-meta! 'function "find" 'domain 'system 'effects '(pure))
-(public! 'any "(any PRED LST) — the first true value PRED gives for an element of LST, or #f")
-(catalog-meta! 'function "any" 'domain 'system 'effects '(pure))
 
 ;; A whole number from 0 up to N, not N. A generator seeded from the clock:
 ;; enough to pick a file or a row at random, not for secrets. The editor had
@@ -3152,9 +3083,9 @@
                     (lambda () (put initial)))))
     (set! *desktop-globals*
       (cons (list key get put reset)
-            (alist-delete *desktop-globals* key)))
+            (remove (lambda (e) (equal? (car e) key)) *desktop-globals*)))
     (when pending
-      (set! *desktop-pending* (alist-delete *desktop-pending* key))
+      (set! *desktop-pending* (remove (lambda (e) (equal? (car e) key)) *desktop-pending*))
       (put (cadr pending)))))
 
 ;; what the desktop writes
@@ -3357,7 +3288,7 @@
     (when e
       (set! *globalized-minor-modes*
         (cons (list global (nth 1 e) (nth 2 e) on?)
-              (alist-delete *globalized-minor-modes* global))))))
+              (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*))))))
 
 (define (globalized-minor-mode--apply! e buf)
   (let ((local (nth 1 e)) (eligible? (nth 2 e)))
@@ -3392,7 +3323,7 @@
 (define (define-globalized-minor-mode! global local eligible? &optional doc)
   (set! *globalized-minor-modes*
     (cons (list global local eligible? (globalized-minor-mode-on? global))
-          (alist-delete *globalized-minor-modes* global)))
+          (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*)))
   (define-command global (or doc (string-append "Toggle " local " in every buffer"))
     (lambda ()
       (if (globalized-minor-mode-on? global)
@@ -3447,7 +3378,7 @@
   (set-modeline-extra! (global-mode-string-segments)))
 
 (define (global-mode-string-set! key value)
-  (let ((rest (alist-delete *global-mode-string* key)))
+  (let ((rest (remove (lambda (e) (equal? (car e) key)) *global-mode-string*)))
     (set! *global-mode-string*
       (if (or (not value) (equal? value ""))
           rest
@@ -4453,7 +4384,7 @@
   (let ((old (assoc buf *font-lock-hooks*)))
     (when old
       (remove-on-change! (cadr old))
-      (set! *font-lock-hooks* (alist-delete *font-lock-hooks* buf)))
+      (set! *font-lock-hooks* (remove (lambda (e) (equal? (car e) buf)) *font-lock-hooks*)))
     (overlay-set! buf 'font-lock '())))
 
 (define-command "isearch-forward" "Do incremental search forward"
@@ -4595,7 +4526,7 @@
 ;; is not: no answer makes a .scm belong outside a Scheme root.
 (define (defwrite-rule! name reason confirmable? pred)
   (set! *write-rules*
-        (append (alist-delete *write-rules* name)
+        (append (remove (lambda (r) (equal? (car r) name)) *write-rules*)
                 (list (list name reason confirmable? pred))))
   name)
 
@@ -4700,55 +4631,6 @@
       (set-symbol-value! var (cons value cur)))
     (symbol-value var)))
 
-;;; --- load times ---------------------------------------------------------------
-;;; Every file the loader evaluates records its time, at boot and after
-;;; boot. The inclusive time contains the files this file loaded. The
-;;; exclusive time is the time of the forms of this file alone.
-
-(define *load-times* '())   ; ((FEATURE PATH INCLUSIVE-MS EXCLUSIVE-MS ORIGIN) ...), newest first
-(define *load-child-ms* 0)  ; the inclusive time of the files the current file loaded
-
-;; (load-time-note! FEATURE PATH MS ORIGIN OUTER) records one finished load.
-;; OUTER is the child time of the file that loaded it, before this load.
-(define (load-time-note! feature path ms origin outer)
-  (set! *load-times*
-        (cons (list feature path ms (max 0 (- ms *load-child-ms*)) origin) *load-times*))
-  (set! *load-child-ms* (+ outer ms)))
-
-;; THUNK loads PATH. The time is recorded when THUNK returns or raises.
-(define (load--timed feature path origin thunk)
-  (let ((t0 (monotonic-ms))
-        (outer *load-child-ms*))
-    (set! *load-child-ms* 0)
-    (unwind-protect
-      thunk
-      (lambda () (load-time-note! feature path (- (monotonic-ms) t0) origin outer)))))
-
-;; (load-times) answers the recorded loads, oldest first.
-(define (load-times) (reverse *load-times*))
-
-(define (load-times--sum rows origin)
-  (fold (lambda (acc r) (if (eq? (list-ref r 4) origin) (+ acc (list-ref r 3)) acc)) 0 rows))
-
-;; (load-times-report [N]) answers the totals for each origin and the N
-;; files with the largest exclusive time, as text.
-(define (load-times-report &optional n)
-  (let* ((rows (load-times))
-         ;; sort has no comparator: a negative key in front puts the largest first
-         (slow (map cadr (sort (map (lambda (r) (list (- (list-ref r 3)) r)) rows))))
-         (top (take slow (min (or n 15) (length slow)))))
-    (string-append
-      "load times: " (number->string (length rows)) " files, bundled "
-      (number->string (load-times--sum rows 'bundled)) "ms, user "
-      (number->string (load-times--sum rows 'user)) "ms\n"
-      (string-join
-        (map (lambda (r)
-               (string-append "  " (number->string (list-ref r 3)) "ms  ("
-                              (number->string (list-ref r 2)) "ms with its loads)  "
-                              (list-ref r 1)))
-             top)
-        "\n"))))
-
 ;; The user's config, in load order: saved customizations load last so
 ;; they win over init. Boot calls (boot-user-config!) once, after the
 ;; bundled init.scm. A file that is not there is skipped; a file that
@@ -4758,10 +4640,8 @@
 
 (define (boot-user-config!)
   (for-each (lambda (file)
-              (let ((path (string-append (compos-config-dir) "/" file)))
-                (when (file-exists? path)
-                  (load--timed (string->symbol (load--library-name file)) path 'user
-                               (lambda () (builtin-load file))))))
+              (when (file-exists? (string-append (compos-config-dir) "/" file))
+                (builtin-load file)))
             user-config-files)
   (origin! 'user))
 
@@ -4811,17 +4691,15 @@
       (set! *features-loading* (cons feature chain))
       ;; the stamps go back whether the file loads or raises: a file that
       ;; raised must not leave the loader naming it as the package
-      (let ((result (load--timed feature path (load--origin path)
+      (let ((result (unwind-protect
+                      (lambda () (builtin-load path))
                       (lambda ()
-                        (unwind-protect
-                          (lambda () (builtin-load path))
-                          (lambda ()
-                            (set! *features-loading* chain)
-                            (set! *loading-package* pkg)
-                            (set! *loading-namespace* ns)
-                            (set! *loading-origin* org)
-                            (set! *catalog-domain* dom)
-                            (set! *catalog-effects* eff)))))))
+                        (set! *features-loading* chain)
+                        (set! *loading-package* pkg)
+                        (set! *loading-namespace* ns)
+                        (set! *loading-origin* org)
+                        (set! *catalog-domain* dom)
+                        (set! *catalog-effects* eff)))))
         ;; the boot loader reports a file that did not load; a load after
         ;; boot raises instead, so the feature stays unprovided either way
         (unless (eq? result 'load-failed) (provide feature))
@@ -4846,7 +4724,7 @@
 (define (provide f)
   (unless (featurep f) (set! *features* (cons f *features*)))
   (let ((waiting (reverse (filter (lambda (e) (equal? (car e) f)) *after-load-thunks*))))
-    (set! *after-load-thunks* (alist-delete *after-load-thunks* f))
+    (set! *after-load-thunks* (remove (lambda (e) (equal? (car e) f)) *after-load-thunks*))
     (for-each (lambda (e) ((cadr e))) waiting))
   f)
 
@@ -4894,10 +4772,10 @@
 (define *autoloads* '())   ; ((NAME FILE) ...): NAME a symbol or a command name
 
 (define (autoload--note! name file)
-  (set! *autoloads* (alist-put *autoloads* name file)))
+  (set! *autoloads* (cons (list name file) (remove (lambda (e) (equal? (car e) name)) *autoloads*))))
 
 (define (autoload--forget! name)
-  (set! *autoloads* (alist-delete *autoloads* name)))
+  (set! *autoloads* (remove (lambda (e) (equal? (car e) name)) *autoloads*)))
 
 ;; the file an autoload stub would load for NAME, or #f when NAME is defined
 (define (autoload-file name)
@@ -6177,7 +6055,7 @@
 
 (define (command-modes! name modes)
   (set! *command-modes*
-        (alist-put *command-modes* name modes))
+        (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*)))
   (set! *command-generation* (+ *command-generation* 1))
   name)
 
@@ -7148,10 +7026,7 @@
 (global-set-key "M-v" "scroll-down-command")
 (global-set-key "<next>" "scroll-up-command")
 (global-set-key "<prior>" "scroll-down-command")
-;; C-l is the LLM prefix: C-l l changes this chat's model in a popup,
-;; C-l C-l opens the AI app: setup, prompts, connectors and local models.
-(global-set-key "C-l l" "vscode-llm")
-(global-set-key "C-l C-l" "ai")
+(global-set-key "C-l" "recenter-top-bottom")
 (global-set-key "C-M-i" "completion-at-point")
 (global-set-key "M-/" "completion-at-point")
 (global-set-key "C-M-f" "forward-sexp")
@@ -7199,6 +7074,7 @@
     ("=" "window-layout-halves")
     ("c" "window-layout-columns")
     ("+" "window-layout-two-chat")
+    ("f" "window-layout-free")
     ;; the arrows walk the stack of this pane
     ("<right>" "layout-forward")
     ("<left>" "layout-backward")))
@@ -7593,6 +7469,8 @@
 (public! 'run-hook-with-args-until-success "(run-hook-with-args-until-success 'name-hook ARG ...) — run until one answers a true value; that value")
 (public! 'run-hook-with-args-until-failure "(run-hook-with-args-until-failure 'name-hook ARG ...) — run until one answers #f; #t when none did")
 (public! 'hook-functions "(hook-functions 'name-hook) — the functions the hook runs here, local then global")
+(public! 'hook-keys "(hook-keys 'name-hook) — the keys of the keyed hook, oldest first")
+(catalog-meta! 'function "hook-keys" 'effects '(read))
 (public! 'registry-register! "(registry-register! TABLE NAME VALUE) — NAME holds VALUE in the table; the same NAME replaces in place, a new one goes last")
 (public! 'registry-lookup "(registry-lookup TABLE NAME [DEFAULT]) — the value under NAME, or DEFAULT")
 (public! 'registry-forget! "(registry-forget! TABLE NAME) — drop NAME from the table; #t when it was there")
@@ -7730,8 +7608,6 @@
 (effects! '(read))
 (public! 'featurep "(featurep F) — #t when the feature F is provided: its file loaded, or (provide 'F) ran")
 (public! 'locate-library "(locate-library NAME) — the file (load NAME) reads, or #f")
-(public! 'load-times "(load-times) — the files the loader evaluated, oldest first: (FEATURE PATH INCLUSIVE-MS EXCLUSIVE-MS ORIGIN)")
-(public! 'load-times-report "(load-times-report [N]) — the load time totals for each origin and the N slowest files, as text")
 (public! 'autoload-file "(autoload-file NAME) — the file the autoload stub under NAME would load, or #f when NAME is defined")
 (public! 'priv-path "(priv-path REL) — the absolute path of REL in the compos_core priv directory, symlinks resolved")
 (public! 'compos-priv-dir "(compos-priv-dir) — the bundled Scheme directory, the compos_core priv dir" 'files)
@@ -7741,7 +7617,6 @@
 (public! 'expand-path "(expand-path PATH) — expand PATH to an absolute path, against the home and working directories." 'files)
 (public! 'file-realpath "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal." 'files)
 (effects! '(write))
-(public! 'after-init "(after-init 'FN) — call FN once the boot is complete: on after-init-hook during the boot, at once after it")
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
 (public! 'with-eval-after-load "(with-eval-after-load 'F THUNK) — run THUNK now when F is provided, or when it is")
@@ -7943,7 +7818,7 @@
 (effects! '(read))
 (editor--public-primitives!
   '(autoload-cookies desktop-file-globals directory-entries file-directory?
-    file-glob file-mtime file-stat file-writable? list-dir read-file-source
+    file-mtime file-stat file-writable? list-dir read-file-source
     local-directory-entries local-file-stat local-list-dir git-prefix))
 (domain! 'windows)
 (effects! '(read))

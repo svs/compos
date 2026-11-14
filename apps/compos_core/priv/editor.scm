@@ -7367,6 +7367,8 @@
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
 (public! 'compos-temp-dir "(compos-temp-dir) — the folder for files one call writes and forgets: $TMPDIR/compos, which the OS clears")
 (public! 'compos-temp-file "(compos-temp-file NAME) — the path of NAME in the temp folder, the folder made")
+(public! 'compos-cache-dir "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete")
+(public! 'compos-cache-dir-set! "(compos-cache-dir-set! DIR) — keep every cache in DIR from now on, Scheme and Elixir alike; #f goes back to the default")
 ;; the buffer-name grammar: *strong* ~dim~ `mono` :icon:, and \x for a literal x
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"

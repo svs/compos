@@ -417,6 +417,52 @@
               (unless (equal? name "")
                 (chat-preset-off! buf (string->symbol name)))))))))
 
+;;; A preset for one use: it goes on now and off again when the next turn
+;;; of the chat ends. The chat keeps (NAME . TURNS) in chat-presets-once,
+;;; TURNS being its user turns when the preset went on, so a turn already
+;;; in flight does not use up the one use. A preset that was on before
+;;; stays on.
+
+(define (chat-preset-once! buf name)
+  (if (member name (chat-presets-of buf))
+      (message (string-append "Preset " (symbol->string name) " is already on"))
+      (begin
+        (chat-preset-on! buf name)
+        (buffer-set-local! buf 'chat-presets-once
+          (cons (cons name (chat-turn-count buf))
+                (or (buffer-local-value 'chat-presets-once buf) '())))
+        (message (string-append "Preset " (symbol->string name) " on for the next turn")))))
+
+(define (chat-presets-once-expire! buf)
+  (let ((once (or (buffer-local-value 'chat-presets-once buf) '()))
+        (turns (chat-turn-count buf)))
+    (unless (null? once)
+      (let ((used (filter (lambda (e) (> turns (cdr e))) once)))
+        (buffer-set-local! buf 'chat-presets-once
+          (filter (lambda (e) (<= turns (cdr e))) once))
+        (for-each (lambda (e)
+                    (when (member (car e) (chat-presets-of buf))
+                      (chat-preset-off! buf (car e))))
+                  used)))))
+
+(add-hook! (list 'agent-turn-end "preset-once")
+  (lambda (slug stop-reason ok?)
+    (let ((buf (agent-buf slug)))
+      (when (and buf (buffer-known? buf))
+        (chat-presets-once-expire! buf)))))
+
+(define-command "llm-set-preset-once" "Enable a tool preset for the next turn of this LLM session only"
+  (lambda ()
+    (let ((buf (llm-preset-target)))
+      (if (not buf)
+          (message "No LLM session here — enable llm-mode first")
+          (minibuffer-read "Set LLM preset once: "
+            (filter (lambda (c) (not (member (string->symbol (car c)) (chat-presets-of buf))))
+                    (chat-preset-candidates buf))
+            (lambda (name)
+              (unless (equal? name "")
+                (chat-preset-once! buf (string->symbol name)))))))))
+
 ;;; --- calling a tool -----------------------------------------------------------
 ;;; The chat tool loop calls MCP tools on its own, off this process. Every
 ;;; other caller — a command, a hook, an agent through the compos proxy —

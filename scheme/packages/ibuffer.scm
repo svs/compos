@@ -120,6 +120,7 @@
 ;;; A kind is (NAME PLIST). The plist holds fns of one row:
 ;;;   'when?     (b) -> #t            this kind owns the row
 ;;;   'dot       (b) -> CELL          the one-character state column
+;;;   'icon      (b) -> string        the one-glyph icon column
 ;;;   'name      (b) -> (DIR BASE)    the name, its dim head and its base
 ;;;   'size      (b) -> number or #f  what the size column reads
 ;;;   'label     (b) -> string        the mode column, and the mode grouping key
@@ -447,7 +448,8 @@
           (set! *ibuffer-title-memo* (cons (list b title) *ibuffer-title-memo*))
           title))))
 
-(define (ibuffer-row-icon b) (if (buffer-known? b) (buffer-icon b) ""))
+(define (ibuffer-buffer-icon b) (if (buffer-known? b) (buffer-icon b) ""))
+(define (ibuffer-row-icon b) (ibuffer-ask b 'icon ibuffer-buffer-icon))
 
 (define (ibuffer-row-directory b)
   (let ((p (if (buffer-known? b) (buffer-path b) b)))
@@ -3076,7 +3078,7 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-set-grouping! "(ibuffer-set-grouping! MODE [BUF]) — section the table by 'group, 'mode, or 'directory")
 (public! 'ibuffer-toggle-fold! "(ibuffer-toggle-fold! KEY [BUF]) — fold or unfold the section KEY names")
 (public! 'ibuffer-age-label "(ibuffer-age-label SECONDS) — \"now\", \"40s\", \"5m\", \"2h\", \"3d\", or \"\" for #f")
-(public! 'ibuffer-kind! "(ibuffer-kind! NAME PLIST) — register a row kind: 'when? 'dot 'name 'size 'label 'last 'match 'face 'modified? 'parent fns of a row; a row follows its listed parent, indented")
+(public! 'ibuffer-kind! "(ibuffer-kind! NAME PLIST) — register a row kind: 'when? 'dot 'icon 'name 'size 'label 'last 'match 'face 'modified? 'parent fns of a row; a row follows its listed parent, indented")
 (public! 'ibuffer-scope! "(ibuffer-scope! NAME THUNK) — register a named scope; a view's 'ibuffer-scope local names it")
 (public! 'ibuffer-view! "(ibuffer-view! BUF . DEFAULTS) — register a table buffer with its default 'sort, 'grouping, and 'footer fn")
 (public! 'ibuffer-mode-opts "(ibuffer-mode-opts OVERRIDES) — the template's list-mode options with OVERRIDES; 'keys replace the template's by key, and add the rest")

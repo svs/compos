@@ -280,7 +280,7 @@
 
 ;; a chat needing a reply wears its alert glyph in the name itself, so it
 ;; survives even a narrow table that drops the dot and label columns
-;; a chat that works a task wears the task's mark before its name: an
+;; a chat that works a task wears the task's mark in the icon column: an
 ;; open task a hollow diamond, a closed one a tick. One read of the todo
 ;; files serves a whole draw; the index is read again after a second.
 (define *chats-todo-index* (list #f '()))
@@ -307,12 +307,12 @@
           (set! *chats-todo-index* (list now idx))
           idx))))
 
-(define (chats-todo-glyph b)
+(define (chats-todo-icon b)
   (let* ((id (buffer-local-value 'chat-id b))
          (hit (and id (assoc id (chats-todo-index)))))
-    (cond ((not hit) "")
-          ((cdr hit) "◇ ")
-          (else "✓ "))))
+    (cond ((not hit) (buffer-icon b))
+          ((cdr hit) "◇")
+          (else "✓"))))
 
 (define (chats-alert-name b)
   (if (equal? (chat-row-status b) 'needs_attention)
@@ -341,7 +341,8 @@
                (let ((s (chat-row-status b)))
                  (list (if (equal? s 'needs_attention) "!" "●")
                        (chats-state-face s))))
-        'name (lambda (b) (list (chats-todo-glyph b) (chats-alert-name b)))
+        'icon (lambda (b) (chats-todo-icon b))
+        'name (lambda (b) (list "" (chats-alert-name b)))
         ;; by name, never by value: a reload redefines the function and a
         ;; kind registered with the old one keeps calling it
         'size (lambda (b) (chats-filesize b))

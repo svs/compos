@@ -503,6 +503,8 @@
 
 (catalog-meta! 'command "chat-retitle-at-point" 'domain 'chat 'effects '(write external spend))
 (catalog-meta! 'command "chat-goto-todo-at-point" 'domain 'chat 'effects '(write display))
+;; ibuffer lists chats too, with the same mark: t there goes to the task
+(define-key "ibuffer-mode-map" "t" "chat-goto-todo-at-point")
 
 ;; A chat's subject tells the chats of one group apart: the goal chats
 ;; from the editor chats, say. It rides in the .chat header beside the
@@ -563,11 +565,13 @@
 
 (define-command "chat-goto-todo-at-point" "Show the task the chat at point works as its own page; with several, ask which"
   (lambda ()
-    (let ((chat (agents-current-buf)))
+    ;; the row at point of the list this runs in: the chat list or ibuffer
+    (let* ((row (list-current (current-buffer)))
+           (chat (and (string? row) (buffer-known? row) (chat-buffer? row) row)))
       (if (not chat)
           (message "No chat at point")
           (with-current-buffer chat (lambda () (run-command "chat-goto-todo"))))))
-  'modes '(chat-list-mode))
+  'modes '(chat-list-mode ibuffer-mode))
 
 (define-command "chat-set-subject-at-point" "Give the chat at point a subject"
   (lambda ()

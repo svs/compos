@@ -1295,3 +1295,5 @@
 (catalog-meta! 'function "panes-focus-window" 'effects '(pure))
 (public! 'panes-pane-ids "(panes-pane-ids LAYOUT) -> (ID ...): the ids of LAYOUT's panes, left to right; pure")
 (catalog-meta! 'function "panes-pane-ids" 'effects '(pure))
+(public! 'panes-window-mode "(panes-window-mode LAYOUT KEY) -> MODE | #f: the mode of window KEY; a window with no mode or fundamental-mode takes the mode-name of the buffer it shows")
+(catalog-meta! 'function "panes-window-mode" 'effects '(read))

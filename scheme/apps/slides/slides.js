@@ -207,7 +207,9 @@ function parseDeck(src) {
   // a line of ??? starts the slide's speaker notes; they run to the slide's end
   const flush = () => {
     const body = noteAt < 0 ? cur : cur.slice(0, noteAt), notes = noteAt < 0 ? [] : cur.slice(noteAt + 1);
-    if (cur.join('').trim()) slides.push({ text: body.join('\n'), notes: notes.join('\n').trim(), line: from });
+    // <!-- hidden: yes --> leaves the slide in the deck but out of the show
+    const hidden = /^(yes|true|on|1|)$/i.test((directives(body.join('\n'))[1].hidden ?? 'no').trim());
+    if (cur.join('').trim() && !hidden) slides.push({ text: body.join('\n'), notes: notes.join('\n').trim(), line: from });
     noteAt = -1;
   };
   for (let k = start; k < lines.length; k++) {

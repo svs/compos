@@ -39,6 +39,10 @@
   "The words one decide call judges."
   'group 'anon 'type 'integer)
 
+(defcustom 'anon-refresh-delay 2000
+  "Milliseconds anon waits after the last answer of decide before it repaints."
+  'group 'anon 'type 'integer)
+
 (defcustom 'anon-max-bytes 2000000
   "A buffer past this size is redacted but never sent to decide."
   'group 'anon 'type 'integer)
@@ -64,6 +68,9 @@
 
 ;; cached words a paint used since the last prune, most recent first
 (define *anon-touched* '())
+
+;; common words the answers of decide unbarred since the last repaint
+(define *anon-unbarred* '())
 
 (effects! '(pure))
 
@@ -639,8 +646,22 @@ from the buffer, so the redaction must reach that text through the tree"
   (customize-save! 'anon-common-words anon-common-words)
   (customize-save! 'anon-handles anon-handles))
 
+;; An answer of decide does not repaint. A repaint scans every shown view,
+;; and a full screen sends many batches. One repaint for each batch held the
+;; :ui lane for seconds at a time. The unbarred words wait in
+;; *anon-unbarred*, and one repaint shows them when the answers stop for
+;; anon-refresh-delay.
+(define (anon--note-unbarred! words)
+  (set! *anon-unbarred* (append words *anon-unbarred*))
+  (debounce! "anon:refresh" anon-refresh-delay anon--refresh-unbarred! #f))
+
+(define (anon--refresh-unbarred! _)
+  (let ((words *anon-unbarred*))
+    (set! *anon-unbarred* '())
+    (when (pair? words) (anon--refresh! words))))
+
 (define (anon--learn! answers asked)
-  "record decide's ANSWERS for ASKED, a list of (KEY WORD), and repaint"
+  "record decide's ANSWERS for ASKED, a list of (KEY WORD), and schedule one repaint"
   (let loop ((rows asked) (proper '()) (common '()))
     (if (pair? rows)
         (let* ((hit (assoc (car (car rows)) answers))
@@ -655,7 +676,7 @@ from the buffer, so the redaction must reach that text through the tree"
             (customize-set! 'anon-proper-nouns (append proper anon-proper-nouns)))
           (when (pair? common)
             (customize-set! 'anon-common-words (append common anon-common-words))
-            (anon--refresh! common))
+            (anon--note-unbarred! common))
           (when (or (pair? proper) (pair? common))
             (debounce! "anon:prune" 2000 anon--prune! #f))))))
 

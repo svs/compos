@@ -189,10 +189,11 @@
     ("M-<down>" "slides-next-slide")
     ("M-<up>" "slides-previous-slide")
     ("M-S-<down>" "slides-select-next")
-    ("M-S-<up>" "slides-select-previous")))
+    ("M-S-<up>" "slides-select-previous")
+    ("C-c C-h" "slides-hide")))
 
 (mode-doc! "slides-deck-mode"
-  "A slide deck. `M-<up>` and `M-<down>` move by slide, and `M-S-<up>` and `M-S-<down>` select a slide and grow the selection by one slide each time. Once presented, moving point shows the slide at point, and a save redraws the slides. `C-c C-n` and `C-c C-p` step the slides forward and back, with their transitions. `C-c C-s` presents the deck again. `M-x slides-deck-mode` unlinks it.")
+  "A slide deck. `M-<up>` and `M-<down>` move by slide, and `M-S-<up>` and `M-S-<down>` select a slide and grow the selection by one slide each time. Once presented, moving point shows the slide at point, and a save redraws the slides. `C-c C-n` and `C-c C-p` step the slides forward and back, with their transitions. `C-c C-s` presents the deck again. `C-c C-h` hides the slide at point from the show, or shows it again. `M-x slides-deck-mode` unlinks it.")
 
 ;; a .slides file is a deck from the moment it opens
 (define (slides--on-visit!)
@@ -309,6 +310,44 @@
 (define-command "slides-previous-slide" "Move to the previous slide of the deck"
   (lambda () (slides--goto-slide! 'prev))
   'modes '(slides-deck-mode))
+
+;; A slide with <!-- hidden: yes --> stays in the deck and out of the show.
+;; The toggle adds that line at the top of the slide at POS, or takes the
+;; slide's hidden line out; it answers #t when the slide is now hidden.
+(define (slides--toggle-hidden! buf pos)
+  (let* ((spans (slides--spans buf))
+         (span (or (let loop ((s spans))
+                     (cond ((null? s) #f) ((< pos (cadr (car s))) (car s)) (else (loop (cdr s)))))
+                   (and (pair? spans) (car (reverse spans))))))
+    (and span
+         (let* ((text (buffer-text buf))
+                (at (string-index text "<!-- hidden:" (car span))))
+           (if (and at (< at (cadr span)))
+               (let* ((close (string-index text "-->" at))
+                      (end (+ close 3))
+                      (end (if (equal? (slides--char buf end) "\n") (+ end 1) end)))
+                 (buffer-replace-range! buf at (- end at) "")
+                 #f)
+               (begin
+                 (buffer-replace-range! buf (caddr span) 0 "<!-- hidden: yes -->\n")
+                 #t))))))
+
+(define-command "slides-hide" "Hide the slide at point from the show, or show it again"
+  (lambda ()
+    (let* ((here (current-buffer))
+           (presenter? (buffer-local-value 'slides-source here))
+           (deck (if presenter? (slides--deck here) here))
+           (pos (if presenter?
+                    (let* ((at (buffer-local-value 'slides-at here))
+                           (line (+ 1 (or (and (pair? at) (plist-get at 'line)) 0))))
+                      (and deck (with-current-buffer deck (lambda () (line-start-position line)))))
+                    (point))))
+      (if (not deck)
+          (message "The deck of these slides is gone")
+          (let ((hidden (slides--toggle-hidden! deck pos)))
+            (when presenter? (slides-present! deck))
+            (message (if hidden "Slide hidden" "Slide shown"))))))
+  'modes '(slides-deck-mode slides-mode))
 
 ;; The region grows a whole slide at a time. With no region the mark goes
 ;; to the far side of the slide at point, so the first press takes it all.
@@ -552,12 +591,13 @@
 (mode-keys! "slides-mode"
   (append '(("g" "slides-reload")
             ("e" "slides-edit")
+            ("h" "slides-hide")
             ("q" "quit-window"))
           (map (lambda (entry) (list (car entry) "slides-page-key"))
                slides--page-keys)))
 
 (mode-doc! "slides-mode"
-  "A deck presented. The page has the keyboard: `→` or `SPC` steps on, `←` steps back, `o` shows every slide, `f` gives the slides the whole frame and `f` again restores the layout, `b` blacks out, and `?` lists the keys. `C-g` gives the keyboard back; then `e` shows the deck at this slide, `g` redraws, and `C-c C-a` stops the page.")
+  "A deck presented. The page has the keyboard: `→` or `SPC` steps on, `←` steps back, `o` shows every slide, `f` gives the slides the whole frame and `f` again restores the layout, `b` blacks out, and `?` lists the keys. `C-g` gives the keyboard back; then `e` shows the deck at this slide, `h` hides this slide, `g` redraws, and `C-c C-a` stops the page.")
 
 ;; A deck is a Morg document: a .slides file opens in morg-mode, so it
 ;; folds, links and pastes images like any other Markdown file.

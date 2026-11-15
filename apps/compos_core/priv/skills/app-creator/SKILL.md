@@ -322,6 +322,25 @@ The page declares its anchors with `anchor-set!` after every draw and turns on `
 
 Agents read a page the same way: `(buffer-outline BUF)` first, then `(buffer-section BUF NAME)`. A page with no anchors is a wall to them too.
 
+### Imenu is chosen, not collected
+
+`s-i` (imenu) is how a reader gets to a thing in this buffer by its name. Without a decision it gets an index of whatever the blocks happen to carry. A page then lists every part with kind `""` and the part's whole body run together as its doc, title line included. A listing lists every row as `entry`, named by its first two cells stuck together (`Udit Rai  3`), with every other cell joined by `·` and no labels. Nobody can choose from that.
+
+Decide the index for the listing and for each page kind, the same way you decide the columns:
+
+1. **Entries are what a reader would type to get there.** On a person's page that is the parts (Numbers, Follow-ups, Fundraisers) and each fundraiser by its name. On a month's page it is the parts and each executive. On a listing it is the rows by the name the reader knows: the person or the month, never a cell of figures.
+2. **Every entry has a KIND, the noun of the thing**: `part`, `executive`, `fundraiser`, `lead`. Kinds become imenu's tabs, so choose kinds a reader would want to filter by, and never leave KIND empty. Name the tab imenu opens on with `(buffer-set-local! BUF 'imenu-tab KIND)`.
+3. **DOC is one line to choose by**: the figure or the state, labelled (`₹61,000 collected · 3 started`). Never the part's body, never bare numbers.
+4. **Leave out**: the action bar, the tabs, the page title repeated as an entry, a part that says `reading…` or is empty, numbered rows (`Mode 1`), and anything listed twice.
+
+How:
+
+- The whole index, for a listing or a page: `(buffer-set-local! BUF 'imenu-index-function 'APP--imenu)`, where `(APP--imenu BUF)` answers rows `(LINE KIND NAME DOC)`. It wins over every default, and it is the only way to drop a part. Read the lines from the page's anchors (`anchor-find`, `anchor-start`, `line-number-at-pos`) or the listing's rows; never count them by hand.
+- One component's entry: `'imenu-name NAME` on its props, `'anchor-data (list 'kind KIND 'doc DOC)` for its kind and doc, and `'imenu-key` for a letter that jumps to it.
+- `anchor-page!` names a part after its title when you give it nothing better. That is a fallback, not a decision.
+
+Check it as the reader will: `(imenu-rows BUF)` for the listing and for one page of each kind. Every row must have a kind, a name a person would type, and a one-line doc. Anything you would not jump to has to go.
+
 ### The cache is the product
 
 - One detail buffer per row keeps what it last read. Opening it draws that at once; a read under a minute old stands, an older one rereads behind it.

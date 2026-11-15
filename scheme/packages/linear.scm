@@ -549,8 +549,8 @@
                     (member (plist-get t 'state) '("done" "review")))
            (todo-source-returned! (plist-get t 'id) (string-append actor " moved " ident " back to " name " in Linear.") "linear"))))
       ((and (equal? type "Comment") (equal? action "create") (pair? d))
-       (let ((body (linear--s (plist-get d 'body)))
-             (on (lambda (ident)
+       (let* ((body (linear--s (plist-get d 'body)))
+              (on (lambda (ident)
                    (let ((t (and (string? ident) (todo-of-source (string-append "linear:" ident)))))
                      (when t
                        (report-errors "linear"

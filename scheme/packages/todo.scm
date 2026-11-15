@@ -150,6 +150,10 @@
   (or (equal? from to) (and (member to (todo-moves from)) #t)))
 
 (public! 'todo-moves "(todo-moves STATE) — the states a task in STATE may move to")
+(public! 'todo-of-source "(todo-of-source KEY) — the task filed from the source KEY, open or closed, or #f")
+(public! 'todo-source-returned! "(todo-source-returned! ID REASON [WHO]) — the task's source came back: open it again and wake its chat")
+(public! 'todo-source-page-register! "(todo-source-page-register! PREFIX FN) — a source key starting PREFIX shows on the page (FN KEY)")
+(public! 'todo-source-rounds "(todo-source-rounds TASK) — how many times the task's source came back")
 (public! 'todo-can-move? "(todo-can-move? FROM TO) — whether a task may go from state FROM to state TO; staying put is always fine")
 
 (define (todo--check-move! t to)
@@ -806,6 +810,56 @@
                             'log (if (todo--blank? reason) "reopened" (string-append "reopened: " reason))
                             'by (or who todo-user))))))
 
+;; A task's source is where the org tracks the work: "linear:SMA-109", a mail,
+;; an ATS card. The task is our share of it, and a source has one task for
+;; good: when the source comes back after our share closed, the same task
+;; opens again and its chat wakes. A kind of source names the page that
+;; shows a key, so a page's own chat can take the task.
+(define *todo-source-pages* '())
+
+(define (todo-source-page-register! prefix fn)
+  "(todo-source-page-register! PREFIX FN) — a source key starting PREFIX shows on the page (FN KEY)"
+  (set! *todo-source-pages*
+        (cons (list prefix fn) (filter (lambda (e) (not (equal? (car e) prefix))) *todo-source-pages*)))
+  prefix)
+
+(define (todo--source-page t)
+  ;; the open page that shows T's source, or #f
+  (let ((key (plist-get t 'source)))
+    (and (string? key)
+         (let ((hit (find (lambda (e) (string-prefix? (car e) key)) *todo-source-pages*)))
+           (and hit (let ((p ((cadr hit) key))) (and (string? p) (buffer-exists? p) p)))))))
+
+(define (todo-of-source key)
+  "(todo-of-source KEY) — the task filed from the source KEY, open or closed, the newest of several, or #f"
+  (and (string? key)
+       (let ((ts (todo-list (list 'source key 'all #t))))
+         (and (pair? ts)
+              (fold (lambda (t best) (if (string>? (or (plist-get t 'created) "") (or (plist-get best 'created) "")) t best))
+                    (car ts) (cdr ts))))))
+
+(define (todo-source-returned! id reason &optional who)
+  "(todo-source-returned! ID REASON [WHO]) — the task's source came back for REASON. A done, reviewed or waiting task goes to doing, and its chat wakes with REASON, or a new chat takes it; a cancelled task stays, an open one only logs REASON. Answers the chat, or #f"
+  (let* ((t (todo--must id)) (state (plist-get t 'state)) (who (or who todo-user)))
+    (cond
+      ((equal? state "cancelled")
+       (todo-log id (string-append "back from its source, stays cancelled: " reason) who)
+       #f)
+      ((member state '("done" "review" "waiting"))
+       (when (equal? state "done") (todo-reopen id "its source came back" who))
+       (todo-update id (list 'state "doing" 'log (string-append "back from its source: " reason) 'by who))
+       (let* ((t (todo-get id))
+              (text (string-append "Your todo " id " is open again. " reason))
+              (live (todo--chat-of t))
+              (chat (or live (todo-assign-chat! id (plist-get t 'group)))))
+         (when chat (agent-wake! chat "todo" text))
+         chat))
+      (else (todo-log id (string-append "from its source: " reason) who) #f))))
+
+(define (todo-source-rounds t)
+  "(todo-source-rounds TASK) — how many times the task's source came back"
+  (length (filter (lambda (l) (string-contains? l "back from its source:")) (or (plist-get t 'log) '()))))
+
 ;;; --- the list ----------------------------------------------------------------
 
 (category! 'writing)
@@ -1343,8 +1397,14 @@
          (own (or (todo--kept-live t g)
                   (let ((a (plist-get t 'assignee)))
                     (and (string? a) (string-prefix? "chat:" a) (todo--live-chat a)))))
-         (held (and own (not (and caller (equal? (subagent-slug own) caller)))
-                    (todo--chat-current? own g) own)))
+         ;; a task with no chat of its own, whose source page has its own chat
+         ;; open, goes to that chat: one chat works an issue
+         (adopted (and (not own)
+                       (let ((p (todo--source-page t)))
+                         (and p (let ((c (llm-mode--companion-existing p))) (and (string? c) (chat-buffer? c) c))))))
+         (held (or (and own (not (and caller (equal? (subagent-slug own) caller)))
+                        (todo--chat-current? own g) own)
+                   adopted)))
     (let* ((got (assign-chat! #f g
                   (lambda (chat)
                     ;; the caller hears when the new chat stops
@@ -1356,6 +1416,14 @@
                     (todo--brief (todo-get id) (chat-stable-id! chat)))
                   held))
            (chat (car got)))
+      ;; the source page's chat takes the task as a new chat would: the
+      ;; assignee, and the brief
+      (when (and adopted (not (cadr got)) (equal? chat adopted))
+        (todo-update id (list 'assignee (chat-stable-id! chat)
+                              'state (if (member (plist-get t 'state) '("inbox" "todo")) "doing" (plist-get t 'state))
+                              'log "the source page's own chat takes the task"
+                              'by (or who todo-user)))
+        (agent-continue! chat (todo--brief (todo-get id) (chat-stable-id! chat))))
       (when (cadr got)
         ;; a new chat takes no window until someone asks for it
         (buffer-context-only! chat)

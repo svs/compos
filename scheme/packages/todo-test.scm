@@ -227,3 +227,59 @@
               (chat-quiet--list!)
               (check-true! (buffer-context-only? by-who) "WHO agent:...: hidden after the command")
               (buffer-kill! by-who))))))))
+
+(deftest 'todo-source-a-returning-source-opens-the-same-task-again
+  "a done task whose source comes back is the same task, in doing, its chat woken with the reason, one round counted"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (todo-update id (list 'source "zz:ISSUE-1" 'state "doing"))
+        (check-equal! (plist-get (todo-of-source "zz:ISSUE-1") 'id) id "the source finds its task")
+        (todo-done id "zz finished" "agent:zz")
+        (check-equal! (plist-get (todo-of-source "zz:ISSUE-1") 'id) id "a closed task is still the source's")
+        (let ((woken '()))
+          (with-stubs (list (list 'todo-assign-chat! (lambda (i gg . r) "zz-chat"))
+                            (list 'agent-wake! (lambda (c src text) (set! woken (cons (list c text) woken)))))
+            (lambda () (check-equal! (todo-source-returned! id "zz sent back" "zz") "zz-chat" "answers the chat that has it")))
+          (check-equal! (plist-get (todo-get id) 'state) "doing" "the task is open again, in doing")
+          (check-equal! (todo-source-rounds (todo-get id)) 1 "one round back")
+          (check-equal! (map car woken) '("zz-chat") "its chat wakes")
+          (check-true! (string-contains? (cadr (car woken)) "zz sent back") "with the reason"))))))
+
+(deftest 'todo-source-an-open-task-logs-and-a-cancelled-one-stays
+  "a source that speaks while the task is open goes to the log; a cancelled task stays cancelled"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (todo-update id (list 'source "zz:ISSUE-2"))
+        (let ((before (plist-get (todo-get id) 'state)))
+          (check-false! (todo-source-returned! id "zz a note" "zz") "an open task wakes nothing")
+          (check-equal! (plist-get (todo-get id) 'state) before "and keeps its state"))
+        (check-true! (any (lambda (l) (string-contains? l "from its source: zz a note")) (plist-get (todo-get id) 'log)) "the log has it")
+        (todo-update id (list 'state "cancelled"))
+        (check-false! (todo-source-returned! id "zz back" "zz") "a cancelled task wakes nothing")
+        (check-equal! (plist-get (todo-get id) 'state) "cancelled" "and stays cancelled")))))
+
+(deftest 'todo-assign-chat-gives-the-task-to-its-source-page-chat
+  "a task with no chat, whose source page has its own chat open, goes to that chat with the brief: one chat an issue"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (let ((page "*zz-source-page*") (chat "zz-source-page-chat") (old *todo-source-pages*) (sent '()))
+          (buffer-create page)
+          (buffer-create chat)
+          (chat-set-group! chat g)
+          (todo-update id (list 'source "zzpage:1"))
+          (todo-source-page-register! "zzpage:" (lambda (k) page))
+          (unwind-protect
+            (lambda ()
+              (with-stubs (list (list 'llm-mode--companion-existing (lambda (b) (and (equal? b page) chat)))
+                                (list 'chat-buffer? (lambda (b) (equal? b chat)))
+                                (list 'agent-continue! (lambda (c text) (set! sent (cons c sent)))))
+                (lambda () (check-equal! (todo-assign-chat! id g) chat "the page's chat takes the task")))
+              (check-equal! sent (list chat) "and gets the brief")
+              (check-equal! (plist-get (todo-get id) 'assignee) (chat-stable-id! chat) "it is the assignee")
+              (check-equal! (plist-get (todo-get id) 'state) "doing" "and the task is in doing"))
+            (lambda ()
+              (set! *todo-source-pages* old)
+              (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b))) (list page chat)))))))))

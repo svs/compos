@@ -150,6 +150,123 @@
                                     (list-tail a 3)))
                           (anchor-blocks blocks)))))
 
+;;; --- a page of blocks that scrolls by itself -------------------------------
+;; A page drawn as blocks scrolls on the keys only as far as its text goes:
+;; C-v, C-n and point travel over the buffer's lines, and the browser maps
+;; a line to the block that names it. A page whose text is a short summary
+;; therefore never scrolls. anchor-page gives every part of the page a line
+;; and an anchor, and every row inside a part one more line: a table row, a
+;; stat, a list row, a key-value row. Controls (the action bar, the tabs,
+;; the keys bar) get none: a key already reaches them.
+
+(effects! '(pure))
+
+(define anchor-page-control-tags '("c-toolbar" "c-keys-bar" "c-tabs"))
+
+(define (anchor--page-control? blk)
+  (and (pair? blk) (member (plist-get blk 'tag) anchor-page-control-tags) #t))
+
+(define (anchor--page-row? blk)
+  (and (pair? blk)
+       (let ((tag (plist-get blk 'tag)) (cls (or (plist-get blk 'class) "")))
+         (or (and (equal? tag "c-tr") (not (string-contains? cls "c-thead")))
+             (member tag '("c-stat" "c-row" "c-li"))
+             (string-contains? cls "c-kv-row")))
+       #t))
+
+;; the words a block shows, children included, as one line
+(define (anchor--page-words blk)
+  (cond
+    ((string? blk) blk)
+    ((not (pair? blk)) "")
+    (else
+     (let* ((own (let ((t (plist-get blk 'text))) (if (string? t) (list t) '())))
+            (segs (map (lambda (sg) (if (and (pair? sg) (pair? (cdr sg)) (string? (cadr sg))) (cadr sg) ""))
+                       (let ((s (plist-get blk 'segs))) (if (list? s) s '()))))
+            (kids (map anchor--page-words (let ((c (plist-get blk 'children))) (if (list? c) c '())))))
+       (string-join (filter (lambda (s) (not (equal? (string-trim s) ""))) (append own segs kids)) "  ")))))
+
+(define (anchor--page-line s)
+  (let ((one (string-trim (re-replace "\\s+" (or s "") " "))))
+    (if (> (string-length one) 200) (substring one 0 200) one)))
+
+;; a part's name: what the component calls itself, else its first words
+(define (anchor--page-title blk)
+  (let ((n (or (plist-get blk 'imenu-name) (plist-get blk 'anchor-name))))
+    (if (and (string? n) (not (equal? n "")))
+        n
+        (let ((w (anchor--page-line (anchor--page-words blk))))
+          (cond ((equal? w "") "part")
+                ((> (string-length w) 40) (substring w 0 40))
+                (else w))))))
+
+;; (anchor-page BLOCKS) -> (TEXT BLOCKS): the page's text, one line a part
+;; and one a row, and BLOCKS with each part a stop and each row a knot
+(define (anchor-page blocks)
+  (let* ((lines '())
+         (names '())
+         (line! (lambda (s) (set! lines (cons (anchor--page-line s) lines)) (length lines)))
+         (unique! (lambda (n)
+                    (let loop ((k 1))
+                      (let ((c (if (= k 1) n (string-append n " " (number->string k)))))
+                        (if (member c names) (loop (+ k 1)) (begin (set! names (cons c names)) c))))))
+         ;; left to right, so the lines come in page order
+         (each (lambda (f xs) (let loop ((xs xs) (acc '())) (if (null? xs) (reverse acc) (loop (cdr xs) (cons (f (car xs)) acc))))))
+         (rows #f)
+         (part #f))
+    (set! rows
+      (lambda (blk)
+        (cond ((not (pair? blk)) blk)
+              ((anchor--page-row? blk)
+               (let ((n (line! (anchor--page-words blk)))) (append (list 'lines (list n n)) blk)))
+              ((list? (plist-get blk 'children))
+               (append (list 'children (each rows (plist-get blk 'children))) blk))
+              (else blk))))
+    (set! part
+      (lambda (blk)
+        (if (or (not (pair? blk)) (anchor--page-control? blk))
+            blk
+            (let* ((title (anchor--page-title blk))
+                   (first (line! title))
+                   (inner (if (anchor--page-row? blk)
+                              blk
+                              (if (list? (plist-get blk 'children))
+                                  (append (list 'children (each rows (plist-get blk 'children))) blk)
+                                  blk)))
+                   (last (length lines)))
+              (append (list 'anchor-name (if (plist-get blk 'anchor-name) (plist-get blk 'anchor-name) (unique! title))
+                            'lines (list first last))
+                      inner)))))
+    (let* ((wrapper (and (= (length blocks) 1) (pair? (car blocks))
+                         (list? (plist-get (car blocks) 'children))
+                         (not (plist-get (car blocks) 'imenu-name))
+                         (not (plist-get (car blocks) 'text))
+                         (car blocks)))
+           (drawn (if wrapper
+                      (list (append (list 'children (each part (plist-get wrapper 'children))) wrapper))
+                      (each part blocks))))
+      (list (string-join (reverse lines) "\n") drawn))))
+
+(effects! '(write))
+
+;; draw BLOCKS as BUF's page: its text one line a part and a row, its parts
+;; anchors, anchor-mode on, so C-v, C-n, TAB and M-<down> move through it.
+;; Point keeps its line across a redraw, so an answer landing does not
+;; throw the reader back to the top.
+(define (anchor-page! buf blocks)
+  (let* ((page (anchor-page blocks))
+         (text (car page))
+         (blks (cadr page))
+         (old (and (buffer-exists? buf) (buffer-local-value 'render-blocks buf) (buffer-point buf))))
+    (buffer-set-text! buf text #t)
+    (buffer-set-local! buf 'render-mode "blocks")
+    (buffer-set-local! buf 'render-blocks blks)
+    (anchor-set-blocks! buf text blks)
+    (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))
+    (when (and old (> old 0)) (buffer-goto! buf (min old (string-byte-length text))))
+    (anchor-sync! buf)
+    page))
+
 ;;; --- the keymap at point ---------------------------------------------------
 
 ;; The anchor at point owns the keys, and the highlight says which anchor
@@ -675,6 +792,9 @@
 (public! 'anchor-clear! "(anchor-clear! BUF) — BUF has no anchors")
 (public! 'anchor-blocks "(anchor-blocks BLOCKS) — the stops a block tree names: (NAME FIRST-LINE LAST-LINE [KEYMAP DATA]) for each block with anchor-name and lines")
 (public! 'anchor-set-blocks! "(anchor-set-blocks! BUF TEXT BLOCKS) — set BUF's anchors from the stops BLOCKS name, TEXT being BUF's text")
+(public! 'anchor-page "(anchor-page BLOCKS) — (TEXT BLOCKS) for a page drawn as blocks: one text line per part and per row inside it (table row, stat, list or key-value row), each part an anchor stop and each row a scroll knot; controls get no line")
+(public! 'anchor-page! "(anchor-page! BUF BLOCKS) — draw BLOCKS as BUF's page so it scrolls and walks by itself: sets its text from anchor-page, render-mode blocks, its anchors and anchor-mode; point keeps its place across redraws")
+(public! 'anchor-page-control-tags "anchor-page-control-tags — block tags anchor-page leaves without a line (action bars, tabs, keys bars)")
 (public! 'anchor-list "(anchor-list BUF) — BUF's anchors, in the order they appear")
 (public! 'anchor-at "(anchor-at BUF POS) — the innermost anchor holding byte POS, or #f")
 (public! 'anchor-find "(anchor-find BUF NAME) — BUF's anchor called NAME, or #f")

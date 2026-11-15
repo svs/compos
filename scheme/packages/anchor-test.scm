@@ -151,3 +151,34 @@
       (disable-minor-mode! buf "anchor-mode")
       (check-equal! (buffer-local-value 'imenu-index-function buf) #f "off again")
       (buffer-kill! buf))))
+
+;; a page of blocks gets a line a part and a row, so the keys scroll it
+(define (t--anchor-page-blocks)
+  (list (component 'ui/section (list 'title "Hello"))
+        (component 'ui/actions (list 'actions (list (list "x" "Refresh" "g"))))
+        (component 'ui/card (list 'title "Numbers" 'open? #t
+                                  'body (list (component 'ui/stats (list 'stats (list (list 'label "a" 'value "1") (list 'label "b" 'value "2")))))))
+        (component 'ui/card (list 'title "Table" 'open? #t
+                                  'body (list (component 'ui/table (list 'columns (list (list "n") (list "v" 'right))
+                                                                         'rows (list (list "x" "1") (list "y" "2")))))))))
+
+(deftest 'anchor-page-lines-every-part-and-row
+  "each part is a line and a stop, each row a line, and the action bar neither"
+  (lambda ()
+    (let ((p (anchor-page (t--anchor-page-blocks))))
+      (check-equal! (car p) "Hello\nNumbers\na 1\nb 2\nTable\nx 1\ny 2" "one line a part and a row, the header row left out")
+      (check-equal! (map (lambda (a) (list (car a) (cadr a) (caddr a))) (anchor-blocks (cadr p)))
+                    '(("Hello" 1 1) ("Numbers" 2 4) ("Table" 5 7))
+                    "the parts are stops over their own rows"))))
+
+(deftest 'anchor-page!-keeps-point-across-redraws
+  "a redraw leaves point where the reader put it"
+  (lambda ()
+    (buffer-create *t-anchor-buf*)
+    (anchor-page! *t-anchor-buf* (t--anchor-page-blocks))
+    (check-true! (minor-mode-on? *t-anchor-buf* "anchor-mode") "anchor-mode is on")
+    (check-equal! (length (anchor-list *t-anchor-buf*)) 3 "three stops")
+    (buffer-goto! *t-anchor-buf* 20)
+    (anchor-page! *t-anchor-buf* (t--anchor-page-blocks))
+    (check-equal! (buffer-point *t-anchor-buf*) 20 "point stays")
+    (buffer-kill! *t-anchor-buf*)))

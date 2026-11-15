@@ -3397,6 +3397,7 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (public! 'list-unmark-key! "(list-unmark-key! BUF KEY) - drop the mark on the row whose key is KEY" 'ui)
 (effects! '(read))
 (public! 'list-marks "(list-marks BUF) - a list's marks, a list of (KEY CHAR)" 'ui)
+(public! 'list-grid? "(list-grid? BUF) - #t when list BUF draws its rows as a grid of cells: one line of columns, no plain, template or field view" 'ui)
 (public! 'list-row-cells "(list-row-cells BUF ROW [CTX]) - ROW's cells in list BUF, one list of cells per line of the row" 'ui)
 (effects! '(write))
 (catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))

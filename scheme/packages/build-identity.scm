@@ -19,6 +19,7 @@
     (and (file-exists? p)
          (let ((forms (scheme-read (read-file p))))
            (and (pair? forms) (car forms))))))
+(public! 'build-info "(build-info) — the release's build plist from priv/build-info.scm: version, commit, built; #f in a checkout" 'system)
 
 (define (build-release-version)
   "the version a release runs, from its build info or its compos_core directory"

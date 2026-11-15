@@ -68,8 +68,7 @@ defmodule Compos.LoadTest do
     # commands reach M-x through their ;;;###autoload cookies, which the
     # harvest at the end of init.scm installs.
     opt_in =
-      ~w(spreadsheet amazon doom-lite movie title training
-         ats chart decide fast-code fast-code-eval housekeeping onboarding site-app)
+      ~w(title housekeeping)
       |> Enum.map(&(&1 <> ".scm"))
 
     # an app nobody loads must still be reachable: a command means a cookie.
@@ -84,7 +83,7 @@ defmodule Compos.LoadTest do
              "#{app} defines commands but marks none with ;;;###autoload"
     end
 
-    expected = packages -- (opt_in ++ ["calendar/calendar.scm"])
+    expected = packages -- opt_in
     assert Enum.sort(loaded -- expected) == [], "loaded, but not a stock package"
     assert Enum.sort(expected -- loaded) == [], "a stock package init.scm does not reach: #{inspect(Enum.sort(expected -- loaded))}"
     assert Enum.sort(opt_in -- packages) == [], "an opt-in app is missing from scheme/packages and scheme/apps"
@@ -248,7 +247,7 @@ defmodule Compos.LoadTest do
 
     assert {:ok, names} = Session.eval("(map car (reload--files))")
     assert names =~ "editor"
-    assert names =~ "annotate"
+    assert names =~ "tramp"
     assert names =~ "zz-user-pkg"
 
     # choose one through the real prompt

@@ -400,7 +400,9 @@
                   (string-append l "\t0\t")))))))
 
 (define-home-migration! 'web-visited-to-history "2026-10-16"
+  ;; the history is the web package's (compos-web); a home without it has none
   (lambda ()
+   (when (boundp '*web-visited-file*)
     (let* ((new *web-visited-file*)
            (old (string-append (parent-dir new) "/web-visited"))
            (text (or (read-file new) (read-file old))))
@@ -410,7 +412,7 @@
             (string-join
               (filter string? (map migration--web-history-line (string-split text "\n")))
               "\n")
-            "\n"))))))
+            "\n")))))))
 
 ;;; --- the annotations ---------------------------------------------------------------
 
@@ -422,7 +424,8 @@
   (lambda ()
     (let ((dir (or *migration-annotations-dir*
                    (string-append (compos-home) "/annotations"))))
-      (when (file-exists? dir)
+      ;; the store is the annotate package's (compos-annotate)
+      (when (and (file-exists? dir) (boundp 'annotate--store-file))
         (for-each
           (lambda (name)
             (report-errors "migration: move an annotation file"

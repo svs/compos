@@ -84,7 +84,7 @@
          (effective (if (equal? backend 'auto) (decide--first-live) backend))
          (t0 (monotonic-ms)))
     (cond
-      ((equal? effective 'laya)
+      ((and (equal? effective 'laya) (featurep 'laya))
        (laya-predict state questions #f
          (lambda (reply)
            (k (if (and reply (plist-get reply 'ok))
@@ -112,7 +112,7 @@
           ((equal? (car bs) 'jev)
            (if (decide-jev-ready?) 'jev (loop (cdr bs))))
           ((equal? (car bs) 'laya)
-           (if (laya-available?) 'laya (loop (cdr bs))))
+           (if (and (featurep 'laya) (laya-available?)) 'laya (loop (cdr bs))))
           ((equal? (car bs) 'haiku)
            (if (llm-key "anthropic") 'haiku (loop (cdr bs))))
           (else (loop (cdr bs))))))

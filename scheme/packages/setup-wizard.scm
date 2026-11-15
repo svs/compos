@@ -271,7 +271,7 @@
 ;; the decision model: decide asks the first backend that is ready
 (define (setup-wizard--decide-ready? b)
   (cond ((eq? b 'jev) (decide-jev-ready?))
-        ((eq? b 'laya) (laya-available?))
+        ((eq? b 'laya) (and (featurep 'laya) (laya-available?)))
         (else #f)))
 
 (define (setup-wizard--decide-card b)
@@ -295,11 +295,12 @@
                                         (if ready? "Change the key" "Add a key")))))
                      (else
                       (list "laya" "Answers on this machine, in a local daemon"
-                            (cond ((laya-running?) "running")
+                            (cond ((not (featurep 'laya)) "the laya package is not installed")
+                                  ((laya-running?) "running")
                                   (ready? "installed, starts on the first question")
                                   ((not (laya--python)) "needs Python 3.10 or newer")
                                   (else "not installed: pip install laya"))
-                            (if (and (not ready?) (laya--python))
+                            (if (and (featurep 'laya) (not ready?) (laya--python))
                                 '(("wizard:laya-install" "Install")) '()))))))
     (component 'wizard/choice
       (list 'title (list-ref spec 0)
@@ -771,7 +772,7 @@
      #t)
     ((equal? id "wizard:learn") (setup-open-learning-space!) #t)
     ((equal? id "wizard:connectors") (run-command "setup-wizard-connectors") #t)
-    ((equal? id "wizard:rescan") (laya-rescan!) (setup-wizard--ollama-check!) (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
+    ((equal? id "wizard:rescan") (when (featurep 'laya) (laya-rescan!)) (setup-wizard--ollama-check!) (setup-wizard-redraw! buf) (message "Setup: scanned again") #t)
     (else (setup-model-card-click! buf id))))
 
 (add-hook! (list 'block-click 'setup-wizard)
@@ -882,7 +883,7 @@
   'modes '(setup-wizard-mode))
 
 (define-command "setup-wizard-rescan" "Scan this machine for models again"
-  (lambda () (laya-rescan!) (setup-wizard-redraw! (current-buffer)))
+  (lambda () (when (featurep 'laya) (laya-rescan!)) (setup-wizard-redraw! (current-buffer)))
   'modes '(setup-wizard-mode))
 
 (define-command "setup-wizard-decide-test" "Ask the decision model in use a test question"

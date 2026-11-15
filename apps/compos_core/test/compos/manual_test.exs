@@ -11,7 +11,7 @@ defmodule Compos.ManualTest do
   alias Compos.Core.Session
 
   # the apps the stock boot leaves out; the suite loads them (test_helper.exs)
-  @opt_in ~w(spreadsheet amazon doom-lite movie title training decide)
+  @opt_in ~w(title decide)
 
   @tag timeout: 300_000
   test "the manual renders from a stock boot" do
@@ -24,12 +24,7 @@ defmodule Compos.ManualTest do
 
     exclude = Enum.map_join(@opt_in, " ", &inspect/1)
 
-    # training is the one opt-in app that rebinds a global key; the manual
-    # shows the stock binding, and the suite gets training's back after
-    {:ok, _} =
-      Session.eval(~s{(begin (global-set-key "C-x k" "kill-buffer")
-                             (write-manual! #{inspect(dir)} (list #{exclude}))
-                             (global-set-key "C-x k" "training-kill-buffer"))})
+    {:ok, _} = Session.eval(~s{(write-manual! #{inspect(dir)} (list #{exclude}))})
 
     howto = File.read!(Path.join(dir, "HOW-DO-I.md"))
     commands = File.read!(Path.join(dir, "COMMANDS.md"))

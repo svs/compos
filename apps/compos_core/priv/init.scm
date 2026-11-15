@@ -18,10 +18,10 @@
 ;;; The stock boot is the editor. An app ships in scheme/apps, which is
 ;;; nothing special: one more load-path entry, so it loads on its first use: the ;;;###autoload cookies
 ;;; in its file name the commands M-x shows before the file loads, and the
-;;; harvest at the end of this file installs them (amazon, doom-lite, movie,
-;;; spreadsheet, title, training). A user init may still (load) one outright.
-;;; A community package lives in its own repo and loads with use-package.
-;;; The test suite loads them all (test/test_helper.exs).
+;;; harvest at the end of this file installs them (title). A user init may
+;;; still (load) one outright.
+;;; A community package lives in its own repo and loads with use-package
+;;; from ~/.compos/init.scm, after this file.
 ;;;
 ;;; Order: a line here is a manifest line, not a proof. A package that
 ;;; needs another at load time says (require 'name) at its top, and a
@@ -50,11 +50,8 @@
 (require 'isearch)
 (require 'capf)
 (require 'visual-line)
-(require 'predict)
 (require 'collect)
 (require 'comint)
-(require 'herdr-agent)
-(require 'herdr-claude)
 (require 'advice)
 (require 'custom)
 ;; the settings of the windows: bound before any package reads one
@@ -82,14 +79,9 @@
 (require 'palette)
 
 (require 'anchor)
-(require 'agenda)
 ;; the turn machine every agent thread steps (Compos.Core.Agent)
 (require 'agent-machine)
 (require 'agent)
-;; the connector packages register themselves with define-connector!
-(require 'connector-gemini "connectors/gemini.scm")
-(require 'connector-kimi "connectors/kimi.scm")
-(require 'annotate)
 (require 'appearance)
 (require 'autorevert)
 (require 'bookmark)
@@ -105,13 +97,8 @@
 ;; TypeSafe JEV, the first decision backend; the setup wizard takes its key
 (require 'jev)
 (require 'diff-mode)
-(require 'doppler)
-(require 'endpoint)
-(require 'irc)
 (require 'evil)
-(require 'feeds)
 (require 'git)
-(require 'google)
 ;; the window model: a row of panes, each a stack of windows, each a stack
 ;; of buffers, and the policy that says where a buffer opens. groups.scm
 ;; keeps one per group, so it comes first
@@ -166,36 +153,22 @@
 (require 'watchers)
 (require 'app-registry)
 (require 'ai)
-(require 'notifications)
 (require 'jj)
 (require 'keys)
 (require 'keymaps)
-;; the on-device decision model: it registers its daemon in the endpoint
-;; registry, which models.scm reads to show and start it
-(require 'laya)
 (require 'lsp)
 (require 'mcp-hub)
 (require 'mcp)
-;; the architecture canvas: one draw tool on the compos MCP, routed to a
-;; backend (tldraw Desktop by default); it posts through http.scm
-(require 'draw)
 (require 'models)
-;; the on-device tool caller: it fetches its engine and weights on the
-;; first call, so a machine that never asks it pays nothing
-(require 'needle)
-(require 'whatsapp)
 (require 'morg-kinds "morg/morg-kinds.scm")
 (require 'morg)
 (require 'markdown-mode)
 (require 'cua)
 (require 'vscode)
 (require 'app-watch)
-(require 'notmuch)
 (require 'occur)
-(require 'org)
 (require 'package)
 (require 'paredit)
-(require 'pdf)
 (require 'project)
 (require 'messages)
 (require 'provenance)
@@ -206,7 +179,6 @@
 ;; popups after popper.el; its keys take the backtick family from groups.scm
 (require 'popper)
 (require 'scratch)
-(require 'sentry)
 (require 'setup)
 ;; the first-run wizard: the model step, then the guide
 (require 'setup-wizard)
@@ -215,8 +187,6 @@
 (require 'llm-config)
 ;; the direct model lane's tool gate and retry rule: llm.ex asks them by name
 (require 'llm-gate)
-;; the Do prompt reads the whole command catalog: it loads after the apps
-(require 'do)
 ;; the agents' shell commands in the sandbox: it reads the chat's llm-config
 ;; and its group, and the shell gate in decide.scm asks it
 (require 'agent-sandbox)
@@ -230,36 +200,21 @@
 ;; agents' listeners: a WhatsApp reply or a mail wakes the chat that waits on
 ;; it; it loads at boot so the saved listeners subscribe again after a restart
 (require 'agent-listen)
-;; an orchestrator chat runs a todo tree; it advises the subagent turn end
-(require 'orchestrate)
-(require 'sockets)
 (require 'switch)
-(require 'handheld)
 (require 'telemetry)
 ;; the model rounds and tool calls of an ACP or Codex turn, for chat-perf
 (require 'agent-perf)
-;; what worked last time, in front of a prompt like it (loads fast-code)
-(require 'recall)
 (require 'perf)
 ;; which compos is running: rel VERSION · COMMIT, or dev · jj · git
 (require 'build-identity)
 ;; M-x release-build-and-install: build, install as the stable compos, restart it
 (require 'release)
 (require 'profile)
-(require 'racket)
 (require 'test)
 (require 'treesit)
-(require 'web)
-(require 'xslt)
-(require 'web-server)
-(require 'webhooks)
-(require 'anon)
 (require 'worktrees)
-(require 'writing)
 (require 'dismiss)
 (require 'content-scale)
-(require 'ghost-rewrite)
-(require 'screenshot)
 
 ;; the run and result blocks live with the other blocks and lean on
 ;; block.scm; they load here because their kind registrations need the

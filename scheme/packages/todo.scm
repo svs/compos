@@ -493,15 +493,18 @@
 
 ;; the agenda reads every project's todos.md; a new project joins it here
 (define (todo--agenda-sync!)
-  (let* ((mine (map abbreviate-file-name (todo--files)))
-         (others (filter (lambda (f) (let ((p (expand-path f)))
-                                       (not (or (member p (todo--files))
-                                                (and (string-suffix? "todos.md" p) (not (file-exists? p)))))))
-                         morg-agenda-files))
-         (want (append others mine)))
-    (unless (equal? want morg-agenda-files)
-      (customize-save! 'morg-agenda-files want))
-    want))
+  ;; the agenda is a package (compos-agenda); without it there is no list to keep
+  (if (not (boundp 'morg-agenda-files))
+      '()
+      (let* ((mine (map abbreviate-file-name (todo--files)))
+             (others (filter (lambda (f) (let ((p (expand-path f)))
+                                           (not (or (member p (todo--files))
+                                                    (and (string-suffix? "todos.md" p) (not (file-exists? p)))))))
+                             morg-agenda-files))
+             (want (append others mine)))
+        (unless (equal? want morg-agenda-files)
+          (customize-save! 'morg-agenda-files want))
+        want)))
 
 ;;; --- the API: reading ------------------------------------------------------
 

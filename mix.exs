@@ -85,7 +85,7 @@ defmodule Compos.MixProject do
   defp deps do
     [
       # single-binary packaging; needs zig + xz on the build machine
-      {:burrito, "~> 1.5.0", runtime: false}
+      {:burrito, "~> 1.6.0", runtime: false}
     ]
   end
 end

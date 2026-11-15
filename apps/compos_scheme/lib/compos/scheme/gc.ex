@@ -27,6 +27,10 @@ defmodule Compos.Scheme.GC do
   alias Compos.Scheme
   alias Compos.Scheme.Env
 
+  # the interpreter has no deps: telemetry fires only when the
+  # host application brings it
+  @compile {:no_warn_undefined, {:telemetry, :execute, 3}}
+
   @doc "Drop every frame not reachable from the global frame or `roots`."
   def sweep(%Scheme{store: store, global: global} = interp, roots) do
     case Env.begin_gc(store) do
@@ -47,8 +51,6 @@ defmodule Compos.Scheme.GC do
 
           ms = System.monotonic_time(:millisecond) - t0
 
-          # the interpreter has no deps: telemetry fires only when the
-          # host application brings it
           if Code.ensure_loaded?(:telemetry) do
             :telemetry.execute(
               [:compos, :scheme, :gc],

@@ -579,8 +579,13 @@
 
 (define (window-set-buffer! win buf)
   "(window-set-buffer! WIN BUF) -> #t: WIN shows BUF without being selected; the buffer list and WIN's history record it"
+  ;; a buffer on screen is no context-only buffer: promote it first, else
+  ;; the panes door skips it (fill-candidate?) and the model never learns
+  ;; of the show, so the next draw hides BUF behind WIN's own buffer.
   ;; outside a draw the panes model places BUF first: a buffer of another
   ;; mode goes to its own window, and the show lands there, not on WIN
+  (when (and (string? buf) (buffer-known? buf) (boundp 'buffer-promote!))
+    (buffer-promote! buf))
   (let* ((win (or (and (boundp 'panes--door?) (panes--door?) (panes--show-follows! win buf))
                   win))
          (before (window--before win))

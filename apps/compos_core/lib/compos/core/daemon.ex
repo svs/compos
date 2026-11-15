@@ -367,7 +367,7 @@ defmodule Compos.Core.Daemon do
       "while kill -0 #{pid} 2>/dev/null; do sleep 0.1; done; " <>
         "unset $(env | awk -F= '/^(RELEASE_|__BURRITO|BINDIR=|ROOTDIR=|EMU=|PROGNAME=)/{print $1}'); " <>
         @raise_fd_limit <>
-        "exec env COMPOS_HOME=#{shq(home)} #{shq(bin)} >> #{shq(log)} 2>&1"
+        "exec env COMPOS_HOME=#{shq(home)} #{shq(bin)} --no-halt >> #{shq(log)} 2>&1"
 
     "nohup /bin/sh -c #{shq(relaunch)} </dev/null >/dev/null 2>&1 &"
   end

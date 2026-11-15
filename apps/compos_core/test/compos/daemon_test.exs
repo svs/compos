@@ -36,6 +36,7 @@ defmodule Compos.DaemonTest do
 
     assert script =~ "kill -0 42"
     assert script =~ "compos stable"
+    assert script =~ "--no-halt"
     assert script =~ "daemon.log"
     assert script =~ "RELEASE_"
     refute script =~ "mix run"

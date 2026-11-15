@@ -33,7 +33,9 @@ config :compos_ui, app_port: 4005
 # Dormant buffers remain durable and in history; only their live processes
 # are released. Zero disables idle eviction.
 config :compos_core, buffer_idle_timeout_ms: 24 * 60 * 60 * 1_000
-config :compos_core, daemon_registry_path: Path.expand("~/.local/state/compos/daemons.json")
+# daemon_registry_path defaults at runtime to Compos.Core.machine_state_dir()/daemons.json.
+# Never expand ~ here: config.exs is evaluated at build time, so a release
+# would carry the build machine's home (/home/runner on CI).
 
 # One HTTP/2 connection carries every round of a turn. Under HTTP/1 the
 # editor opened a new connection for each round and paid the TLS handshake

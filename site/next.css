@@ -109,6 +109,7 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .row { display: grid; grid-template-columns: 0px minmax(0, 1fr) auto; column-gap: 0px; padding: 3px 6px; opacity: 0; transform: translateY(5px); transition-property: opacity, transform, background, padding, column-gap, grid-template-columns; transition-duration: .4s, .4s, .3s, .6s, .6s, .6s; transition-delay: 0s; }
 .at-2 .row { opacity: 1; transform: none; transition-delay: calc(var(--i) * 80ms + .7s), calc(var(--i) * 80ms + .7s), 0s, 0s, 0s, 0s; }
 .row .av { grid-row: 1 / 3; width: 0; height: 28px; border-radius: 50%; object-fit: cover; align-self: center; opacity: 0; box-shadow: 0 0 0 2px rgba(159, 176, 234, .25); transition: width .6s, opacity .6s; }
+.row span.av { display: grid; place-items: center; overflow: hidden; background: var(--night-sel); color: var(--namber); font-size: 9.5px; }
 .row .nm { color: var(--nink); overflow: hidden; text-overflow: ellipsis; }
 .row .fl { color: var(--nmuted); text-align: right; font-size: 10.5px; }
 .row .hd { grid-column: 2; color: var(--nmuted); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; }
@@ -150,6 +151,16 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .you::before { content: 'YOU'; font-size: 9px; letter-spacing: .2em; color: var(--nmuted); margin-right: 10px; }
 .step { font-family: var(--mono); font-size: 11px; color: var(--nmuted); }
 .step i { display: inline-block; width: 6px; height: 6px; background: var(--ngreen); margin-right: 8px; vertical-align: 1px; }
+.ping { border-left: 2px solid var(--namber); padding: 4px 10px; font-family: var(--mono); font-size: 11.5px; color: var(--nink); }
+.ping::before { content: attr(data-src); display: block; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--namber); margin-bottom: 2px; }
+.fm-note.ping-m { color: var(--namber); padding: 0 6px; border-radius: 2px; animation: ping-flash 2.4s ease-out both; }
+@keyframes ping-flash {
+  0% { opacity: 0; background: var(--namber); color: var(--night); }
+  8%, 22% { opacity: 1; background: var(--namber); color: var(--night); }
+  30% { background: transparent; color: var(--namber); }
+  38%, 52% { background: var(--namber); color: var(--night); }
+  100% { background: transparent; color: var(--namber); }
+}
 .say { color: var(--nink-2); }
 .say code { font-family: var(--mono); font-size: 12px; color: var(--nink); }
 .f-input { border-top: 1px solid var(--nrule); padding: 8px 10px; color: var(--nmuted); font-size: 10px; letter-spacing: .1em; display: flex; gap: 10px; align-items: center; }
@@ -313,7 +324,7 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 /* who */
 .who-intro { margin: 0 0 44px; max-width: 34ch; font-weight: 300; font-size: clamp(26px, 2.8vw, 38px); line-height: 1.25; letter-spacing: -.015em; text-wrap: pretty; }
 .who-intro em { color: var(--muted); }
-.who-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; border-top: 1px solid var(--edge); padding-top: 28px; }
+.who-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; border-top: 1px solid var(--edge); padding-top: 28px; }
 .who-grid h3 { margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--leaf); font-weight: 500; }
 .who-grid p { margin: 12px 0 0; font-size: 17px; line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
 
@@ -416,3 +427,21 @@ footer { border-top: 1px solid var(--rule); }
 :root[data-theme=dark] .plate img { border-color: #302b23; }
 .theme { all: unset; cursor: pointer; font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
 .theme:hover { color: var(--ink); }
+
+.handled { list-style: none; margin: 28px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); border-top: 1px solid var(--rule); }
+.handled li { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px 18px 0; border-bottom: 1px solid var(--rule); }
+.handled b { font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); }
+.handled b::before { content: '\2713'; color: var(--verm); margin-right: 8px; }
+.handled span { color: var(--muted); font-size: 15px; line-height: 1.45; }
+
+/* hero: rolling audience word */
+.roll { display: inline-block; height: 1.15em; line-height: 1.15em; overflow: hidden; vertical-align: bottom; white-space: nowrap; }
+.roll-in { display: flex; flex-direction: column; animation: roll 7.5s cubic-bezier(.7,0,.3,1) infinite; }
+.roll-in > span { display: block; height: 1.15em; }
+@keyframes roll {
+  0%, 28%   { transform: translateY(0); }
+  33%, 61%  { transform: translateY(-1.15em); }
+  66%, 94%  { transform: translateY(-2.3em); }
+  100%      { transform: translateY(-3.45em); }
+}
+@media (prefers-reduced-motion: reduce) { .roll-in { animation: none; } }

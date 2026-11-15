@@ -37,7 +37,7 @@
   function scheduleGallery() {
     clearTimeout(galleryTimer);
     galleryTimer = null;
-    if (!gallery || tabs.length < 2 || galleryPaused || !galleryVisible || document.hidden) return;
+    if (!gallery || tabs.length < 2 || galleryPaused || gallery.hasAttribute('data-hold') || !galleryVisible || document.hidden) return;
     galleryTimer = setTimeout(function () {
       pick(tabs[(galleryIndex + 1) % tabs.length], false, 1);
     }, 6000);
@@ -132,8 +132,8 @@
   if (!film || !ctl) return;
   var playBtn = document.getElementById('film-play');
   var steps = ctl.querySelectorAll('.stepb');
-  var DUR = [0, 5600, 5000, 9800, 5400, 5400];
-  var ECHO = ['', 'Ready.', 'instagram search - 12 creators', 'outreach-mode is new - creator cards', 'Arjun Nair booked by agent - 2 changes recorded', 'outreach-mode kept - ready for the next launch'];
+  var DUR = [0, 5600, 5000, 9800, 7800, 5400];
+  var ECHO = ['', 'Ready.', 'postgres + imap connected - 46 holds', 'customs-mode is new - holds by days at port', '9 refiled - sms + webhook handled while you were away', 'customs-mode kept - runs every morning'];
   var scene = 1, timers = [], playing = !reduce, visible = false;
   var msgs = film.querySelectorAll('.msg');
   // keep each typed line's words before any render blanks it
@@ -188,8 +188,9 @@
     film.className = cls;
     film.dataset.scene = s;
     echo.textContent = ECHO[s];
-    note.textContent = s >= 4 ? '1 booked' : '';
-    status.textContent = s >= 4 ? 'booked' : 'shortlisted';
+    note.textContent = s >= 4 ? '9 refiled' : '';
+    note.classList.remove('ping-m');
+    status.textContent = s >= 4 ? 'refiled' : 'held';
     btnA.classList.remove('press');
     btnR.classList.remove('press');
     msgs.forEach(function (m) {
@@ -204,12 +205,13 @@
       }
     });
     if (!instant && s === 3) {
-      later(4400, function () { btnA.classList.add('press'); echo.textContent = 'RET - Arjun Nair'; });
+      later(4400, function () { btnA.classList.add('press'); echo.textContent = 'RET - Asha Pharma'; });
       later(5100, function () { btnA.classList.remove('press'); });
     }
     if (!instant && s === 4) {
       later(1900, fly);
       later(2300, function () { btnR.classList.add('press'); });
+      later(5000, function () { note.textContent = 'webhook \u00b7 INV-8840 posted for KST-24902'; note.classList.add('ping-m'); });
     }
     steps.forEach(function (b) { b.removeAttribute('aria-current'); });
     void ctl.offsetWidth;

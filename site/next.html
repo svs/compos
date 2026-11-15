@@ -1,369 +1,383 @@
 <!DOCTYPE html>
 <html lang='en'>
-<head>
-<meta charset='utf-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>Compos - the hackable harness for operators</title>
-<meta name='description' content='Compos is an agentic platform for operators, with a focus on aesthetics, extensibility, and control. Ask your agent for the app you need, and keep making it yours.'>
-<link rel='canonical' href='https://compos.svs.io/'>
-<meta property='og:type' content='website'>
-<meta property='og:url' content='https://compos.svs.io/'>
-<meta property='og:site_name' content='Compos'>
-<meta property='og:title' content='Compos - the hackable harness for operators'>
-<meta property='og:description' content='Ask your agent for the app you need. Use it together, change it as you work, and keep making it yours.'>
-<meta property='og:image' content='https://compos.svs.io/images/compos-logo.png'>
-<meta property='og:image:width' content='560'>
-<meta property='og:image:height' content='560'>
-<meta property='og:image:alt' content='The Compos logo.'>
-<meta name='twitter:card' content='summary'>
-<meta name='twitter:title' content='Compos - the hackable harness for operators'>
-<meta name='twitter:description' content='Ask your agent for the app you need. Use it together, change it as you work, and keep making it yours.'>
-<meta name='twitter:image' content='https://compos.svs.io/images/compos-logo.png'>
-<meta name='theme-color' content='#fdf3dc'>
-<link rel='icon' type='image/png' href='images/compos-logo-clear.png'>
-<link rel='preconnect' href='https://fonts.googleapis.com'>
-<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
-<link href='https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Spectral:ital,wght@0,300;0,400;1,300;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap' rel='stylesheet'>
-<link rel='preload' as='image' href='images/smartbrew-frame.webp'>
-<link rel='stylesheet' href='next.css?v=caption-2'>
-<script>document.documentElement.classList.add('js')</script>
-</head>
-<body>
-<a class='skip' href='#main'>skip to content</a>
-
-<header class='top'>
-  <div class='top-in'>
-    <a href='#main' class='brand'><img src='images/compos-logo-clear.png' width='22' height='22' alt=''><span>Compos</span></a>
-    <span class='spacer'></span>
-    <nav class='nav' aria-label='Sections'>
-      <a href='#how'>how it works</a>
-      <a href='#apps'>apps</a>
-      <a href='#context'>context</a>
-      <a href='#features'>features</a>
-      <a href='https://github.com/svs/compos/tree/main/docs/manual'>manual</a>
-    </nav>
-    <a href='https://github.com/svs/compos' class='btn-line'>github</a>
-  </div>
-</header>
-
-<main id='main'>
-
-<section class='hero' aria-labelledby='hero-h'>
-  <div class='hero-art gal' id='apps' aria-label='Apps built in Compos'>
-  <div class='gal-tabs' role='tablist' aria-label='Apps built in Compos'>
-    <button role='tab' id='tab-work' aria-controls='pl-work' aria-selected='true'>for work</button>
-    <button role='tab' id='tab-fire' aria-controls='pl-fire' aria-selected='false' tabindex='-1'>for prod</button>
-    <button role='tab' id='tab-love' aria-controls='pl-love' aria-selected='false' tabindex='-1'>for love</button>
-  </div>
-  <div class='slides'>
-  <figure class='plate on' id='pl-work' role='tabpanel' aria-labelledby='tab-work'>
-    <img class='for-light' src='images/outreach-light.webp' width='2560' height='1246' fetchpriority='high' alt='Compos with influencer outreach for a coffee launch: creators by stage, one creator in detail with her next step and conversation, and the campaign chat with the agent.'>
-    <img class='for-dark' src='images/outreach-dark.webp' width='2560' height='1246' loading='lazy' alt='Compos with influencer outreach for a coffee launch: creators by stage, one creator in detail with her next step and conversation, and the campaign chat with the agent.'>
-    <figcaption><b>Your outreach, your way.</b><span>Manage any workflow with beautiful custom software.</span></figcaption>
-  </figure>
-  <figure class='plate' id='pl-fire' role='tabpanel' aria-labelledby='tab-fire'>
-    <img src='images/compos-sentry-three-panes.png' width='2560' height='1270' loading='lazy' alt='Compos Sentry layout with an issues list, selected issue details, and a third pane with event trends, top errors and errors by release.'>
-    <figcaption><b>When prod is on fire.</b><span>Don't depend on someone else's interface to know what your system needs. Build your own workflows for the good times and the bad.</span></figcaption>
-  </figure>
-  <figure class='plate' id='pl-love' role='tabpanel' aria-labelledby='tab-love'>
-    <img src='images/compos-music.webp' width='2560' height='1294' loading='lazy' alt='Compos with Spotify, the album page and an agent chat that recommends similar records.'>
-    <figcaption><b>For doing what you love.</b><span>Go deeper into your music with a teacher and a guide.</span></figcaption>
-  </figure>
-  </div>
-  </div>
-  <div class='hero-copy'>
-    <div class='eyebrow'><i></i><span>the hackable harness for operators</span></div>
-    <h1 id='hero-h' aria-label='Intelligent software done your way.'>Intelligent software<br>done <span class='headline-correction'><del aria-hidden='true'>the right</del><span class='scribble' aria-hidden='true'>your</span></span> way.</h1>
-    <p class='sub'>Compos is an agentic platform for operators, with a focus on aesthetics, extensibility, and control.</p>
-    <p class='lede'>Ask your agent for the app you need. Use it together, change it as you work, and keep making it yours.</p>
-    <div class='actions'>
-      <a href='https://github.com/svs/compos/releases/latest' class='btn btn-solid'>download</a>
-      <a href='https://github.com/svs/compos' class='btn btn-ghost'>github</a>
-      <a href='#how' class='btn btn-ghost'>see it work</a>
-    </div>
-    <div class='facts'><span>fewer apps</span><span>&middot;</span><span>less explaining</span><span>&middot;</span><span>no new bill</span></div>
-  </div>
-</section>
-
-
-<div class='wrap'>
-
-<section class='rule' id='how'>
-  <span class='title'>&sect; how it works</span><span class='line'></span><span>need &middot; ask &middot; work &middot; keep &middot; let go</span>
-</section>
-
-<section class='sec' aria-labelledby='film-h'>
-  <div class='film-head'>
-    <h2 class="h2" id="film-h" style="font-size: 48px; width: 638px; max-width: 100%;">Automate and agentify your workflows</h2>
-    <p class='p'>Pull your context to you instead of going there. Wrap it in intelligence. Automate without getting cut out of the loop.</p>
-  </div>
-
-  <div class='film at-1' id='film' data-scene='1' role='img' aria-label='A short film. You ask the agent to find Instagram creators for a coffee launch, and a list appears. You ask to see their pictures, and the list becomes cards with photos. You ask who fits best, the agent picks one, and books him. The work is done, and the app it made stays for the next launch.'>
-    <div class='f-top' aria-hidden='true'>
-      <span class='brandmark'>Compos</span>
-      <span class='tab-new on'>outreach</span>
-      <span class='tab-chat on'>chat</span>
-      <span>mail</span><span>spotify</span><span>whatsapp</span><span>smartbrew</span><span>63 more</span>
-    </div>
-    <div class='f-wins' aria-hidden='true'>
-      <section class='f-win w-list sel'>
-        <div class='f-head'><span>*outreach*</span><span class='n'>group slow-mornings</span></div>
-        <div class='f-body'>
-          <div class='l-kick'>Instagram &middot; slow coffee mornings</div>
-          <div class='l-title'>Slow Mornings &middot; Kinara Coffee</div>
-          <div class='l-sub'>12 creators &middot; post before 9am &middot; under 300K</div>
-          <div class='row' style='--i:0'><img class='av' src='images/film/ira.jpg' alt=''><span class='nm'>Ira Menon</span><span class='fl'>84K followers</span><span class='hd'>@slowpour.ira &middot; Home brewing &middot; Bengaluru</span><span class='pills'><span class='pill d'>6.1% engage</span></span></div>
-          <div class='row' style='--i:1'><img class='av' src='images/film/kabir.jpg' alt=''><span class='nm'>Kabir Sethi</span><span class='fl'>212K followers</span><span class='hd'>@kabir.cooks.slow &middot; Breakfast &middot; Delhi</span><span class='pills'><span class='pill d'>4.8% engage</span></span></div>
-          <div class='row' style='--i:2'><img class='av' src='images/film/naina.jpg' alt=''><span class='nm'>Naina Rao</span><span class='fl'>156K followers</span><span class='hd'>@naina.at.home &middot; Interiors &middot; Mumbai</span><span class='pills'><span class='pill d'>5.2% engage</span></span></div>
-          <div class='row' style='--i:3'><img class='av' src='images/film/dev.jpg' alt=''><span class='nm'>Dev Malhotra</span><span class='fl'>68K followers</span><span class='hd'>@dev.runs.early &middot; Running &middot; Pune</span><span class='pills'><span class='pill d'>7.4% engage</span></span></div>
-          <div class='row' style='--i:4'><img class='av' src='images/film/tara.jpg' alt=''><span class='nm'>Tara Iyer</span><span class='fl'>122K followers</span><span class='hd'>@tarareads &middot; Books &middot; Chennai</span><span class='pills'><span class='pill d'>5.9% engage</span></span></div>
-          <div class='row' style='--i:5'><img class='av' src='images/film/meher.jpg' alt=''><span class='nm'>Meher Kapoor</span><span class='fl'>47K followers</span><span class='hd'>@meher.makes &middot; Ceramics &middot; Jaipur</span><span class='pills'><span class='pill d'>8.2% engage</span></span></div>
-          <div class='row cur' style='--i:6'><img class='av' src='images/film/arjun.jpg' alt=''><span class='nm'>Arjun Nair</span><span class='fl'>190K followers</span><span class='hd'>@arjun.frames &middot; Photography &middot; Kochi</span><span class='pills'><span class='pill d'>3.9% engage</span><span class='pill g st'>Booked</span></span></div>
-          <div class='row' style='--i:7'><img class='av' src='images/film/zoya.jpg' alt=''><span class='nm'>Zoya Mirza</span><span class='fl'>245K followers</span><span class='hd'>@zoya.everyday &middot; Lifestyle &middot; Hyderabad</span><span class='pills'><span class='pill d'>2.6% engage</span></span></div>
-          <div class='row' style='--i:8'><img class='av' src='images/film/rohan.jpg' alt=''><span class='nm'>Rohan Das</span><span class='fl'>98K followers</span><span class='hd'>@rohan.bakes &middot; Baking &middot; Kolkata</span><span class='pills'><span class='pill d'>5.5% engage</span></span></div>
-          <div class='legend'><b>RET</b> creator &middot; <b>a</b> agent &middot; <b>B</b> book &middot; <b>/</b> filter &middot; <b>q</b> quit</div>
+  <head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <title>Compos - the hackable harness for operators</title>
+    <meta name='description' content='Compos is a hackable harness for complex automations. The power of Unix in a beautiful UI.'>
+    <link rel='canonical' href='https://compos.svs.io/'>
+    <meta property='og:type' content='website'>
+    <meta property='og:url' content='https://compos.svs.io/'>
+    <meta property='og:site_name' content='Compos'>
+    <meta property='og:title' content='Compos - the hackable harness for operators'>
+    <meta property='og:description' content='Ask your agent for the app you need. Use it together, change it as you work, and keep making it yours.'>
+    <meta property='og:image' content='https://compos.svs.io/images/compos-logo.png'>
+    <meta property='og:image:width' content='560'>
+    <meta property='og:image:height' content='560'>
+    <meta property='og:image:alt' content='The Compos logo.'>
+    <meta name='twitter:card' content='summary'>
+    <meta name='twitter:title' content='Compos - the hackable harness for operators'>
+    <meta name='twitter:description' content='Ask your agent for the app you need. Use it together, change it as you work, and keep making it yours.'>
+    <meta name='twitter:image' content='https://compos.svs.io/images/compos-logo.png'>
+    <meta name='theme-color' content='#fdf3dc'>
+    <link rel='icon' type='image/png' href='images/compos-logo-clear.png'>
+    <link rel='preconnect' href='https://fonts.googleapis.com'>
+    <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
+    <link href='https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Spectral:ital,wght@0,300;0,400;1,300;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap' rel='stylesheet'>
+    <link rel='preload' as='image' href='images/smartbrew-frame.webp'>
+    <link rel='stylesheet' href='next.css?v=roll-1'>
+    <script>document.documentElement.classList.add('js')</script>
+  </head>
+  <body>
+    <a class='skip' href='#main'>skip to content</a>
+    
+    <header class='top'>
+      <div class='top-in'>
+        <a href='#main' class='brand'><img src='images/compos-logo-clear.png' width='22' height='22' alt=''><span>Compos</span></a>
+        <span class='spacer'></span>
+        <nav class='nav' aria-label='Sections'>
+          <a href='#how'>how it works</a>
+          <a href='#apps'>apps</a>
+          <a href='#context' style='display: none;'>context</a>
+          <a href='#features'>features</a>
+          <a href='https://github.com/svs/compos/tree/main/docs/manual'>manual</a>
+        </nav>
+        <a href='https://github.com/svs/compos' class='btn-line'>github</a>
+      </div>
+    </header>
+    
+    <main id='main'>
+      
+      <section class='hero' aria-labelledby='hero-h'>
+        <div class='hero-art gal' id='apps' aria-label='Apps built in Compos'>
+          <div class='gal-tabs' role='tablist' aria-label='Apps built in Compos'>
+            <button role='tab' id='tab-work' aria-controls='pl-work' aria-selected='true'>for travel</button>
+            <button role='tab' id='tab-fire' aria-controls='pl-fire' aria-selected='false' tabindex='-1'>for prod</button>
+            <button role='tab' id='tab-love' aria-controls='pl-love' aria-selected='false' tabindex='-1'>for love</button>
+          </div>
+          <div class='slides'>
+            <figure class='plate on' id='pl-work' role='tabpanel' aria-labelledby='tab-work'>
+              <img src='images/compos-travel.webp' width='2560' height='1289' fetchpriority='high' alt='Compos with a travel app: a Phuket itinerary of 26 steps, the hotel step in detail with photos and booking actions, and the agent chat changing the app while it runs.'>
+              <figcaption><b>Ready-to-go UI.</b><span>A trip planner built in compos: itinerary, booking pages, photos, and the agent restyling it while it runs.</span></figcaption>
+            </figure>
+            <figure class='plate' id='pl-fire' role='tabpanel' aria-labelledby='tab-fire'>
+              <img src='images/compos-sentry-three-panes.png' width='2560' height='1270' loading='lazy' alt='Compos Sentry layout with an issues list, selected issue details, and a third pane with event trends, top errors and errors by release.'>
+              <figcaption><b>When prod is on fire.</b><span>Can you trust someone else to build your observability AI? Get a batteries included starting point for yours.&nbsp;</span></figcaption>
+            </figure>
+            <figure class='plate' id='pl-love' role='tabpanel' aria-labelledby='tab-love'>
+              <img src='images/compos-music.webp' width='2560' height='1294' loading='lazy' alt='Compos with Spotify, the album page and an agent chat that recommends similar records.'>
+              <figcaption><b>And for doing what you love.</b><span>Go deeper into your music with a teacher and a guide.</span></figcaption>
+            </figure>
+          </div>
         </div>
-        <div class='f-mode'><i></i><span>MODE <b>outreach</b></span><span>GROUP <b>slow-mornings</b></span><span class='fm-note'></span></div>
-      </section>
-      <section class='f-win w-detail'>
-        <div class='f-head'><span>*outreach:arjun*</span></div>
-        <div class='f-body'>
-          <div class='d-title'>ARJUN NAIR</div>
-          <span class='d-badge kv-status'>shortlisted</span>
-          <div class='btns'><span class='btn-a'><b>a</b> Ask agent</span><span><b>o</b> Open profile</span><span class='btn-r'><b>B</b> Book</span></div>
-          <div class='d-next'><small>Next</small>Offer Rs 45,000 with ad rights. He asks Rs 60,000.</div>
-          <div class='d-stats'><div><small>Followers</small>190K</div><div><small>Engagement</small><b>3.9%</b></div><div><small>Asks</small>Rs 60K</div></div>
-          <div class='card'><h4>Why they fit</h4><p>Morning light and monsoon still lifes. The mood of the launch.</p></div>
-          <div class='card d-msg'><h4>Your agent &middot; draft</h4><p>Arjun, your morning light series is the mood of this launch. Would you shoot a still life with Kinara?</p></div>
+        <div class='hero-copy'>
+          <div class='eyebrow'><i></i><span>the hackable harness for operators</span></div>
+          <h1 id='hero-h' aria-label='Weapon of choice for FDEs, consultants and AI engineers.'>Weapon of choice<br>for <span class='roll' aria-hidden='true'><span class='roll-in'><span>FDEs.</span><span>Consultants.</span><span>AI Engineers.</span><span>FDEs.</span></span></span></h1>
+          <p class='sub'>Compos is a hackable harness for complex automations.</p>
+          <p class='lede'>The power of Agents in a beautiful UI. An open source license (GPLv3) to build your business on, without any of the busywork.</p>
+          <div class='actions'>
+            <a href='https://github.com/svs/compos/releases/latest' class='btn btn-solid'>download</a>
+            <a href='https://github.com/svs/compos' class='btn btn-ghost'>github</a>
+            <a href='#how' class='btn btn-ghost'>see it work</a>
+          </div>
+          <div class='facts'><span>fewer apps</span><span>&middot;</span><span>less explaining</span><span>&middot;</span><span>no new bill</span></div>
         </div>
-        <div class='f-mode'><i></i><span>MODE <b>outreach-detail</b></span></div>
       </section>
-      <section class='f-win w-chat'>
-        <div class='f-head'><span>Slow Mornings launch</span><span class='n'>agent</span></div>
-        <div class='f-body'>
-          <div class='msg you' data-at='1' data-delay='300' data-type>find me Instagram creators who post slow coffee mornings. under 300K followers.</div>
-          <div class='msg step' data-at='2' data-delay='0'><i></i>searched Instagram: 340 creators post before 9am</div>
-          <div class='msg say' data-at='2' data-delay='1300'>12 fit. They're on the left.</div>
-          <div class='msg you' data-at='3' data-delay='300' data-type>show me their pics</div>
-          <div class='msg step' data-at='3' data-delay='1600'><i></i>made outreach-mode: creator cards with photos</div>
-          <div class='msg you' data-at='3' data-delay='3000' data-type>who fits the launch best?</div>
-          <div class='msg say' data-at='3' data-delay='5000'>Arjun. His morning light is the mood of the launch. He asks 60K; offer 45K with ad rights?</div>
-          <div class='msg you' data-at='4' data-delay='200' data-type>yes. book him if he agrees.</div>
-          <div class='msg step' data-at='4' data-delay='1300'><i></i>sent the offer to Arjun</div>
-          <div class='msg step' data-at='4' data-delay='1800'><i></i>Arjun agreed - booked</div>
+      
+      
+      <div class='wrap'>
+        
+        <section class='rule' id='grow'>
+          <span class='title'>&sect; for you, then for them</span><span class='line'></span><span>perfect for fdes</span>
+        </section>
+        
+        <section class='sec' aria-labelledby='grow-h'>
+          <h2 class='h2' id='grow-h'>Perfect for FDEs.</h2>
+          <p class='p'>You sit with the client, learn the work, and ship the system that runs it. Not a chatbot. A tool their team uses every day, wired into their data, with agents that do the grind and wait for sign-off.</p>
+          <p class='p'>The code is not the moat. Anyone can copy an app. Nobody can copy the fit, the integrations, or how fast you change it. In week one it runs the process. By week four it runs it better than the old team did.</p>
+        </section>
+        
+        <section class='sec' id='how' aria-labelledby='film-h'>
+          <div class='film-head'>
+            <h2 class="h2" id="film-h" style="font-size: 48px; width: 638px; max-width: 100%;">Wire in their data. Automate the grind.</h2>
+            <p class='p'>Connect the client's databases, inboxes and APIs. Build the tool around their work in an afternoon. Agents run it every day and wait for sign-off.</p>
+          </div>
+          
+          <div class='film at-1' id='film' data-scene='1' role='img' aria-label='A short film. An engineer connects a freight forwarder&apos;s ERP database and its customs broker&apos;s inbox, and 46 shipments held at port appear. They ask for the oldest first, and the list becomes a customs desk. The agent finds 9 holds that only lack an invoice in the ERP, refiles them with the broker, and is scheduled to do it every morning.'>
+            <div class='f-top' aria-hidden='true'>
+              <span class='brandmark'>Compos</span>
+              <span class='tab-new on'>customs</span>
+              <span class='tab-chat on'>chat</span>
+              <span>postgres</span><span>mail</span><span>slack</span><span>whatsapp</span><span>63 more</span>
+            </div>
+            <div class='f-wins' aria-hidden='true'>
+              <section class='f-win w-list sel'>
+                <div class='f-head'><span>*customs*</span><span class='n'>group kestrel-customs</span></div>
+                <div class='f-body'>
+                  <div class='l-kick'>Kestrel Freight &middot; ERP + broker inbox</div>
+                  <div class='l-title'>Held at port &middot; Nhava Sheva</div>
+                  <div class='l-sub'>46 holds &middot; oldest first &middot; days at port</div>
+                  <div class='row' style='--i:0'><span class='av'>7d</span><span class='nm'>Bluewater Garments</span><span class='fl'>7 days</span><span class='hd'>KST-24795 &middot; 1 &times; 20ft &middot; Surat</span><span class='pills'><span class='pill d'>invoice missing</span></span></div>
+                  <div class='row' style='--i:1'><span class='av'>6d</span><span class='nm'>Sahyadri Tools</span><span class='fl'>6 days</span><span class='hd'>KST-24809 &middot; 1 &times; 40ft &middot; Kolhapur</span><span class='pills'><span class='pill d'>valuation query</span></span></div>
+                  <div class='row cur' style='--i:2'><span class='av'>6d</span><span class='nm'>Asha Pharma</span><span class='fl'>6 days</span><span class='hd'>KST-24817 &middot; 2 &times; 40ft &middot; Ahmedabad</span><span class='pills'><span class='pill d'>invoice missing</span><span class='pill g st'>Refiled</span></span></div>
+                  <div class='row' style='--i:3'><span class='av'>5d</span><span class='nm'>Coromandel Spices</span><span class='fl'>5 days</span><span class='hd'>KST-24839 &middot; 1 &times; 20ft &middot; Kochi</span><span class='pills'><span class='pill d'>invoice missing</span></span></div>
+                  <div class='row' style='--i:4'><span class='av'>4d</span><span class='nm'>Pune Polymers</span><span class='fl'>4 days</span><span class='hd'>KST-24851 &middot; 3 &times; 40ft &middot; Pune</span><span class='pills'><span class='pill d'>duty unpaid</span></span></div>
+                  <div class='row' style='--i:5'><span class='av'>4d</span><span class='nm'>Northstar Electronics</span><span class='fl'>4 days</span><span class='hd'>KST-24860 &middot; 1 &times; 20ft &middot; Bengaluru</span><span class='pills'><span class='pill d'>invoice missing</span></span></div>
+                  <div class='row' style='--i:6'><span class='av'>3d</span><span class='nm'>Vasant Foods</span><span class='fl'>3 days</span><span class='hd'>KST-24877 &middot; 1 &times; 40ft reefer &middot; Nashik</span><span class='pills'><span class='pill d'>FSSAI cert</span></span></div>
+                  <div class='row' style='--i:7'><span class='av'>3d</span><span class='nm'>Konkan Auto Parts</span><span class='fl'>3 days</span><span class='hd'>KST-24902 &middot; 2 &times; 40ft &middot; Pune</span><span class='pills'><span class='pill d'>invoice missing</span></span></div>
+                  <div class='row' style='--i:8'><span class='av'>2d</span><span class='nm'>Meridian Textiles</span><span class='fl'>2 days</span><span class='hd'>KST-24931 &middot; 1 &times; 20ft &middot; Tiruppur</span><span class='pills'><span class='pill d'>HS code query</span></span></div>
+                  <div class='legend'><b>RET</b> shipment &middot; <b>a</b> agent &middot; <b>F</b> file &middot; <b>/</b> filter &middot; <b>q</b> quit</div>
+                </div>
+                <div class='f-mode'><i></i><span>MODE <b>customs</b></span><span>GROUP <b>kestrel-customs</b></span><span class='fm-note'></span></div>
+              </section>
+              <section class='f-win w-detail'>
+                <div class='f-head'><span>*customs:KST-24817*</span></div>
+                <div class='f-body'>
+                  <div class='d-title'>ASHA PHARMA</div>
+                  <span class='d-badge kv-status'>held</span>
+                  <div class='btns'><span class='btn-a'><b>a</b> Ask agent</span><span><b>o</b> Open in ERP</span><span class='btn-r'><b>F</b> File</span></div>
+                  <div class='d-next'><small>Next</small>Invoice INV-8812 is in the ERP. Send it to the broker and refile.</div>
+                  <div class='d-stats'><div><small>At port</small>6 days</div><div><small>Demurrage</small><b>Rs 18K/day</b></div><div><small>Cartons</small>840</div></div>
+                  <div class='card'><h4>Why it's held</h4><p>The broker flagged a missing commercial invoice on 9 Nov.</p></div>
+                  <div class='card d-msg'><h4>Your agent &middot; draft</h4><p>Ramesh, attaching INV-8812 for KST-24817. Please refile today.</p></div>
+                </div>
+                <div class='f-mode'><i></i><span>MODE <b>customs-detail</b></span></div>
+              </section>
+              <section class='f-win w-chat'>
+                <div class='f-head'><span>Kestrel customs</span><span class='n'>agent</span></div>
+                <div class='f-body'>
+                  <div class='msg you' data-at='1' data-delay='300' data-type>connect Kestrel's ERP database and the customs broker's inbox. read only.</div>
+                  <div class='msg step' data-at='2' data-delay='0'><i></i>connected postgres, read only: 2,140 open shipments</div>
+                  <div class='msg step' data-at='2' data-delay='500'><i></i>connected customs@ inbox: 1,312 broker mails</div>
+                  <div class='msg say' data-at='2' data-delay='1300'>46 are held at port. They're on the left.</div>
+                  <div class='msg you' data-at='3' data-delay='300' data-type>oldest first. show days at port.</div>
+                  <div class='msg step' data-at='3' data-delay='1600'><i></i>made customs-mode: holds by days at port</div>
+                  <div class='msg you' data-at='3' data-delay='3000' data-type>which can we clear today?</div>
+                  <div class='msg say' data-at='3' data-delay='5000'>9 lack only an invoice, and it's in the ERP. Asha Pharma is the oldest at Rs 18K a day. Send the invoices to the broker?</div>
+                  <div class='msg you' data-at='4' data-delay='200' data-type>yes, all 9. and do this every morning at 7.</div>
+                  <div class='msg step' data-at='4' data-delay='1300'><i></i>sent 9 invoices to the broker</div>
+                  <div class='msg step' data-at='4' data-delay='1800'><i></i>scheduled daily 07:00 - drafts wait for ops sign-off</div>
+                  <div class='msg ping' data-at='4' data-delay='3200' data-src='sms'>Ramesh, broker: KST-24817 out of charge.</div>
+                  <div class='msg step' data-at='4' data-delay='3900'><i></i>marked Asha Pharma cleared, told ops on Slack</div>
+                  <div class='msg step' data-at='4' data-delay='5700'><i></i>attached it, refiled Konkan Auto Parts</div>
+                </div>
+                <div class='f-input'><span>YOU</span><span class='caret'></span></div>
+              </section>
+            </div>
+            <div class='f-tray' aria-hidden='true'>
+              <small>9 holds refiled</small>
+              <p>And now Kestrel has a customs desk.</p>
+              <div class='chips'><span class='chip'><i></i>customs-mode</span><span class='chip'><i></i>holds by age</span><span class='chip'><i></i>F file</span><span class='chip ag'><i></i>ERP + broker inbox</span><span class='chip ag'><i></i>every day 07:00</span></div>
+            </div>
+            <div class='f-echo' aria-hidden='true'><span class='echo-msg'>Ready.</span><span class='keys'>C-x b &middot; M-x &middot; C-g</span></div>
+            <span class='pdot' aria-hidden='true'></span>
+          </div>
+          <div class='film-ctl' id='film-ctl'>
+            <button class='stepb' data-go='1'>connect</button><span class='sep'>&rarr;</span>
+            <button class='stepb' data-go='2'>list</button><span class='sep'>&rarr;</span>
+            <button class='stepb' data-go='3'>see</button><span class='sep'>&rarr;</span>
+            <button class='stepb' data-go='4'>file</button><span class='sep'>&rarr;</span>
+            <button class='stepb' data-go='5'>keep</button>
+            <button class='play' id='film-play' aria-pressed='false'>pause</button>
+          </div>
+        </section>
+        
+        <section class='sec' aria-label='Clients'>
+          <ul class='map' aria-label='The same harness, from your own work to your clients'>
+            <li style='--i:0'><span class='src'>a 400-bed hospital</span><span class='wire'></span><span class='buf'>*discharge: 18 beds blocked*</span></li>
+            <li style='--i:1'><span class='src'>a regional bank</span><span class='wire'></span><span class='buf'>*kyc: 312 files flagged*</span></li>
+            <li style='--i:2'><span class='src'>a freight forwarder</span><span class='wire'></span><span class='buf'>*customs: 46 held at port*</span></li>
+            <li style='--i:3'><span class='src'>a general insurer</span><span class='wire'></span><span class='buf'>*claims: 1,204 to triage*</span></li>
+            <li style='--i:4'><span class='src'>a mid-market PE fund</span><span class='wire'></span><span class='buf'>*diligence: 3 data rooms*</span></li>
+            <li style='--i:5'><span class='src'>a listed manufacturer</span><span class='wire'></span><span class='buf'>*plant 2: OEE down 9%*</span></li>
+          </ul>
+          <p class='same'>Already decided: <span class='k'>groups</span> context <span class='k'>effects</span> permissions <span class='k'>memory</span> history <span class='k'>apps</span> the UI</p>
+        </section>
+        
+        <section class='rule' id='handled'>
+          <span class='title'>&sect; handled</span><span class='line'></span><span>the plumbing every harness needs</span>
+        </section>
+        
+        <section class='sec' aria-labelledby='handled-h'>
+          <h2 class='h2' id='handled-h'>All the busywork, handled.</h2>
+          <ul class='handled'>
+            <li><b>Chat UI</b><span>Streaming replies, tool calls, components drawn inline.</span></li>
+            <li><b>Concurrency</b><span>Every agent, task and app runs in its own BEAM process. Nothing blocks.</span></li>
+            <li><b>Orchestration</b><span>Sub-chats, workers and hand-offs, each with clean context.</span></li>
+            <li><b>Rendering</b><span>Buffers, windows, listings, detail pages and components.</span></li>
+            <li><b>IPC</b><span>MCP servers, the shell, HTTP and the browser, one call away.</span></li>
+            <li><b>Events</b><span>Webhooks, mail, SMS, WhatsApp and Slack wake the right agent.</span></li>
+            <li><b>Scheduling</b><span>Jobs that run at 7am, or when the work they wait on finishes.</span></li>
+            <li><b>Permissions</b><span>Every call declares its effects. You decide what runs unattended.</span></li>
+            <li><b>Context</b><span>Groups hold the buffers, windows and chat of one task.</span></li>
+            <li><b>Memory and history</b><span>Every save is versioned. Tasks carry their own record.</span></li>
+            <li><b>Secrets</b><span>Keys stay in the vault, never in the prompt.</span></li>
+            <li><b>Models</b><span>Bring the subscriptions you already pay for.</span></li>
+          </ul>
+        </section>
+        
+        <section class='rule' id='always-on'>
+          <span class='title'>&sect; always on</span><span class='line'></span><span>whatsapp &middot; email &middot; webhooks</span>
+        </section>
+        
+        <section class='sec split' aria-labelledby='world-h'>
+          <div>
+            <h2 class='h2' id='world-h'>The secret of efficiency is immediate action.&nbsp;</h2>
+            <p class='p'>Compos can listen for Webhooks, Slack, emails, DMs - you name it. If you can reach it in the browser or the cli, you can get an agent to handle it.</p>
+            <p class='p'>The secret of efficiency is immediate action.&nbsp;</p>
+          </div>
+          <div class='log' role='img' aria-label='A log of outside events and what the agent did with each'>
+            <div class='row2' style='--i:0'><span class='t'>09:12</span><span class='src'>whatsapp</span><span class='what'>Ramesh, broker: KST-24817 refiled, out of charge.</span></div>
+            <div class='row2 act' style='--i:1'><span class='t'></span><span class='src agent'>agent</span><span class='what'>marked Asha Pharma cleared, told ops on Slack</span></div>
+            <div class='row2' style='--i:2'><span class='t'>09:40</span><span class='src'>email</span><span class='what'>Nhava Sheva CFS: 3 new holds, duty query.</span></div>
+            <div class='row2 act' style='--i:3'><span class='t'></span><span class='src agent'>agent</span><span class='what'>added them to customs, drafted replies for ops sign-off</span></div>
+            <div class='row2' style='--i:4'><span class='t'>10:05</span><span class='src'>webhook</span><span class='what'>ERP: invoice INV-8840 posted for KST-24902</span></div>
+            <div class='row2 act' style='--i:5'><span class='t'></span><span class='src agent'>agent</span><span class='what'>attached it, refiled Konkan Auto Parts. Nothing else needs you.</span></div>
+          </div>
+        </section>
+        
+      </div>
+      
+      <div class='band' style='display: none;'>
+        <div class='wrap'>
+          <section class='rule' id='context'>
+            <span class='title'>&sect; context</span><span class='line'></span><span>groups, not tabs</span>
+          </section>
+          <section class='split' aria-labelledby='ctx-h'>
+            <div>
+              <h2 class='h2' id='ctx-h'>Ludicrously good context management.</h2>
+              <p class='p'>Point the agent at where your attention is. Compos agents are more like copilots than bounty hunters.</p>
+              <p class='p'>Collect context into groups. One group per task: its buffers, its windows, its chat. Switch tasks and the whole room switches with you.</p>
+              <ul class='ticks'>
+                <li>Your agent sees the windows you see. No pasting.</li>
+                <li>Give it a part of a file, not the whole drive.</li>
+                <li>A group keeps its layout. Come back tomorrow and it is all still there.</li>
+              </ul>
+            </div>
+            <figure class='band-art'>
+              <img src='images/compos-context.svg' width='760' height='800' loading='lazy' alt='Three group layouts stacked in space, each holding windows split into panes, with buffers floating above.'>
+            </figure>
+          </section>
         </div>
-        <div class='f-input'><span>YOU</span><span class='caret'></span></div>
-      </section>
-    </div>
-    <div class='f-tray' aria-hidden='true'>
-      <small>Arjun is booked</small>
-      <p>And now you have an outreach app.</p>
-      <div class='chips'><span class='chip'><i></i>outreach-mode</span><span class='chip'><i></i>creator cards</span><span class='chip'><i></i>B book</span><span class='chip ag'><i></i>Slow Mornings launch</span><span class='chip ag'><i></i>ready for the next launch</span></div>
-    </div>
-    <div class='f-echo' aria-hidden='true'><span class='echo-msg'>Ready.</span><span class='keys'>C-x b &middot; M-x &middot; C-g</span></div>
-    <span class='pdot' aria-hidden='true'></span>
-  </div>
-  <div class='film-ctl' id='film-ctl'>
-    <button class='stepb' data-go='1'>find</button><span class='sep'>&rarr;</span>
-    <button class='stepb' data-go='2'>list</button><span class='sep'>&rarr;</span>
-    <button class='stepb' data-go='3'>see</button><span class='sep'>&rarr;</span>
-    <button class='stepb' data-go='4'>book</button><span class='sep'>&rarr;</span>
-    <button class='stepb' data-go='5'>keep</button>
-    <button class='play' id='film-play' aria-pressed='false'>pause</button>
-  </div>
-</section>
-
-<section class='rule' id='always-on'>
-  <span class='title'>&sect; always on</span><span class='line'></span><span>whatsapp &middot; email &middot; webhooks</span>
-</section>
-
-<section class='sec split' aria-labelledby='world-h'>
-  <div>
-    <h2 class='h2' id='world-h'>The secret of efficiency is immediate action.&nbsp;</h2>
-    <p class='p'>Compos can listen for Webhooks, Slack, emails, DMs - you name it. If you can reach it in the browser or the cli, you can get an agent to handle it.</p>
-    <p class='p'>The secret of efficiency is immediate action.&nbsp;</p>
-  </div>
-  <div class='log' role='img' aria-label='A log of outside events and what the agent did with each'>
-    <div class='row2' style='--i:0'><span class='t'>09:12</span><span class='src'>whatsapp</span><span class='what'>Arun: a 30% deposit is fine.</span></div>
-    <div class='row2 act' style='--i:1'><span class='t'></span><span class='src agent'>agent</span><span class='what'>updated the q4 plan, drafted a reply for your OK</span></div>
-    <div class='row2' style='--i:2'><span class='t'>09:40</span><span class='src'>email</span><span class='what'>Kestrel: shipping confirmed for 14 Nov.</span></div>
-    <div class='row2 act' style='--i:3'><span class='t'></span><span class='src agent'>agent</span><span class='what'>ticked the todo, added the date to your calendar</span></div>
-    <div class='row2' style='--i:4'><span class='t'>10:05</span><span class='src'>webhook</span><span class='what'>invoice #2231 paid</span></div>
-    <div class='row2 act' style='--i:5'><span class='t'></span><span class='src agent'>agent</span><span class='what'>noted it in the plan. Nothing else needs you.</span></div>
-  </div>
-</section>
-
-<section class='rule' id='grow'>
-  <span class='title'>&sect; for you, then for them</span><span class='line'></span><span>perfect for fdes</span>
-</section>
-
-<section class='sec split' aria-labelledby='grow-h'>
-  <div>
-    <h2 class='h2' id='grow-h'>Perfect for FDEs.</h2>
-    <p class='p'>You sit with the client, learn the work, and ship the system that runs it. Not a chatbot. A tool their team uses every day, wired into their data, with agents that do the grind and wait for sign-off.</p>
-    <p class='p'>The code is not the moat. Anyone can copy an app. Nobody can copy the fit, the integrations, or how fast you change it. In week one it runs the process. By week four it runs it better than the old team did.</p>
-  </div>
-  <div>
-    <ul class='map' aria-label='The same harness, from your own work to your clients'>
-      <li style='--i:0'><span class='src'>a 400-bed hospital</span><span class='wire'></span><span class='buf'>*discharge: 18 beds blocked*</span></li>
-      <li style='--i:1'><span class='src'>a regional bank</span><span class='wire'></span><span class='buf'>*kyc: 312 files flagged*</span></li>
-      <li style='--i:2'><span class='src'>a freight forwarder</span><span class='wire'></span><span class='buf'>*customs: 46 held at port*</span></li>
-      <li style='--i:3'><span class='src'>a general insurer</span><span class='wire'></span><span class='buf'>*claims: 1,204 to triage*</span></li>
-      <li style='--i:4'><span class='src'>a mid-market PE fund</span><span class='wire'></span><span class='buf'>*diligence: 3 data rooms*</span></li>
-      <li style='--i:5'><span class='src'>a listed manufacturer</span><span class='wire'></span><span class='buf'>*plant 2: OEE down 9%*</span></li>
-    </ul>
-    <p class='same'>Already decided: <span class='k'>groups</span> context <span class='k'>effects</span> permissions <span class='k'>memory</span> history <span class='k'>apps</span> the UI</p>
-  </div>
-</section>
-
-</div>
-
-<div class='band'>
-<div class='wrap'>
-<section class='rule' id='context'>
-  <span class='title'>&sect; context</span><span class='line'></span><span>groups, not tabs</span>
-</section>
-<section class='split' aria-labelledby='ctx-h'>
-  <div>
-    <h2 class='h2' id='ctx-h'>Ludicrously good context management.</h2>
-    <p class='p'>Point the agent at where your attention is. Compos agents are more like copilots than bounty hunters.</p>
-    <p class='p'>Collect context into groups. One group per task: its buffers, its windows, its chat. Switch tasks and the whole room switches with you.</p>
-    <ul class='ticks'>
-      <li>Your agent sees the windows you see. No pasting.</li>
-      <li>Give it a part of a file, not the whole drive.</li>
-      <li>A group keeps its layout. Come back tomorrow and it is all still there.</li>
-    </ul>
-  </div>
-  <figure class='band-art'>
-    <img src='images/compos-context.svg' width='760' height='800' loading='lazy' alt='Three group layouts stacked in space, each holding windows split into panes, with buffers floating above.'>
-  </figure>
-</section>
-</div>
-</div>
-
-<div class='wrap'>
-
-<section class='rule' id='alive' style='border-top: 0; margin-top: 0;'>
-  <span class='title'>&sect; alive</span><span class='line'></span><span>change it while it runs</span>
-</section>
-
-<section class='sec split' aria-labelledby='ask-h'>
-  <div>
-    <h2 class='h2' id='ask-h'>Effortless multitasking</h2>
-    <p class='p'>Orchestrator agents run teams of workers, one per task, to keep context clean and costs low.</p>
-    <p class='p'><br></p>
-    <div class='uses'><span>a key</span><span>a btton</span><span>an agent</span><span>another app</span></div>
-  </div>
-  <div class='ask team' role='img' aria-label='The chat list: the Slow Mornings launch chat runs four sub-chats. One found the creators, one writes to them, one waits for you to approve a booking, one sends results each morning.'>
-    <div class='f-head'><span>*chats*</span><span class='n'>group slow-mornings</span></div>
-    <div class='kids'>
-      <div class='lead'><i class='dot work'></i><span class='nm'>Slow Mornings launch</span><span class='st work'>working</span><span class='c'>4 chats</span></div>
-      <div><i class='dot ok'></i><span class='nm'><b>&#9500;</b>find creators on Instagram</span><span class='st ok'>done</span><span class='c'>12 found</span></div>
-      <div><i class='dot work'></i><span class='nm'><b>&#9500;</b>write to each creator</span><span class='st work'>working</span><span class='c'>7 of 12</span></div>
-      <div class='cur'><i class='dot you'></i><span class='nm'><b>&#9500;</b>book Arjun Nair</span><span class='st you'>needs you</span><span class='c'>45K</span></div>
-      <div><i class='dot wait'></i><span class='nm'><b>&#9492;</b>results every morning</span><span class='st wait'>waiting</span><span class='c'>08:00</span></div>
-    </div>
-    <div class='ask-chat'>
-      <div class='say'>Arjun says yes to 45K with ad rights. Approve, and I book him.</div>
-    </div>
-    <p class='legend'><b>RET</b> open &middot; <b>a</b> approve &middot; <b>k</b> stop &middot; <b>/</b> filter</p>
-  </div>
-</section>
-
-<section class='rule' id='features'>
-  <span class='title'>&sect; features</span><span class='line'></span><span>what changes for you</span>
-</section>
-
-<section class='sec' aria-label='Features'>
-  <div class='feature-grid'>
-    <article class='feature'>
-      <div class='num'><b>01</b> &middot; fits you</div>
-      <h3>Work the way you think.</h3>
-      <p>Your workspace fits your habits, not the other way round. Need a new tool? Ask for it and have it in minutes. When your work changes, your tools change with it.</p>
-    </article>
-    <article class='feature'>
-      <div class='num'><b>02</b> &middot; focus</div>
-      <h3>Seamless context.</h3>
-      <p>Your agent already knows what you are working on. Stop pasting, re-explaining and correcting. It stays on the task in front of you.</p>
-    </article>
-    <article class='feature'>
-      <div class='num'><b>03</b> &middot; control</div>
-      <h3>Agents anywhere...</h3>
-      <p>Attach an agent to anything. Agents see the context you do, so they know what is important now. You stay in charge of what an agent may do on its own.</p>
-    </article>
-    <article class='feature'>
-      <div class='num'><b>04</b> &middot; flow</div>
-      <h3>...and everywhere.</h3>
-      <p>Mail, Slack, presentations, notes, reading - you name it, you can point your agent at it. Stay in one place and get into your flow state.</p>
-    </article>
-    <article class='feature'>
-      <div class='num'><b>05</b> &middot; time</div>
-      <h3>Get more done while you think.</h3>
-      <p>Hand off the follow-ups, summaries and first drafts. Work comes back to you when it is ready, and nothing important goes out without your OK.</p>
-    </article>
-    <article class='feature'>
-      <div class='num'><b>06</b> &middot; cost</div>
-      <h3>No new AI bill.</h3>
-      <p>Use the AI subscriptions you already pay for. No markup, no extra key, and your data stays yours.</p>
-    </article>
-  </div>
-</section>
-
-<section class='rule' id='who'>
-  <span class='title'>&sect; who it's for</span><span class='line'></span><span>nerdy knowledge workers</span>
-</section>
-
-<section class='sec' aria-label='Who Compos is for'>
-  <p class='who-intro'>Compos is for the human in the loop.&nbsp;</p>
-  <div class='who-grid'>
-    <div>
-      <h3>Founders &amp; operators</h3>
-      <p>Get through the inbox faster and never drop a follow-up. Approve drafts instead of writing them, and see the whole day at a glance.</p>
-    </div>
-    <div>
-      <h3>Researchers &amp; writers</h3>
-      <p>Read, take notes and write in one place. Get help comparing sources and checking a draft against what you read, without losing the thread.</p>
-    </div>
-    <div>
-      <h3>Programmers</h3>
-      <p>Get focused changes, not rewrites, from agents that see the code you see. Stay in the place you think, from the first note to the last commit.</p>
-    </div>
-  </div>
-</section>
-
-<section class='closing' aria-labelledby='close-h'>
-  <figure class='closing-bird' aria-hidden='true'><img src='images/compos-human-agent.webp' width='1122' height='1402' loading='lazy' alt=''></figure>
-  <h2 id='close-h'>Finally, a home for your agent that is also <b>a home for you</b>.</h2>
-  <p class='p'>Start with what you use today. Shape it a little more each week, with an agent that knows exactly what you are working on.</p>
-  <div class='actions'>
-    <a href='https://github.com/svs/compos/releases/latest' class='btn btn-solid'>download</a>
-    <a href='https://github.com/svs/compos' class='btn btn-ghost'>github</a>
-    <a href='https://github.com/svs/compos/tree/main/docs/manual' class='btn btn-ghost'>read the manual</a>
-  </div>
-</section>
-
-</div>
-</main>
-
-<footer aria-label='Site footer'>
-  <div class='foot'>
-    <a class='brand' href='#main' aria-label='Compos home'><img src='images/compos-logo-clear.png' width='22' height='22' alt=''><span>Compos</span></a>
-    <span>Flow state has a home.</span>
-    <span class='spacer'></span>
-    <a href='https://github.com/svs/compos' class='btn-line'>github</a>
-  </div>
-  <nav class='foot' aria-label='Explore Compos'>
-    <a href='#how'>how it works</a>
-    <a href='#apps'>apps</a>
-    <a href='#features'>features</a>
-    <span class='spacer'></span>
-    <a href='https://github.com/svs/compos'>source</a>
-    <a href='https://github.com/svs/compos/tree/main/docs/manual'>manual</a>
-    <a href='mailto:hello@compos.in'>contact</a>
-    <a href='#main'>back to top</a>
-  </nav>
-</footer>
-
-<script src='next.js?v=carousel-2' defer></script>
-</body>
+      </div>
+      
+      <div class='wrap'>
+        
+        <section class='rule' id='alive' style='border-top: 0; margin-top: 0;'>
+          <span class='title'>&sect; alive</span><span class='line'></span><span>change it while it runs</span>
+        </section>
+        
+        <section class='sec split' aria-labelledby='ask-h'>
+          <div>
+            <h2 class='h2' id='ask-h'>Effortless multitasking</h2>
+            <p class='p'>Orchestrator agents run teams of workers, one per task, to keep context clean and costs low.</p>
+            <p class='p'><br></p>
+            <div class='uses'><span>a key</span><span>a button</span><span>an agent</span><span>another app</span></div>
+          </div>
+          <div class='ask team' role='img' aria-label='The chat list: the Kestrel customs chat runs four sub-chats. One connected the client&apos;s data, one refiles invoice holds, one waits for you to approve a duty payment, one sweeps the holds each morning.'>
+            <div class='f-head'><span>*chats*</span><span class='n'>group kestrel-customs</span></div>
+            <div class='kids'>
+              <div class='lead'><i class='dot work'></i><span class='nm'>Kestrel customs</span><span class='st work'>working</span><span class='c'>4 chats</span></div>
+              <div><i class='dot ok'></i><span class='nm'><b>&#9500;</b>connect ERP and broker inbox</span><span class='st ok'>done</span><span class='c'>46 holds</span></div>
+              <div><i class='dot work'></i><span class='nm'><b>&#9500;</b>refile invoice holds</span><span class='st work'>working</span><span class='c'>7 of 9</span></div>
+              <div class='cur'><i class='dot you'></i><span class='nm'><b>&#9500;</b>pay Pune Polymers duty</span><span class='st you'>needs you</span><span class='c'>2.4L</span></div>
+              <div><i class='dot wait'></i><span class='nm'><b>&#9492;</b>morning sweep</span><span class='st wait'>waiting</span><span class='c'>07:00</span></div>
+            </div>
+            <div class='ask-chat'>
+              <div class='say'>Pune Polymers owes Rs 2.4L duty on KST-24851. Approve, and I pay it on ICEGATE.</div>
+            </div>
+            <p class='legend'><b>RET</b> open &middot; <b>a</b> approve &middot; <b>k</b> stop &middot; <b>/</b> filter</p>
+          </div>
+        </section>
+        
+        <section class='rule' id='features'>
+          <span class='title'>&sect; features</span><span class='line'></span><span>what changes for you</span>
+        </section>
+        
+        <section class='sec' aria-label='Features'>
+          <div class='feature-grid'>
+            <article class='feature'>
+              <div class='num'><b>01</b> &middot; primitives</div>
+              <h3>Program in primitives designed for agentic execution.</h3>
+              <p>Buffers, groups, effects, listeners, tasks. Small parts an agent can read, call and compose, and you can audit. Every automation is a few lines of Scheme you own.</p>
+            </article>
+            <article class='feature'>
+              <div class='num'><b>02</b> &middot; live</div>
+              <h3>Fully live system. Connect anything.</h3>
+              <p>Change it while it runs: no build, no restart, no deploy. Databases, inboxes, APIs, webhooks, MCP servers, the CLI: if you can reach it, an agent can wire it in.</p>
+            </article>
+            <article class='feature'>
+              <div class='num'><b>03</b> &middot; any harness</div>
+              <h3>Drive any CLI harness. Even your own.</h3>
+              <p>Claude Code, Codex, any ACP agent, or the one you wrote. Compos provides the application and UI layer; the harness brings the brain.</p>
+            </article>
+            <article class='feature'>
+              <div class='num'><b>04</b> &middot; ui</div>
+              <h3>Ready-to-go UI capabilities.</h3>
+              <p>Listings, detail pages, galleries, keys, components. Agents learn from the demo apps how to build beautiful UIs. Use it.</p>
+            </article>
+            <article class='feature'>
+              <div class='num'><b>05</b> &middot; proven</div>
+              <h3>Battle tested in recruiting and coding.</h3>
+              <p>Compos runs a recruiting business and builds itself, every day. The rough edges get found in real work, not in a demo.</p>
+            </article>
+            <article class='feature'>
+              <div class='num'><b>06</b> &middot; cost</div>
+              <h3>No new AI bill.</h3>
+              <p>Use the AI subscriptions you already pay for. No markup, no extra key, and your data stays yours.</p>
+            </article>
+          </div>
+        </section>
+        
+        <section class='rule' id='who'>
+          <span class='title'>&sect; who it's for</span><span class='line'></span><span>nerdy knowledge workers</span>
+        </section>
+        
+        <section class='sec' aria-label='Who Compos is for'>
+          <p class='who-intro'>Compos is for the human in the loop.&nbsp;</p>
+          <div class='who-grid'>
+            <div>
+              <h3>FDEs &amp; consultants</h3>
+              <p>Wire into the client's data in a day and ship the system that runs their process. Agents do the grind; their team signs off.</p>
+            </div>
+            <div>
+              <h3>Founders &amp; operators</h3>
+              <p>Build your company brain without worrying about engineering. Your processes, data and decisions in one place, run by agents you can read and change.</p>
+            </div>
+            <div>
+              <h3>Researchers &amp; writers</h3>
+              <p>Read, take notes and write in one place. Get help comparing sources and checking a draft against what you read, without losing the thread.</p>
+            </div>
+            <div>
+              <h3>Programmers</h3>
+              <p>Bring a beautiful UI and powerful automations to your coding and monitoring systems. Agents, diffs, CI, Sentry and logs in one place, with agents that see the code you see.</p>
+            </div>
+          </div>
+        </section>
+        
+        
+      </div>
+    </main>
+    
+    <footer aria-label='Site footer'>
+      <div class='foot'>
+        <a class='brand' href='#main' aria-label='Compos home'><img src='images/compos-logo-clear.png' width='22' height='22' alt=''><span>Compos</span></a>
+        <span>THE HACKABLE HARNESS FOR AI APPLICATIONS</span>
+        <span class='spacer'></span>
+        <a href='https://github.com/svs/compos' class='btn-line'>github</a>
+      </div>
+      <nav class='foot' aria-label='Explore Compos'>
+        <a href='#how'>how it works</a>
+        <a href='#apps'>apps</a>
+        <a href='#features'>features</a>
+        <span class='spacer'></span>
+        <a href='https://github.com/svs/compos'>source</a>
+        <a href='https://github.com/svs/compos/tree/main/docs/manual'>manual</a>
+        <a href='mailto:hello@compos.in'>contact</a>
+        <a href='#main'>back to top</a>
+      </nav>
+    </footer>
+    
+    <script src='next.js?v=carousel-2' defer></script>
+  </body>
 </html>

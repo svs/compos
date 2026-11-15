@@ -5087,7 +5087,9 @@ is forgotten and that group falls back to creation order in the switcher."
   (define-key "buffer-group-map" "m" "group-move")
   (define-key "buffer-group-map" "n" "group-new")
   (define-key "buffer-group-map" "r" "remove-group-from-buffer")
-  (define-key "buffer-group-map" "v" "group-from-visible"))
+  (define-key "buffer-group-map" "v" "group-from-visible")
+  (define-key "buffer-group-map" "R" "group-rename")
+  (define-key "buffer-group-map" "k" "group-kill"))
 
 (group-keymap-install!)
 

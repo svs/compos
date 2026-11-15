@@ -149,6 +149,9 @@
   "(todo-can-move? FROM TO) — whether a task may go from state FROM to state TO; staying put is always fine"
   (or (equal? from to) (and (member to (todo-moves from)) #t)))
 
+(public! 'todo-moves "(todo-moves STATE) — the states a task in STATE may move to")
+(public! 'todo-can-move? "(todo-can-move? FROM TO) — whether a task may go from state FROM to state TO; staying put is always fine")
+
 (define (todo--check-move! t to)
   (let ((from (plist-get t 'state)))
     (unless (todo-can-move? from to)

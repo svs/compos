@@ -1471,7 +1471,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `focus-down` | `s-<down>` | Select the window below |
 | `focus-up` | `s-<up>` | Select the window above |
 | `group-switch` | `C-x g` | Switch to a group and restore its layout |
-| `group-switch-last` | `C-x C-g C-g` | Switch back to the group this frame just left |
+| `group-switch-last` | `C-x C-g l` | Switch back to the group this frame just left |
 | `index-hide-item` |  | Hide this item from the list it came from, and open the next one here |
 | `index-next-item` |  | Open the next item of the list this page came from, here |
 | `index-previous-item` |  | Open the previous item of the list this page came from, here |

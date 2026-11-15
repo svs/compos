@@ -107,7 +107,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x C-d` | `dired` | Prompt for a directory and open it in Dired |
 | `C-x C-e` | `eval-last-sexp` | Evaluate the region, else the sexp before point, and echo the value |
 | `C-x C-f` | `find-file` | Visit a file, prompting with filename completion |
-| `C-x C-g C-g` | `group-switch-last` | Switch back to the group this frame just left |
+| `C-x C-g l` | `group-switch-last` | Switch back to the group this frame just left |
 | `C-x C-g a` | `group-add` | Put the selected buffers, else this buffer, in a group |
 | `C-x C-g b` | `group-members` | Open the switcher on this group's members |
 | `C-x C-g g` | `buffer-goto-group` | Stand in this buffer's own group and focus the buffer there |

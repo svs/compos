@@ -366,7 +366,7 @@ One command per verb. The name says which way the verb runs, so `remove-buffers-
 | `remove-buffers` | `remove-buffers-from-group` | `M-x` |
 | `remove-group` | `remove-group-from-buffer` | `C-x C-g r` |
 | `switch` | `group-switch` | `C-x g`; `RET` in the board |
-| `switch-last` | `group-switch-last` | `C-x C-g C-g` |
+| `switch-last` | `group-switch-last` | `C-x C-g l` |
 | `switch-to-buffer-group` | `buffer-context-switch!` | none |
 | `new` | `group-new` | `C-x C-g n`; `M-RET` in the group switcher |
 | `dissolve` | `group-dissolve` | `x` in the board |

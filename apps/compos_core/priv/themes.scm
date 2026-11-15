@@ -1490,9 +1490,9 @@
     (list 'window-inactive 'bg "#050505")
     (list 'body 'fg "#c0c0c0")
     (list 'border-soft 'bg "#555555")
-    (list 'border 'bg "#55ffff")
+    (list 'border 'bg "#2a7a7a")
     (list 'modeline 'bg "#333333" 'fg "#aaaaaa")
-    (list 'modeline-active 'bg "#00aaaa" 'fg "#000000")
+    (list 'modeline-active 'bg "#0e3a3a" 'fg "#9fdcdc")
     (list 'cursor 'bg "#55ff55")
     (list 'region 'bg "#0000aa")
     (list 'select 'bg "#0000aa")
@@ -1546,7 +1546,7 @@
     (list 'sans 'inherit 'mono)
     (list 'serif 'inherit 'mono)
     (list 'chrome 'gap "6px" 'radius "0"
-          'border "3px double #55ffff"
+          'border "3px double #2a7a7a"
           'shadow "6px 6px 0 #000066"
           'shadow-deep "6px 6px 0 #000066")))
 

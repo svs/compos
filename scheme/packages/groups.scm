@@ -5079,7 +5079,7 @@ is forgotten and that group falls back to creation order in the switcher."
 
   (define-key "ctl-x-map" "g" "group-switch")
 
-  (define-key "buffer-group-map" "C-g" "group-switch-last")
+  (define-key "buffer-group-map" "l" "group-switch-last")
   (define-key "buffer-group-map" "g" "buffer-goto-group")
   (define-key "buffer-group-map" "b" "group-members")
   (define-key "buffer-group-map" "p" "group-pin")

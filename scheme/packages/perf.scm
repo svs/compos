@@ -572,11 +572,13 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "(vm-processes LIMIT SORT FILTER) — plist (rows count matched): at most LIMIT process rows whose name or pid contains FILTER, sorted by \"reds\", \"memory\", \"queue\" or \"name\"")
 (public! 'vm-process-info
   "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone")
+(public! 'vm-roots
+  "(vm-roots) — the Scheme values that Elixir holds as GC roots, grouped by kind, largest first: a list of (KIND COUNT BYTES LARGEST-KEY)")
 (public! 'perf-refresh!
   "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'diagnostics 'effects '(read)))
-  '("vm-sample" "vm-processes" "vm-process-info" "perf-refresh!"))
+  '("vm-sample" "vm-processes" "vm-process-info" "vm-roots" "perf-refresh!"))
 
 (effects! '(destroy))
 (public! 'vm-process-kill!

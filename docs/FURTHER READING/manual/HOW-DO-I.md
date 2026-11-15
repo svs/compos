@@ -158,7 +158,7 @@ A group is the set of buffers for one task, with the window arrangement you left
 
 Press `C-x g` (`group-switch`) and choose a group. The editor shows its buffers in the windows you left them in.
 
-`C-x C-g C-g` (`group-switch-last`) goes back to the group you came from.
+`C-x C-g l` (`group-switch-last`) goes back to the group you came from.
 
 ### How do I rename or close a group?
 

@@ -10,6 +10,8 @@
 ;;; preview-mode turns the paint on and off (markdown-paint-on!,
 ;;; markdown-paint-off!). morg-mode owns structure and the plain faces.
 
+(require 'mermaid)
+
 (domain! 'writing)
 (effects! '(write))
 
@@ -580,9 +582,12 @@
            (table-spans (markdown--table-spans scan))
            (icode-spans (markdown--icode-spans scan (cadr both)))
            (fence-spans (markdown--own-rows-fence-spans scan))
-           (block-spans (fence-kind-body-spans (buffer-text buf) (morg-blocks scan buf))))
+           (blocks (morg-blocks scan buf))
+           (block-spans (fence-kind-body-spans (buffer-text buf) blocks))
+           ;; a mermaid block draws as its diagram (mermaid.scm)
+           (diagram-spans (mermaid-paint-spans (buffer-text buf) blocks)))
       (overlay-set! buf 'markdown
-        (append line-spans table-spans icode-spans fence-spans block-spans)))))
+        (append line-spans table-spans icode-spans fence-spans block-spans diagram-spans)))))
 
 ;;; --- the mode ----------------------------------------------------------------
 
@@ -621,6 +626,15 @@
 (define (markdown-paint-off! buf)
   (buffer-set-local! buf 'markdown-paint #f)
   (markdown--teardown! buf))
+
+;; a diagram that lands repaints the drawn pages that hold a mermaid block
+(mermaid-on-drawn! "markdown"
+  (lambda ()
+    (for-each (lambda (b)
+                (when (and (buffer-exists? b) (buffer-local-value 'markdown-paint b)
+                           (string-contains? (buffer-text b) "```mermaid"))
+                  (markdown-refontify! b)))
+              (buffer-list))))
 
 (public! 'markdown-paint-on! "(markdown-paint-on! BUF) — draw BUF's Markdown in place (preview-mode's painter)")
 (public! 'markdown-paint-off! "(markdown-paint-off! BUF) — take the in-place drawing off BUF")

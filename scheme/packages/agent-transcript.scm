@@ -4,6 +4,7 @@
 ;;; state, queued rows, and paragraph reveal. All offsets are buffer bytes.
 
 (require 'window)
+(require 'mermaid)
 
 (domain! 'chat)
 (effects! '(write))
@@ -1076,8 +1077,10 @@
               (open
                (if closing?
                    (loop (cdr ls) next next #f #f '()
-                         (cons (list 'component (car open) next (cadr open)
-                                     (string-join (reverse body) "\n"))
+                         (cons (if (equal? (cadr open) 'mermaid)
+                                   (list 'diagram (car open) next "mermaid" (string-join (reverse body) "\n"))
+                                   (list 'component (car open) next (cadr open)
+                                         (string-join (reverse body) "\n")))
                                out))
                    (loop (cdr ls) next start #f open (cons l body) out)))
               (outer
@@ -1085,6 +1088,10 @@
               ((and (= n 3) (string-prefix? "```component " t))
                (loop (cdr ls) next pos #f
                      (list pos (string-trim (substring t 13 (string-length t)))) '()
+                     (if (< start pos) (cons (list 'prose start pos) out) out)))
+              ;; a mermaid fence draws as its diagram (mermaid.scm)
+              ((and (= n 3) (equal? (string-downcase t) "```mermaid"))
+               (loop (cdr ls) next pos #f (list pos 'mermaid) '()
                      (if (< start pos) (cons (list 'prose start pos) out) out)))
               ((>= n 3) (loop (cdr ls) next start n #f '() out))
               (else (loop (cdr ls) next start #f #f '() out))))))))
@@ -1147,18 +1154,24 @@
 ;; fences, its prose ranges with the components between them
 (define (chat-view--prose buf s e)
   (let* ((text (chat-view--slice buf s e))
-         (parts (and (string-contains? text "```component ") (chat-component--parts text s)))
+         (parts (and (or (string-contains? text "```component ") (string-contains? text "```mermaid"))
+                     (chat-component--parts text s)))
          (head (list 'tag "c-agent" 'class "ag-prose"
                      'attrs '(("author" "assistant") ("kind" "prose")))))
-    (if (not (and parts (find (lambda (p) (equal? (car p) 'component)) parts)))
+    (if (not (and parts (find (lambda (p) (member (car p) '(component diagram))) parts)))
         (append head (list 'range (list s e) 'format "markdown"))
         (append head
                 (list 'children
                       (map (lambda (p)
-                             (if (equal? (car p) 'prose)
-                                 (list 'tag "c-group" 'class "ag-prose-part"
-                                       'range (list (nth 1 p) (nth 2 p)) 'format "markdown")
-                                 (chat-component--view p)))
+                             (cond
+                               ((equal? (car p) 'prose)
+                                (list 'tag "c-group" 'class "ag-prose-part"
+                                      'range (list (nth 1 p) (nth 2 p)) 'format "markdown"))
+                               ((equal? (car p) 'diagram)
+                                (list 'tag "c-group" 'class "ag-component"
+                                      'attrs '(("kind" "diagram"))
+                                      'children (list (mermaid-node (nth 4 p)))))
+                               (else (chat-component--view p))))
                            parts))))))
 
 ;; the component fences of one transcript block, oldest first
@@ -1424,6 +1437,17 @@
                                                    (let ((nav (buffer-local-value 'chat-view-nav buf)))
                                                      (and (integer? nav) (- nav (cadr win)))))
                                                  verbosity queued activity (cadr win)))))))))
+
+;; a diagram that lands draws again the chats whose replies hold one: the
+;; memo forgets them, so the next sync builds their views afresh
+(mermaid-on-drawn! "chat"
+  (lambda ()
+    (for-each (lambda (m)
+                (let ((b (car m)))
+                  (when (and (buffer-exists? b) (string-contains? (buffer-text b) "```mermaid"))
+                    (set! *chat-view-memo* (filter (lambda (x) (not (equal? (car x) b))) *chat-view-memo*))
+                    (chat-view-sync! b))))
+              *chat-view-memo*)))
 
 ;; the clicks the tree carries: a tool card, a permission verb, an answer
 (add-hook! (list 'block-click 'chat)

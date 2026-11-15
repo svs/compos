@@ -2148,6 +2148,13 @@ defmodule Compos.Ui.EditorLive do
       # holding zero bytes; the byte walker skips it by its data-len.
       # A click id routes through the block-click registry like a block
       # tree's click.
+      # A chrome img-embed is a picture the buffer does not hold: its text
+      # is the image's path or URL (a mermaid diagram over its fence).
+      String.starts_with?(cls, "chrome-seg") and cls =~ "img-embed" ->
+        assigns = assign(assigns, src: image_src(txt, assigns.base), cls: String.replace_prefix(cls, "chrome-seg ", ""))
+
+        ~M|<img id={@id} src={@src} class={@cls} loading="lazy" contenteditable="false" data-len="0" />|
+
       String.starts_with?(cls, "chrome-seg") ->
         {shown, click} = chrome_click_off(cls)
         assigns = assign(assigns, cls: shown, click: click)

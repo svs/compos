@@ -15,6 +15,7 @@
 (require 'tabulated-list)
 (require 'detail)
 (require 'emacs-names)
+(require 'mermaid)
 
 (domain! 'linear)
 (effects! '(write))
@@ -257,22 +258,32 @@
     (component 'ui/table (list 'columns (map (lambda (c) (list (linear--plain c))) (car rows))
                                'rows (map (lambda (r) (map linear--plain r)) (cdr rows))))))
 
+;; a fenced block: a mermaid fence draws as its diagram, any other as a quote
+(define (linear--fence-block lang lines)
+  (let ((body (string-join (reverse lines) "\n")))
+    (if (equal? lang "mermaid")
+        (mermaid-node body)
+        (component 'ui/quote (list 'text body)))))
+
 (define (linear--md-blocks md)
-  (let loop ((ls (string-split (linear--s md) "\n")) (para '()) (fence #f) (out '()))
+  (let loop ((ls (string-split (linear--s md) "\n")) (para '()) (fence #f) (out '()) (lang ""))
     (let ((flush (lambda (out)
                    (if (null? para) out
-                       (cons (component 'ui/prose (list 'segs (linear--inline (string-join (reverse para) " ")))) out)))))
+                       (cons (component 'ui/prose (list 'segs (linear--inline (string-join (reverse para) " ")))) out))))
+          ;; the fence's language rides along: a call that does not name it keeps it
+          (loop (lambda (ls para fence out . l) (loop ls para fence out (if (pair? l) (car l) lang)))))
       (cond
         ((null? ls)
-         (reverse (if fence (cons (component 'ui/quote (list 'text (string-join (reverse fence) "\n"))) out) (flush out))))
+         (reverse (if fence (cons (linear--fence-block lang fence) out) (flush out))))
         (fence
          (if (string-prefix? "```" (string-trim (car ls)))
-             (loop (cdr ls) '() #f (cons (component 'ui/quote (list 'text (string-join (reverse fence) "\n"))) out))
+             (loop (cdr ls) '() #f (cons (linear--fence-block lang fence) out) "")
              (loop (cdr ls) '() (cons (car ls) fence) out)))
         (else
          (let* ((raw (car ls)) (l (string-trim raw)) (out1 (flush out)))
            (cond
-             ((string-prefix? "```" l) (loop (cdr ls) '() '() out1))
+             ((string-prefix? "```" l)
+              (loop (cdr ls) '() '() out1 (string-downcase (string-trim (substring l 3 (string-length l))))))
              ((equal? l "") (loop (cdr ls) '() #f out1))
              ((member l '("---" "***" "___")) (loop (cdr ls) '() #f out1))
              ;; a line that is only **bold** heads what follows
@@ -555,7 +566,15 @@
 (define (linear-refresh! buf)
   (if (buffer-derived-mode? buf "linear-mode")
       (linear--read! buf)
-      (begin (buffer-set-local! buf 'linear-issue #f) (linear--issue-draw! buf) (linear--issue-read! buf))))
+      ;; g tries the diagrams that did not draw again
+      (begin (mermaid-forget-failures!)
+             (buffer-set-local! buf 'linear-issue #f) (linear--issue-draw! buf) (linear--issue-read! buf))))
+
+;; a diagram that lands redraws the issue pages, which hold its picture
+(mermaid-on-drawn! "linear"
+  (lambda ()
+    (for-each (lambda (b) (when (and (buffer-exists? b) (buffer-local b 'linear-issue)) (linear--issue-draw! b)))
+              (buffer-list))))
 
 ;; the status tabs head the list, each with its count under the filters /
 ;; set; the closed count shows once that tab has been read

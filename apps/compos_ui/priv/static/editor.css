@@ -925,6 +925,8 @@ body.unfocused .window.active .cursor {
   display: inline-block; max-width: min(100%, 640px); height: auto;
   border-radius: 0; margin: 6px 8px 6px 0; vertical-align: middle;
 }
+/* a mermaid diagram over its fence (mermaid.scm): the page's width */
+.line img.img-embed.mermaid-diagram { display: block; max-width: 100%; margin: 8px 0; }
 .line-content:has(> img.img-avatar) {
   display: inline-flex; align-items: flex-end;
 }

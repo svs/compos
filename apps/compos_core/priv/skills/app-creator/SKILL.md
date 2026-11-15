@@ -308,6 +308,8 @@ There is no button without a key, and the key is drawn on it. Draw the bar with 
 
 ### Anchor the content, never the controls
 
+Draw every detail page with `(anchor-page! BUF BLOCKS)`. It gives each part of the page a text line and an anchor, and each row inside a part (a table row, a stat, a list or key-value row) a line of its own, turns on `anchor-mode`, and keeps point across redraws. Without it a page's text is a short summary, and `C-v`, `C-n` and `M-<down>` do not move the page at all. Set `render-blocks` by hand only for a page that numbers its own lines.
+
 The page declares its anchors with `anchor-set!` after every draw and turns on `anchor-mode`. An anchor is a stop for reading, so:
 
 - Never anchor anything a key already reaches: the action bar, the tabs, a menu, a pager.

@@ -699,3 +699,6 @@
          (jj-sh root (string-append "jj show --ignore-working-copy --color never --git -r '"
                                     (jj-quote change) "' 2>&1")))))
 (public! 'jj-show "(jj-show CHANGE [DIR]) — CHANGE's description, files and diff")
+(public! 'jj-root "(jj-root PATH) — the jj repo root that holds PATH, or #f when PATH is in no jj repo or jj is not installed")
+;; a lookup like git-root: the one-time `command -v jj` probe is cached
+(catalog-meta! 'function "jj-root" 'domain 'code 'effects '(read))

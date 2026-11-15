@@ -8,7 +8,6 @@
 (require 'window)
 (require 'modeline)
 (require 'tabulated-list)
-(require 'comint)
 
 (domain! 'buffers)
 (effects! '(write))
@@ -4403,16 +4402,6 @@ is forgotten and that group falls back to creation order in the switcher."
             (message "Group needs a name")
             (receive (or (group-resolve-id name)
                          (group-ensure-record! name))))))))
-
-;; C-u M-x opencode and the group-prefix command use the same destination
-;; reader as files and projects.  Enter the group first so a new terminal
-;; inherits that group's working directory and layout context.
-(set! opencode-group-reader
-  (lambda (receive)
-    (group-read-or-create! "Open OpenCode in group: "
-      (lambda (group)
-        (switch-to-group! group)
-        (receive group)))))
 
 ;; The seed of `new` (docs/groups.md): a marked selection is the seed.
 ;; With none the seed is empty and the group opens on its scratch: `new`

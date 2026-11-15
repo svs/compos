@@ -11,7 +11,7 @@ defmodule Compos.ManualTest do
   alias Compos.Core.Session
 
   # the apps the stock boot leaves out; the suite loads them (test_helper.exs)
-  @opt_in ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 title training decide)
+  @opt_in ~w(spreadsheet amazon doom-lite movie title training decide)
 
   @tag timeout: 300_000
   test "the manual renders from a stock boot" do

@@ -164,9 +164,8 @@ nonstandard install out of the built-in connector catalog."
     description "Chrome Gemini Nano — local browser inference"))
 
 ;; one package per connector: each declares its command, install steps,
-;; sign-in and secrets
-(require 'connector-gemini "connectors/gemini.scm")
-(require 'connector-kimi "connectors/kimi.scm")
+;; sign-in and secrets with define-connector!. A connector loads after
+;; this file and registers itself; this file names none of them.
 
 ;;; --- the live model catalog ---------------------------------------------------
 ;;; LLMDB ships a snapshot of what each provider offers, and a snapshot

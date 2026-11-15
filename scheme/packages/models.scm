@@ -37,7 +37,6 @@
 ;;; holding it up.
 
 (require 'format)
-(require 'endpoint)
 (require 'tabulated-list)
 
 (domain! 'llm)
@@ -139,11 +138,17 @@
 ;; connection, and says there that it serves models. A daemon therefore
 ;; appears in this list the moment its package loads, and leaves with it.
 (define (models--daemon-hosts)
-  (map (lambda (n) (string-append "endpoint:" n))
-       (filter (lambda (n)
-                 (let ((spec (endpoint-spec n)))
-                   (and (pair? spec) (equal? (plist-get spec 'serves) "models"))))
-               (endpoint-names))))
+  (if (not (featurep 'endpoint))
+      '()
+      (map (lambda (n) (string-append "endpoint:" n))
+           (filter (lambda (n)
+                     (let ((spec (endpoint-spec n)))
+                       (and (pair? spec) (equal? (plist-get spec 'serves) "models"))))
+                   (endpoint-names)))))
+
+;; the registry's spec of daemon NAME, or #f when no endpoint package is loaded
+(define (models--endpoint-spec name)
+  (and (featurep 'endpoint) (endpoint-spec name)))
 
 (define *models-daemon-hosts* models--daemon-hosts)
 
@@ -483,7 +488,8 @@
 ;; the two seams a daemon is reached through: whether it holds its pipe
 ;; open, and the one request. A test replaces these and needs no daemon.
 (define *models-daemon-ask* models--daemon-ask)
-(define *models-daemon-running?* endpoint-connected?)
+(define *models-daemon-running?*
+  (lambda (name) (and (featurep 'endpoint) (endpoint-connected? name))))
 
 (define (models--ollama-fetch host k)
   (*models-request* host "GET" "/api/tags" #f 10
@@ -629,7 +635,7 @@
 ;; a model loaded is asking for the program that holds it
 (define (models--daemon-op! host op name verb)
   (let ((ep (models--endpoint-name host)))
-    (if (not (endpoint-spec ep))
+    (if (not (models--endpoint-spec ep))
         (message (string-append ep ": no package registered this daemon"))
         (begin
           (unless (*models-daemon-running?* ep) (endpoint-ensure! ep))
@@ -771,7 +777,7 @@
 ;; of the first answer would be a guess.
 (define (models--serve-daemon! host)
   (let ((ep (models--endpoint-name host)))
-    (if (not (endpoint-spec ep))
+    (if (not (models--endpoint-spec ep))
         (message (string-append ep ": no package registered this daemon"))
         (begin
           (message (string-append "starting " ep "..."))
@@ -821,7 +827,7 @@
               (message (string-append (models--host-label host)
                                       " did not start from here, so it does not stop here"))
               (let ((ep (models--endpoint-name host)))
-                (endpoint-stop! ep)
+                (when (featurep 'endpoint) (endpoint-stop! ep))
                 (message (string-append ep ": the daemon is stopped"))
                 (cache-refresh! *models-buffer*)))))))
   'modes '(models-mode))

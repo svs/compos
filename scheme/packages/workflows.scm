@@ -283,6 +283,62 @@
     (if (or (pair? parsed) (null? parsed)) parsed '())))
 
 
+;;; --- the cron runner ----------------------------------------------------------
+;;; cron.scm is the clock: a due job appends `fired` on cron:NAME, as an
+;;; Emacs timer would call its function. This workflow runs the job's
+;;; action, one event a batch: a batch that fails runs again, and only its
+;;; own job runs again with it. cron calls cron-boot-hook once the scheduler
+;;; is up, before its jobs load, so the runner listens before the first
+;;; `fired` lands.
+
+(require 'cron)
+
+(domain! 'system)
+(effects! '(write execute spend))
+
+(defcustom 'cron-agent-jobs #f
+  "Let a job send a prompt to an agent chat. Off, such a job does nothing and says so.")
+
+(define (workflows--cron-agent! name target)
+  (if cron-agent-jobs
+      (agent-wake! (car target) 'cron (cadr target))
+      (message (string-append "cron: " name
+                              " sends a prompt to an agent; turn on cron-agent-jobs to let it"))))
+
+;; a shell job runs in its own process buffer: no time limit, its output
+;; stays there, and a run still going when the next is due is not doubled
+(define (workflows--cron-shell! name target)
+  (let ((buf (string-append "*cron:" name "*"))
+        (dir (car target))
+        (cmd (cadr target)))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (if (process-running? buf)
+        (message (string-append "cron: " name " still runs; this run is skipped"))
+        (begin
+          (buffer-append! buf (string-append "\n== " (format-time (current-time) "%Y-%m-%d %H:%M")
+                                             " " cmd "\n"))
+          (start-process! buf (string-append "cd " (sh-quote dir) " && " cmd))))))
+
+(define (workflows--cron-run! event)
+  (when (equal? (plist-get event 'kind) 'fired)
+    (let* ((name (plist-get (plist-get event 'data) 'name))
+           (opts (cron-job-action name)))
+      (cond ((plist-get opts 'command) (run-command (plist-get opts 'command)))
+            ((plist-get opts 'call) ((workflow--fn (plist-get opts 'call)) event))
+            ((plist-get opts 'shell) (workflows--cron-shell! name (plist-get opts 'shell)))
+            ((plist-get opts 'emit)
+             (let ((e (plist-get opts 'emit))) (emit! (car e) (cadr e) (caddr e) event)))
+            ((plist-get opts 'agent) (workflows--cron-agent! name (plist-get opts 'agent)))))))
+
+(define (workflows--cron-handle key events) (for-each workflows--cron-run! events))
+
+(define (workflows--cron-start!)
+  (define-workflow! "cron" 'listen '("cron:*") 'handle 'workflows--cron-handle 'batch 1))
+
+(add-hook! 'cron-boot-hook 'workflows--cron-start!)
+;; a reload into a running daemon
+(when (cron-running?) (workflows--cron-start!))
+
 ;;; the catalog
 
 (domain! 'system)

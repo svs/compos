@@ -365,11 +365,17 @@
     (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
     (display-buffer buf)))
 
-;; groups.scm replaces this seam with its native reader.  Keeping the reader
-;; out of terminal code also lets compos boot without the optional workspace
-;; package loaded.
+;; C-u M-x opencode asks for the group with the reader files and projects
+;; use, once groups.scm is loaded. Enter the group first so a new terminal
+;; inherits that group's working directory and layout context.
 (define opencode-group-reader
-  (lambda (receive) (receive (frame-group))))
+  (lambda (receive)
+    (if (boundp 'group-read-or-create!)
+        (group-read-or-create! "Open OpenCode in group: "
+          (lambda (group)
+            (switch-to-group! group)
+            (receive group)))
+        (receive (frame-group)))))
 
 (define-command "opencode"
   "Open OpenCode for this group; with C-u, choose a group"

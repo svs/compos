@@ -12,13 +12,16 @@
 ;;;                            it runs only when cron-agent-jobs is on
 ;;;
 ;;; or nothing, when a workflow that listens to cron:NAME does the work.
+;;; cron only keeps the jobs and says when they are due; it runs none.
 ;;; 'zone gives a time zone other than the local one. 'save #f keeps the
 ;;; job out of cron-file, for a package that defines it as it loads.
 ;;;
 ;;; The core (Compos.Core.Cron, on Quantum) holds the timer. A due job
-;;; appends `fired` to cron:NAME in the event log, and the workflow "cron"
-;;; runs the action, one event at a time, off the keystroke lane. An action
-;;; that raises is retried and then parked, as any workflow batch is.
+;;; appends `fired` to cron:NAME in the event log, as an Emacs timer calls
+;;; its function. The workflow "cron" in workflows.scm runs the action, one
+;;; event at a time, off the keystroke lane; without workflows a job fires
+;;; and nothing runs it. An action that raises is retried and then parked,
+;;; as any workflow batch is.
 ;;;
 ;;; The log is the record. Its newest event on cron:NAME is the last run,
 ;;; or the definition when the job never ran. When a job comes up with the
@@ -28,8 +31,6 @@
 ;;;
 ;;; M-x cron-list lists the jobs: r runs one now, k removes it.
 
-;; the workflow "cron" runs the jobs
-(require 'workflows)
 (require 'tabulated-list)
 
 (domain! 'system)
@@ -40,9 +41,6 @@
 
 (defcustom 'cron-catch-up #t
   "Run a job once when the daemon was down at its last due time.")
-
-(defcustom 'cron-agent-jobs #f
-  "Let a job send a prompt to an agent chat. Off, such a job does nothing and says so.")
 
 ;; NAME -> (name NAME spec SPEC cron CRON zone ZONE opts OPTS save BOOL);
 ;; SPEC is what the user wrote, CRON the cron time the core reads
@@ -199,49 +197,23 @@
     (event-log-append! (cron--topic name) 'fired
                        (list 'name name 'spec (plist-get job 'cron) 'manual #t))))
 
-;;; --- the run ----------------------------------------------------------------
+;;; --- the action and the boot ---------------------------------------------
 
-(effects! '(write execute spend))
+(effects! '(read))
 
-(define (cron--agent! name target)
-  (if cron-agent-jobs
-      (agent-wake! (car target) 'cron (cadr target))
-      (message (string-append "cron: " name
-                              " sends a prompt to an agent; turn on cron-agent-jobs to let it"))))
+(define (cron-job-action name)
+  "(cron-job-action NAME) — what the job NAME does, as the opts cron-define! took: 'command, 'call, 'shell, 'emit or 'agent; () when it names none"
+  (let ((job (alist-get *cron-jobs* name)))
+    (if job (plist-get job 'opts) '())))
 
-;; a shell job runs in its own process buffer: no time limit, its output
-;; stays there, and a run still going when the next is due is not doubled
-(define (cron--shell! name target)
-  (let ((buf (string-append "*cron:" name "*"))
-        (dir (car target))
-        (cmd (cadr target)))
-    (unless (buffer-exists? buf) (buffer-create buf))
-    (if (process-running? buf)
-        (message (string-append "cron: " name " still runs; this run is skipped"))
-        (begin
-          (buffer-append! buf (string-append "\n== " (format-time (current-time) "%Y-%m-%d %H:%M")
-                                             " " cmd "\n"))
-          (start-process! buf (string-append "cd " (sh-quote dir) " && " cmd))))))
+(effects! '(write))
 
-(define (cron--run! event)
-  (when (equal? (plist-get event 'kind) 'fired)
-    (let* ((name (plist-get (plist-get event 'data) 'name))
-           (job (alist-get *cron-jobs* name))
-           (opts (if job (plist-get job 'opts) '())))
-      (cond ((plist-get opts 'command) (run-command (plist-get opts 'command)))
-            ((plist-get opts 'call) ((workflow--fn (plist-get opts 'call)) event))
-            ((plist-get opts 'shell) (cron--shell! name (plist-get opts 'shell)))
-            ((plist-get opts 'emit)
-             (let ((e (plist-get opts 'emit))) (emit! (car e) (cadr e) (caddr e) event)))
-            ((plist-get opts 'agent) (cron--agent! name (plist-get opts 'agent)))))))
-
-(define (cron--handle key events) (for-each cron--run! events))
-
-;; The core calls this once the scheduler and the workflows are up; they
-;; are not while the packages load. One event a batch: a batch that fails
-;; runs again, and only its own job runs again with it.
+;; The core calls this once the scheduler and the event log are up; they are
+;; not while the packages load. A package that runs the jobs adds itself to
+;; cron-boot-hook, which runs before the jobs load, so it listens before the
+;; first `fired` lands.
 (define (cron--boot!)
-  (define-workflow! "cron" 'listen '("cron:*") 'handle 'cron--handle 'batch 1)
+  (run-hooks 'cron-boot-hook)
   (cron--load!)
   #t)
 
@@ -270,7 +242,7 @@
               (list (plist-get r 'action) "faint")))))
 
 (define (cron--meta buf)
-  (let ((st (workflow-status "cron")))
+  (let ((st (and (boundp 'workflow-status) (workflow-status "cron"))))
     (string-append (number->string (length *cron-jobs*)) " jobs · "
                    (if (cron-running?) (cron-zone) "scheduler not running")
                    (if (and st (plist-get st 'last-error))
@@ -336,6 +308,7 @@
 (effects! '(read))
 (public! 'cron-jobs "(cron-jobs) — every job as a plist: name spec cron zone action next last")
 (public! 'cron-last "(cron-last NAME) — the newest event on cron:NAME, the last run or the definition, or #f")
+(public! 'cron-job-action "(cron-job-action NAME) — what the job NAME does: the action opts cron-define! took")
 (public! 'cron-next-run "(cron-next-run NAME) — the next time the job NAME is due, in unix seconds, or #f")
 (effects! '(write execute spend))
 (public! 'cron-define! "(cron-define! NAME SPEC ['command NAME | 'call FN | 'shell (DIR CMD) | 'emit (TOPIC KIND DATA) | 'agent (CHAT PROMPT)] ['zone ZONE] ['save BOOL]) — run the job NAME at the cron time SPEC, as an event on cron:NAME")

@@ -18,9 +18,9 @@
 ;;; The stock boot is the editor. An app ships in scheme/apps, which is
 ;;; nothing special: one more load-path entry, so it loads on its first use: the ;;;###autoload cookies
 ;;; in its file name the commands M-x shows before the file loads, and the
-;;; harvest at the end of this file installs them (amazon, doom, doom-lite,
-;;; graphql, linkedin, movie, peers, px0, recording, spotify, spreadsheet,
-;;; substack, title, training). A user init may still (load) one outright.
+;;; harvest at the end of this file installs them (amazon, doom-lite, movie,
+;;; spreadsheet, title, training). A user init may still (load) one outright.
+;;; A community package lives in its own repo and loads with use-package.
 ;;; The test suite loads them all (test/test_helper.exs).
 ;;;
 ;;; Order: a line here is a manifest line, not a proof. A package that
@@ -86,6 +86,9 @@
 ;; the turn machine every agent thread steps (Compos.Core.Agent)
 (require 'agent-machine)
 (require 'agent)
+;; the connector packages register themselves with define-connector!
+(require 'connector-gemini "connectors/gemini.scm")
+(require 'connector-kimi "connectors/kimi.scm")
 (require 'annotate)
 (require 'appearance)
 (require 'autorevert)

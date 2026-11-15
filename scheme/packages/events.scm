@@ -26,8 +26,6 @@
 ;;;
 ;;; Event data must print and read back: strings, numbers, symbols, lists.
 
-;; the chats table's status hook feeds the log
-(require 'agent-fleet)
 
 (domain! 'system)
 (effects! '(write))

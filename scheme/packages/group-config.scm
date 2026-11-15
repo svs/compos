@@ -19,8 +19,6 @@
 ;;; chat-load-config runs them again on one chat; group-reload-config loads
 ;;; the file again into every buffer of the group.
 
-;; a group's config may name an llm-config bundle
-(require 'llm-config)
 
 (domain! 'buffers)
 (effects! '(write execute))

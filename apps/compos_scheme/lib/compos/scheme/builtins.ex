@@ -573,10 +573,16 @@ defmodule Compos.Scheme.Builtins do
       {"value->string", "(value->string V) — return V printed as a string."} => fn [v] ->
         Printer.print(v)
       end,
-      {"string->number", "(string->number S) — parse S as an integer or a float."} => fn [s] ->
+      {"string->number", "(string->number S) — parse S as an integer or a float; false when S is not a number."} => fn [s] ->
         case Integer.parse(s) do
-          {i, ""} -> i
-          _ -> with {f, ""} <- Float.parse(s), do: f
+          {i, ""} ->
+            i
+
+          _ ->
+            case Float.parse(s) do
+              {f, ""} -> f
+              _ -> false
+            end
         end
       end,
       {"symbol->string", "(symbol->string SYM) — return the name of SYM as a string."} => fn [

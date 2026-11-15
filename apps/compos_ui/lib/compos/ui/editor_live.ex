@@ -868,7 +868,8 @@ defmodule Compos.Ui.EditorLive do
       leaf ->
         registry = Map.get(state.chrome || %{}, "predict-skip")
         skip = Compos.Ui.RopeSync.skip_keys(leaf, registry)
-        {payload, entry} = Compos.Ui.RopeSync.payload(leaf, Map.get(sent, leaf.id), ack, skip)
+        hold = Map.get(state, :key_hold, false)
+        {payload, entry} = Compos.Ui.RopeSync.payload(leaf, Map.get(sent, leaf.id), ack, skip, hold)
         socket = assign(socket, rope_sent: %{leaf.id => entry})
         if payload, do: push_event(socket, "rope", payload), else: socket
     end

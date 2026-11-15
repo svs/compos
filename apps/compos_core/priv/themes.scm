@@ -1468,7 +1468,7 @@
 
 (define-theme "dos-dark"
   (list
-    ;; the development frame: the CGA sixteen on a black text-mode screen
+    ;; the development frame: the CGA sixteen on a deep navy text-mode screen
     (list 'ts-keyword 'fg "#55ffff" 'weight "700")
     (list 'ts-function 'fg "#ffff55")
     (list 'ts-string 'fg "#55ff55")
@@ -1484,19 +1484,19 @@
     (list 'ts-variable 'fg "#d0d0d0")
     (list 'ts-property 'fg "#ffaa00")
     (list 'ts-escape 'fg "#ff5555")
-    (list 'default 'bg "#0a0a0a" 'fg "#c0c0c0")
-    (list 'window 'bg "#0a0a0a")
-    (list 'paper 'bg "#0a0a0a")
-    (list 'window-inactive 'bg "#050505")
+    (list 'default 'bg "#0c1026" 'fg "#c0c0c0")
+    (list 'window 'bg "#0c1026")
+    (list 'paper 'bg "#0c1026")
+    (list 'window-inactive 'bg "#090c1e")
     (list 'body 'fg "#c0c0c0")
-    (list 'border-soft 'bg "#555555")
+    (list 'border-soft 'bg "#4a5078")
     (list 'border 'bg "#2a7a7a")
-    (list 'modeline 'bg "#333333" 'fg "#aaaaaa")
+    (list 'modeline 'bg "#1e2446" 'fg "#aaaaaa")
     (list 'modeline-active 'bg "#0e3a3a" 'fg "#9fdcdc")
     (list 'cursor 'bg "#55ff55")
     (list 'region 'bg "#0000aa")
     (list 'select 'bg "#0000aa")
-    (list 'hl-line 'bg "#161616")
+    (list 'hl-line 'bg "#161c3c")
     (list 'linenum 'fg "#555555")
     (list 'accent 'fg "#55ffff")
     (list 'link 'fg "#55ffff" 'decoration "underline")
@@ -1551,10 +1551,10 @@
           'shadow-deep "6px 6px 0 #000066")))
 
 (define-theme-skin! "dos-dark" "
-/* the desktop: black, a faint dither so the windows stand off it */
+/* the desktop: deep navy, a faint dither so the windows stand off it */
 .windows {
-  background-color: #000000;
-  background-image: radial-gradient(#1c1c1c 1px, transparent 1px);
+  background-color: #060818;
+  background-image: radial-gradient(#161c40 1px, transparent 1px);
   background-size: 3px 3px;
 }
 /* a window is a gray double rule; the live one is cyan; shadows are DOS blue */

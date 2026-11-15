@@ -2426,6 +2426,12 @@
             clearTimeout(this._selt);
             this._selPending = false;
             this._gestureAt = 0;
+            // a command or typed text takes the selection over: the
+            // mark is no longer the native selection's to drop
+            if (!["Control", "Meta", "Alt", "Shift"].includes(e.key)) {
+              this._nativeSel = false;
+              this._dropMark = false;
+            }
           }
           // Cmd-C with no native selection: copy the editor region
           // (with one, the browser's own copy handles it)
@@ -2458,6 +2464,11 @@
             // caret move from a click down there.
             this._motionAt = performance.now();
             if (native) this._gestureAt = this._motionAt;
+            // A selection made with Shift or the pointer ends on a
+            // plain motion key, as on every platform and as Emacs ends
+            // a shift-selection. A mark set by a command (C-SPC, C-x h)
+            // is the region's, and motion extends it.
+            if (native && !e.shiftKey && this._nativeSel) this._dropMark = true;
           }
           // Up and Down go through Selection.modify on every surface:
           // the native caret motion across the flex rows of a
@@ -2813,7 +2824,7 @@
         // caret stands on the server's cursor, so the next intent
         // targets the byte the server means. A prompt, a panel, or
         // a terminal keeps the keyboard it has.
-        this.syncEditable = () => {
+        this.syncEditable = (keepSel) => {
           if (document.querySelector(".mb-panel, .which-key, .transient-panel")) return;
           const buf = document.querySelector(".window.active .buf[contenteditable]");
           if (!buf) return;
@@ -2839,6 +2850,9 @@
           const anchorByte = sel.anchorNode && buf.contains(sel.anchorNode) ? domByte(sel.anchorNode, sel.anchorOffset) : null;
           const wantAnchor = mark === null || mark === pt ? pt : mark;
           if (focusByte === pt && anchorByte === wantAnchor) { markCurrentRow(buf); return; }
+          // the patch changed nothing here (afterPatch): the selection
+          // the reader is making stands
+          if (keepSel === true && focusByte !== null) { markCurrentRow(buf); return; }
           // The reader's selection outranks a stale point. A report
           // is on its way, or has gone and not come back: until the
           // server's point is the one reported, a patch (a chat
@@ -2927,8 +2941,9 @@
             if (!w || !w.classList.contains("active")) return;
             const sel = window.getSelection();
             const pt = parseInt(buf.dataset.pt, 10);
-            // a collapsed caret still on the server's point is no news
-            if (sel && sel.isCollapsed && !isNaN(pt) && sel.focusNode && buf.contains(sel.focusNode) &&
+            // a collapsed caret still on the server's point is no news,
+            // unless it ends a selection the server still holds
+            if (!this._dropMark && sel && sel.isCollapsed && !isNaN(pt) && sel.focusNode && buf.contains(sel.focusNode) &&
                 domByte(sel.focusNode, sel.focusOffset) === pt) return;
             // keep the mark when a motion key caused this report;
             // a click, which sets no timestamp, still clears it
@@ -2963,6 +2978,11 @@
           // upstream = the caret is drawn on the row of the character
           // before it; at a soft wrap that row is the upper one
           this._affinity = wrapAffinity(sel);
+          // a selection this client reported is a native one; a plain
+          // motion key after it reports the caret and drops the mark
+          if (mark !== null) this._nativeSel = true;
+          else if (this._dropMark || !keep) { keep = false; this._nativeSel = false; }
+          this._dropMark = false;
           this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep,
             v: parseInt(buf.dataset.v, 10) });
           this._gestureAt = 0;
@@ -3730,18 +3750,36 @@
         doc.style.top = Math.max(8, Math.min(y, window.innerHeight - d.height - 8)) / zoom + "px";
       },
       afterPatch() {
-        // the patch stamp: selChangeH compares it with the gesture
-        // stamp to tell a reader's caret move from a patch's
-        this._patchAt = performance.now();
-        clearTimeout(this._selt);
-        this._selPending = false;
-        this._gestureAt = 0;
+        // A patch that left the active editable as it was (a chat
+        // writing in another window, the faces of the last edit, a
+        // clock) replaced no node under the caret. A caret move or a
+        // selection the reader is still making is theirs: its report
+        // stays armed, and syncEditable leaves the selection alone.
+        // Dropping it here put the caret back and undid the selection
+        // whenever any patch landed within the report's delay.
+        const now = performance.now();
+        const ab = document.querySelector(".window.active .buf[contenteditable]");
+        const abWin = ab && ab.closest(".window");
+        const sig = ab ? (abWin ? abWin.dataset.winId : "") + ":" + ab.dataset.v + ":" +
+          ab.dataset.pt + ":" + (ab.dataset.mark || "") : "";
+        const mine = this._selPending ||
+          (this._gestureAt && now - this._gestureAt < 1500);
+        const foreign = sig !== "" && sig === this._patchSig && !!mine;
+        this._patchSig = sig;
+        if (!foreign) {
+          // the patch stamp: selChangeH compares it with the gesture
+          // stamp to tell a reader's caret move from a patch's
+          this._patchAt = now;
+          clearTimeout(this._selt);
+          this._selPending = false;
+          this._gestureAt = 0;
+        }
         this.applyWhichKeyFilter();
         this.restoreClientScroll();
         this.applyScrollRequests();
         this.syncCursorFocus();
         this.syncKeyboardOwner();
-        this.syncEditable();
+        this.syncEditable(foreign);
         // re-measure after every patch: splits, buffer switches and
         this.placeCompletionDocs();
         // per-buffer styles all change how many rows fit where

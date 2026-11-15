@@ -24,7 +24,9 @@
 // predict (a chord, a paste, a selection) blocks prediction until the
 // daemon acks it, and a row the client cannot read makes it stop. A key
 // that a mode takes over (paredit's "(" and DEL) arrives in "skip": the
-// client sends it with no prediction (predict-skip! in predict.scm).
+// client sends it with no prediction (predict-skip! in predict.scm). While
+// a prefix key waits for its key, the daemon says "hold" with the ack of
+// the prefix: the h of C-x h is never painted as text.
 (function () {
   const utf8 = new TextEncoder();
   const bytes = (s) => utf8.encode(s).length;
@@ -364,6 +366,7 @@
     W.hist.set(p.v, { r: rope, pt: p.pt, ack: p.ack });
     W.v = p.v;
     if (p.skip) W.skip = new Set(p.skip);
+    W.hold = !!p.hold;
     const now = performance.now();
     for (const o of W.ops) {
       if (o.seq <= p.ack && !o.confirmed) {
@@ -415,6 +418,9 @@
 
   function predictable(buf, e, W) {
     if (e.isComposing || buf.hasAttribute("phx-update")) return null;
+    // a prefix key waits for its key (C-x h): the typed character is the
+    // rest of a chord, not text
+    if (W.hold) return null;
     const V = viewOf(W, buf);
     if (!V || V.pending.some((o) => o.kind === "none")) return null;
     const sel = window.getSelection();

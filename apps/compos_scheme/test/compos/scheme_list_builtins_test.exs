@@ -138,4 +138,14 @@ defmodule Compos.Scheme.ListBuiltinsTest do
     assert run("(alist-get '((a 1)) 'z)") == false
     assert run("(alist-delete '((a 1) (b 2)) 'a)") == [[{:sym, "b"}, 2]]
   end
+
+  test "string->number parses a number and answers false for anything else" do
+    assert run(~s{(string->number "42")}) == 42
+    assert run(~s{(string->number "2.5")}) == 2.5
+    # Float.parse's :error and its partial match never leak out
+    assert run(~s{(string->number "abc")}) == false
+    assert run(~s{(string->number "/bin/sh:")}) == false
+    assert run(~s{(string->number "1/2")}) == false
+    assert run(~s{(string->number "")}) == false
+  end
 end

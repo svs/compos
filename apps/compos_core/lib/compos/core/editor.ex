@@ -890,6 +890,12 @@ defmodule Compos.Core.Editor do
        tree: rendered,
        active: f.active,
        pending: f.pending,
+       # the next key is not plain text: a prefix waits for its key, a
+       # command reads the key itself, or a count is open. The browser
+       # paints no typed character until this clears (Compos.Ui.RopeSync).
+       key_hold:
+         f.pending != [] or Map.get(f, :key_capture) not in [nil, false] or
+           Map.get(f, :prefix_arg) not in [nil, false],
        minibuffer: f.minibuffer && render_minibuffer(f.minibuffer, minibuf_of(f)),
        transient: Map.get(f, :transient),
        # a pending prefix has which-key rows; the client asks Scheme for

@@ -21,21 +21,23 @@ defmodule Compos.Ui.RopeSync do
   The payload for LEAF against SENT (the entry this module returned last for
   that window, or nil), and the entry to keep. The payload is nil when the
   client already holds everything that the payload would carry. SKIP is
-  the list of keys from `skip_keys/2`.
+  the list of keys from `skip_keys/2`. HOLD is true while the next key is
+  not plain text (a prefix such as `C-x` waits for its key): the client
+  predicts nothing until a payload clears it.
   """
-  def payload(%{id: win, buffer: buffer, version: v, point: pt} = leaf, sent, ack, skip \\ []) do
+  def payload(%{id: win, buffer: buffer, version: v, point: pt} = leaf, sent, ack, skip \\ [], hold \\ false) do
     text = leaf_text(leaf)
-    entry = {buffer, v, pt, ack, skip, text}
+    entry = {buffer, v, pt, ack, skip, text, hold}
 
     payload =
       case sent do
-        {^buffer, ^v, ^pt, ^ack, ^skip, _} ->
+        {^buffer, ^v, ^pt, ^ack, ^skip, _, ^hold} ->
           nil
 
-        {^buffer, ^v, _, _, _, _} ->
+        {^buffer, ^v, _, _, _, _, _} ->
           %{win: win, v: v, pt: pt, ack: ack}
 
-        {^buffer, _, _, _, _, old} ->
+        {^buffer, _, _, _, _, old, _} ->
           {at, del, ins} = delta(old, text)
           %{win: win, v: v, pt: pt, ack: ack, at: at, del: del, ins: ins}
 
@@ -46,9 +48,13 @@ defmodule Compos.Ui.RopeSync do
     payload =
       case {payload, sent} do
         {nil, _} -> nil
-        {p, {_, _, _, _, ^skip, _}} -> p
+        {p, {_, _, _, _, ^skip, _, _}} -> p
         {p, _} -> Map.put(p, :skip, skip)
       end
+
+    # every payload says whether the next key is plain text: the ack that
+    # frees a prefix key must not free the prediction of the key after it
+    payload = payload && Map.put(payload, :hold, hold)
 
     {payload, entry}
   end

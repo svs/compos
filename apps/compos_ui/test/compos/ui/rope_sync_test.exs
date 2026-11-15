@@ -70,6 +70,17 @@ defmodule Compos.Ui.RopeSyncTest do
       {p3, _} = RopeSync.payload(%{leaf | point: 1}, e2, 0, [])
       refute Map.has_key?(p3, :skip)
     end
+
+    test "the payload says when the next key is not plain text" do
+      leaf = %{id: 1, buffer: "b", version: 1, point: 0, text: "ab"}
+      {p1, e1} = RopeSync.payload(leaf, nil, 0, [], false)
+      assert p1.hold == false
+      {p2, e2} = RopeSync.payload(leaf, e1, 1, [], true)
+      assert p2.hold == true
+      assert {nil, ^e2} = RopeSync.payload(leaf, e2, 1, [], true)
+      {p3, _} = RopeSync.payload(leaf, e2, 1, [], false)
+      assert p3.hold == false
+    end
   end
 
   describe "the rope event" do

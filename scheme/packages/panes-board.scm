@@ -249,14 +249,13 @@
          (s (if (and (member kind '("p" "w" "b")) (panes-board--column-row id)) 1 0)))
     (cond ((equal? kind "g") 0) ((member kind '("c" "f" "h")) 1) ((equal? kind "p") (+ 1 s)) ((equal? kind "w") (+ 2 s)) (else (+ 3 s)))))
 
-(define (panes-board--indent buf id)
-  ;; no-break spaces: the list cell collapses plain leading spaces in the browser
-  (let loop ((n (* 4 (panes-board--depth buf id))) (s ""))
-    (if (<= n 0) s (loop (- n 1) (string-append s "\u00A0")))))
+(define panes-board--nbsp (list->string (list (integer->char 160))))
 
 (define (panes-board--indent buf id)
-  (let loop ((n (* 4 (panes-board--depth buf id))) (s ""))
-    (if (<= n 0) s (loop (- n 1) (string-append s " ")))))
+  ;; two columns a level, in no-break spaces: the list cell collapses plain
+  ;; leading spaces in the browser
+  (let loop ((n (* 2 (panes-board--depth buf id))) (s ""))
+    (if (<= n 0) s (loop (- n 1) (string-append s panes-board--nbsp)))))
 
 (define (panes-board--pct share) (string-append (number->string (round (* 100 share))) "%"))
 
@@ -355,7 +354,7 @@
 
 (define (panes-board--trim s w)
   (let loop ((i 0))
-    (if (and (< i (string-length s)) (member (substring s i (+ i 1)) '(" " "\u00A0" "▸" "▾")))
+    (if (and (< i (string-length s)) (member (substring s i (+ i 1)) (list " " panes-board--nbsp "▸" "▾")))
         (loop (+ i 1))
         (let* ((lead (substring s 0 i))
                (parts (string-split (substring s i (string-length s)) ": ")))

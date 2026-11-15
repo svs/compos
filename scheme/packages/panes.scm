@@ -1297,3 +1297,7 @@
 (catalog-meta! 'function "panes-pane-ids" 'effects '(pure))
 (public! 'panes-window-mode "(panes-window-mode LAYOUT KEY) -> MODE | #f: the mode of window KEY; a window with no mode or fundamental-mode takes the mode-name of the buffer it shows")
 (catalog-meta! 'function "panes-window-mode" 'effects '(read))
+(public! 'panes-window-buffer "(panes-window-buffer LAYOUT KEY) -> BUF | #f: the buffer window KEY shows, the front of its stack; reads buffer names")
+(catalog-meta! 'function "panes-window-buffer" 'effects '(read))
+(public! 'panes-window-buffers "(panes-window-buffers LAYOUT KEY) -> (BUF ...): the stack of window KEY, the shown buffer first; () for an unknown KEY; reads buffer names")
+(catalog-meta! 'function "panes-window-buffers" 'effects '(read))

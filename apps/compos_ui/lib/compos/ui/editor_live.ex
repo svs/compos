@@ -529,8 +529,17 @@ defmodule Compos.Ui.EditorLive do
 
   # system clipboard: Cmd-V arrives as a browser paste event
   def handle_event("paste", %{"text" => text} = p, socket) when is_binary(text) do
-    Input.run(socket.assigns.frame, fn ->
-      Compos.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
+    frame = socket.assigns.frame
+
+    Input.run(frame, fn ->
+      case client_range(p, frame) do
+        # no editable selection to speak of (a prompt, a list): the old rule
+        {-1, -1} ->
+          Compos.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
+
+        {from, to} ->
+          Compos.Core.Session.call_named("clipboard-paste-range!", [text, from, to])
+      end
     end)
 
     {:noreply, socket |> ack(p) |> drain() |> refresh()}
@@ -561,10 +570,26 @@ defmodule Compos.Ui.EditorLive do
   # Cmd-C with no native selection: reply with the region (or kill top)
   # for the client to put on the OS clipboard — what "copy" MEANS is
   # Scheme's (clipboard-copy), like paste (S12, dup #26)
-  def handle_event("copy", _params, socket) do
+  #
+  # Cmd-C and Cmd-X with a selection on an editable surface: the browser
+  # sends the selection as bytes and takes the text from here. The rows it
+  # draws are not the source (a fold hides lines, a marker adds
+  # characters), so the text it would copy itself is not the text.
+  def handle_event("copy", params, socket) do
+    frame = socket.assigns.frame
+
     text =
-      Input.run(socket.assigns.frame, fn ->
-        case Compos.Core.Session.call_named("clipboard-copy", []) do
+      Input.run(frame, fn ->
+        result =
+          case client_range(params, frame) do
+            {from, to} when from >= 0 and to > from ->
+              Compos.Core.Session.call_named("clipboard-copy-range", [from, to])
+
+            _ ->
+              Compos.Core.Session.call_named("clipboard-copy", [])
+          end
+
+        case result do
           {:ok, text} when is_binary(text) -> text
           _ -> ""
         end
@@ -575,6 +600,44 @@ defmodule Compos.Ui.EditorLive do
      |> push_event("clipboard", %{text: text})
      |> drain()
      |> refresh()}
+  end
+
+  def handle_event("cut", params, socket) do
+    frame = socket.assigns.frame
+
+    text =
+      Input.run(frame, fn ->
+        {from, to} = client_range(params, frame)
+        buffer = Compos.Core.Editor.current_buffer()
+        if Compos.Core.Buffer.exists?(buffer), do: Compos.Core.Buffer.break_undo_chain(buffer)
+        result = Compos.Core.Session.call_named("clipboard-cut-range", [from, to])
+        Compos.Core.Editor.finish_command("clipboard-cut", false)
+
+        case result do
+          {:ok, text} when is_binary(text) -> text
+          _ -> ""
+        end
+      end)
+
+    socket = if text == "", do: socket, else: push_event(socket, "clipboard", %{text: text})
+    {:noreply, socket |> ack(params) |> drain() |> refresh()}
+  end
+
+  # The byte range the browser measured in its selection, {from, to}, when
+  # it is about the selected window and the text version that window
+  # holds; {-1, -1} when there is none to trust. It runs inside Input.run.
+  defp client_range(p, frame) do
+    buffer = Compos.Core.Editor.current_buffer()
+
+    with true <- is_integer(p["from"]) and is_integer(p["to"]),
+         true <- p["from"] >= 0 and p["to"] >= p["from"],
+         true <- safe_int(p["win"]) == Compos.Core.Editor.active_window(frame),
+         true <- Compos.Core.Buffer.exists?(buffer),
+         true <- p["v"] == Compos.Core.Buffer.version(buffer) do
+      {p["from"], p["to"]}
+    else
+      _ -> {-1, -1}
+    end
   end
 
   defp scheme_string(text) do
@@ -981,7 +1044,8 @@ defmodule Compos.Ui.EditorLive do
     # placeholder misses and the card renders
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
-       leaf.hidden_lines, :erlang.phash2(leaf.overlays), Compos.Ui.Oembed.generation(),
+       leaf.hidden_lines, Map.get(leaf, :narrow_lines), :erlang.phash2(leaf.overlays),
+       Compos.Ui.Oembed.generation(),
        Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode"),
        csv_preview_file_key(leaf.buffer, rm)}
 
@@ -2813,6 +2877,26 @@ defmodule Compos.Ui.EditorLive do
   @doc false
   # Preview folds keep source byte offsets stable. Hidden lines become spaces.
   # A closing fence stays present so the Markdown tree remains valid.
+  # A narrowed buffer previews only its narrowed lines. The lines outside
+  # turn to spaces of the same length, so every byte keeps its offset and
+  # a click on the page still lands on its source.
+  defp preview_narrow(%{text: text} = leaf) do
+    case Map.get(leaf, :narrow_lines) do
+      {first, last} ->
+        text
+        |> String.split("\n", trim: false)
+        |> Enum.with_index()
+        |> Enum.map_join("\n", fn {line, index} ->
+          if index < first or index > last,
+            do: String.duplicate(" ", byte_size(line)),
+            else: line
+        end)
+
+      _ ->
+        text
+    end
+  end
+
   defp preview_fold_source("markdown", text, point, mark, hidden) do
     fences = if MapSet.size(hidden) == 0, do: MapSet.new(), else: fence_lines(text)
 
@@ -2874,10 +2958,10 @@ defmodule Compos.Ui.EditorLive do
   # more, and only an edit parses again.
   defp render_preview("markdown" = rm, leaf, pt, mark, faces, cache) do
     {text, pt, mark} =
-      preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
+      preview_fold_source(rm, preview_narrow(leaf), pt, mark, leaf.hidden_lines)
 
     leaf = %{leaf | text: text}
-    key = {leaf.buffer, leaf.version, leaf.hidden_lines, leaf.overlays}
+    key = {leaf.buffer, leaf.version, leaf.hidden_lines, Map.get(leaf, :narrow_lines), leaf.overlays}
     {tree, cache} = md_tree(leaf, key, cache)
 
     html =
@@ -2900,7 +2984,7 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp render_preview(rm, leaf, pt, mark, faces, cache) do
-    {text, pt, mark} = preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
+    {text, pt, mark} = preview_fold_source(rm, preview_narrow(leaf), pt, mark, leaf.hidden_lines)
     html = preview_doc(rm, text, pt, mark, faces, leaf.preview_authored, leaf.overlays)
     {if(rm == "html", do: local_images(html, Map.get(leaf, :path)), else: html), cache}
   end

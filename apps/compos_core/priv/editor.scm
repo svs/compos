@@ -4050,14 +4050,27 @@
 (define (register-region-lifter! mode fn)
   (set! *region-lifters* (alist-put *region-lifters* mode fn)))
 
+;; A fold hides text from the end of its head line to the end of its last
+;; line. A range that reaches the end of the head line takes the hidden
+;; text with it, as killing a folded line does in Emacs: the reader chose
+;; the line they see, and what it stands for goes with it.
+(define (region-lift-hidden buf start end)
+  (let loop ((hidden (sort (buffer-hidden buf))) (end end))
+    (cond ((null? hidden) (list start end))
+          ((and (< start end) (<= start (car (car hidden))) (>= end (car (car hidden))))
+           (loop (cdr hidden) (max end (cadr (car hidden)))))
+          (else (loop (cdr hidden) end)))))
+
+;; what START..END stands for in BUF: the mode's lifter, then the folds
+(define (region-lift-bounds buf start end)
+  (let* ((hit (assoc (buffer-local-value 'mode-name buf) *region-lifters*))
+         (bounds (if (and hit (procedure? (cadr hit)))
+                     ((cadr hit) buf start end)
+                     (list start end))))
+    (region-lift-hidden buf (car bounds) (cadr bounds))))
+
 (define (region-action-bounds)
-  (let* ((buf (current-buffer))
-         (start (region-beginning))
-         (end (region-end))
-         (hit (assoc (buffer-local-value 'mode-name buf) *region-lifters*)))
-    (if (and hit (procedure? (cadr hit)))
-        ((cadr hit) buf start end)
-        (list start end))))
+  (region-lift-bounds (current-buffer) (region-beginning) (region-end)))
 
 (define-command "forward-word" "Move point forward one word" (interactive 'p)
   (lambda (n) (repeat-count n forward-word! backward-word!)))
@@ -6902,6 +6915,47 @@
     (if (equal? text "")
         (kill-top)
         (begin (kill-push! text) text))))
+
+;;; Copy, cut and paste on an editable surface name source text, and the
+;;; rows the browser draws are not the source: a fold hides lines, a fold
+;;; marker and a card add characters. The browser sends its selection as
+;;; bytes FROM..TO, and the text is worked out here. No range (-1, or a
+;;; text version the browser no longer shows) means the region.
+
+(define (clipboard--bounds from to)
+  (let ((buf (current-buffer)))
+    (if (and (integer? from) (integer? to) (<= 0 from) (< from to) (<= to (buffer-size buf)))
+        (region-lift-bounds buf from to)
+        (region-action-bounds))))
+
+(define (clipboard-copy-range from to)
+  (let* ((bounds (clipboard--bounds from to))
+         (text (buffer-substring (car bounds) (cadr bounds))))
+    (unless (equal? text "") (kill-push! text))
+    text))
+
+;; the text that went, "" when there was nothing to cut
+(define (clipboard-cut-range from to)
+  (let* ((bounds (clipboard--bounds from to))
+         (s (car bounds)) (e (cadr bounds)))
+    (if (< s e)
+        (let ((text (buffer-substring s e)))
+          (kill-region-1 s e)
+          text)
+        "")))
+
+;; TEXT over the browser's selection. A caret (FROM = TO) says there is no
+;; selection, so a mark the server still holds is not one to paste over.
+(define (clipboard-paste-range! text from to)
+  (let ((buf (current-buffer)))
+    (cond
+      ((and (integer? from) (integer? to) (<= 0 from) (< from to) (<= to (buffer-size buf)))
+       (let ((bounds (region-lift-bounds buf from to)))
+         (goto-char! (car bounds))
+         (set-mark! (cadr bounds))))
+      ((and (integer? from) (integer? to) (<= 0 from) (= from to))
+       (set-mark! #f)))
+    (clipboard-paste! text)))
 
 ;;; --- buffer links ----------------------------------------------------------
 ;;; A link is one string that points at a buffer, and two readers follow it.

@@ -1575,6 +1575,9 @@
           const m = e.data;
           if (!m || !m.compos) return;
           if (m.compos === "scroll") {
+            // the page's own scroll: the editor's ctop will catch up to it,
+            // and that echo must not be sent back in
+            this.reported = Math.round(m.top);
             clearTimeout(this.timer);
             this.timer = setTimeout(() => {
               this.pushEvent("cscroll", {
@@ -1614,7 +1617,7 @@
         // the page loads the buffer as it is now: a message already
         // posted is in it, so only a later one is sent in
         this.posted = this.el.dataset.appMessage;
-        this.onLoad = () => this.apply();
+        this.onLoad = () => this.apply(true);
         this.el.addEventListener("load", this.onLoad);
       },
       updated() { this.apply(); },
@@ -1623,11 +1626,18 @@
         this.el.removeEventListener("load", this.onLoad);
         clearTimeout(this.timer);
       },
-      apply() {
+      apply(load) {
         const top = parseInt(this.el.dataset.ctop || "0", 10);
         const w = this.el.contentWindow;
         if (!w) return;
-        w.postMessage({ compos: "scroll", top: top }, "*");
+        // The scroll goes in when the page loads and when the editor moves
+        // it. Every other render (the buffer changed, the window redrew)
+        // left ctop where it was, or where the page itself put it a moment
+        // ago: sending it again pulled the page back to a stale place.
+        if (load || (top !== this.sent && top !== this.reported)) {
+          this.sent = top;
+          w.postMessage({ compos: "scroll", top: top }, "*");
+        }
         // app-post! (preview.scm): the package's news, with no reload
         const msg = this.el.dataset.appMessage;
         if (msg && msg !== this.posted) {
@@ -2529,7 +2539,9 @@
           const text = e.clipboardData && e.clipboardData.getData("text/plain");
           if (!text) return;
           e.preventDefault();
-          this.pushEvent("paste", { text, seq: composPredict.barrier() });
+          // on an editable surface the paste goes over the selection the
+          // browser has, as bytes; a caret says there is none
+          this.pushEvent("paste", { text, seq: composPredict.barrier(), ...this.selBytes(true) });
         };
         window.addEventListener("paste", this.pasteH);
 
@@ -2820,6 +2832,38 @@
         };
         window.addEventListener("compositionstart", this.compStartH, true);
         window.addEventListener("compositionend", this.compEndH, true);
+        // The selection of the active editable surface as a byte range
+        // of the text version it shows: {win, v, from, to}. A caret gives
+        // from = to when CARET is true, and no range otherwise. {} when
+        // the selection is somewhere else.
+        this.selBytes = (caret) => {
+          const sel = window.getSelection();
+          if (!sel || !sel.rangeCount || !sel.focusNode || !sel.anchorNode) return {};
+          const el = sel.focusNode.nodeType === 1 ? sel.focusNode : sel.focusNode.parentElement;
+          const buf = el && el.closest(".window.active .buf[contenteditable]");
+          if (!buf || !buf.contains(sel.anchorNode)) return {};
+          const a = domByte(sel.anchorNode, sel.anchorOffset);
+          const f = domByte(sel.focusNode, sel.focusOffset);
+          const p = { win: winIdOf(buf), v: parseInt(buf.dataset.v, 10) };
+          if (a == null || f == null || (sel.isCollapsed && !caret)) return p;
+          return { ...p, from: Math.min(a, f), to: Math.max(a, f) };
+        };
+        // Copy and cut name source text, and the rows on the screen are
+        // not the source: a fold hides lines, a fold marker and a card
+        // add characters. The browser's own copy took the marker and
+        // left the folded lines. The selection travels as bytes, the
+        // editor works out the text, and it comes back for the
+        // clipboard (the "clipboard" event).
+        this.clipH = (e) => {
+          if (e.target.closest && e.target.closest(".terminal-view")) return;
+          const p = this.selBytes(false);
+          if (p.win == null) return;
+          e.preventDefault();
+          if (e.type === "cut") this.pushEvent("cut", { ...p, seq: composPredict.barrier() });
+          else this.pushEvent("copy", p);
+        };
+        window.addEventListener("copy", this.clipH);
+        window.addEventListener("cut", this.clipH);
         // After a patch the active editable takes focus and the DOM
         // caret stands on the server's cursor, so the next intent
         // targets the byte the server means. A prompt, a panel, or
@@ -3055,7 +3099,7 @@
         });
 
         this.handleEvent("clipboard", ({ text }) => {
-          copyText(text);
+          if (text) copyText(text);
         });
 
         // this TAB's frame rides the payload as data-frame (S5,
@@ -3836,6 +3880,8 @@
         window.removeEventListener("mousedown", this.linkDownH, true);
         document.removeEventListener("visibilitychange", this.visibilityH);
         window.removeEventListener("paste", this.pasteH);
+        window.removeEventListener("copy", this.clipH);
+        window.removeEventListener("cut", this.clipH);
         window.removeEventListener("beforeinput", this.beforeInputH, true);
         window.removeEventListener("compositionstart", this.compStartH, true);
         window.removeEventListener("compositionend", this.compEndH, true);

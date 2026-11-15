@@ -2867,7 +2867,9 @@ defmodule Compos.Core.Editor do
       # Scheme selects the buffer-owned group that supplies its color.
       # The frame group remains separate context for the bottom bar.
       group_color: Map.get(ml, "group-color"),
-      ts_lang: Map.get(locals, "ts-lang"),
+      # ts-faces #f borrows a grammar for its structure without its colours:
+      # tree-edit-mode lends Morg the markdown grammar
+      ts_lang: if(Map.get(locals, "ts-faces") == false, do: nil, else: Map.get(locals, "ts-lang")),
       plain_source: Map.get(locals, "plain-source") == true,
       display_updating: display_updating or Events.display_updating?(buffer),
       overlays: snap.overlays,

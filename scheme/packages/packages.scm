@@ -175,7 +175,6 @@
 (define (packages-list)
   "(packages-list) -- every package as packages-scan gives it, from the last scan"
   (or packages--scan-cache (begin (set! packages--scan-cache (packages-scan)) packages--scan-cache)))
-(public! 'packages-list "(packages-list) - every package of the checkout as a plist: name tier file requires required-by breaks; cached after the first scan")
 
 (define (packages-tier-breaks)
   "(packages-tier-breaks) -- every require that breaks the tier rules as a plist: from from-tier to to-tier feature file line"

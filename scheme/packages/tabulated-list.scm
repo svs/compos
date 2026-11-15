@@ -2444,6 +2444,8 @@
 
 (define-style! 'list-grid "
 .lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
+/* a row is also a semantic item: keep the list's own height, not the item's padding */
+.semantic-list > .lg-row { padding: 3px 0; }
 .lg-row > .lg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .lg-head { color: var(--dim-fg); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-bg); }
 .lg-head-title { display: flex; justify-content: space-between; gap: 2ch; padding: 6px 0 2px; font-family: var(--font-sans); font-weight: 600; white-space: pre; overflow: hidden; }

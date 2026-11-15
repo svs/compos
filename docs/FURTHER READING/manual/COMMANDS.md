@@ -1043,8 +1043,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `org-promote` |  | Promote the headline at point, or de-dent the line |
 | `org-promote-subtree` |  | Promote the entire subtree at point |
 | `org-todo` |  | Cycle the TODO state of the headline at point |
-| `package-install` |  | Fetch a package (.scm) from github/url and load it |
-| `package-list` |  | Echo the installed user packages |
+| `package-develop` |  | Load a package from a checkout of your own (empty: back to the clone) |
+| `package-freeze` |  | Pin every installed package at its current commit in packages.lock |
+| `package-install` |  | Clone a package from GitHub (user/repo) or a git url and load it |
+| `package-list` |  | Echo the installed packages |
+| `package-thaw` |  | Check every package out at its packages.lock pin |
 | `previous-line` | `C-p` | Move point up one line |
 | `site-chat-tab` |  | Go back to the browser tab this site chat was opened from |
 | `slides-deck-mode` |  | Link or unlink this deck and its slides |

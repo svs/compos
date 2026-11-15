@@ -4,7 +4,7 @@
 ;;; them all, from app-command-scopes, sectioned by where each comes from:
 ;;;
 ;;;   user     your own packages under ~/.compos/packages
-;;;   package  packages installed with package-install from a URL
+;;;   package  packages installed with use-package from a git repo
 ;;;   core     what ships with compos: the kernel and its bundled packages
 ;;;
 ;;; Moving the point shows the app's page: what it is, its file, its modes,
@@ -243,7 +243,7 @@
   (list
     'doc (string-append
            "Every app in the editor, in three sections: user (your own packages under ~/.compos/packages), "
-           "package (installed with package-install) and core (what ships with compos). "
+           "package (installed with use-package) and core (what ships with compos). "
            "Moving the point shows the app's page beside the list: its modes, its commands and its open buffers. "
            "o or RET opens the app, v visits its source, / narrows the rows, g reads the apps again, q quits.")
     'buffer *app-registry-buffer*

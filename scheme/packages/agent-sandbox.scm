@@ -122,10 +122,10 @@
           (else '()))))
 
 (define (agent-sandbox-dirs chat)
-  "(agent-sandbox-dirs CHAT) — where a sandboxed command of CHAT may write: its working directory, its group's 'writable, the temp directories and agent-sandbox-writable, as real paths"
+  "(agent-sandbox-dirs CHAT) — where a sandboxed command of CHAT may write: its working directory, the editor's own home (compos-home, where the package clones live, as straight.el keeps its repos in user-emacs-directory), its group's 'writable, the temp directories and agent-sandbox-writable, as real paths"
   (filter string?
           (map agent-sandbox--real
-               (append (list (chat-cwd-of chat) "/tmp" "/private/var/folders")
+               (append (list (chat-cwd-of chat) (compos-home) "/tmp" "/private/var/folders")
                        (agent-sandbox--group-writable chat)
                        agent-sandbox-writable))))
 

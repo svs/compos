@@ -6,7 +6,7 @@ defmodule Compos.LLMUsageTest do
   alias Compos.Core.{LLMUsage, ModelCatalog}
 
   setup do
-    File.rm(Path.join(Compos.Core.home(), "llm-usage.jsonl"))
+    File.rm(Path.join(Compos.Core.state_dir(), "llm-usage.jsonl"))
     :ok
   end
 
@@ -94,7 +94,7 @@ defmodule Compos.LLMUsageTest do
   end
 
   defp ledger_rows do
-    Path.join(Compos.Core.home(), "llm-usage.jsonl")
+    Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.map(&Jason.decode!/1)

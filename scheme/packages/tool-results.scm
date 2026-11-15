@@ -229,7 +229,7 @@
   (if (and buf (buffer-exists? buf)
            (boundp (quote chat-log-dir-for)) (boundp (quote chat-log-id!)))
       (string-append (chat-log-dir-for buf) "/" (chat-log-id! buf) ".results")
-      (string-append (compos-home) "/tool-results")))
+      (string-append (compos-cache-dir) "/tool-results")))
 
 (define (tool-result--path buf name ext)
   (set! *tool-result-seq* (+ *tool-result-seq* 1))

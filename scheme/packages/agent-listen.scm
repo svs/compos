@@ -33,7 +33,7 @@
 (domain! 'chat)
 (effects! '(pure))
 
-(defcustom 'agent-listen-file (string-append (compos-home) "/agent-listeners.scd")
+(defcustom 'agent-listen-file (string-append (compos-state-dir) "/agent-listeners.scd")
   "The file that keeps the agents' event listeners, one form each. Not .scm: hotload evaluates a .scm saved under ~/.compos.")
 
 (defcustom 'agent-listen-default-days 3

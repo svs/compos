@@ -253,7 +253,7 @@ defmodule Compos.CacheEconomicsTest do
       end
     end)
 
-    ledger = Path.join(Compos.Core.home(), "llm-usage.jsonl")
+    ledger = Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
     File.rm(ledger)
 
     buf = api_chat("cancel")

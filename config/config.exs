@@ -33,7 +33,7 @@ config :compos_ui, app_port: 4005
 # Dormant buffers remain durable and in history; only their live processes
 # are released. Zero disables idle eviction.
 config :compos_core, buffer_idle_timeout_ms: 24 * 60 * 60 * 1_000
-config :compos_core, daemon_registry_path: Path.expand("~/.compos/daemons.json")
+config :compos_core, daemon_registry_path: Path.expand("~/.local/state/compos/daemons.json")
 
 # One HTTP/2 connection carries every round of a turn. Under HTTP/1 the
 # editor opened a new connection for each round and paid the TLS handshake
@@ -100,7 +100,7 @@ if config_env() == :dev and System.get_env("COMPOS_VERIFY") do
 
   config :compos_core,
     home: "/tmp/compos-verify-home",
-    desktop_path: "/tmp/compos-verify-home/desktop.etf"
+    desktop_path: "/tmp/compos-verify-home/state/desktop.etf"
 
   config :compos_rpc, socket_path: "/tmp/compos-verify.sock"
 end
@@ -139,6 +139,8 @@ if config_env() == :test do
     provenance_path: ":memory:",
     desktop_path: "/tmp/compos-desktop-test-#{suffix}.etf",
     daemon_registry_path: "/tmp/compos-daemons-test-#{suffix}.json",
+    # grammars and the model catalog are machine-wide; a run keeps its own
+    machine_cache_dir: "/tmp/compos-test-home-#{suffix}/machine-cache",
     desktop_autorestore: false,
     # a visit of a file in a worktree checkout must not boot a daemon for it
     workspace_daemons: false

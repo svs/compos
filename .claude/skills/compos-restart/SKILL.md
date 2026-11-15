@@ -64,7 +64,7 @@ Three changes, and nothing else. Nothing reloads them in place:
 Then use `M-x restart-daemon`, or evaluate `(daemon-restart!)` over the socket.
 It compiles first, refuses the restart if the tree does not compile, saves the
 desktop, respawns, and stops this VM. Buffers, windows and theme come back
-from `~/.compos/desktop.etf`.
+from `~/.local/state/compos/desktop.etf`.
 
 Never `pkill -f "mix run"`. The user runs concurrent sessions and worktree
 daemons out of this tree, and a broad kill takes theirs down too. Never
@@ -75,7 +75,7 @@ backgrounded `mix run` gives no failure signal.
 
 ```sh
 bin/compos state                                  # answers = it is up
-tail -40 ~/.compos/daemon.log
+tail -40 ~/.local/state/compos/daemon.log
 pgrep -f "mix run --no-halt"                     # process alive but silent = still booting
 ```
 
@@ -149,6 +149,6 @@ load; `llm_db` refreshes under a Task; the desktop restore is async and runs
 after the socket opens.
 
 Slow lane jobs report themselves. `Compos.Core.Lane` logs any job over 250ms
-with its lane and label, so `grep "slow job" ~/.compos/daemon.log` names a stall
+with its lane and label, so `grep "slow job" ~/.local/state/compos/daemon.log` names a stall
 that happens after boot. `Session.init` runs no lane jobs of its own, so
 nothing inside it is timed.

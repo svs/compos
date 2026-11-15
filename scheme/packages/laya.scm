@@ -27,7 +27,7 @@
   "The python that holds the laya package, or laya-mlx on Apple silicon.
 When this file is missing, python3 on PATH answers." 'group 'laya)
 
-(defcustom 'laya-model-roots (list (string-append (compos-home) "/models"))
+(defcustom 'laya-model-roots (list (string-append (compos-cache-dir) "/models"))
   "Where this machine keeps laya checkpoints, besides the huggingface cache."
   'group 'laya)
 (defcustom 'laya-model ""
@@ -86,7 +86,7 @@ When this file is missing, python3 on PATH answers." 'group 'laya)
         'args (list (laya-script))
         'framing "line"
         'serves "models"
-        'env (list 'LAYA_DAEMON_LOG (string-append (compos-home) "/laya-daemon.log")
+        'env (list 'LAYA_DAEMON_LOG (string-append (compos-state-dir) "/laya-daemon.log")
                    'LAYA_MODEL_DIRS (string-join laya-model-roots ":")
                    'PYTHONUNBUFFERED "1")))
 
@@ -152,7 +152,7 @@ When this file is missing, python3 on PATH answers." 'group 'laya)
                                (length (or (plist-get (plist-get reply 'json) 'models) '())))
                              " checkpoint(s)"))
                   (message (string-append "laya: " (or (plist-get reply 'error) "no answer")
-                                          " - see " (compos-home) "/laya-daemon.log")))))))))
+                                          " - see " (compos-state-dir) "/laya-daemon.log")))))))))
 
 (define-command "laya-server-stop" "Stop the laya daemon and free the weights"
   (lambda ()

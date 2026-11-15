@@ -700,7 +700,7 @@
         (message "Set transient values")))))
 
 (define (transient--values-file)
-  (string-append (compos-home) "/transient-values.scm"))
+  (string-append (compos-state-dir) "/transient-values.scm"))
 
 (define-command "transient-save" "Save this infix value set for future sessions"
   (lambda ()

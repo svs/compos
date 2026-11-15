@@ -744,7 +744,7 @@
           (message "The bundled AI guide is missing")))))
 
 (define (setup-welcome-marker-path)
-  (string-append (compos-home) "/welcome-seen"))
+  (string-append (compos-state-dir) "/welcome-seen"))
 
 (define (setup-welcome-needed?)
   (not (file-exists? (setup-welcome-marker-path))))

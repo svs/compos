@@ -7,8 +7,9 @@ import Config
 #   COMPOS_HOME=~/.compos-work COMPOS_PORT=4014 COMPOS_APP_PORT=4015 \
 #     COMPOS_NAME=work mix run --no-halt
 #
-# Setting COMPOS_HOME alone is enough: the socket and desktop file follow it,
-# so two daemons can't fight over ~/.compos/sock.
+# Setting COMPOS_HOME alone is enough: the socket and desktop file follow it
+# into HOME/state (Compos.Core.default_state_dir), so two daemons can't fight
+# over one socket.
 #
 # The same knobs also read from a config file, one `key = value` per line,
 # `#` comments. An environment variable wins over the file.
@@ -17,7 +18,7 @@ import Config
 #   port = 4004
 #   app_port = 4005
 #   name = work
-#   registry = ~/.compos/daemons.json
+#   registry = ~/.local/state/compos/daemons.json
 #   secret_key_base = ...
 #   buffer_idle_hours = 24
 #   trusted_networks = 10.10.69.0/24, 10.10.67.4
@@ -48,10 +49,10 @@ if config_env() != :test do
 
   home = System.get_env("COMPOS_HOME") || (conf && conf["home"])
 
+  # the socket and the desktop file follow the home into its state folder:
+  # Compos.Core.state_dir, fixed at boot by Compos.Core.HomeSplit
   if home do
-    home = Path.expand(home)
-    config :compos_core, home: home, desktop_path: Path.join(home, "desktop.etf")
-    config :compos_rpc, socket_path: Path.join(home, "sock")
+    config :compos_core, home: Path.expand(home)
   end
 
   # config apart from state: a test daemon points COMPOS_CONFIG at the real
@@ -162,9 +163,21 @@ end
 # catalog inside deps/, which ages from the day the lock was written and which
 # mix deps.get throws away. M-x llm-catalog-refresh writes a fresh one here,
 # outside the build, and this points llm_db at it for every boot after.
-llm_db_snapshot = Path.expand("~/.compos/llm_db/snapshot.json")
+# It lives in the machine cache, Compos.Core.ModelCatalog.snapshot_home; a
+# compos from before the home split kept it in ~/.compos/llm_db.
+llm_db_snapshot =
+  [
+    Path.join(
+      System.get_env("COMPOS_CACHE_DIR") ||
+        Path.join(System.get_env("XDG_CACHE_HOME") || "~/.cache", "compos"),
+      "llm_db/snapshot.json"
+    ),
+    "~/.compos/llm_db/snapshot.json"
+  ]
+  |> Enum.map(&Path.expand/1)
+  |> Enum.find(&File.exists?/1)
 
-if File.exists?(llm_db_snapshot) do
+if llm_db_snapshot do
   config :llm_db, snapshot_path: llm_db_snapshot
 end
 

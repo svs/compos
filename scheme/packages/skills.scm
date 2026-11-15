@@ -303,7 +303,7 @@
 (define (skills-view-dir g)
   (if g
       (string-append (group-home-dir g) "/skills-view")
-      (string-append (compos-home) "/skills-view")))
+      (string-append (compos-cache-dir) "/skills-view")))
 
 (define (skills-view-render! g)
   (let* ((set (skills--group g))
@@ -493,7 +493,7 @@
   "Environment variables removed from a codex-app-server subprocess. Auth then always comes from the sanitized home's auth.json."
   'group 'chat 'type 'list)
 
-(define (codex-home) (string-append (compos-home) "/codex-home"))
+(define (codex-home) (string-append (compos-cache-dir) "/codex-home"))
 
 ;; rendered once per daemon; a skills-scan! or reload starts fresh
 (define *codex-home-ready* #f)
@@ -672,7 +672,7 @@
   "DeepSeek Harness plugins an editor thread turns off, by entry id. Each one adds a tool the editor did not name. tool-skill stays on: what it reads is the editor's own catalog."
   'group 'chat 'type 'list)
 
-(define (dsh-home) (string-append (compos-home) "/dsh-home"))
+(define (dsh-home) (string-append (compos-cache-dir) "/dsh-home"))
 
 ;; rendered once per daemon; a reload of this file starts fresh
 (define *dsh-home-ready* #f)

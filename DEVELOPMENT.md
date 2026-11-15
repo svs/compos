@@ -14,7 +14,7 @@ The daemon watches `apps/*/lib`, `apps/compos_core/priv`, `scheme/`, and the
 config home. When you save a file, the daemon reloads it without a restart.
 Browser clients reload themselves through a boot-id check.
 
-Each daemon records its name and URL in `~/.compos/daemons.json`. Run another
+Each daemon records its name and URL in `~/.local/state/compos/daemons.json`. Run another
 daemon with a different home and port, then use `C-x d` to switch the current
 browser tab. Set `COMPOS_DAEMON_REGISTRY` when the daemons must share another
 registry path.
@@ -37,7 +37,7 @@ apps/compos_core     buffers, editor state, primitives, NIFs, procs, LLM
 apps/compos_ui       Phoenix LiveView frontend (a client — no editor logic)
 scheme/packages      every package: commands, modes, chat
 scheme/apps          the apps (ats, spotify, slides, ...): one more place to load and autoload from
-apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
+apps/compos_rpc      JSON-RPC over ~/.local/state/compos/sock ("eval is the API")
 ```
 
 Your config loads from `~/.compos/ai-config.scm`, then `~/.compos/init.scm`,
@@ -85,7 +85,7 @@ load-bearing. Read-only buffers block `:user` edits only, and the reactor ignore
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
-  | nc -U ~/.compos/sock
+  | nc -U ~/.local/state/compos/sock
 ```
 
 A **buffer link** is one string that names a buffer. `C-c l` copies an

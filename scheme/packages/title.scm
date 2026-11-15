@@ -22,7 +22,7 @@
 
 (defgroup 'title "Title: the on-device model that names a passage of text.")
 
-(defcustom 'title-model-directory (string-append (compos-home) "/models/title")
+(defcustom 'title-model-directory (string-append (compos-cache-dir) "/models/title")
   "The MLX model folder the card writer serves. Nothing is downloaded: populate it with the weights."
   'group 'title 'type 'string)
 
@@ -91,7 +91,7 @@
                    " --model " title-model-directory
                    " --host 127.0.0.1 --port " (number->string title-server-port)
                    " --temp 0.0 --max-tokens " (number->string title-max-tokens)
-                   " >" (compos-home) "/title-server.log 2>&1 &")
+                   " >" (compos-state-dir) "/title-server.log 2>&1 &")
     (compos-home))
   (message "title: the on-device card writer is loading"))
 

@@ -105,7 +105,7 @@
 
 (define (pdf--next-edit-temp-dir)
   (set! pdf--edit-sequence (+ pdf--edit-sequence 1))
-  (string-append (compos-home) "/tmp/pdf-edit-"
+  (string-append (compos-cache-dir) "/tmp/pdf-edit-"
                  (number->string (current-time)) "-"
                  (number->string pdf--edit-sequence)))
 
@@ -478,7 +478,7 @@
   (if (pdf--generated-copy? source) source (pdf--generated-path source)))
 
 (define (pdf--undo-path path)
-  (string-append (compos-home) "/pdf-edit-undo/"
+  (string-append (compos-state-dir) "/pdf-edit-undo/"
                  (pdf--path-key path) ".pdf"))
 
 (define (pdf--buffer-name path)

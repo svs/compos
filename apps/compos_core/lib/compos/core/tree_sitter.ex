@@ -7,7 +7,7 @@ defmodule Compos.Core.TreeSitter do
   `install/2` is Emacs's treesit-install-language-grammar: clone the
   grammar repo shallow, find its named grammar, and use `cc -shared` on
   its generated parser (and scanner.c when present). Store the library
-  in `~/.compos/grammars/<name>.<dylib|so>`, copy
+  in `~/.cache/compos/grammars/<name>.<dylib|so>`, copy
   `queries/highlights.scm` alongside, then dlopen it into the NIF's
   registry (`TS.ts_load_grammar/3`). Installed grammars reload at boot
   (`load_installed/0`, a Task in the supervision tree), so a grammar is a
@@ -25,7 +25,7 @@ defmodule Compos.Core.TreeSitter do
   # installed once and every daemon on every port reads the same shared
   # object. Keyed to the home instead, a second daemon reported no grammars
   # at all and quietly fell back to the renderer that has none.
-  def grammars_dir, do: Path.join(Compos.Core.config_dir(), "grammars")
+  def grammars_dir, do: Path.join(Compos.Core.machine_cache_dir(), "grammars")
 
   def lib_ext do
     case :os.type() do

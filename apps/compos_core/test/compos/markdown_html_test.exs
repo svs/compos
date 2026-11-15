@@ -234,7 +234,7 @@ defmodule Compos.MarkdownHtmlTest do
   end
 
   test "a Scheme result fence uses syntax highlight spans" do
-    dir = Path.expand("~/.compos/grammars")
+    dir = Enum.find(["~/.cache/compos/grammars", "~/.compos/grammars"], &File.dir?(Path.expand(&1))) |> Kernel.||("~/.cache/compos/grammars") |> Path.expand()
     ext = if :os.type() |> elem(1) == :darwin, do: ".dylib", else: ".so"
     lib = Path.join(dir, "scheme" <> ext)
     query = Path.join(dir, "scheme-highlights.scm")

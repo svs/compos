@@ -2,7 +2,19 @@ defmodule Compos.Mix.Daemon do
   @moduledoc false
 
   def home(opts), do: Path.expand(opts[:home] || System.get_env("COMPOS_HOME") || "~/.compos")
-  def socket(home), do: Path.join(home, "sock")
+  # HOME's socket, in its state folder (Compos.Core.default_state_dir), or in
+  # the home for a daemon from before the home split
+  def socket(home) do
+    state =
+      cond do
+        dir = System.get_env("COMPOS_STATE_DIR") -> Path.expand(dir)
+        home != Path.expand("~/.compos") -> Path.join(home, "state")
+        true -> Path.join(System.get_env("XDG_STATE_HOME") || Path.expand("~/.local/state"), "compos")
+      end
+
+    old = Path.join(home, "sock")
+    if File.exists?(old) and not File.exists?(Path.join(state, "sock")), do: old, else: Path.join(state, "sock")
+  end
 
   def rpc(home, method, params \\ %{}, timeout \\ 30_000) do
     request = %{

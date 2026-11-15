@@ -79,7 +79,7 @@ defmodule Compos.Core.Events.Log do
   @doc "Load EVENTS (maps with seq, topic, kind, data, at) and POSITIONS ({name, seq}) into an empty log. Answer how many events went in."
   def import(events, positions), do: GenServer.call(__MODULE__, {:import, events, positions}, 60_000)
 
-  def path, do: Path.join(Compos.Core.home(), "events.db")
+  def path, do: Path.join(Compos.Core.state_dir(), "events.db")
 
   # --- server ----------------------------------------------------------------
 

@@ -27,7 +27,7 @@
   "The stable compos's executable; a restart starts it again, logging to daemon.log."
   'group 'release 'type 'string)
 
-(defcustom 'release-stable-socket "~/.compos/sock"
+(defcustom 'release-stable-socket "~/.local/state/compos/sock"
   "The stable compos's socket, asked to restart after an install from another compos."
   'group 'release 'type 'string)
 

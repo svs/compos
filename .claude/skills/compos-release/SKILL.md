@@ -39,7 +39,7 @@ A failed build changes nothing in service. The stable daemon continues on the ol
 
 ## 3. Install and restart
 
-The restart stops each terminal and each agent turn that runs in the 4004 daemon. Buffers, windows, and groups come back from `~/.compos/desktop.etf`. Tell the user that the restart comes next, then run it. If this session runs in a terminal of the 4004 daemon, the restart ends this session too: say so first, and name the check in step 4.
+The restart stops each terminal and each agent turn that runs in the 4004 daemon. Buffers, windows, and groups come back from `~/.local/state/compos/desktop.etf`. Tell the user that the restart comes next, then run it. If this session runs in a terminal of the 4004 daemon, the restart ends this session too: say so first, and name the check in step 4.
 
 ```sh
 bin/compos --home ~/.compos eval '(release-install!)'
@@ -58,7 +58,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 
 The release passes when the `commit` in `(build-info)` equals `git rev-parse --short HEAD` and the curl prints `200`. Report the old commit and the new commit.
 
-If the daemon does not answer after 60 seconds, read `tail -40 ~/.compos/daemon.log`. The RPC socket opens last, after the Scheme corpus loads.
+If the daemon does not answer after 60 seconds, read `tail -40 ~/.local/state/compos/daemon.log`. The RPC socket opens last, after the Scheme corpus loads.
 
 If the commit is still the old one, the daemon started again from a different executable. A release respawns the path in `__BURRITO_BIN_PATH`, which is the file it first started from:
 

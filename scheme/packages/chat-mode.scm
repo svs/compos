@@ -7,7 +7,6 @@
 ;;; from init.scm before every package that opens a chat.
 
 (require 'buffer-relations)
-(require 'transient)
 
 (domain! 'chat)
 (effects! '(unknown))
@@ -193,7 +192,8 @@
     (when hit
       (remove-on-change! (cadr hit))
       (set! *llm-mode-hooks*
-        (alist-delete *llm-mode-hooks* buf)))))
+        (remove (lambda (entry) (equal? (car entry) buf))
+                *llm-mode-hooks*)))))
 
 (define (llm-mode--retire-thinking! buf response-id)
   (let* ((active-id (buffer-local-value 'llm-active-thinking buf))
@@ -794,74 +794,22 @@
 
 (add-hook! 'chat-mode-hook 'chat--source-modes-hook!)
 
-;; imenu in a chat walks its turns: one row per message you sent, oldest
-;; first, so moving through the rows scrolls the chat a turn at a time.
-;; The live input is not a turn yet and has no row.
-(effects! '(write display))
-(define (chat--view-at buf)
-  "the block the chat BUF shows at its top, as chat-view-step! counts; past the last when it follows the bottom"
-  (let ((fp (buffer-local-value 'follow-place buf)) (nav (buffer-local-value 'chat-view-nav buf)))
-    (if (and (pair? fp) (car fp) (integer? nav)) nav (cadr (chat-view--counts buf)))))
-
-(define (chat--show-block! buf idx)
-  "jump the chat BUF so block IDX is at its top, as M-<down> does; #f follows the bottom again"
-  (if idx
-      (chat-view-step! buf (- idx (chat--view-at buf)))
-      (begin (buffer-set-local! buf 'chat-view-nav #f) (chat-follow-again! buf))))
-
-(define (chat--user-blocks buf)
-  "the block number of each message sent in the chat BUF, oldest first"
-  (let loop ((bs (reverse (agent-blocks buf))) (i 0) (acc '()))
-    (cond ((null? bs) (reverse acc))
-          ((equal? (caddr (car bs)) "user") (loop (cdr bs) (+ i 1) (cons i acc)))
-          (else (loop (cdr bs) (+ i 1) acc)))))
-
-;; made outside the loop of chat--imenu-rows, so the lambda keeps only
-;; BUF and IDX and not the rows before it (see ai--imenu-target)
-(define (chat--imenu-target buf idx)
-  (lambda () (chat--show-block! buf idx)))
-
-;; C-g puts the chat back where it was: the same top block, or the bottom
-(define (chat--imenu-snapshot buf)
-  (let ((nav (and (pair? (buffer-local-value 'follow-place buf)) (car (buffer-local-value 'follow-place buf))
-                  (buffer-local-value 'chat-view-nav buf))))
-    (lambda () (chat--show-block! buf (and (integer? nav) nav)))))
-
-(effects! '(read))
-(define (chat--imenu-rows buf)
-  "(LINE KIND NAME DOC) for each message sent in the chat BUF: its line, and its first words"
-  (let ((input (with-current-buffer buf (lambda () (line-number-at-pos (chat-input-start buf)))))
-        (tag (substring *chat-input-marker* 1 (string-length *chat-input-marker*)))
-        (blocks (chat--user-blocks buf)))
-    (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1) (turn 1) (acc '()))
-      (cond ((or (null? ls) (>= n input)) (reverse acc))
-            ((string-prefix? tag (car ls))
-             (let ((text (string-trim (substring (car ls) (string-length tag) (string-length (car ls))))))
-               (loop (cdr ls) (+ n 1) (+ turn 1)
-                     (cons (list n "turn"
-                                 (if (> (string-length text) 90) (string-append (substring text 0 89) "…") text)
-                                 (string-append "turn " (number->string turn))
-                                 (chat--imenu-target buf (and (<= turn (length blocks)) (nth (- turn 1) blocks))))
-                           acc))))
-            (else (loop (cdr ls) (+ n 1) turn acc))))))
-
-(effects! '(write))
-(define (chat--imenu-setup!)
-  (buffer-set-local! (current-buffer) 'imenu-index-function 'chat--imenu-rows)
-  (buffer-set-local! (current-buffer) 'imenu-snapshot 'chat--imenu-snapshot))
-(add-hook! 'chat-mode-hook 'chat--imenu-setup!)
-
-
 ;; a page that takes no text, an app page, talks in its chat: M-o pops it up
 (define (llm-companion-ensure! buf &optional group)
   ;; BUF's chat, the one M-o opens, made quietly when it has none: (CHAT NEW?).
   ;; Nothing shows and nothing is sent. GROUP puts the chat in that group.
-  (let* ((new? (not (llm-mode--companion-recall! buf group)))
-         (made (llm-mode--companion! buf (buffer-llm-model buf) group))
-         ;; a mode that names its chats names this one before it speaks, so no title is guessed from the opening
-         (title (and new? (chat-mode-title buf)))
-         (chat (or (and title (chat-title made title) (llm-mode--companion-existing buf)) made)))
-    (list chat new?)))
+  ;; A mode whose page already has a chat at work, the chat of the task its
+  ;; issue was filed as, names it with 'agent-chat, and that chat is BUF's.
+  (let* ((f (and (string? buf) (mode-get (buffer-local-value 'mode-name buf) 'agent-chat)))
+         (own (and f (f buf))))
+    (if (and (string? own) (buffer-known? own))
+        (list own #f)
+        (let* ((new? (not (llm-mode--companion-recall! buf group)))
+               (made (llm-mode--companion! buf (buffer-llm-model buf) group))
+               ;; a mode that names its chats names this one before it speaks, so no title is guessed from the opening
+               (title (and new? (chat-mode-title buf)))
+               (chat (or (and title (chat-title made title) (llm-mode--companion-existing buf)) made)))
+          (list chat new?)))))
 
 (define (llm-companion-open! buf &optional bundle)
   ;; BUNDLE, a preset, is the one a chat made here starts on

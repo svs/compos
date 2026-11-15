@@ -60,7 +60,7 @@ file that captures a primitive before shadowing it uses `alias-once!`, so a
 whole-file re-eval does not capture the wrapper (see `editor.scm`).
 
 Browser clients reload themselves (boot-id). Editor state (buffers, windows, theme) is restored from
-`~/.compos/desktop.etf`. **Rule: everything survives a reload** - file buffers
+`~/.local/state/compos/desktop.etf`. **Rule: everything survives a reload** - file buffers
 reopen via `(visit)`; non-file buffers (chat, agent threads, scratch) persist
 content+point+locals, and the mode setup fn rebuilds keys/overlays/folds from
 locals on restore. New buffer kinds must keep this true.
@@ -78,7 +78,7 @@ Drive the editor headlessly:
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
-  | nc -U ~/.compos/sock
+  | nc -U ~/.local/state/compos/sock
 ```
 
 The socket of a daemon a person uses is for reading. Never `(load ...)` a
@@ -239,7 +239,7 @@ apps/compos_core     buffers, editor state, primitives, NIF, procs, LLM, desktop
 scheme/packages      every package: commands, modes, apps, chat, groups, dired verbs
   native/compos_ts   tree-sitter Rustler NIF
 apps/compos_ui       LiveView frontend (a client - no editor logic)
-apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
+apps/compos_rpc      JSON-RPC over ~/.local/state/compos/sock ("eval is the API")
 ```
 
 `docs/SCHEME-GOTCHAS.md` lists the builtins whose behaviour a reader would

@@ -84,7 +84,7 @@ defmodule Compos.Core.Daemon do
   defp listener_configured?(sup), do: is_pid(Process.whereis(sup))
 
   defp listener_address("rpc") do
-    Application.get_env(:compos_rpc, :socket_path, Path.join(Compos.Core.home(), "sock"))
+    Application.get_env(:compos_rpc, :socket_path, Path.join(Compos.Core.state_dir(), "sock"))
     |> Path.expand()
   end
 
@@ -107,7 +107,7 @@ defmodule Compos.Core.Daemon do
   defp restart_release do
     with {:ok, bin} <- release_bin(),
          :ok <- save_desktop(),
-         :ok <- run_relauncher(release_respawn_script(bin, Compos.Core.home(), System.pid())) do
+         :ok <- run_relauncher(release_respawn_script(bin, Compos.Core.home(), System.pid(), Compos.Core.state_dir())) do
       schedule_stop()
       :ok
     end
@@ -226,13 +226,13 @@ defmodule Compos.Core.Daemon do
         Application.get_env(
           :compos_core,
           :daemon_registry_path,
-          Path.expand("~/.compos/daemons.json")
+          Path.join(Compos.Core.machine_state_dir(), "daemons.json")
         )
 
       digest =
         :crypto.hash(:sha256, workspace) |> Base.encode16(case: :lower) |> binary_part(0, 12)
 
-      home = Path.join([Path.dirname(registry), "worktree-daemons", digest])
+      home = Path.join([Compos.Core.machine_cache_dir(), "worktree-daemons", digest])
       conf = Path.join(home, "daemon.conf")
 
       {port, app_port} = existing_ports(conf) || available_port_pair()
@@ -259,7 +259,8 @@ defmodule Compos.Core.Daemon do
       if tcp_up?(port) do
         {:ok, %{url: url, home: home, port: port}}
       else
-        log = Path.join(home, "daemon.log")
+        log = Path.join([home, "state", "daemon.log"])
+        File.mkdir_p!(Path.dirname(log))
 
         command =
           @raise_fd_limit <>
@@ -323,7 +324,7 @@ defmodule Compos.Core.Daemon do
   # The new daemon starts after the port and socket are free. All relauncher
   # descriptors point away from System.cmd, so it returns at once.
   defp respawn do
-    run_relauncher(respawn_script(File.cwd!(), Compos.Core.home(), System.pid()))
+    run_relauncher(respawn_script(File.cwd!(), Compos.Core.home(), System.pid(), Compos.Core.state_dir()))
   end
 
   defp run_relauncher(script) do
@@ -343,8 +344,8 @@ defmodule Compos.Core.Daemon do
   end
 
   @doc false
-  def respawn_script(root, home, pid) do
-    log = Path.join(home, "daemon.log")
+  def respawn_script(root, home, pid, state \\ nil) do
+    log = Path.join(state || home, "daemon.log")
 
     relaunch =
       "while kill -0 #{pid} 2>/dev/null; do sleep 0.1; done; " <>
@@ -359,8 +360,8 @@ defmodule Compos.Core.Daemon do
   # and the release scripts would take RELEASE_ROOT, an unpacked directory an
   # install may have pruned, as given.
   @doc false
-  def release_respawn_script(bin, home, pid) do
-    log = Path.join(home, "daemon.log")
+  def release_respawn_script(bin, home, pid, state \\ nil) do
+    log = Path.join(state || home, "daemon.log")
 
     relaunch =
       "while kill -0 #{pid} 2>/dev/null; do sleep 0.1; done; " <>

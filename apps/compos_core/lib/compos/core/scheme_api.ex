@@ -1685,6 +1685,9 @@ defmodule Compos.Core.SchemeAPI do
           Application.put_env(:compos_core, :cache_dir, if(is_binary(dir), do: Path.expand(dir)))
           Compos.Core.cache_dir()
         end,
+      {"compos-state-dir",
+       "(compos-state-dir) — the folder for what compos keeps but never syncs: the desktop, buffer checkpoints, logs, the socket. ~/.local/state/compos, or state/ in a daemon's own home"} =>
+        fn [] -> Compos.Core.state_dir() end,
       {"compos-priv-dir",
        "(compos-priv-dir) — return the bundled Scheme directory (the editor's priv dir)."} =>
         fn [] -> Application.app_dir(:compos_core, "priv") end,
@@ -1699,7 +1702,7 @@ defmodule Compos.Core.SchemeAPI do
       # to it rather than to the default path.
       {"compos-socket-path",
        "(compos-socket-path) — return the path of this daemon's JSON-RPC socket."} => fn [] ->
-        Application.get_env(:compos_rpc, :socket_path, Path.join(Compos.Core.home(), "sock"))
+        Application.get_env(:compos_rpc, :socket_path, Path.join(Compos.Core.state_dir(), "sock"))
         |> Path.expand()
       end,
       {"socket-listeners",
@@ -2036,7 +2039,7 @@ defmodule Compos.Core.SchemeAPI do
         Application.get_env(
           :compos_core,
           :daemon_registry_path,
-          Path.expand("~/.compos/daemons.json")
+          Path.join(Compos.Core.machine_state_dir(), "daemons.json")
         )
       end,
       {"client-slide!",

@@ -54,7 +54,7 @@ defmodule Compos.Core.MetaDb do
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  def path, do: Path.join(Compos.Core.home(), "meta.db")
+  def path, do: Path.join(Compos.Core.state_dir(), "meta.db")
 
   @doc """
   Start it under the core supervisor when it is not running: a session

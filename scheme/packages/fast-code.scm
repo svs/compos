@@ -670,7 +670,7 @@ learned function: (ok NAME), or (no REASON) when fast-accept refuses it"
 ;;; took. From the palette and from ! alike. The last hundred stay in memory
 ;;; and in fast-code-trace.jsonl; M-x fast-trace reads them.
 
-(define (fast-trace-path) (string-append (compos-home) "/fast-code-trace.jsonl"))
+(define (fast-trace-path) (string-append (compos-state-dir) "/fast-code-trace.jsonl"))
 
 ;; the file holds the oldest first; a restart reads it back, so the next
 ;; record adds to the history instead of writing over it

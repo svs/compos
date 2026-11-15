@@ -31,7 +31,7 @@
 
 (defcustom 'needle-uv (expand-path "~/.local/bin/uv")
   "The uv that installs and runs the engine's package." 'group 'needle)
-(defcustom 'needle-root (string-append (compos-home) "/needle")
+(defcustom 'needle-root (string-append (compos-cache-dir) "/needle")
   "Where the daemon caches the catalog's vectors." 'group 'needle)
 (defcustom 'needle-threshold 0.7
   "A call at or above this confidence is acted on. Below it, it is confirmed."
@@ -58,7 +58,7 @@
 ;;
 ;; A missing rung is not an error: the daemon answers with the full
 ;; model, 20 ms slower.
-(defcustom 'needle-ladder (string-append (compos-home) "/needle/d4.cact")
+(defcustom 'needle-ladder (string-append (compos-cache-dir) "/needle/d4.cact")
   "A shallower rung of the ladder to answer with. A missing file uses the full model."
   'group 'needle)
 
@@ -80,7 +80,7 @@
         'env (list 'NEEDLE_TELEMETRY "0" 'DO_NOT_TRACK "1"
                    'NEEDLE_ROOT needle-root
                    'NEEDLE_WEIGHTS needle-ladder
-                   'NEEDLE_DAEMON_LOG (string-append (compos-home) "/needle-daemon.log")
+                   'NEEDLE_DAEMON_LOG (string-append (compos-state-dir) "/needle-daemon.log")
                    'PYTHONUNBUFFERED "1")))
 
 (endpoint-register! *needle-endpoint* (needle-spec))
@@ -203,7 +203,7 @@
               (message (if (plist-get (needle-reply r) 'ok)
                            "needle: the daemon runs"
                            (string-append "needle: no answer - see "
-                                          (compos-home) "/needle-daemon.log")))))))))
+                                          (compos-state-dir) "/needle-daemon.log")))))))))
 
 (define-command "needle-server-stop" "Stop the Needle daemon and free the weights"
   (lambda ()

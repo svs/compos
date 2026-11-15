@@ -35,7 +35,7 @@ defmodule Compos.Core.BufferStore do
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  def dir, do: Path.join(Compos.Core.home(), "buffers")
+  def dir, do: Path.join(Compos.Core.state_dir(), "buffers")
   def catalog_path, do: Path.join(dir(), "catalog.etf")
   def checkpoint_path(id), do: Path.join(dir(), id <> ".etf")
 

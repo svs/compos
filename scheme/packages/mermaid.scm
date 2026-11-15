@@ -15,7 +15,7 @@
 
 (effects! '(pure))
 
-(define mermaid-dir (string-append (expand-path "~/.compos/mermaid") "/"))
+(define mermaid-dir (string-append (compos-cache-dir) "/mermaid/"))
 (define mermaid-chrome "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 (define mermaid--pending '())
 (define mermaid--failed '())    ; ((KEY . ERROR) ...)

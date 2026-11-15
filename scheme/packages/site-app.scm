@@ -16,7 +16,7 @@
 ;; each app's one background tab in each browser window, kept on disk so a
 ;; restart reuses it: keyed "NAME@WINDOW"
 ;; instead of opening another in the browser
-(define *site-app-tabs-file* (string-append (compos-home) "/site-app-tabs.json"))
+(define *site-app-tabs-file* (string-append (compos-state-dir) "/site-app-tabs.json"))
 
 (define (site-app-tabs-load)
   (let ((text (and (file-exists? *site-app-tabs-file*) (read-file *site-app-tabs-file*))))

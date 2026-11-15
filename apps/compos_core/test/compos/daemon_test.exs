@@ -10,8 +10,9 @@ defmodule Compos.DaemonTest do
   alias Compos.Core.Daemon
   alias Compos.Core.Session
 
-  test "the respawn script relaunches mix run from the root into the home log" do
-    script = Daemon.respawn_script("/src/compos.el", "/home/user/.compos", "12345")
+  test "the respawn script relaunches mix run from the root into the state log" do
+    script =
+      Daemon.respawn_script("/src/compos.el", "/home/user/.compos", "12345", "/home/user/.local/state/compos")
 
     assert script =~ "nohup /bin/sh -c"
     refute script =~ "setsid"
@@ -20,7 +21,7 @@ defmodule Compos.DaemonTest do
     assert script =~ "COMPOS_HOME="
     assert script =~ "/home/user/.compos"
     assert script =~ "mix run --no-halt"
-    assert script =~ "/home/user/.compos/daemon.log"
+    assert script =~ "/home/user/.local/state/compos/daemon.log"
     assert script =~ "2>&1"
   end
 

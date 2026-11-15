@@ -869,7 +869,7 @@
 ;;; type, and `H` lists it. One URL-tab-TIME-tab-TITLE line per page;
 ;;; migrations.scm reads the old visited file into it once.
 
-(define *web-visited-file* (string-append (compos-home) "/web-history"))
+(define *web-visited-file* (string-append (compos-state-dir) "/web-history"))
 (define *web-visited-max* 500)
 
 ;; one line -> (URL TITLE TIME), or #f for a blank line

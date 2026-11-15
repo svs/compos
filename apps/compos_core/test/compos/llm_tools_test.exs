@@ -643,7 +643,7 @@ defmodule Compos.LLMToolsTest do
     # provider's input_tokens already includes the cached tokens. Ours
     # cannot, so its figure — not our table's — is what the ledger keeps.
     test "the ledger records req_llm's cost, not the local table's" do
-      ledger = Path.join(Compos.Core.home(), "llm-usage.jsonl")
+      ledger = Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
       File.rm(ledger)
 
       # a deliberately absurd local price: if this figure ever reaches the

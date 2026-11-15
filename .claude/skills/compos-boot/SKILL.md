@@ -13,7 +13,7 @@ new home, a new port pair, and a new socket. It keeps the same config dir.
 COMPOS_HOME=~/.compos-alt COMPOS_CONFIG=~/.compos \
 COMPOS_PORT=4020 COMPOS_APP_PORT=4021 COMPOS_NAME=alt \
 COMPOS_DAEMON_REGISTRY=~/.compos-alt/daemons.json \
-  nohup mix run --no-halt >> ~/.compos-alt/daemon.log 2>&1 </dev/null &
+  nohup mix run --no-halt >> ~/.compos-alt/state/daemon.log 2>&1 </dev/null &
 ```
 
 Run it from the project root. `mkdir -p` the home first, because the
@@ -23,12 +23,12 @@ redirection opens the log before the daemon creates the directory.
 
 | Variable | What it moves | Leave it out and |
 |---|---|---|
-| `COMPOS_HOME` | state: `desktop.etf`, `buffers/`, `docs/`, `sock`, `peer-id`, `llmdb.json` | the new daemon writes the user's desktop and buffers |
+| `COMPOS_HOME` | data, and state in `HOME/state`: `desktop.etf`, `buffers/`, `docs/`, `sock`, `peer-id` | the new daemon writes the user's desktop and buffers |
 | `COMPOS_CONFIG` | where user Scheme reads from: `ai-config.scm`, `init.scm`, `custom.scm`, `theme.scm`, key files, `packages/` | the new daemon boots stock, with none of the user's config |
 | `COMPOS_PORT` | the editor origin | the endpoint fails with `:eaddrinuse` and the whole boot aborts |
 | `COMPOS_APP_PORT` | the preview-app origin | the same crash, one port later |
 | `COMPOS_NAME` | the label in the extension's daemon list | it defaults to the home's basename |
-| `COMPOS_DAEMON_REGISTRY` | the shared daemon list | the new daemon writes a row into the user's `~/.compos/daemons.json` |
+| `COMPOS_DAEMON_REGISTRY` | the shared daemon list | the new daemon writes a row into the user's `~/.local/state/compos/daemons.json` |
 
 `COMPOS_HOME` alone moves the socket and the desktop file with it. The other
 paths follow the home, so `COMPOS_SOCK` and `COMPOS_DESKTOP` are only for the
@@ -52,7 +52,7 @@ registry = /Users/svs/.compos-alt/daemons.json
 EOF
 
 COMPOS_HOME=~/.compos-alt COMPOS_CONFIG=~/.compos \
-  nohup mix run --no-halt >> ~/.compos-alt/daemon.log 2>&1 </dev/null &
+  nohup mix run --no-halt >> ~/.compos-alt/state/daemon.log 2>&1 </dev/null &
 ```
 
 `COMPOS_CONFIG` is read from the environment only. The conf file has no key
@@ -84,7 +84,7 @@ never sleep a fixed number of seconds:
 ```sh
 for i in $(seq 1 60); do
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' \
-    | nc -U ~/.compos-alt/sock 2>/dev/null | grep -q pong && break
+    | nc -U ~/.compos-alt/state/sock 2>/dev/null | grep -q pong && break
   sleep 1
 done
 ```
@@ -104,7 +104,7 @@ and `state`. `mix compos.reload --home ~/.compos-alt FILE` reloads there.
 ## Stop it
 
 ```sh
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}' | nc -U ~/.compos-alt/sock
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}' | nc -U ~/.compos-alt/state/sock
 ```
 
 Never `pkill -f "mix run"`. That kill takes down the user's daemon and every

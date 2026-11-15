@@ -26,7 +26,7 @@ defmodule Compos.Core.BufferHistoryStore do
   @frame_bits 32
   @max_frame 64 * 1024 * 1024
 
-  def dir, do: Path.join(Compos.Core.home(), "docs")
+  def dir, do: Path.join(Compos.Core.state_dir(), "docs")
 
   def path(id), do: Path.join(dir(), id <> ".loro")
 

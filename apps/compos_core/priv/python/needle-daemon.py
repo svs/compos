@@ -261,7 +261,7 @@ class World:
     # 30 second re-embed on a start that should have cost nothing.
     def cache_path(self, names):
         import hashlib
-        root = os.environ.get('NEEDLE_ROOT') or os.path.expanduser('~/.compos/needle')
+        root = os.environ.get('NEEDLE_ROOT') or os.path.expanduser('~/.cache/compos/needle')
         key = hashlib.sha1('\n'.join(names).encode('utf-8')).hexdigest()[:16]
         return os.path.join(root, 'catalog-%s.npz' % key)
 

@@ -18,7 +18,7 @@ use std::thread;
 
 fn main() {
     let path = env::var("COMPOS_MCP_SOCK").unwrap_or_else(|_| {
-        format!("{}/.compos/sock-mcp", env::var("HOME").unwrap_or_default())
+        format!("{}/.local/state/compos/sock-mcp", env::var("HOME").unwrap_or_default())
     });
 
     let mut sock = UnixStream::connect(&path).unwrap_or_else(|e| {

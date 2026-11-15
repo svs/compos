@@ -48,8 +48,24 @@ def rpc_socket(sock, code, timeout=30):
     return r["result"]
 
 
+def state_dir(home):
+    """HOME's state folder, as Compos.Core.default_state_dir answers it."""
+    if os.environ.get("COMPOS_STATE_DIR"):
+        return os.path.expanduser(os.environ["COMPOS_STATE_DIR"])
+    if os.path.abspath(os.path.expanduser(home)) != os.path.expanduser("~/.compos"):
+        return os.path.join(home, "state")
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "compos")
+
+
+def state_file(home, name):
+    """NAME in HOME's state folder, or in the home for a daemon from before the home split."""
+    new = os.path.join(state_dir(home), name)
+    old = os.path.join(home, name)
+    return old if os.path.exists(old) and not os.path.exists(new) else new
+
+
 def rpc(home, code, timeout=30):
-    return rpc_socket(os.path.join(home, "sock"), code, timeout)
+    return rpc_socket(state_file(home, "sock"), code, timeout)
 
 
 def cmd_eval(a):
@@ -85,12 +101,12 @@ def tail(path, n, follow, keep=None, drop=NOISE):
 
 
 def cmd_log(a):
-    tail(os.path.join(a.home, "daemon.log"), a.n, a.follow)
+    tail(state_file(a.home, "daemon.log"), a.n, a.follow)
 
 
 def cmd_bridge(a):
     # both directions of the wire, plus whatever the extension forwarded
-    tail(os.path.join(a.home, "daemon.log"), a.n, a.follow,
+    tail(state_file(a.home, "daemon.log"), a.n, a.follow,
          keep=("browser <-", "browser ->", "browser =>", "browser <=",
                "browser:", "browser-ext"))
 
@@ -128,7 +144,7 @@ def cmd_open_url(a):
 
     query = urllib.parse.parse_qs(url.query)
     path = query.get("path", [None])[0]
-    sock = query.get("socket", [os.path.join(a.home, "sock")])[0]
+    sock = query.get("socket", [state_file(a.home, "sock")])[0]
     if not path:
         sys.exit("compos link has no path")
 

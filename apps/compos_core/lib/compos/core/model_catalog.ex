@@ -14,8 +14,6 @@ defmodule Compos.Core.ModelCatalog do
   them into a single connector-wide "effort" list invents invalid choices.
   """
 
-  @snapshot_home "~/.compos/llm_db"
-
   @doc """
   Where the refreshed snapshot lives.
 
@@ -24,7 +22,7 @@ defmodule Compos.Core.ModelCatalog do
   editor refreshed belongs outside the build, so it survives a dependency
   update and a rebuild.
   """
-  def snapshot_home, do: Path.expand(@snapshot_home)
+  def snapshot_home, do: Path.join(Compos.Core.machine_cache_dir(), "llm_db")
 
   def snapshot_file, do: Path.join(snapshot_home(), "snapshot.json")
 

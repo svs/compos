@@ -1,7 +1,7 @@
 # A checkpoint outlives the run that wrote it, so the test home fills up.
 # Every test that reads the buffer catalog then walks all of them: 1438 stale
 # checkpoints took one 7-test file from 0.6s to 140s. Start each run empty.
-File.rm_rf!(Path.join(Application.get_env(:compos_core, :home), "buffers"))
+File.rm_rf!(Compos.Core.BufferStore.dir())
 
 # The same failure, one directory over. A leaked fixture outlives its run and
 # fills the system temp directory. The file prompt lists that directory and
@@ -45,11 +45,12 @@ Compos.TestRun.clean_at_exit()
 # A tree-sitter grammar is a compiled artifact, not a fixture, so a test
 # that needs one is excluded where it is missing rather than passing on an
 # empty answer. The run then says "excluded", which a silent skip never
-# does. Grammars live in the reader's home; a test home has none, so load
+# does. Grammars live in the machine cache; a test run has its own, empty, so load
 # the real ones read-only when they are there.
 markdown_grammar? =
   Enum.all?(["markdown", "markdown-inline"], fn name ->
-    dir = Path.expand("~/.compos/grammars")
+    # the machine cache; a compos from before the home split kept them in ~/.compos
+    dir = Enum.find(["~/.cache/compos/grammars", "~/.compos/grammars"], &File.dir?(Path.expand(&1))) |> Kernel.||("~/.cache/compos/grammars") |> Path.expand()
     lib = Path.join(dir, name <> if(:os.type() |> elem(1) == :darwin, do: ".dylib", else: ".so"))
     query = Path.join(dir, name <> "-highlights.scm")
 

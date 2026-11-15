@@ -31,7 +31,7 @@
 
 ;; (NAME PLIST): the last test of each connector. PLIST holds status
 ;; (testing, ok or failed), reply, error, ms and at.
-(define llm-connectors--tests-file (string-append (compos-home) "/llm-connector-tests.scm"))
+(define llm-connectors--tests-file (string-append (compos-cache-dir) "/llm-connector-tests.scm"))
 
 ;; the tests kept from before, so a restart keeps each row's last result
 (define (llm-connectors--load-tests)

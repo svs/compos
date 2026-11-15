@@ -32,9 +32,54 @@ defmodule Compos.Core do
       dir = Application.get_env(:compos_core, :cache_dir) -> dir
       dir = env_dir("COMPOS_CACHE_DIR") -> dir
       home() != Path.expand("~/.compos") -> Path.join(home(), "cache")
-      true -> Path.join(env_dir("XDG_CACHE_HOME") || Path.expand("~/.cache"), "compos")
+      true -> machine_cache_dir()
     end
   end
+
+  @doc """
+  The cache every daemon on this machine shares, whatever its home: what is
+  built once per machine, such as the tree-sitter grammars, the model
+  catalog and the worktree daemons. The :machine_cache_dir app env wins
+  (tests), then COMPOS_CACHE_DIR, then $XDG_CACHE_HOME/compos, or
+  ~/.cache/compos.
+  """
+  def machine_cache_dir do
+    Application.get_env(:compos_core, :machine_cache_dir) || env_dir("COMPOS_CACHE_DIR") ||
+      Path.join(env_dir("XDG_CACHE_HOME") || Path.expand("~/.cache"), "compos")
+  end
+
+  @doc """
+  Where compos keeps what it must keep but never syncs: the desktop, the
+  buffer checkpoints and their history, the event and meta databases, the
+  logs and the socket. The home then holds the user's data only, and can
+  be synced or backed up as it is.
+
+  Boot fixes it (`Compos.Core.HomeSplit.run/0`). Before that the home
+  answers, so a daemon that loaded this code live keeps its files where
+  they are until it restarts.
+  """
+  def state_dir, do: Application.get_env(:compos_core, :state_dir) || home()
+
+  @doc """
+  The state folder boot gives this home. COMPOS_STATE_DIR wins. A daemon
+  with a home of its own (a test, a worktree daemon) keeps its state in
+  that home, under state/. Else $XDG_STATE_HOME/compos, or
+  ~/.local/state/compos.
+  """
+  def default_state_dir do
+    cond do
+      dir = env_dir("COMPOS_STATE_DIR") -> dir
+      home() != Path.expand("~/.compos") -> Path.join(home(), "state")
+      true -> machine_state_dir()
+    end
+  end
+
+  @doc """
+  The state every daemon on this machine shares, whatever its home: the
+  daemon registry. $XDG_STATE_HOME/compos, or ~/.local/state/compos.
+  """
+  def machine_state_dir,
+    do: Path.join(env_dir("XDG_STATE_HOME") || Path.expand("~/.local/state"), "compos")
 
   defp env_dir(name) do
     case System.get_env(name) do

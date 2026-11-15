@@ -88,15 +88,27 @@ fn spawn_command() -> String {
     std::env::var("COMPOS_SPAWN").unwrap_or_else(|_| "exec mix run --no-halt".to_string())
 }
 
-/// The directory the daemon log goes in — the same home the daemon uses.
+/// The directory the daemon log goes in: the state folder of the home the
+/// daemon uses (Compos.Core.default_state_dir).
 fn home_dir() -> String {
-    std::env::var("COMPOS_HOME").unwrap_or_else(|_| "~/.compos".to_string())
+    if let Ok(dir) = std::env::var("COMPOS_STATE_DIR") {
+        return dir;
+    }
+    let default = format!("{}/.compos", std::env::var("HOME").unwrap_or_default());
+    match std::env::var("COMPOS_HOME") {
+        Ok(home) if home.trim_end_matches('/') != "~/.compos" && home.trim_end_matches('/') != default => {
+            format!("{home}/state")
+        }
+        _ => std::env::var("XDG_STATE_HOME")
+            .map(|d| format!("{d}/compos"))
+            .unwrap_or_else(|_| "~/.local/state/compos".to_string()),
+    }
 }
 
 fn spawn_daemon() {
     let root = project_root();
     let home = home_dir();
-    // same launch shape as the dev loop: log to $COMPOS_HOME/daemon.log, detach
+    // same launch shape as the dev loop: log to the state folder's daemon.log, detach
     let script = format!(
         "mkdir -p {home} && {cmd} >> {home}/daemon.log 2>&1",
         home = home,
@@ -198,7 +210,7 @@ fn main() {
                 if let Some(w) = handle.get_webview_window("main") {
                     let _ = w.eval(
                         "var s = document.getElementById('status'); \
-                         if (s) { s.textContent = 'daemon did not come up — check ~/.compos/daemon.log'; \
+                         if (s) { s.textContent = 'daemon did not come up — check ~/.local/state/compos/daemon.log'; \
                                   s.classList.remove('dot'); }",
                     );
                 }

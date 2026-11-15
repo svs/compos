@@ -35,7 +35,8 @@ defmodule Compos.Core.Desktop do
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def path,
-    do: Application.get_env(:compos_core, :desktop_path, Path.expand("~/.compos/desktop.etf"))
+    do: Application.get_env(:compos_core, :desktop_path) ||
+        Path.join(Compos.Core.state_dir(), "desktop.etf")
 
   @doc "Synchronous snapshot to disk (also used by tests)."
   def save_now, do: GenServer.call(__MODULE__, :save)

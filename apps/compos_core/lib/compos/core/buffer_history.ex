@@ -29,7 +29,7 @@ defmodule Compos.Core.BufferHistory do
   @doc """
   This replica's peer id, stable across restarts.
 
-  **A home is a replica.** The id lives in `~/.compos/peer-id` beside the
+  **A home is a replica.** The id lives in `peer-id` in the state folder, beside the
   buffers, the checkpoints and the history logs, and everything in that
   directory belongs to the one writer the id names. Two daemons sharing a home
   are the same replica and must not run at once, which their checkpoints
@@ -57,7 +57,7 @@ defmodule Compos.Core.BufferHistory do
   end
 
   defp read_or_create_peer do
-    path = Path.join(Compos.Core.home(), "peer-id")
+    path = Path.join(Compos.Core.state_dir(), "peer-id")
 
     with {:ok, raw} <- File.read(path),
          {peer, _} <- Integer.parse(String.trim(raw)),

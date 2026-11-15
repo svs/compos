@@ -14,8 +14,11 @@ defmodule Compos.Core.Application do
     # good file: that once lost every group, every graveyard entry
     # and every LLM bundle. The probe runs before the supervision tree, so a
     # second daemon dies before it can restore or save anything.
-    case live_daemon(daemon_socket_path()) do
+    case Enum.find_value(daemon_socket_paths(), &live_daemon/1) do
       nil ->
+        # the home keeps the user's data only; state and cache go to their
+        # own folders before anything opens a file
+        Compos.Core.HomeSplit.run()
         Compos.Core.ErrorFeed.install()
         # ~/.compos/chrome-extension: the folder Chrome's Load unpacked points at.
         Task.start(&Compos.Core.ChromeExtension.install/0)
@@ -134,9 +137,14 @@ defmodule Compos.Core.Application do
 
   # --- one daemon per home ----------------------------------------------------
 
-  defp daemon_socket_path do
-    Application.get_env(:compos_rpc, :socket_path) ||
+  # The socket this daemon will bind, and the one in the home where a daemon
+  # from before the home split still listens.
+  defp daemon_socket_paths do
+    Enum.uniq([
+      Application.get_env(:compos_rpc, :socket_path) ||
+        Path.join(Compos.Core.default_state_dir(), "sock"),
       Path.join(Compos.Core.home(), "sock")
+    ])
   end
 
   @probe ~s({"jsonrpc":"2.0","id":1,"method":"ping","params":{}}\n)

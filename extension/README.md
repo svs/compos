@@ -84,7 +84,7 @@ COMPOS_HOME=~/.compos-work COMPOS_PORT=4005 COMPOS_NAME=work mix run --no-halt
 ```
 
 `COMPOS_HOME` is enough on its own: the RPC socket and desktop file follow it, so
-two daemons never fight over `~/.compos/sock`. See `config/runtime.exs`.
+two daemons never fight over `~/.local/state/compos/sock`. See `config/runtime.exs`.
 
 Unlike the earlier browse-in-a-buffer version, a daemon may address **any** tab,
 not only ones it opened — that's the point of an ambient layer.

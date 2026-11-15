@@ -1229,6 +1229,29 @@
 (define (run-hooks &rest hooks)
   (for-each (lambda (h) (run-hook-with-args h)) hooks))
 
+;;; after-init-hook: Emacs's hook of the same name. The Session runs it once
+;;; for each boot, after the packages and the user config load and the
+;;; interpreter is published. It also waits for the desktop restore of the
+;;; shown buffers, at most 30 seconds. Work that the boot does not need goes here:
+;;; a warm-up, a scan, a service. A function on the hook can call anything,
+;;; because every package is in.
+;;;
+;;; A file that loads after the boot finds *after-init-done* true. It then
+;;; does the work at once: (after-init 'FN) is both cases.
+;; a reload of this file keeps the flag: the boot is over only one time
+(define *after-init-done* (and (boundp '*after-init-done*) *after-init-done*))
+
+(define (run-after-init-hook!)
+  (unless *after-init-done*
+    (set! *after-init-done* #t)
+    (run-hooks 'after-init-hook)))
+
+(define (after-init fn)
+  (if *after-init-done*
+      (let ((p (hook--fn fn))) (when p (p)))
+      (add-hook! 'after-init-hook fn #t))
+  fn)
+
 ;; the first function that answers a true value ends the run
 (define (run-hook-with-args-until-success hook &rest args)
   (let loop ((fs (hook-functions hook)))
@@ -7377,6 +7400,8 @@
 (catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
 (catalog-meta! 'function "compos-cache-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-cache-dir-set!" 'domain 'files 'effects '(write))
+(public! 'compos-state-dir "(compos-state-dir) — the folder for what compos keeps but never syncs: the desktop, buffer checkpoints, logs, the socket; ~/.local/state/compos, or state/ in a daemon's own home")
+(catalog-meta! 'function "compos-state-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-temp-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-temp-file" 'domain 'files 'effects '(write))
 
@@ -7619,6 +7644,7 @@
 (public! 'expand-path "(expand-path PATH) — expand PATH to an absolute path, against the home and working directories." 'files)
 (public! 'file-realpath "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal." 'files)
 (effects! '(write))
+(public! 'after-init "(after-init 'FN) — call FN once the boot is complete: on after-init-hook during the boot, at once after it")
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
 (public! 'with-eval-after-load "(with-eval-after-load 'F THUNK) — run THUNK now when F is provided, or when it is")

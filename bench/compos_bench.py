@@ -574,12 +574,14 @@ def attach_provider_config(source_home: Path, benchmark_home: Path):
 def daemon_start(home: Path, project: Path, port: int, app_port: int, timeout: float) -> Rpc:
     home = home.expanduser().resolve()
     project = project.expanduser().resolve()
-    socket_path = home / "sock"
+    # the daemon keeps its socket and log in its home's state folder
+    state = home / "state"
+    socket_path = state / "sock"
     rpc = Rpc(socket_path)
     if rpc.ping():
         raise BenchError(f"daemon is already running at {socket_path}")
-    home.mkdir(parents=True, exist_ok=True)
-    log = (home / "daemon.log").open("a")
+    state.mkdir(parents=True, exist_ok=True)
+    log = (state / "daemon.log").open("a")
     environment = os.environ.copy()
     environment.update({
         "COMPOS_HOME": str(home),
@@ -596,16 +598,16 @@ def daemon_start(home: Path, project: Path, port: int, app_port: int, timeout: f
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise BenchError(f"daemon exited with {process.returncode}; see {home / 'daemon.log'}")
+            raise BenchError(f"daemon exited with {process.returncode}; see {state / 'daemon.log'}")
         if rpc.ping():
             return rpc
         time.sleep(0.2)
-    raise BenchError(f"daemon did not start within {timeout:g}s; see {home / 'daemon.log'}")
+    raise BenchError(f"daemon did not start within {timeout:g}s; see {state / 'daemon.log'}")
 
 
 def daemon_stop(home: Path, timeout: float):
     home = home.expanduser().resolve()
-    rpc = Rpc(home / "sock")
+    rpc = Rpc(home / "state" / "sock")
     try:
         result = rpc.call("shutdown")
     except BenchError as error:
@@ -750,7 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     store = RunStore(args.results)
-    socket_path = args.socket or args.home.expanduser() / "sock"
+    socket_path = args.socket or args.home.expanduser() / "state" / "sock"
     rpc = Rpc(socket_path)
 
     if args.command == "daemon":

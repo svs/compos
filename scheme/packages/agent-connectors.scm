@@ -173,10 +173,10 @@ nonstandard install out of the built-in connector catalog."
 ;;; ages: the day a provider ships a model, nothing in the picker can name
 ;;; it. So ask the provider. OpenRouter publishes its whole catalog with no
 ;;; key, and it is the provider with the most to miss — hundreds of models,
-;;; new ones most weeks. The answer is cached in compos-home, so the list
+;;; new ones most weeks. The answer is cached in compos-cache-dir, so the list
 ;;; survives a restart and no menu ever waits on the network.
 
-(define llm-catalog-file (string-append (compos-home) "/model-catalog.scm"))
+(define llm-catalog-file (string-append (compos-cache-dir) "/model-catalog.scm"))
 
 ;; PROVIDER -> ((ID NAME) ...), as the provider itself reports it
 (define *llm-catalog* '())

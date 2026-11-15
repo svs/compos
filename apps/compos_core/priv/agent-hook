@@ -10,7 +10,7 @@
 # goes on as usual.
 
 [ -n "$COMPOS_AGENT" ] || exit 0
-sock="${COMPOS_SOCK:-$HOME/.compos/sock}"
+sock="${COMPOS_SOCK:-${XDG_STATE_HOME:-$HOME/.local/state}/compos/sock}"
 [ -S "$sock" ] || exit 0
 
 harness=$(printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-')

@@ -68,7 +68,7 @@
   "Every model host the list shows, in the order it shows them." 'group 'models)
 
 (defcustom 'models-disk-roots
-  (list "~/.cache/huggingface/hub" (string-append (compos-home) "/models"))
+  (list "~/.cache/huggingface/hub" (string-append (compos-cache-dir) "/models"))
   "Where this machine keeps model files, for the host named disk."
   'group 'models)
 
@@ -760,7 +760,7 @@
 (define (models--serve-command)
   (string-append
     "nohup " (sh-quote (or (executable-find "ollama") "ollama"))
-    " serve >> " (compos-home) "/ollama.log 2>&1 & sleep 2"))
+    " serve >> " (compos-state-dir) "/ollama.log 2>&1 & sleep 2"))
 
 (define (models--local-host)
   (let ((hs (filter models--local? (models-host-list))))
@@ -782,7 +782,7 @@
                   (models--report! "the daemon runs" ep reply)
                   (message (string-append ep ": "
                                           (or (http-message reply) "no answer")
-                                          " - see " (compos-home) "/" ep "-daemon.log")))))))))
+                                          " - see " (compos-state-dir) "/" ep "-daemon.log")))))))))
 
 (define (models--serve-ollama! host)
   (message "starting ollama...")
@@ -793,7 +793,7 @@
           (if (http-ok? reply)
               (models--report! "the server runs" (models--host-url host) reply)
               (message (string-append "ollama did not start - see "
-                                      (compos-home) "/ollama.log"))))))))
+                                      (compos-state-dir) "/ollama.log"))))))))
 
 (define (models--serve-host! host)
   (if (equal? (models--kind host) 'daemon)

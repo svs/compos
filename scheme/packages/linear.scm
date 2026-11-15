@@ -446,8 +446,20 @@
                 (lambda (d) (when d (linear--after-change! buf row (string-append "→ " (linear--s (plist-get s 'name))))))))))))))
 
 (define (linear-assign-agent! buf row)
-  (let ((g (frame-group)))
-    (if (not g) (message "Linear: no group here to file the todo in")
+  (let* ((g (frame-group))
+         (ident (linear--s (plist-get row 'identifier)))
+         ;; an issue has one task for good: Agent again opens that task again
+         (had (todo-of-source (string-append "linear:" ident))))
+    (cond
+      (had
+       (let ((id (plist-get had 'id)))
+         (when (equal? (plist-get had 'state) "cancelled") (todo-reopen id "assigned to Agent again in Linear" "linear"))
+         (todo-source-returned! id "Assigned to Agent again in Linear." "linear")
+         (let ((t (todo-get id)))
+           (unless (todo--chat-of t) (todo-assign-chat! id (or (plist-get t 'group) g))))
+         (message (string-append "Linear: " ident " → todo " id " again"))))
+      ((not g) (message "Linear: no group here to file the todo in"))
+      (else
         (linear-gql "query($id: String!) { issue(id: $id) { id identifier title description url state { type } team { id } } }"
           (list 'id (plist-get row 'id))
           (lambda (d)
@@ -459,7 +471,7 @@
                                              'notes (linear--todo-notes i)))))
                   (todo-assign-chat! id g)
                   (linear--mark-started! buf row i)
-                  (message (string-append "Linear: " (linear--s (plist-get i 'identifier)) " → todo " id ", agent started"))))))))))
+                  (message (string-append "Linear: " (linear--s (plist-get i 'identifier)) " → todo " id ", agent started")))))))))))
 
 ;; The todo carries the work and Linear hears little of it: one comment when the
 ;; task ends (review or done, the first of them only), and one for each question
@@ -475,21 +487,80 @@
 
 (define (linear--blank? s) (or (not (string? s)) (equal? (string-trim s) "")))
 
+(define (linear--review? name) (string-contains? (string-downcase (linear--s name)) "review"))
+
+;; our share is done: the issue goes to its team's review state, when it is
+;; still todo or in progress
+(define (linear--to-review! ident)
+  (linear-gql "query($id: String!) { issue(id: $id) { id state { name type } team { id } } }" (list 'id ident)
+    (lambda (d)
+      (let* ((i (and d (plist-get d 'issue))) (st (and i (plist-get i 'state))))
+        (when (and i (member (linear--s (plist-get st 'type)) '("unstarted" "started"))
+                   (not (linear--review? (plist-get st 'name))))
+          (linear--with-teams
+            (lambda (_)
+              (let ((hit (filter (lambda (s) (and (equal? (plist-get s 'type) "started") (linear--review? (plist-get s 'name))))
+                                 (linear--nodes (linear--team (plist-get (plist-get i 'team) 'id)) 'states))))
+                (if (null? hit)
+                    (linear--log (string-append ident ": the team has no review state"))
+                    (linear-gql "mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }"
+                      (list 'id (plist-get i 'id) 'input (list 'stateId (plist-get (car hit) 'id)))
+                      (lambda (r) (when r (linear--log (string-append ident " → " (linear--s (plist-get (car hit) 'name))))))))))))))))
+
 (define (linear--todo-moved old new who text)
   (let ((src (plist-get new 'source))
         (state (plist-get new 'state))
         (said (if (linear--blank? text) (linear--s (plist-get new 'status)) text)))
     (when (and (string? src) (string-prefix? "linear:" src))
-      (let ((ident (substring src 7 (string-length src))))
+      (let* ((ident (substring src 7 (string-length src)))
+             ;; each round the issue comes back says its end once more
+             (n (todo-source-rounds new))
+             (key (string-append "linear-ended:" (plist-get new 'id) (if (> n 0) (string-append ":" (number->string n)) ""))))
+        (when (and (equal? state "done") (not (equal? (plist-get old 'state) "done")))
+          (linear--to-review! ident))
         (cond
           ((and (equal? state "waiting") (not (linear--blank? text)))
            (linear--todo-comment! ident (string-append "**Question** (todo " (plist-get new 'id) ")\n\n" text)))
           ((and (member state '("review" "done")) (not (linear--blank? said)))
-           (once! (string-append "linear-ended:" (plist-get new 'id))
+           (once! key
              (lambda ()
                (linear--todo-comment! ident (string-append (if (equal? state "done") "**Done**" "**Ready for review**")
                                                            " (todo " (plist-get new 'id) ")\n\n" said))
                #t))))))))
+
+;; the issue came back from review: its status left review or done for todo or
+;; in progress, or someone said something that is not one of our comments.
+;; The same task opens again and its chat wakes.
+(define linear--our-comments '("**Ready for review**" "**Done**" "**Question**"))
+
+(define (linear--todo-returned! j)
+  (let* ((d (plist-get j 'data))
+         (type (plist-get j 'type))
+         (action (plist-get j 'action))
+         (actor (or (and (pair? (plist-get j 'actor)) (plist-get (plist-get j 'actor) 'name)) "Someone"))
+         (from (plist-get j 'updatedFrom)))
+    (cond
+      ((and (equal? type "Issue") (equal? action "update") (pair? d) (pair? from) (plist-get from 'stateId))
+       (let* ((st (plist-get d 'state)) (name (linear--s (plist-get st 'name)))
+              (ident (linear--s (plist-get d 'identifier)))
+              (t (todo-of-source (string-append "linear:" ident))))
+         (when (and t (member (linear--s (plist-get st 'type)) '("unstarted" "started"))
+                    (not (linear--review? name))
+                    (member (plist-get t 'state) '("done" "review")))
+           (todo-source-returned! (plist-get t 'id) (string-append actor " moved " ident " back to " name " in Linear.") "linear"))))
+      ((and (equal? type "Comment") (equal? action "create") (pair? d))
+       (let ((body (linear--s (plist-get d 'body)))
+             (on (lambda (ident)
+                   (let ((t (and (string? ident) (todo-of-source (string-append "linear:" ident)))))
+                     (when t
+                       (report-errors "linear"
+                         (lambda () (todo-source-returned! (plist-get t 'id) (string-append actor " commented on " ident " in Linear:\n\n" body) "linear"))))))))
+         (unless (find (lambda (m) (string-prefix? m body)) linear--our-comments)
+           (let ((i (plist-get d 'issue)))
+             (if (and (pair? i) (string? (plist-get i 'identifier)))
+                 (on (plist-get i 'identifier))
+                 (linear-gql "query($id: String!) { issue(id: $id) { identifier } }" (list 'id (plist-get d 'issueId))
+                   (lambda (r) (on (and r (plist-get (plist-get r 'issue) 'identifier)))))))))))))
 
 (add-hook! 'todo-state-functions 'linear--todo-moved)
 
@@ -720,6 +791,23 @@
 (register-context-provider! "linear-detail-mode"
   (lambda (buf) (string-append "Linear issue page " buf " is open. Read it with (buffer-outline BUF) and (buffer-section BUF NAME).")))
 
+;; the issue page's chat is the chat of the task the issue was filed as, while
+;; it is live: M-o goes there, not to a second chat. Without one, the page's own.
+(define (linear--page-todo buf)
+  (let ((row (buffer-local buf 'linear-row)))
+    (and row (todo-of-source (string-append "linear:" (linear--s (plist-get row 'identifier)))))))
+
+(mode-put! "linear-detail-mode" 'agent-chat
+  (lambda (buf)
+    (let ((t (linear--page-todo buf)))
+      (or (and t (todo--chat-of t)) (llm-mode--companion-existing buf)))))
+
+;; a task's linear:IDENT source shows on the page *linear:IDENT*
+(define (linear--register-source-page!)
+  (todo-source-page-register! "linear:"
+    (lambda (key) (string-append "*linear:" (substring key 7 (string-length key)) "*"))))
+(if (featurep 'todo) (linear--register-source-page!) (with-eval-after-load 'todo linear--register-source-page!))
+
 (define (linear-listing!)
   (let* ((g (frame-group))
          (d (linear-group-defaults g))
@@ -812,7 +900,9 @@
                 (let* ((j (plist-get e 'data)) (id (and (pair? j) (linear--webhook-issue-id j))))
                   (when (and id (not (member id ids)))
                     (set! ids (cons id ids))
-                    (linear--publish-change! id j "webhook"))))
+                    (linear--publish-change! id j "webhook"))
+                  ;; every event, not one an issue: a comment and a move can come together
+                  (when (pair? j) (report-errors "linear" (lambda () (linear--todo-returned! j))))))
               events)
     (when (and (pair? ids) (buffer-exists? *linear-buffer*)) (linear--read! *linear-buffer*))))
 
@@ -852,7 +942,7 @@
 ;;; minutes, and once at boot when a run was missed, every issue changed since
 ;;; the last change seen is published as if it had been pushed.
 
-(define linear--seen-file (expand-file-name "~/.compos/linear-last-seen"))
+(define linear--seen-file (string-append (compos-state-dir) "/linear-last-seen"))
 
 (define (linear--last-seen)
   (and (file-exists? linear--seen-file)

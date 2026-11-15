@@ -1,7 +1,7 @@
 defmodule Compos.Core.LLMUsage do
   @moduledoc """
   The usage ledger. Every LLM request records `{ts, model, tokens, cost}`
-  through `record/3`, appended to `~/.compos/llm-usage.jsonl`, and
+  through `record/3`, appended to `llm-usage.jsonl` in the state folder, and
   `report/0` aggregates it by day and model. Prices come from
   `Compos.Core.ModelCatalog`. Per-chat attribution lives in chat
   buffer-locals, not here.
@@ -120,5 +120,5 @@ defmodule Compos.Core.LLMUsage do
     if total > 0, do: read / total, else: nil
   end
 
-  defp ledger_path, do: Path.join(Compos.Core.home(), "llm-usage.jsonl")
+  defp ledger_path, do: Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
 end

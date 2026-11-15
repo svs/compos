@@ -30,7 +30,8 @@ defmodule Compos.Rpc.Server do
   end
 
   def default_socket_path do
-    Application.get_env(:compos_rpc, :socket_path, Path.expand("~/.compos/sock"))
+    Application.get_env(:compos_rpc, :socket_path) ||
+      Path.join(Compos.Core.state_dir(), "sock")
   end
 
   @impl true

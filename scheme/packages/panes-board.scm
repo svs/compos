@@ -75,6 +75,8 @@
           (let ((l (if (equal? g (panes-board-here-group)) (panes-board-layout) (panes-layout-of g))))
             (set! panes-board--layouts (cons (list g l) panes-board--layouts))
             l)))))
+(public! 'panes-board-layout-of "(panes-board-layout-of GROUP) — the panes layout of GROUP, cached for one draw")
+(catalog-meta! 'function "panes-board-layout-of" 'domain 'windows 'effects '(read))
 (define (panes-board-row-layout id) (panes-board-layout-of (panes-board-group id)))
 
 (define (panes-board-pane-of id)
@@ -247,13 +249,10 @@
          (s (if (and (member kind '("p" "w" "b")) (panes-board--column-row id)) 1 0)))
     (cond ((equal? kind "g") 0) ((member kind '("c" "f" "h")) 1) ((equal? kind "p") (+ 1 s)) ((equal? kind "w") (+ 2 s)) (else (+ 3 s)))))
 
-(define (panes-board--depth buf id)
-  ;; how far in a row sits below the top of what is shown
-  (let* ((root (panes-board-root buf))
-         (top (cond (root (panes-board--level root))
-                    ((equal? (panes-board-view buf) 'all) 0)
-                    (else 1))))
-    (max 0 (- (panes-board--level id) top))))
+(define (panes-board--indent buf id)
+  ;; no-break spaces: the list cell collapses plain leading spaces in the browser
+  (let loop ((n (* 4 (panes-board--depth buf id))) (s ""))
+    (if (<= n 0) s (loop (- n 1) (string-append s "\u00A0")))))
 
 (define (panes-board--indent buf id)
   (let loop ((n (* 4 (panes-board--depth buf id))) (s ""))
@@ -356,7 +355,7 @@
 
 (define (panes-board--trim s w)
   (let loop ((i 0))
-    (if (and (< i (string-length s)) (member (substring s i (+ i 1)) '(" " "▸" "▾")))
+    (if (and (< i (string-length s)) (member (substring s i (+ i 1)) '(" " "\u00A0" "▸" "▾")))
         (loop (+ i 1))
         (let* ((lead (substring s 0 i))
                (parts (string-split (substring s i (string-length s)) ": ")))

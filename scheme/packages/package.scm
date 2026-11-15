@@ -198,17 +198,31 @@
                  " " (sh-quote url) " " (sh-quote dir)
                  (if commit (string-append " && git -C " (sh-quote dir) " checkout --quiet " (sh-quote commit)) "")))
 
+(define package--cloning '())
+
 (define (package--ensure! n k)
-  ;; K gets #t once the checkout is there; a missing clone runs in a task
-  (let ((dir (package-directory n)))
-    (if (file-exists? dir)
-        (k #t)
+  ;; K gets #t once the checkout is there; a missing clone runs in a task.
+  ;; A second call while the clone runs (init.scm reloads on save, a
+  ;; require of a require) waits for that clone instead of starting one
+  ;; into the same directory, which fails.
+  (let ((dir (package-directory n))
+        (busy (assoc n package--cloning)))
+    (cond
+      (busy (set! package--cloning
+              (map (lambda (x) (if (equal? (car x) n) (append x (list k)) x)) package--cloning)))
+      ((file-exists? dir) (k #t))
+      (else
         (let* ((recipe (package-recipe n))
                (pin (assoc n (package-lock)))
                (url (or (package-recipe-url recipe) (and pin (cadr pin)))))
           (if (not url)
               (begin (message (string-append "use-package: no recipe for " n)) (k #f))
-              (begin
+              (let ((done (lambda (ok)
+                            (let ((e (assoc n package--cloning)))
+                              (set! package--cloning
+                                    (filter (lambda (x) (not (equal? (car x) n))) package--cloning))
+                              (for-each (lambda (w) (w ok)) (if e (cdr e) (list k)))))))
+                (set! package--cloning (cons (list n k) package--cloning))
                 (message (string-append "cloning " n " from " url))
                 (shell-command->string
                   (string-append (package--clone-command url dir (plist-get recipe ':branch)
@@ -217,10 +231,10 @@
                   (compos-home)
                   (lambda (out)
                     (if (string-contains? out "CLONE-OK")
-                        (k #t)
+                        (done #t)
                         (begin
                           (message (string-append "use-package: clone of " n " failed: " (string-trim out)))
-                          (k #f)))))))))))
+                          (done #f))))))))))))
 
 (define (package--use n k)
   ;; ensure, install the requires that have recipes, activate; K gets N or #f

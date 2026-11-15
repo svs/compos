@@ -1466,6 +1466,130 @@
 }
 ")
 
+(define-theme "dos-dark"
+  (list
+    ;; the development frame: the CGA sixteen on a black text-mode screen
+    (list 'ts-keyword 'fg "#55ffff" 'weight "700")
+    (list 'ts-function 'fg "#ffff55")
+    (list 'ts-string 'fg "#55ff55")
+    (list 'ts-comment 'fg "#808080" 'style "italic")
+    (list 'ts-number 'fg "#ff55ff")
+    (list 'ts-constant 'fg "#ff55ff")
+    (list 'ts-type 'fg "#00aaaa")
+    (list 'ts-module 'fg "#00aaaa")
+    (list 'ts-operator 'fg "#ffffff")
+    (list 'ts-punctuation 'fg "#808080")
+    (list 'ts-tag 'fg "#55ffff")
+    (list 'ts-attribute 'fg "#ffff55")
+    (list 'ts-variable 'fg "#d0d0d0")
+    (list 'ts-property 'fg "#ffaa00")
+    (list 'ts-escape 'fg "#ff5555")
+    (list 'default 'bg "#0a0a0a" 'fg "#c0c0c0")
+    (list 'window 'bg "#0a0a0a")
+    (list 'paper 'bg "#0a0a0a")
+    (list 'window-inactive 'bg "#050505")
+    (list 'body 'fg "#c0c0c0")
+    (list 'border-soft 'bg "#555555")
+    (list 'border 'bg "#55ffff")
+    (list 'modeline 'bg "#333333" 'fg "#aaaaaa")
+    (list 'modeline-active 'bg "#00aaaa" 'fg "#000000")
+    (list 'cursor 'bg "#55ff55")
+    (list 'region 'bg "#0000aa")
+    (list 'select 'bg "#0000aa")
+    (list 'hl-line 'bg "#161616")
+    (list 'linenum 'fg "#555555")
+    (list 'accent 'fg "#55ffff")
+    (list 'link 'fg "#55ffff" 'decoration "underline")
+    (list 'llm-response 'fg "#c0c0c0")
+    (list 'llm-prompt 'fg "#ffffff")
+    (list 'diff-block 'fg "#ffff55")
+    (list 'diff-block-source 'fg "#808080")
+    (list 'dim 'fg "#808080")
+    (list 'faint 'fg "#555555")
+    (list 'warn 'fg "#ffff55")
+    (list 'ok 'fg "#55ff55")
+    (list 'alert 'fg "#ff5555")
+    (list 'org-level-1 'fg "#ffffff" 'weight "700")
+    (list 'org-level-2 'fg "#55ffff" 'weight "700")
+    (list 'org-level-3 'fg "#ffff55" 'weight "700")
+    (list 'org-level-4 'fg "#ff55ff" 'weight "700")
+    (list 'group-color-1 'fg "#ff5555")
+    (list 'group-color-2 'fg "#55ffff")
+    (list 'group-color-3 'fg "#55ff55")
+    (list 'group-color-4 'fg "#ff55ff")
+    (list 'group-color-5 'fg "#ffff55")
+    (list 'group-color-6 'fg "#ffffff")
+    (list 'org-todo 'fg "#ff5555" 'weight "700")
+    (list 'org-done 'fg "#555555" 'decoration "line-through")
+    (list 'org-priority 'fg "#ffff55" 'weight "700")
+    (list 'org-date 'fg "#55ffff")
+    (list 'org-tag 'fg "#808080")
+    (list 'org-checkbox 'fg "#ffff55" 'weight "700")
+    (list 'org-cookie 'fg "#ffff55")
+    (list 'org-meta 'fg "#808080")
+    (list 'fold-marker 'fg "#ffff55")
+    (list 'nm-date 'fg "#808080")
+    (list 'nm-author 'fg "#55ffff")
+    (list 'nm-tags 'fg "#ffff55")
+    (list 'nm-subject 'fg "#ffffff")
+    (list 'nm-marked 'fg "#ff5555")
+    (list 'nm-hdr 'fg "#ffffff")
+    (list 'nm-sep 'fg "#555555")
+    (list 'diff-file 'fg "#ffffff" 'weight "700")
+    (list 'diff-hunk 'fg "#55ffff")
+    (list 'diff-add 'fg "#55ff55" 'bg "rgba(85, 255, 85, 0.12)")
+    (list 'diff-del 'fg "#ff5555" 'bg "rgba(255, 85, 85, 0.12)")
+    (list 'diff-add-word 'bg "rgba(85, 255, 85, 0.30)")
+    (list 'diff-del-word 'bg "rgba(255, 85, 85, 0.30)")
+    (list 'code-scope 'bg "rgba(85, 255, 255, 0.05)")
+    (list 'mono 'family "'IBM Plex Mono', Menlo, 'DejaVu Sans Mono', 'Courier New', monospace")
+    (list 'sans 'inherit 'mono)
+    (list 'serif 'inherit 'mono)
+    (list 'chrome 'gap "6px" 'radius "0"
+          'border "3px double #55ffff"
+          'shadow "6px 6px 0 #000066"
+          'shadow-deep "6px 6px 0 #000066")))
+
+(define-theme-skin! "dos-dark" "
+/* the desktop: black, a faint dither so the windows stand off it */
+.windows {
+  background-color: #000000;
+  background-image: radial-gradient(#1c1c1c 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+/* a window is a gray double rule; the live one is cyan; shadows are DOS blue */
+.window, .window.inactive {
+  border: 3px double var(--border-soft-bg);
+  box-shadow: 6px 6px 0 #000066;
+}
+.window.active, .window.active:has(.dash-state-focus),
+.window.active:has(.dash-state-editing) {
+  border: 3px double var(--border-bg);
+  box-shadow: 6px 6px 0 #0000aa;
+}
+.modeline, .window.active .modeline, .buffer-header {
+  background: var(--modeline-bg);
+  color: var(--modeline-fg);
+  border-top: 0; border-bottom: 0;
+  letter-spacing: 0;
+}
+.window.active .modeline, .window.active .buffer-header {
+  background: var(--modeline-active-bg);
+  color: var(--modeline-active-fg);
+}
+.modeline .ml-icon, .modeline .ml-group-item, .modeline .ml-state-modified,
+.modeline .ml-segment, .modeline .ml-strong, .modeline .ml-extra .ml-segment {
+  color: inherit;
+}
+.modeline .ml-dot { background: var(--modeline-fg); }
+.window.active .modeline .ml-dot { background: var(--modeline-active-fg); }
+/* chat: your turn is a DOS-blue box */
+.ag-user {
+  background: #0000aa; color: #ffffff;
+  border-radius: 14px; padding: 8px 14px;
+}
+")
+
 ;;; --- paperized: the sheet, the grain, and the ink ---------------------------
 ;;; The desk is woven, the pane is a sheet laid on it, and the sheet has a
 ;;; grain that catches the light at the corners. The hand writes in three

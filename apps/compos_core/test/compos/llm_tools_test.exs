@@ -54,7 +54,7 @@ defmodule Compos.LLMToolsTest do
       # Focused repository readers avoid wrapping safe reads in the
       # deliberately conservative eval-scheme tool.
       for t <-
-            ~w(eval-scheme eval-scheme-read apropos apropos-categories describe-function read-file code-outline code-read act ask draw spotify) do
+            ~w(eval-scheme eval-scheme-read apropos apropos-categories describe-function read-file code-outline code-read act ask draw) do
         assert specs =~ t
       end
 
@@ -64,7 +64,7 @@ defmodule Compos.LLMToolsTest do
           ~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))}
         )
 
-      assert count == "13"
+      assert count == "12"
       # apropos reads the catalog, and its semantic pass embeds the query
       # through an external service, so the stamp names external and spend.
       # agent-permissions.scm allows the tool anyway: discovery must not ask.

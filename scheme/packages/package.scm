@@ -111,10 +111,20 @@
 
 (effects! '(write))
 
+(define (package--key k)
+  ;; init.scm spells a key 'repo, the compos plist way; recipe.scm and
+  ;; the code read :repo. Both name one key.
+  (if (and (symbol? k) (not (string-prefix? ":" (symbol->string k))))
+      (string->symbol (string-append ":" (symbol->string k)))
+      k))
+
 (define (package-recipe-add! recipe)
   (let ((n (package--name (car recipe))))
     (set! package--recipes
-          (cons (cons n (cdr recipe))
+          (cons (cons n (let loop ((ps (cdr recipe)))
+                          (if (and (pair? ps) (pair? (cdr ps)))
+                              (cons (package--key (car ps)) (cons (cadr ps) (loop (cddr ps))))
+                              ps)))
                 (filter (lambda (e) (not (equal? (car e) n))) package--recipes)))
     n))
 
@@ -267,8 +277,206 @@
               (event-publish! "packages" 'thawed out)))))
     (map car rows)))
 
-(public! 'use-package "(use-package 'NAME [:repo USER/REPO | :url URL] [:branch B] [:defer #t]) - clone NAME if missing (in a task), check out its pin, put it on load-path and load it; publishes packages loaded or failed")
+(public! 'use-package "(use-package 'NAME ['repo USER/REPO | 'url URL] ['branch B] ['defer #t]) - keys are quoted symbols, :repo spelled 'repo; - clone NAME if missing (in a task), check out its pin, put it on load-path and load it; publishes packages loaded or failed")
 (public! 'package-thaw! "(package-thaw!) - in a task, check every package out at its packages.lock pin, cloning what is missing; publishes packages thawed")
+
+;; ---- git state and pull requests: an agent and the user send a change upstream
+
+(effects! '(pure))
+
+(define (package-github-repo url)
+  ;; OWNER/REPO of a github url, else #f
+  (let* ((u (string-trim (or url "")))
+         (rest (cond ((string-prefix? "https://github.com/" u) (substring u 19 (string-length u)))
+                     ((string-prefix? "git@github.com:" u) (substring u 15 (string-length u)))
+                     ((string-prefix? "ssh://git@github.com/" u) (substring u 21 (string-length u)))
+                     (else #f)))
+         (rest (and rest (if (string-suffix? ".git" rest) (substring rest 0 (- (string-length rest) 4)) rest))))
+    (and rest (= (length (string-split rest "/")) 2) rest)))
+
+(define (package--slug text)
+  ;; a branch name piece: lower case letters, digits and dashes, at most 40
+  (let* ((cs (map (lambda (c) (if (or (char-alphabetic? c) (char-numeric? c)) (char-downcase c) #\-))
+                  (string->list (string-trim text))))
+         (s (let loop ((cs cs) (acc '()))
+              (cond ((null? cs) (list->string (reverse acc)))
+                    ((and (char=? (car cs) #\-) (or (null? acc) (char=? (car acc) #\-))) (loop (cdr cs) acc))
+                    (else (loop (cdr cs) (cons (car cs) acc))))))
+         (s (if (> (string-length s) 40) (substring s 0 40) s))
+         (s (if (string-suffix? "-" s) (substring s 0 (- (string-length s) 1)) s)))
+    (if (equal? s "") "change" s)))
+
+(public! 'package-github-repo "(package-github-repo URL) - OWNER/REPO of a github git url, else #f")
+
+(effects! '(read execute))
+
+(define package--prs '())
+
+(define (package--git-status-of dir)
+  ;; git only: the shell gate refuses other readers
+  (let* ((g (lambda (args) (string-append "git -C " (sh-quote dir) " " args)))
+         (head (map string-trim
+                    (string-split (string-trim
+                                    (shell-command->string
+                                      (string-append (g "rev-parse --abbrev-ref HEAD 2>/dev/null || echo -") "; "
+                                                     (g "rev-parse --abbrev-ref '@{u}' 2>/dev/null || ")
+                                                     (g "rev-parse --abbrev-ref origin/HEAD 2>/dev/null || echo -") "; "
+                                                     (g "config --get remote.origin.url || echo -"))
+                                      dir))
+                                  "\n")))
+         (dash (lambda (s) (if (equal? s "-") #f s))))
+    (if (< (length head) 3)
+        (list 'branch #f 'upstream #f 'behind 0 'ahead 0 'dirty 0 'url #f)
+        (let* ((up (dash (cadr head)))
+               (out (shell-command->string
+                      (string-append (if up (g (string-append "rev-list --left-right --count " (sh-quote (string-append up "...HEAD")) " 2>/dev/null; ")) "")
+                                     "echo @@; " (g "status --porcelain 2>/dev/null"))
+                      dir))
+               (parts (string-split out "@@"))
+               (ab (string-split (string-trim (car parts)) "\t"))
+               (dirty (if (pair? (cdr parts))
+                          (length (filter (lambda (l) (not (equal? (string-trim l) "")))
+                                          (string-split (cadr parts) "\n")))
+                          0)))
+          (list 'branch (dash (car head)) 'upstream up
+                'behind (or (string->number (car ab)) 0)
+                'ahead (or (and (pair? (cdr ab)) (string->number (cadr ab))) 0)
+                'dirty dirty
+                'url (dash (caddr head)))))))
+
+(define (package-git-status name)
+  (let ((dir (package-directory name)))
+    (if (file-exists? (string-append dir "/.git"))
+        (package--git-status-of dir)
+        (list 'branch #f 'upstream #f 'behind 0 'ahead 0 'dirty 0 'url #f))))
+
+(define (package-prs name)
+  (let ((e (assoc (package--name name) package--prs))) (if e (cdr e) '())))
+
+(public! 'package-git-status "(package-git-status NAME) - the checkout of NAME as a plist: branch upstream ahead behind dirty url; behind counts what the last package-fetch! saw")
+(public! 'package-prs "(package-prs NAME) - the open pull requests of NAME's github repo as ((NUMBER TITLE URL BRANCH) ...), as the last package-fetch! saw them")
+
+(effects! '(write external execute))
+
+(define (package-fetch! . k)
+  ;; in a task: git fetch every clone and read its open PRs with gh
+  (let* ((names (filter (lambda (n) (file-exists? (string-append (package-directory n) "/.git")))
+                        (package-installed)))
+         (step (lambda (n)
+                 (let* ((dir (package-directory n))
+                        (repo (package-github-repo (package--git dir "config --get remote.origin.url"))))
+                   (string-append
+                     "echo " (sh-quote (string-append "@@ " n)) "; "
+                     "git -C " (sh-quote dir) " fetch --quiet origin 2>/dev/null; "
+                     (if repo
+                         (string-append "gh pr list -R " (sh-quote repo)
+                                        " --state open --json number,title,url,headRefName"
+                                        " --jq '.[] | \"\\(.number)\\t\\(.url)\\t\\(.headRefName)\\t\\(.title)\"' 2>/dev/null; ")
+                         ""))))))
+    (if (null? names)
+        (begin (set! package--prs '()) (when (pair? k) ((car k) '())) '())
+        (begin
+          (shell-command->string
+            (string-join (map step names) "")
+            (compos-home)
+            (lambda (out)
+              (let loop ((ls (string-split out "\n")) (cur #f) (acc '()))
+                (cond ((null? ls)
+                       (set! package--prs (map (lambda (e) (cons (car e) (reverse (cdr e)))) acc))
+                       (event-publish! "packages" 'fetched (map car package--prs))
+                       (when (pair? k) ((car k) package--prs)))
+                      ((string-prefix? "@@ " (car ls))
+                       (let ((n (substring (car ls) 3 (string-length (car ls)))))
+                         (loop (cdr ls) n (cons (list n) acc))))
+                      (else
+                       (let ((f (string-split (car ls) "\t")))
+                         (if (and cur (>= (length f) 4) (string->number (car f)))
+                             (loop (cdr ls) cur
+                                   (cons (append (car acc)
+                                                 (list (list (string->number (car f)) (string-join (cdddr f) "\t")
+                                                             (cadr f) (caddr f))))
+                                         (cdr acc)))
+                             (loop (cdr ls) cur acc))))))))
+          names))))
+
+(define (package--pr-script repo branch fresh? message title body)
+  ;; on BRANCH (new when FRESH?): commit all, fork, push, open or find the PR; the last line says
+  (let ((q sh-quote))
+    (string-append
+      "set -e; "
+      (if fresh? (string-append "git checkout --quiet -b " (q branch) "; ") "")
+      "git add -A; "
+      "if ! git diff --cached --quiet; then git commit --quiet -m " (q message) "; fi; "
+      "if [ -z \"$(git rev-list '@{u}..HEAD' 2>/dev/null || git rev-list origin/HEAD..HEAD)\" ]; then echo 'PR-FAIL nothing to send'; exit 0; fi; "
+      "user=$(gh api user --jq .login); owner=" (q (car (string-split repo "/"))) "; "
+      "name=" (q (cadr (string-split repo "/"))) "; "
+      "if [ \"$user\" = \"$owner\" ]; then remote=origin; else "
+      "remote=fork; "
+      "gh repo fork " (q repo) " --clone=false >/dev/null 2>&1 || true; "
+      "if ! git remote get-url fork >/dev/null 2>&1; then "
+      "case \"$(git remote get-url origin)\" in git@*|ssh:*) git remote add fork \"git@github.com:$user/$name.git\";; "
+      "*) git remote add fork \"https://github.com/$user/$name.git\";; esac; fi; fi; "
+      "git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --quiet -u \"$remote\" " (q branch) " 2>&1; "
+      "url=$(gh pr list -R " (q repo) " --head " (q branch) " --state open --json url --jq '.[0].url'); "
+      "if [ -z \"$url\" ]; then "
+      "head=" (q branch) "; [ \"$remote\" = fork ] && head=\"$user:" branch "\"; "
+      "url=$(gh pr create -R " (q repo) " --head \"$head\" --title " (q title) " --body " (q body) " | tail -1); fi; "
+      "echo \"PR-URL $url\"")))
+
+(define (package-pr name description . k)
+  ;; commit NAME's changes to a branch, push it to the user's fork, open the PR; K and the event get the url
+  (let* ((n (package--name name))
+         (dir (package-directory n))
+         (desc (string-trim description))
+         (lines (string-split desc "\n"))
+         (title (string-trim (car lines)))
+         (body (string-append (string-trim (string-join (cdr lines) "\n"))
+                              (if (null? (cdr lines)) "" "\n\n")
+                              "Sent from compos with package-pr."))
+         (done (lambda (url err)
+                 (if url
+                     (event-publish! "packages" 'pr-opened (list n url))
+                     (begin (message (string-append "package-pr " n ": " err))
+                            (event-publish! "packages" 'pr-failed (list n err))))
+                 (when (pair? k) ((car k) url)))))
+    (cond ((equal? title "") (error "package-pr: the description is empty"))
+          ((not (file-exists? (string-append dir "/.git")))
+           (error (string-append "package-pr: " n " has no git checkout at " dir)))
+          (else
+           (let* ((st (package--git-status-of dir))
+                  (repo (package-github-repo (plist-get st 'url)))
+                  (cur (plist-get st 'branch))
+                  ;; a compos/ branch is a PR in progress: commit to it again
+                  (fresh? (not (and cur (string-prefix? "compos/" cur))))
+                  (branch (if fresh? (string-append "compos/" (package--slug title)) cur)))
+             (if (not repo)
+                 (error (string-append "package-pr: " n "'s origin is not on github"))
+                 (begin
+                   (shell-command->string
+                     (package--pr-script repo branch fresh? desc title body)
+                     dir
+                     (lambda (out)
+                       (let* ((ls (reverse (string-split (string-trim out) "\n")))
+                              (last (if (null? ls) "" (car ls))))
+                         (cond ((string-prefix? "PR-URL https://" last) (done (substring last 7 (string-length last)) #f))
+                               ((string-prefix? "PR-FAIL " last) (done #f (substring last 8 (string-length last))))
+                               (else (done #f (string-trim out)))))))
+                   branch)))))))
+
+(public! 'package-fetch! "(package-fetch! [K]) - in a task, git fetch every clone and read its open PRs with gh; K gets ((NAME PR ...) ...); publishes packages fetched")
+(public! 'package-pr "(package-pr NAME DESCRIPTION [K]) - commit NAME's changes to a compos/ branch (or the compos/ branch it is on), push it to your fork of its github repo, open the PR; answers the branch, K gets the PR url or #f; publishes packages pr-opened (NAME URL) or pr-failed. In an agent: (app-await (lambda (k) (package-pr NAME DESC k))) inside a task")
+
+(define-command "package-pr" "Send a package's changes upstream as a pull request"
+  (interactive
+    (lambda (k)
+      (minibuffer-read "Package: " (package-installed)
+        (lambda (name)
+          (minibuffer-read (string-append "Describe the change to " name ": ") '()
+            (lambda (d) (k (list (string-trim name) d))))))))
+  (lambda (name d)
+    (package-pr name d (lambda (url) (when url (message (string-append "opened " url)))))
+    (message (string-append "sending " name " upstream"))))
+
 
 (define-command "package-install" "Clone a package from GitHub (user/repo) or a git url and load it"
   (interactive
@@ -280,10 +488,12 @@
   (lambda (s)
     (let* ((url? (string-contains? s "://"))
            (base (car (reverse (string-split s "/"))))
-           (name (if (string-suffix? ".git" base) (substring base 0 (- (string-length base) 4)) base))
-           (key (if url? ':url ':repo)))
+           (bare (if (string-suffix? ".git" base) (substring base 0 (- (string-length base) 4)) base))
+           ;; a community repo is compos-NAME; the package in it is NAME
+           (name (if (string-prefix? "compos-" bare) (substring bare 7 (string-length bare)) bare))
+           (key (if url? 'url 'repo)))
       (use-package name key s)
-      (message (format "installing ~a; add (use-package '~a ~a ~s) to init.scm" name name key s)))))
+      (message (format "installing ~a; add (use-package '~a '~a ~s) to init.scm" name name key s)))))
 
 (define-command "package-freeze" "Pin every installed package at its current commit in packages.lock"
   (lambda ()

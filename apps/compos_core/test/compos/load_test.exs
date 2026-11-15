@@ -68,7 +68,7 @@ defmodule Compos.LoadTest do
     # commands reach M-x through their ;;;###autoload cookies, which the
     # harvest at the end of init.scm installs.
     opt_in =
-      ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 spotify title training
+      ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 title training
          ats chart decide fast-code fast-code-eval herdr housekeeping onboarding recruiting site-app slides)
       |> Enum.map(&(&1 <> ".scm"))
 

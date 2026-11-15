@@ -13,7 +13,7 @@
 (effects! '(pure))
 
 (define *packages-buffer* "*packages*")
-(define *packages-tiers* '("core" "standard" "community" "dev" "unassigned"))
+(define *packages-tiers* '("installed" "core" "standard" "community" "dev" "unassigned"))
 ;; core by rule: priv/editor.scm, priv/core.scm and the manifest
 (define packages--kernel '("editor" "core" "init"))
 (define packages--manifests '("init"))
@@ -136,7 +136,9 @@
   "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks"
   (let* ((root (packages--root))
          (table (packages--tier-table))
-         (rels (if root (filter packages--source? (project-files root)) '()))
+         (rels (if root (filter (lambda (rel) (and (packages--source? rel) (file-exists? (string-append root "/" rel))))
+                                (project-files root))
+                        '()))
          (raw (map (lambda (rel)
                      (let ((text (read-file (string-append root "/" rel))) (name (packages--name rel)))
                        (list 'name name 'file (string-append root "/" rel) 'tier (packages--tier-of name table)
@@ -172,9 +174,27 @@
                                           rows)))))))
          rows)))
 
+(define (packages--installed-rows)
+  "a row per installed package with its git state and open PRs; the id keeps it apart from a checkout file of the same name"
+  (map (lambda (n)
+         (let ((dir (package-directory n)))
+           (list 'id (string-append "installed:" n) 'name n 'tier "installed"
+                 'file (string-append dir "/" n ".scm") 'dir dir
+                 'requires '() 'required-by '() 'breaks '()
+                 'git (package-git-status n) 'prs (package-prs n))))
+       (package-installed)))
+
+(define (packages--git-text row)
+  "branch +ahead -behind ~dirty, ASCII; empty for a checkout file"
+  (let ((g (plist-get row 'git)))
+    (if (not g) ""
+        (let ((num (lambda (pre k) (let ((v (plist-get g k))) (if (and v (> v 0)) (string-append " " pre (number->string v)) "")))))
+          (string-append (or (plist-get g 'branch) "-") (num "+" 'ahead) (num "-" 'behind) (num "~" 'dirty))))))
+
 (define (packages-list)
-  "(packages-list) -- every package as packages-scan gives it, from the last scan"
-  (or packages--scan-cache (begin (set! packages--scan-cache (packages-scan)) packages--scan-cache)))
+  "(packages-list) -- every package as packages-scan gives it, from the last scan, then the installed clones"
+  (or packages--scan-cache
+      (begin (set! packages--scan-cache (append (packages--installed-rows) (packages-scan))) packages--scan-cache)))
 
 (define (packages-tier-breaks)
   "(packages-tier-breaks) -- every require that breaks the tier rules as a plist: from from-tier to to-tier feature file line"
@@ -220,7 +240,7 @@
                          in))))
            *packages-tiers*))))
 
-(define (packages--count xs) (if (null? xs) "" (number->string (length xs))))
+(define (packages--count xs) (if (pair? xs) (number->string (length xs)) ""))
 
 (define (packages--break-text row)
   (string-join (packages--dedup (map (lambda (b) (string-append (plist-get b 'target) " (" (plist-get b 'tier) ")"))
@@ -229,9 +249,10 @@
 
 (define (packages--cells buf row)
   (if (packages--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "" "" "" "")
+      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "")
       (list (plist-get row 'name) (plist-get row 'tier)
             (packages--count (plist-get row 'requires)) (packages--count (plist-get row 'required-by))
+            (packages--git-text row) (packages--count (plist-get row 'prs))
             (if (null? (plist-get row 'breaks)) "" (list (packages--break-text row) "warning")))))
 
 (define (packages--narrow-cells buf row)
@@ -288,7 +309,9 @@
                                                              (if (null? breaks) "no tier breaks"
                                                                  (string-append (number->string (length breaks)) " tier breaks")))))))
          (actions (component 'ui/actions
-                    (list 'actions (list (list "packages-source" "Source" "v") (list "packages-refresh" "Scan again" "g")))))
+                    (list 'actions (append (list (list "packages-source" "Source" "v"))
+                                         (if (plist-get row 'git) (list (list "packages-pr" "Send upstream" "P")) '())
+                                         (list (list "packages-refresh" "Scan again" "g"))))))
          (break-part (if (null? breaks) '() (list (part (count "Tier breaks" breaks) "Break" (map req-row breaks)))))
          (about (let ((n (line! "About")))
                   (stop (component 'ui/group
@@ -300,12 +323,32 @@
                                                                                   "the boot manifest: its requires do not count"
                                                                                   "package"))))))))
                         "About" n n)))
+         (git (plist-get row 'git))
+         (kv-row (lambda (k v) (cons (string-append k "  " v)
+                                     (component 'ui/row (list 'segs (list (list "c-dim" k) (list "" (string-append "  " v))))))))
+         (num (lambda (k) (number->string (or (and git (plist-get git k)) 0))))
+         (git-part (if (not git) '()
+                       (list (part "Git" "Git"
+                                   (list (kv-row "branch" (or (plist-get git 'branch) "-"))
+                                         (kv-row "upstream" (or (plist-get git 'upstream) "-"))
+                                         (kv-row "ahead" (num 'ahead))
+                                         (kv-row "behind" (num 'behind))
+                                         (kv-row "changed files" (num 'dirty))
+                                         (kv-row "origin" (or (plist-get git 'url) "-")))))))
+         (prs (or (plist-get row 'prs) '()))
+         (pr-part (if (null? prs) '()
+                      (list (part (count "Open PRs" prs) "PR"
+                                  (map (lambda (p)
+                                         (let ((head (string-append "#" (number->string (car p)) " " (cadr p))))
+                                           (cons (string-append head "  " (caddr p))
+                                                 (component 'ui/row (list 'segs (list (list "" head) (list "c-dim" (string-append "  " (caddr p)))))))))
+                                       prs)))))
          (req-part (if (null? reqs) '() (list (part (count "Requires" reqs) "Require" (map req-row reqs)))))
          (by-part (if (null? by) '() (list (part (count "Required by" by) "User" (map name-row by)))))
          (end (begin (line! "end") (component 'ui/row (list 'segs '(("c-dim" "end")))))))
     (list (string-join (reverse lines) "\n")
           (list (component 'ui/page
-                  (list 'body (append (list head meta actions) break-part (list about) req-part by-part (list end))))))))
+                  (list 'body (append (list head meta actions) break-part (list about) git-part pr-part req-part by-part (list end))))))))
 
 (effects! '(write display))
 
@@ -341,7 +384,7 @@
       (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))
       (anchor-sync! buf)
       (buffer-set-local! buf 'footer-line-blocks
-        (list (component 'ui/keys-bar (list 'main '(("v" "source") ("g" "scan again") ("q" "quit"))))))
+        (list (component 'ui/keys-bar (list 'main '(("v" "source") ("P" "send upstream") ("g" "scan again") ("q" "quit"))))))
       (buffer-set-read-only! buf #t)
       (display-buffer-detail! buf list-buf))))
 
@@ -355,7 +398,7 @@
 (define-list-mode! "packages-mode"
   (list
     'doc (string-append
-           "Every package of the compos checkout by tier: core, standard, community, dev and unassigned, "
+           "Every package of the compos checkout by tier: core, standard, community, dev and unassigned, and on top the installed clones with their git state (branch +ahead -behind ~changed files) and open PRs; P sends a clone's changes upstream as a PR. "
            "as the assignment table in PACKAGES.md puts them. A row shows how many packages it requires, "
            "how many require it, and its tier breaks: each require of a package of a lower tier. "
            "The tabs across the top keep one tier, the packages with tier breaks, or all; left and right step them. Moving the point shows the package's page beside the list. RET or v visits the source, "
@@ -378,7 +421,7 @@
     'markable? (lambda (buf row) #f)
     'filters (list (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
                    (list "breaks:" (lambda (b e) (if (packages--sep? e) "" (packages--break-text e))) "a package it breaks the tier rules with"))
-    'columns (lambda (buf) (list (list "package" 26) (list "tier" 11) (list "req" 4) (list "by" 4) (list "tier breaks" #f)))
+    'columns (lambda (buf) (list (list "package" 26) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
     'cells packages--cells
     'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 80)
                          'columns (lambda (buf) (list (list "package" 24) (list "tier breaks" #f)))
@@ -388,11 +431,42 @@
     'title (lambda (buf) (string-append "Packages  ·  " (number->string (length (packages-tier-breaks))) " tier breaks"))
     'total (lambda (buf) (length (filter (lambda (r) (not (packages--sep? r))) (list-entries buf))))
     'noun "package"
-    'footer (lambda (buf) '(("v" "source") ("/" "filter") ("g" "scan again") ("q" "quit")))
-    'keys '(("RET" "packages-source") ("v" "packages-source") ("g" "packages-refresh") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("v" "source") ("P" "send upstream") ("/" "filter") ("g" "scan again") ("q" "quit")))
+    'keys '(("RET" "packages-source") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
 
 (define-mode "packages-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-keys! "packages-detail-mode" '(("v" "packages-source") ("g" "packages-refresh")))
+(mode-keys! "packages-detail-mode" '(("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
+(define-command "packages-refresh" "Scan the packages again, then fetch the clones and their open PRs"
+  (lambda ()
+    (set! packages--scan-cache #f)
+    (list-refresh! (packages--list))
+    (packages-show-detail! (packages--at))
+    (packages--fetch!))
+  'modes '(packages-detail-mode packages-mode))
+
+(define (packages--fetch!)
+  "fetch the clones and their PRs in a task; the list draws them when they come"
+  (package-fetch!
+    (lambda (_)
+      (set! packages--scan-cache #f)
+      (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*)))))
+
+(define-command "packages-pr" "Send the changes of the installed package at point upstream as a pull request"
+  (interactive
+    (lambda (k)
+      (let ((row (packages--at)))
+        (if (not (and row (plist-get row 'git)))
+            (message "Not an installed package")
+            (minibuffer-read (string-append "Describe the change to " (plist-get row 'name) ": ") '()
+              (lambda (d) (k (list (plist-get row 'name) d))))))))
+  (lambda (name d)
+    (message (string-append "sending " name " upstream"))
+    (package-pr name d
+      (lambda (url)
+        (when url
+          (message (string-append "opened " url))
+          (packages--fetch!)))))
+  'modes '(packages-detail-mode packages-mode))
 (mode-doc! "packages-detail-mode"
   "One package: its tier, its tier breaks, what it requires and what requires it. v visits its source, g scans again.")
 
@@ -401,25 +475,21 @@
   (lambda ()
     (let ((buf (list-mode-show! "packages-mode")))
       (packages-show-detail! (list-current buf))
+      (packages--fetch!)
       buf)))
 
 (define-command "packages-source" "Visit the source of the package at point in the other window"
   (lambda () (packages-visit-source! (packages--at)))
   'modes '(packages-detail-mode packages-mode))
 
-(define-command "packages-refresh" "Scan the packages again"
-  (lambda ()
-    (set! packages--scan-cache #f)
-    (list-refresh! (packages--list))
-    (packages-show-detail! (packages--at)))
-  'modes '(packages-detail-mode packages-mode))
+
 
 (effects! '(pure))
 (public! 'packages-parse-tiers "(packages-parse-tiers TEXT) -- the assignment table of PACKAGES.md TEXT as ((NAME TIER) ...)")
 (public! 'packages-break? "(packages-break? FROM-TIER TO-TIER) -- #t when a require from FROM-TIER to TO-TIER breaks the tier rules")
 (effects! '(read))
 (public! 'packages-scan "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks")
-(public! 'packages-list "(packages-list) -- every package as packages-scan gives it, from the last scan")
+(public! 'packages-list "(packages-list) -- the installed clones (tier installed, with git and prs), then every package as packages-scan gives it, from the last scan")
 (public! 'packages-tier-breaks "(packages-tier-breaks) -- every require that breaks the tier rules as a plist: from from-tier to to-tier feature file line")
 (effects! '(write display))
 (public! 'packages-show-detail! "(packages-show-detail! ROW) -- show the page of package ROW beside the list")

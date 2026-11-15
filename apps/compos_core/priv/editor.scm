@@ -6298,7 +6298,6 @@
 (bind-prefix! "ctl-x-map" "v" "vc-prefix-map")
 (bind-prefix! "ctl-x-map" "C-g" "buffer-group-map")
 (bind-prefix! "mode-specific-map" "a" "agent-map")
-(bind-prefix! "mode-specific-map" "S" "spotify-map")
 (bind-prefix! "mode-specific-map" "!" "annotate-map")
 
 ;;; --- self-insert-command --------------------------------------------------------

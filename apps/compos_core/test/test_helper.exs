@@ -65,7 +65,7 @@ ExUnit.configure(exclude: [:packages, :load_order] ++ if(markdown_grammar?, do: 
 # The apps the stock boot leaves out (see priv/init.scm) still have tests;
 # the suite loads them once here, so a test sees the same world a user
 # init that names them would.
-for app <- ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 spotify title training decide) do
+for app <- ~w(spreadsheet amazon doom-lite doom graphql linkedin peers movie recording substack px0 title training decide) do
   {:ok, _} = Compos.Core.Session.eval(~s{(load "#{app}.scm")})
 end
 

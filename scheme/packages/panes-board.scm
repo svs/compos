@@ -256,7 +256,7 @@
     (max 0 (- (panes-board--level id) top))))
 
 (define (panes-board--indent buf id)
-  (let loop ((n (* 2 (panes-board--depth buf id))) (s ""))
+  (let loop ((n (* 4 (panes-board--depth buf id))) (s ""))
     (if (<= n 0) s (loop (- n 1) (string-append s " ")))))
 
 (define (panes-board--pct share) (string-append (number->string (round (* 100 share))) "%"))
@@ -345,8 +345,14 @@
 ;; narrow, the name is the row: the mode column goes, and a name too long
 ;; gives up its "kind: " prefix before its end, never its middle
 (define (panes-board-narrow-cells buf id)
-  (let ((cells (panes-board-cells buf id)))
-    (list (nth 0 cells) (nth 1 cells))))
+  ;; narrow, the name is the row; a window row says how many buffers its fold holds
+  (let* ((cells (panes-board-cells buf id))
+         (name (nth 1 cells)))
+    (list (nth 0 cells)
+          (if (equal? (panes-board-kind id) "w")
+              (let ((n (length (panes-window-buffers (panes-board-row-layout id) (panes-board-key id)))))
+                (list (string-append (car name) " (" (number->string n) ")") (cadr name)))
+              name))))
 
 (define (panes-board--trim s w)
   (let loop ((i 0))

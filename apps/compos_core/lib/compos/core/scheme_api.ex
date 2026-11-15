@@ -615,6 +615,12 @@ defmodule Compos.Core.SchemeAPI do
           [limit] ->
             SysMon.processes(trunc(limit), "reds", "")
         end,
+      {"vm-ets",
+       "(vm-ets [LIMIT]) — the ETS tables that hold the most memory, largest first: a list of (NAME OWNER ROWS BYTES)."} =>
+        fn
+          [] -> Enum.map(SysMon.ets(), &Tuple.to_list/1)
+          [limit] -> Enum.map(SysMon.ets(trunc(limit)), &Tuple.to_list/1)
+        end,
       {"vm-collect!",
        "(vm-collect! [MIN-BYTES]) — collect the heap of each idle process above MIN-BYTES (default 1 MiB); (PROCESSES BYTES-FREED)."} =>
         fn

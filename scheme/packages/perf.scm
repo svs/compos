@@ -29,6 +29,10 @@
   "The number of BEAM processes the compos memory tab of *perf* shows, the process that holds the most memory first."
   'group 'perf 'type 'number)
 
+(defcustom 'perf-vm-ets-rows 15
+  "The number of ETS tables the compos memory tab of *perf* shows, the table that holds the most memory first."
+  'group 'perf 'type 'number)
+
 (define *perf-lane-window-ms* 30000)
 
 ;;; --- small helpers ------------------------------------------------------------
@@ -109,6 +113,11 @@
                                           (cons (car e) (cadr e))))
                         acc)))))
 
+;; (NAME OWNER ROWS BYTES) per ETS table, the most memory first; '() until
+;; the daemon has the vm-ets primitive
+(define (perf--ets-tables)
+  (if (boundp 'vm-ets) (vm-ets perf-vm-ets-rows) '()))
+
 (define (perf--sample! buf)
   (let* ((s (vm-sample))
          (os (perf--get s 'os '())))
@@ -118,6 +127,7 @@
                             (perf--get (perf--get s 'memory '()) 'total 0))
             'perf-vm (perf--get s 'memory '())
             'perf-procs (perf--get (vm-processes perf-vm-process-rows "memory" "") 'rows '())
+            'perf-ets (perf--ets-tables)
             'perf-tick (+ 1 (or (buffer-local-value 'perf-tick buf) 0))))))
 
 ;;; --- the apps ----------------------------------------------------------------------
@@ -191,7 +201,13 @@
            (map (lambda (r) (string-append (string-pad-right (perf--clip (perf--process-name r) 38) 40)
                                            (string-pad-left (perf--get r 'pid "") 16)
                                            (string-pad-left (perf--bytes (perf--get r 'memory 0)) 12) "\n"))
-                (perf--by-memory (or (buffer-local-value 'perf-procs buf) '()))))))
+                (perf--by-memory (or (buffer-local-value 'perf-procs buf) '()))))
+    "\n" (string-pad-right "ETS TABLE" 40) (string-pad-left "ROWS" 16) (string-pad-left "MEMORY" 12) "\n"
+    (apply string-append
+           (map (lambda (r) (string-append (string-pad-right (perf--clip (string-append (car r) "  " (cadr r)) 38) 40)
+                                           (string-pad-left (number->string (caddr r)) 16)
+                                           (string-pad-left (perf--bytes (list-ref r 3)) 12) "\n"))
+                (or (buffer-local-value 'perf-ets buf) '())))))
 
 ;; "total 314 MiB = processes 73 MiB + ets 134 MiB + binary 25 MiB + code 28 MiB + other 54 MiB"
 ;; The total is all the memory the BEAM allocated for this daemon. The
@@ -310,8 +326,31 @@
       (perf--txt "perf-num perf-strong" (perf--bytes bytes))
       (perf--meter pct (cond ((>= pct 20) "perf-hot") ((>= pct 8) "perf-warm") (else ""))))))
 
+(define (perf--ets-row r total)
+  (let* ((bytes (list-ref r 3))
+         (pct (perf--pct bytes total)))
+    (perf--div "perf-arow perf-vrow"
+      (perf--txt "perf-name" (string-append (car r) "  " (cadr r)))
+      (perf--txt "perf-num perf-dim" (number->string (caddr r)))
+      (perf--txt "perf-num perf-strong" (perf--bytes bytes))
+      (perf--meter pct (cond ((>= pct 20) "perf-hot") ((>= pct 8) "perf-warm") (else ""))))))
+
+;; MEM is the memory plist of (vm-sample); ETS the rows of (vm-ets)
+(define (perf--ets-section mem ets)
+  (let ((total (perf--get mem 'total 0)))
+    (list
+      (perf--div "perf-arow perf-vrow perf-phead"
+        (perf--txt "" "ets table  owner") (perf--txt "perf-num" "rows") (perf--txt "perf-num" "memory")
+        (perf--txt "" "share of total"))
+      (perf--div "perf-list"
+        (if (null? ets)
+            (list (component 'ui/empty (list 'text (if (boundp 'vm-ets)
+                                                         "no ets tables"
+                                                         "vm-ets is not loaded: the daemon has not compiled it yet"))))
+            (map (lambda (r) (perf--ets-row r total)) ets))))))
+
 ;; MEM is the memory plist of (vm-sample); ROWS are the rows of (vm-processes)
-(define (perf--vm-panel mem rows)
+(define (perf--vm-panel mem rows ets)
   (let ((total (perf--get mem 'total 0)))
     (perf--div "perf-panel"
       (perf--div "perf-head"
@@ -324,7 +363,8 @@
       (perf--div "perf-list"
         (if (null? rows)
             (list (component 'ui/empty '(text "no processes")))
-            (map (lambda (r) (perf--process-row r total)) (perf--by-memory rows)))))))
+            (map (lambda (r) (perf--process-row r total)) (perf--by-memory rows))))
+      (perf--ets-section mem ets))))
 
 (define (perf--footer buf)
   (perf--div "perf-bar"
@@ -353,7 +393,8 @@
             (list (perf--tabs buf))
             (if (equal? (perf--tab buf) "compos")
                 (list (perf--vm-panel (or (buffer-local-value 'perf-vm buf) '())
-                                      (or (buffer-local-value 'perf-procs buf) '())))
+                                      (or (buffer-local-value 'perf-procs buf) '())
+                                      (or (buffer-local-value 'perf-ets buf) '())))
                 (list (perf--lanes-panel (or (buffer-local-value 'perf-lanes buf) '()))
                       (perf--memory-panel buf)))
             (list (perf--footer buf))))))
@@ -396,7 +437,7 @@
 
 ;;; --- the mode ------------------------------------------------------------------------
 
-(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-vm perf-procs perf-apps perf-ps-busy perf-tick))
+(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-vm perf-procs perf-ets perf-apps perf-ps-busy perf-tick))
 
 (define (perf--setup! buf)
   (buffer-set-read-only! buf #t)
@@ -420,7 +461,7 @@
     ("q" "quit-window")))
 
 (mode-doc! "perf-mode"
-  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, and the perf-vm-process-rows BEAM processes that hold the most memory. 1 and 2 take the tabs, g samples now, SPC pauses, q quits.")
+  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, the perf-vm-process-rows BEAM processes that hold the most memory, and the perf-vm-ets-rows ETS tables that hold the most, each with its owner and row count. 1 and 2 take the tabs, g samples now, SPC pauses, q quits.")
 
 (register-context-provider! "perf-mode"
   (lambda (buf)
@@ -578,7 +619,7 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'diagnostics 'effects '(read)))
-  '("vm-sample" "vm-processes" "vm-process-info" "vm-roots" "perf-refresh!"))
+  '("vm-sample" "vm-processes" "vm-process-info" "vm-roots" "vm-ets" "perf-refresh!"))
 
 (effects! '(destroy))
 (public! 'vm-process-kill!

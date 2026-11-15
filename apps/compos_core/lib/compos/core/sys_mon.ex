@@ -206,6 +206,31 @@ defmodule Compos.Core.SysMon do
     |> Enum.take(limit)
   end
 
+  @doc """
+  The ETS tables that hold the most memory, largest first: a list of
+  `{name, owner, rows, bytes}`. NAME is the table's name, or its id for an
+  unnamed table; OWNER is the name of the process that owns it.
+  """
+  def ets(limit \\ 30) do
+    word = :erlang.system_info(:wordsize)
+
+    :ets.all()
+    |> Enum.flat_map(fn table ->
+      # a table can die between :ets.all and :ets.info
+      case :ets.info(table) do
+        info when is_list(info) ->
+          owner = info[:owner]
+          owner_info = Process.info(owner, @info_keys) || []
+          [{inspect(info[:name]), process_name(owner, owner_info), info[:size], info[:memory] * word}]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.sort_by(fn {_, _, _, bytes} -> -bytes end)
+    |> Enum.take(limit)
+  end
+
   defp os_sample do
     %{
       cpu_util: guard(fn -> os(:cpu_sup, :util) |> round() |> clamp() end, 0),

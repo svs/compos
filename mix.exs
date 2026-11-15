@@ -57,6 +57,18 @@ defmodule Compos.MixProject do
       File.cp_r!(Path.join("scheme", dir), dest)
     end
 
+    # The standard packages: each clone priv/standard.lock pins goes into
+    # priv/repos at its commit, and package-seed! copies it into
+    # <compos-home>/repos on the first boot, so that boot needs no network.
+    priv = Path.join([release.path, "lib", "compos_core-#{vsn}", "priv"])
+
+    for {name, url, commit} <- standard_pins() do
+      dest = Path.join([priv, "repos", name])
+      File.rm_rf!(dest)
+      {_, 0} = System.cmd("git", ["clone", "--quiet", url, dest])
+      {_, 0} = System.cmd("git", ["-C", dest, "checkout", "--quiet", commit])
+    end
+
     # The Chrome extension; Compos.Core.ChromeExtension copies it to
     # ~/.compos/chrome-extension at boot.
     File.cp_r!("extension", Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", "extension"]))
@@ -70,6 +82,15 @@ defmodule Compos.MixProject do
     )
 
     release
+  end
+
+  # priv/standard.lock: (("NAME" "URL" "COMMIT") ...), read without the
+  # Scheme reader, one quoted triple per entry
+  defp standard_pins do
+    "apps/compos_core/priv/standard.lock"
+    |> File.read!()
+    |> then(&Regex.scan(~r/\("([^"]+)"\s+"([^"]+)"\s+"([0-9a-f]+)"\)/, &1))
+    |> Enum.map(fn [_, name, url, commit] -> {name, url, commit} end)
   end
 
   defp commit do

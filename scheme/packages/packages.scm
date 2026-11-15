@@ -132,6 +132,19 @@
                      (else (loop (cdr ps)))))))
       (let ((e (assoc feature features))) (and e (cadr e)))))
 
+;; compos-packages: DIR/DIR.scm is the package DIR, DIR/FILE.scm is DIR/FILE
+(define (packages--standard-sources)
+  (if (not (boundp 'compos-packages-dirs))
+      '()
+      (apply append
+        (map (lambda (dir)
+               (let ((d (car (reverse (string-split dir "/")))))
+                 (map (lambda (f) (let ((b (substring f 0 (- (string-length f) 4))))
+                                    (list (string-append dir "/" f) (if (equal? b d) d (string-append d "/" b)))))
+                      (filter (lambda (f) (and (string-suffix? ".scm" f) (not (string-suffix? "-test.scm" f))))
+                              (map (lambda (e) (plist-get e 'name)) (ls dir))))))
+             (compos-packages-dirs)))))
+
 (define (packages-scan)
   "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks"
   (let* ((root (packages--root))
@@ -139,11 +152,14 @@
          (rels (if root (filter (lambda (rel) (and (packages--source? rel) (file-exists? (string-append root "/" rel))))
                                 (project-files root))
                         '()))
-         (raw (map (lambda (rel)
-                     (let ((text (read-file (string-append root "/" rel))) (name (packages--name rel)))
-                       (list 'name name 'file (string-append root "/" rel) 'tier (packages--tier-of name table)
+         ;; (FILE NAME): the checkout's sources, then the standard packages' clone
+         (sources (append (map (lambda (rel) (list (string-append root "/" rel) (packages--name rel))) rels)
+                          (packages--standard-sources)))
+         (raw (map (lambda (src)
+                     (let ((text (read-file (car src))) (name (cadr src)))
+                       (list 'name name 'file (car src) 'tier (packages--tier-of name table)
                              'raw (packages--requires text) 'provides (packages--provides text))))
-                   rels))
+                   sources))
          ;; a feature is a file's base name, or what a file provides
          (features (append (map (lambda (p) (list (packages--base (plist-get p 'name)) p)) raw)
                            (apply append (map (lambda (p) (map (lambda (f) (list f p)) (plist-get p 'provides))) raw))))

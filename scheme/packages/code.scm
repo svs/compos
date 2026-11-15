@@ -1492,8 +1492,10 @@
 
 (define (imenu--own-rows buf)
   ;; a mode can own the index: the buffer-local imenu-index-function names a
-  ;; function from BUF to rows, the way Emacs's imenu-create-index-function does
-  (cond ((symbol? (buffer-local-value 'imenu-index-function buf))
+  ;; function from BUF to rows, the way Emacs's imenu-create-index-function does.
+  ;; A name the saved session kept from an older package may no longer be
+  ;; bound: then the buffer takes the default index rather than failing.
+  (cond ((let ((f (buffer-local-value 'imenu-index-function buf))) (and (symbol? f) (boundp f)))
          ((eval (buffer-local-value 'imenu-index-function buf)) buf))
         ;; a buffer with anchors is indexed by them
         ((pair? (anchor-list buf)) (anchor-imenu-rows buf))

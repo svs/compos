@@ -40,37 +40,19 @@
 (require 'window)
 (require 'tramp)
 (require 'dired)
-; the browser tabs join the switcher and the tools; sentry and code read it at load
-(require 'chrome)
-; the chat buffer and the LLM pipes: every package that opens a chat
-; reads the chat locals lists at load
-(require 'chat-mode)
 ; the modeline and the buffer-name grammar: every chrome names buffers
 (require 'modeline)
-(require 'isearch)
 (require 'capf)
-(require 'visual-line)
-(require 'collect)
-(require 'comint)
 (require 'advice)
 (require 'custom)
 ;; the settings of the windows: bound before any package reads one
 (require 'window-settings)
-;; a long tool result goes to a file: the proxy in tools and chat use it
-(require 'tool-results)
-(require 'tools)
-;; the catalog's pure rules: reasoning controls, live effort rows, staleness
-(require 'model-rules)
 (require 'components)
 ;; the hand keys and / over an index's and a detail's tab bars
 (require 'tab-bars)
 ; the detail window: an app registers how it names a kept detail at load,
 ; so this comes before every app that opens rows into one
 (require 'detail)
-; an index opens its items as details; a list mode declares one at load
-(require 'index)
-(require 'preview)
-(require 'file-view)
 ; completion-at-point: agent-session.scm (under agent.scm) runs the chat
 ; mode hook on the chats already open, and that hook watches for
 ; completion. A cold boot has no chat open then; a Session restart does.
@@ -79,26 +61,10 @@
 (require 'palette)
 
 (require 'anchor)
-;; the turn machine every agent thread steps (Compos.Core.Agent)
-(require 'agent-machine)
-(require 'agent)
 (require 'appearance)
 (require 'autorevert)
-(require 'bookmark)
-(require 'register)
-(require 'chat)
-(require 'code)
 (require 'daemons)
 (require 'db)
-;; the typed-decision API and the agents' permission gate: user config calls
-;; decide-config! to name the backend chain, so this loads before the user
-;; config runs, and the permission policy asks its shell gate
-(require 'decide)
-;; TypeSafe JEV, the first decision backend; the setup wizard takes its key
-(require 'jev)
-(require 'diff-mode)
-(require 'evil)
-(require 'git)
 ;; the window model: a row of panes, each a stack of windows, each a stack
 ;; of buffers, and the policy that says where a buffer opens. groups.scm
 ;; keeps one per group, so it comes first
@@ -110,111 +76,48 @@
 (require 'window-log)
 ;; the window model on the frame: the only window system
 (require 'panes-mode)
-;; the model as a list: M-x windows-list (C-x w)
-(require 'panes-board)
-;; every window of a pane as tiles in the pane: M-x pane-overview
-(require 'pane-overview)
-;; a window flashes what it shows as a pane cycles to it
-(require 'window-flash)
 ;; undo and redo over the pane arrangement alone: M-x layout-undo, layout-redo
 (require 'panes-history)
 ;; app identity: an app names the buffers of one instance, and a move
 ;; retags them through group membership, so this follows groups
 (require 'apps)
-(require 'help)
-;; the tasks for people (C-h h) and the generated manual
-(require 'howto)
-;; the learn-by-doing tutorial (C-h t); its companion chat is the training app
-(require 'tutorial)
 (require 'http)
-(require 'ibuffer)
-(require 'peek)
-;; the buffers of one major mode, as ibuffer lists them
-(require 'mode-list)
-;; the chats table is the mode list of chat-mode: it loads after it
-(require 'agent-fleet)
-;; the spawn edges are the chats table's other view: it loads after it
-(require 'subagents)
 ;; the event log: agents publish their status on it, so it follows the
 ;; chats table, whose status hook feeds it
 (require 'events)
-;; workflows: Scheme handlers over the event log that the core runs
-;; exactly once; the demo scene is one you can drive (M-x events-demo)
-(require 'workflows)
 ;; jobs on a clock; the workflow "cron" runs them, so it follows workflows
 (require 'cron)
-;; a chat for every error the daemon logs; its workflow listens to
-;; compos:error, so it follows workflows
-(require 'self-healing)
-;; C-c h: one help chat for all of compos, that teaches as it works
-(require 'help-chat)
 (require 'events-demo)
-(require 'events-list)
 (require 'watchers)
 (require 'app-registry)
-(require 'ai)
-(require 'jj)
 (require 'keys)
 (require 'keymaps)
-(require 'lsp)
-(require 'mcp-hub)
-(require 'mcp)
-(require 'models)
-(require 'morg-kinds "morg/morg-kinds.scm")
-(require 'morg)
-(require 'markdown-mode)
-(require 'cua)
-(require 'vscode)
-(require 'app-watch)
-(require 'occur)
 (require 'package)
-(require 'paredit)
-(require 'project)
 (require 'messages)
-(require 'provenance)
-(require 'scheme-ide)
-;; the REPL is scheme-mode's other buffer: it derives its mode from scheme-mode
-;; and binds C-c C-z and C-c C-e in it
-(require 'repl)
 ;; popups after popper.el; its keys take the backtick family from groups.scm
 (require 'popper)
 (require 'scratch)
-(require 'setup)
-;; the first-run wizard: the model step, then the guide
-(require 'setup-wizard)
-(require 'skills)
 (require 'prompts)
-(require 'llm-config)
-;; the direct model lane's tool gate and retry rule: llm.ex asks them by name
-(require 'llm-gate)
-;; the agents' shell commands in the sandbox: it reads the chat's llm-config
-;; and its group, and the shell gate in decide.scm asks it
-(require 'agent-sandbox)
 (require 'holds)
 ;; a group's shared config lives in its home and reaches its buffers as they
 ;; join it; it may name a bundle, so it loads after llm-config
 (require 'group-config)
-;; the shared todo list: it sets a prompt part on every chat, so it follows
-;; prompts, chat and the event log
-(require 'todo)
-;; agents' listeners: a WhatsApp reply or a mail wakes the chat that waits on
-;; it; it loads at boot so the saved listeners subscribe again after a restart
-(require 'agent-listen)
 (require 'switch)
-(require 'telemetry)
 ;; the model rounds and tool calls of an ACP or Codex turn, for chat-perf
 (require 'agent-perf)
 (require 'perf)
 ;; which compos is running: rel VERSION · COMMIT, or dev · jj · git
 (require 'build-identity)
-;; M-x release-build-and-install: build, install as the stable compos, restart it
-(require 'release)
 (require 'profile)
-(require 'test)
-(require 'treesit)
-(require 'worktrees)
 (require 'dismiss)
-(require 'content-scale)
+
+;; the standard packages: chat, agents, todo, git, code and the everyday
+;; set, one directory each in compos-dev/compos-packages. package-seed!
+;; makes the clone from the copy a release bundles, or from the pin in
+;; standard.lock, before anything else runs; compos-packages.scm then loads
+;; the stock set in the order this file used to.
+(package-seed! 'compos-packages)
+(use-package 'compos-packages)
 
 ;; the run and result blocks live with the other blocks and lean on
 ;; block.scm; they load here because their kind registrations need the
@@ -223,8 +126,6 @@
 (require 'run-block "editor/blocks/run-block.scm")
 (require 'csv-block "editor/blocks/csv-block.scm")
 (require 'table-block "editor/blocks/table-block.scm")
-(require 'morg-tangle "morg/morg-tangle.scm")
-(require 'morg-show-source "morg/morg-show-source.scm")
 ;; core editor behaviour, not a package: every URL and file path is a
 ;; link. It reads a buffer's directory (dired.scm), so it loads once the
 ;; stdlib is in, and it sweeps the buffers that exist by then.

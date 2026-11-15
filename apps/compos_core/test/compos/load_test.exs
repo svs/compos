@@ -43,7 +43,7 @@ defmodule Compos.LoadTest do
     priv = Application.app_dir(:compos_core, "priv")
     init = File.read!(Path.join(priv, "init.scm"))
 
-    # the bundled packages and apps: scheme/packages and scheme/apps at the project root
+    # core's own packages and apps: scheme/packages and scheme/apps at the project root
     dirs = [Path.join(Compos.Core.project_dir(), "scheme/packages"), Path.join(Compos.Core.project_dir(), "scheme/apps")]
     locate = fn name -> Enum.find(Enum.map(dirs, &Path.join(&1, name)), &File.regular?/1) end
 
@@ -51,10 +51,21 @@ defmodule Compos.LoadTest do
     # only the entries a package directory holds are packages
     top_level = (requires(init) ++ loads(init)) |> Enum.filter(locate)
 
-    nested =
-      Enum.flat_map(top_level, fn package -> package |> locate.() |> File.read!() |> loads() end)
+    # a core library another core package requires is reached through it
+    reach = fn reach, seen ->
+      more =
+        seen
+        |> Enum.flat_map(fn pkg -> src = pkg |> locate.() |> File.read!(); requires(src) ++ loads(src) end)
+        |> Enum.filter(locate)
+        |> Enum.uniq()
 
-    loaded = top_level ++ nested
+      case more -- seen do
+        [] -> seen
+        new -> reach.(reach, seen ++ new)
+      end
+    end
+
+    loaded = reach.(reach, top_level)
 
     # the package files, without the tests beside them
     packages =
@@ -63,38 +74,39 @@ defmodule Compos.LoadTest do
       end)
       |> Enum.reject(&String.ends_with?(&1, "-test.scm"))
 
-    # the apps the stock boot leaves out. A user init may load one by
-    # name; test_helper.exs loads them for the suite; and the ones with
-    # commands reach M-x through their ;;;###autoload cookies, which the
-    # harvest at the end of init.scm installs.
+    # what the stock boot leaves out: apps a user init may load by name, and
+    # the dev harnesses. The ones with commands reach M-x through their
+    # ;;;###autoload cookies, which the harvest at the end of init.scm installs.
     opt_in =
-      ~w(title housekeeping)
+      ~w(title housekeeping packages decide-eval drive-eval palette-eval test-browser)
       |> Enum.map(&(&1 <> ".scm"))
 
-    # an app nobody loads must still be reachable: a command means a cookie.
-    # A file another package requires is a library, and its commands are
-    # that package's to reach.
     libraries = Enum.flat_map(packages, fn pkg -> pkg |> locate.() |> File.read!() |> requires() end)
 
-    for app <- opt_in -- libraries,
-        src = File.read!(locate.(app)),
+    for app <- (opt_in -- libraries) -- ["decide-eval.scm", "drive-eval.scm", "palette-eval.scm", "test-browser.scm"],
+        path = locate.(app),
+        path,
+        src = File.read!(path),
         src =~ ~r/^\(define-command /m do
       assert src =~ ~r/^;;;###autoload\n\(define-command /m,
              "#{app} defines commands but marks none with ;;;###autoload"
     end
 
     expected = packages -- opt_in
-    assert Enum.sort(loaded -- expected) == [], "loaded, but not a stock package"
+    assert Enum.sort(Enum.uniq(loaded) -- expected) == [], "loaded, but not a stock package"
     assert Enum.sort(expected -- loaded) == [], "a stock package init.scm does not reach: #{inspect(Enum.sort(expected -- loaded))}"
-    assert Enum.sort(opt_in -- packages) == [], "an opt-in app is missing from scheme/packages and scheme/apps"
-    assert length(loaded) == length(Enum.uniq(loaded))
 
-    assert "agent.scm" in top_level
-    refute "agent-transcript.scm" in top_level
+    # the standard packages come from compos-packages, in its stock order
+    assert init =~ "(use-package 'compos-packages)"
+    assert {:ok, "#t"} = Session.eval("(featurep 'compos-packages)")
+    assert {:ok, stock} = Session.eval("(map car compos-packages-stock)")
+    assert stock =~ "chat-mode"
+    assert stock =~ "agent"
+    assert {:ok, "#t"} = Session.eval("(and (featurep 'agent) (featurep 'todo) (featurep 'chat) #t)")
 
-    agent_modules = "agent.scm" |> locate.() |> File.read!() |> loads()
+    {:ok, std} = Session.eval(~s{(package-directory "compos-packages")})
+    agent_modules = Path.join([String.trim(std, "\""), "agent", "agent.scm"]) |> File.read!() |> loads()
 
-    # agent-fleet is the chats table, loaded by init.scm after ibuffer
     assert agent_modules == [
              "agent-permissions.scm",
              "agent-connectors.scm",

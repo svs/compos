@@ -141,7 +141,10 @@
     (unless (member dir load-path)
       (set! load-path (append load-path (list dir))))
     ;; the app registry files a package with a source under package, not user
-    (cache-put! 'package-source n (or (package-recipe-url recipe) dir))
+    ;; content-cache is a standard package: the stock boot activates
+    ;; compos-packages before it loads
+    (when (boundp 'cache-put!)
+      (cache-put! 'package-source n (or (package-recipe-url recipe) dir)))
     (autoload-harvest! (list dir))
     (when (and (not (plist-get recipe ':defer)) (file-exists? main))
       (require (string->symbol n) main))
@@ -188,6 +191,8 @@
     rows))
 
 (public! 'package-freeze! "(package-freeze!) - write packages.lock: each installed package at the commit its checkout holds; answers the rows")
+(public! 'package-seed! "(package-seed! 'NAME) - make NAME's clone from the bundled copy (priv/repos) or the core pin (priv/standard.lock), at once; #t when it is there")
+(public! 'package-core-pins "(package-core-pins) - the pins core ships for the standard packages, ((NAME URL COMMIT) ...)")
 
 (effects! '(write external execute))
 
@@ -252,6 +257,31 @@
                                    (file-exists? (package-directory r)))))
                       (loop (cdr reqs))
                       (package--use r (lambda (_) (loop (cdr reqs))))))))))))
+
+;; The standard packages ride with core. priv/standard.lock pins the
+;; compos-packages commit this core works with; a release bundles that clone
+;; in priv/repos, and the first boot copies it, so the stock boot never waits
+;; on the network. A checkout without the clone clones it at the pin, at once.
+(define (package-core-pins)
+  (or (package--read-first (string-append (compos-priv-dir) "/standard.lock")) '()))
+
+(define (package--sh s) (string-append "'" (string-replace s "'" "'\\''") "'"))
+
+(define (package-seed! name)
+  (let* ((n (package--name name))
+         (dir (package-directory n)))
+    (or (file-exists? dir)
+        (let* ((bundle (string-append (compos-priv-dir) "/repos/" n))
+               (pin (assoc n (package-core-pins)))
+               (cmd (cond ((file-exists? bundle)
+                           (string-append "mkdir -p " (package--sh (package-repos-dir))
+                                          " && cp -R " (package--sh bundle) " " (package--sh dir)))
+                          (pin
+                           (string-append "git clone --quiet " (package--sh (cadr pin)) " " (package--sh dir)
+                                          " && git -C " (package--sh dir) " checkout --quiet " (package--sh (caddr pin))))
+                          (else #f))))
+          (when cmd (shell-command->string cmd (compos-home)))
+          (file-exists? dir)))))
 
 (define (use-package name . props)
   (let ((n (package--name name)))

@@ -1574,12 +1574,17 @@
         (let loop ((os offs) (es es) (acc '()))
           (if (or (null? os) (null? es))
               (reverse acc)
-              (let* ((cells (filter (lambda (s) (and (string? s) (not (equal? (string-trim s) ""))))
-                                    (map list-cell-text (car (list-row-cells buf (car es))))))
+              ;; a row the mode draws without cells (a list of cards) names
+              ;; nothing, and stays out of the index
+              (let* ((rc (list-row-cells buf (car es)))
+                     (cells (filter (lambda (s) (and (string? s) (not (equal? (string-trim s) ""))))
+                                    (map list-cell-text (if (pair? rc) (car rc) '()))))
                      (name (string-join (if (> (length cells) 2) (list (car cells) (cadr cells)) cells) "  "))
                      (doc (if (> (length cells) 2) (string-join (cddr cells) " · ") "")))
                 (loop (cdr os) (cdr es)
-                      (cons (list (line-number-at-pos (car os)) "entry" name doc) acc)))))))))
+                      (if (null? cells)
+                          acc
+                          (cons (list (line-number-at-pos (car os)) "entry" name doc) acc))))))))))
 
 ;; the header count comes off the buffer, not out of a fresh header: the
 ;; header names the row count, and asking it to count rows that a refresh

@@ -13,7 +13,7 @@
 (effects! '(pure))
 
 (define *packages-buffer* "*packages*")
-(define *packages-tiers* '("installed" "core" "standard" "community" "dev" "unassigned"))
+(define *packages-tiers* '("installed" "core" "standard" "community" "personal" "dev" "unassigned"))
 ;; core by rule: priv/editor.scm, priv/core.scm and the manifest
 (define packages--kernel '("editor" "core" "init"))
 (define packages--manifests '("init"))
@@ -203,14 +203,33 @@
 (define (packages--git-text row)
   "branch +ahead -behind ~dirty, ASCII; empty for a checkout file"
   (let ((g (plist-get row 'git)))
-    (if (not g) ""
+    (if (not g) (if (plist-get row 'loaded) "loaded" "")
         (let ((num (lambda (pre k) (let ((v (plist-get g k))) (if (and v (> v 0)) (string-append " " pre (number->string v)) "")))))
           (string-append (or (plist-get g 'branch) "-") (num "+" 'ahead) (num "-" 'behind) (num "~" 'dirty))))))
 
+(define (packages--personal-rows)
+  "a row per file in the user's own package folders; the first folder that has a name wins, as load does"
+  (let loop ((dirs (if (boundp 'personal-package-dirs) (personal-package-dirs) '())) (seen '()) (acc '()))
+    (if (null? dirs)
+        (reverse acc)
+        (let* ((dir (car dirs))
+               (names (map (lambda (f) (substring f 0 (- (string-length f) 4)))
+                           (filter (lambda (f) (and (string-suffix? ".scm" f) (not (string-suffix? "-test.scm" f))))
+                                   (list-dir dir))))
+               (fresh (filter (lambda (n) (not (member n seen))) names)))
+          (loop (cdr dirs) (append seen fresh)
+                (append (reverse (map (lambda (n)
+                                        (list 'id (string-append "personal:" n) 'name n 'tier "personal"
+                                              'file (string-append dir "/" n ".scm") 'dir dir
+                                              'loaded (if (member n *personal-packages*) #t #f)
+                                              'requires '() 'required-by '() 'breaks '()))
+                                      fresh))
+                        acc))))))
+
 (define (packages-list)
-  "(packages-list) -- every package as packages-scan gives it, from the last scan, then the installed clones"
+  "(packages-list) -- the installed clones, the user's personal packages, then every package as packages-scan gives it, from the last scan"
   (or packages--scan-cache
-      (begin (set! packages--scan-cache (append (packages--installed-rows) (packages-scan))) packages--scan-cache)))
+      (begin (set! packages--scan-cache (append (packages--installed-rows) (packages--personal-rows) (packages-scan))) packages--scan-cache)))
 
 (define (packages-tier-breaks)
   "(packages-tier-breaks) -- every require that breaks the tier rules as a plist: from from-tier to to-tier feature file line"

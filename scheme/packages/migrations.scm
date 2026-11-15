@@ -444,6 +444,49 @@
                       (write-file! target (or (read-file source) "()"))))))))
           (list-dir dir))))))
 
+;; The packages folder holds the user's own code, the personal tier. What
+;; packages wrote there is data, and it moves to <home>/NAME, the folder
+;; package-data-dir names: fast-code's learned.scm, the learned web
+;; parsers, and travel's trips. A file the new place already has stays
+;; where it is, so a second run moves nothing and loses nothing.
+(define (migration--move-into! from to)
+  (cond ((not (file-exists? from)) #f)
+        ((file-directory? from)
+         (make-directory! to)
+         (for-each
+           (lambda (e)
+             (let ((n (if (string-suffix? "/" e) (substring e 0 (- (string-length e) 1)) e)))
+               (migration--move-into! (string-append from "/" n) (string-append to "/" n))))
+           (list-dir from))
+         (when (null? (list-dir from)) (delete-file! from))
+         #t)
+        ((file-exists? to) #f)
+        (else (make-directory! (path-directory to)) (rename-file! from to) #t)))
+
+(define (migration--personal-data-out! home)
+  (let* ((pk (string-append home "/packages"))
+         (in (lambda (dir) (if (file-directory? dir) (list-dir dir) '())))
+         (travel (string-append pk "/travel")))
+    (for-each
+      (lambda (f)
+        (when (string-prefix? "learned.scm" f)
+          (migration--move-into! (string-append pk "/" f) (string-append home "/fast-code/" f))))
+      (in pk))
+    (migration--move-into! (string-append pk "/web/parsers") (string-append home "/web/parsers"))
+    (when (and (file-directory? (string-append pk "/web")) (null? (in (string-append pk "/web"))))
+      (delete-file! (string-append pk "/web")))
+    ;; travel's stylesheets are code and stay; the rest is the user's trips
+    (for-each
+      (lambda (e)
+        (let ((n (if (string-suffix? "/" e) (substring e 0 (- (string-length e) 1)) e)))
+          (unless (string-suffix? ".xsl" n)
+            (migration--move-into! (string-append travel "/" n) (string-append home "/travel/" n)))))
+      (in travel))
+    (when (and (file-directory? travel) (null? (in travel))) (delete-file! travel))))
+
+(define-home-migration! 'personal-data-out-of-packages "2026-11-15"
+  (lambda () (migration--personal-data-out! (compos-home))))
+
 (effects! '(read))
 (define-command "list-migrations" "Show the registered one-shot migrations and their dates"
   (lambda ()

@@ -50,10 +50,13 @@ defmodule Compos.SchemeSuite do
   @doc "The test files of KIND on disk."
   def files(:core), do: Path.wildcard(Path.join(core_dir(), "*.scm"))
 
+  # the package suite spans the checkout, the standard repo and every
+  # loaded community clone: Scheme's test-files knows them all
   def files(:packages) do
-    Enum.flat_map([package_dir(), apps_dir()], fn dir ->
-      Path.wildcard(Path.join(dir, "*-test.scm")) ++ Path.wildcard(Path.join(dir, "*/*-test.scm"))
-    end)
+    case eval("(test-files 'packages)") do
+      {:ok, out} -> Regex.scan(~r/"([^"]+)"/, out) |> Enum.map(fn [_, path] -> path end)
+      _ -> []
+    end
   end
 
   def core_dir, do: Path.join(:code.priv_dir(:compos_core), "tests")
@@ -126,11 +129,12 @@ defmodule Compos.SchemeSuite do
         {if(reduced, do: [reduced | fails], else: fails), [{div(us, 1000), name} | times]}
       end)
 
-    # SCHEME_TIMES=1 prints the slowest tests, for work on the editor's cost
+    # SCHEME_TIMES=1 prints the slowest tests, for work on the editor's cost;
+    # SCHEME_TIMES=all prints every test that ran
     if System.get_env("SCHEME_TIMES") do
       times
       |> Enum.sort(:desc)
-      |> Enum.take(25)
+      |> Enum.take(if System.get_env("SCHEME_TIMES") == "all", do: length(times), else: 25)
       |> Enum.each(fn {ms, name} -> IO.puts("  #{String.pad_leading(to_string(ms), 6)}ms  #{name}") end)
     end
 

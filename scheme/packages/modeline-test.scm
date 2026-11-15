@@ -212,6 +212,7 @@
     (let ((buf "*zz-modeline-llm-changed*")
           (was (current-buffer)))
       (test-buffer! buf "")
+      (buffer-set-local! buf 'mode-name "chat-mode")
       (switch-to-buffer! buf)
       (window-configuration-changed!)
       (buffer-set-local! buf 'llm-model "m-before")

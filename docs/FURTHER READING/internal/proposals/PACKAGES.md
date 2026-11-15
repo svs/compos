@@ -2,13 +2,14 @@
 
 Status: proposal, 2026-11-15. The assignment table is a first cut. A dependency check must confirm it before any file moves.
 
-## The three tiers
+## The tiers
 
 | Tier | Repo | Count | Installed | Who owns it |
 |---|---|---|---|---|
 | 1. Core | `compos` (this repo) | one | always, cannot be removed. Only what boot needs | the compos team |
 | 2. Standard | `compos-packages` | one repo, many packages | on by default, the user can turn each one off. Quality of life: chat, todo, git, code | the compos team, PRs welcome |
 | 3. Community | one repo per package, anywhere on GitHub | unlimited | only when the user asks. Mail, linear, apps, services | the package author |
+| 4. Personal | none: `~/.compos/packages` and each folder `init.scm` puts on `load-path` | any | only what `init.scm` names. Never pushed | the user |
 
 ## Rules
 
@@ -50,6 +51,19 @@ compos-spotify/
 ```
 
 A community package gets into the `M-x packages` list when its recipe is in `compos-packages/index.scm`. A PR to that file adds it. A user can also install by URL without the index.
+
+### 4. Personal: the user's own files
+
+```
+~/.compos/packages/
+  travel.scm             ; code only: the trips are in ~/.compos/travel
+  travel/google-hotels.xsl
+  other-buffer.scm
+```
+
+This is `~/.emacs.d/lisp` for compos: single files on this machine, with no recipe, no lock and no remote. The folders are `(personal-package-dirs)`: `(package-dir)` first, then each `load-path` folder outside the compos checkout and the clones. `init.scm` loads them in order with one call, `(personal-packages! 'other-buffer 'travel)`, which stamps each as the user's. `(personal-file REL)` finds a file such as a stylesheet in those folders. `M-x packages` lists every file there under the Personal tab and marks the loaded ones.
+
+A package of any tier keeps its data out of the code folders, in `(package-data-dir NAME)`, which is `~/.compos/NAME`: fast-code's `learned.scm` in `~/.compos/fast-code`, learned web parsers in `~/.compos/web/parsers`, trips in `~/.compos/travel`. The home migration `personal-data-out-of-packages` moved them there on 2026-11-15.
 
 ## Install and update (straight-like)
 

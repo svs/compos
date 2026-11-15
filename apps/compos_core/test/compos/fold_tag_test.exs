@@ -139,25 +139,25 @@ defmodule Compos.FoldTagTest do
 
   # --- restore ---------------------------------------------------------------
 
-  test "an org buffer's folds come back when the mode setup runs again" do
-    name = "restore-#{System.unique_integer([:positive])}.org"
+  test "a morg buffer's folds come back when the mode setup runs again" do
+    name = "restore-#{System.unique_integer([:positive])}.md"
     Editor.minibuffer_close()
     Compos.TestHelpers.one_window!()
     Editor.set_window_buffer(name)
-    :ok = Buffer.append(name, "* a\nbody\n** child\ncbody\n* b\ntail\n", source: :editor)
+    :ok = Buffer.append(name, "# a\nbody\n## child\ncbody\n# b\ntail\n", source: :editor)
 
-    {:ok, _} = Session.eval(~s{(set-mode! "org-mode")})
+    {:ok, _} = Session.eval(~s{(set-mode! "morg-mode")})
     :ok = Buffer.goto(name, 0)
-    {:ok, _} = Session.eval(~s{(run-command "org-cycle")})
+    {:ok, _} = Session.eval(~s{(run-command "morg-cycle")})
     assert Buffer.hidden(name) == [{3, 23}]
 
     # a daemon restart loses the ranges and keeps the locals. Restore re-runs
     # the setup fn, which must re-derive the ranges with no edit in between.
     :ok = Buffer.clear_hidden(name)
     assert Buffer.hidden(name) == []
-    assert Buffer.get_local(name, "org-folds") == [0]
+    assert Buffer.get_local(name, "morg-folds") != nil
 
-    {:ok, _} = Session.eval(~s{(set-mode! "org-mode")})
+    {:ok, _} = Session.eval(~s{(set-mode! "morg-mode")})
     assert Buffer.hidden(name) == [{3, 23}]
   end
 

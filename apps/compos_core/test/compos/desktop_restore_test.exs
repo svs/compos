@@ -511,17 +511,17 @@ defmodule Compos.DesktopRestoreTest do
   end
 
   # S2 for file buffers: set-mode! re-runs unconditionally after the
-  # locals return, so org's setup re-derives hidden ranges from the
-  # restored 'org-folds local — the folds you left are the folds you get.
-  test "a restored org file comes back folded" do
-    path = Path.join(System.tmp_dir!(), "compos-restore-#{System.unique_integer([:positive])}.org")
-    File.write!(path, "* one\nbody one\n* two\nbody two\n")
+  # locals return, so morg's setup re-derives hidden ranges from the
+  # restored fold local — the folds you left are the folds you get.
+  test "a restored morg file comes back folded" do
+    path = Path.join(System.tmp_dir!(), "compos-restore-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "# one\nbody one\n# two\nbody two\n")
     on_exit(fn -> File.rm(path) end)
 
     eval!(~s{(visit "#{path}")})
-    assert Buffer.get_local(path, "mode-name") == "org-mode"
+    assert Buffer.get_local(path, "mode-name") == "morg-mode"
 
-    eval!(~s{(org-set-folds! "#{path}" (list 0))})
+    eval!(~s{(morg-set-folds! "#{path}" (list 0))})
     hidden = eval!(~s{(buffer-hidden "#{path}")})
     assert hidden != "()"
 

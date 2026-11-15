@@ -816,18 +816,28 @@
 ;; first and the model next. A preset names the whole setup and stands
 ;; alone. The header line carries identity only, so these live here.
 ;; Each fact is (KEY VALUE TONE RANK); the client draws one c-fact each.
+(define dash-llm-fact-modes '("chat-mode" "morg-mode"))
+
+(define (dash--llm-buffer? buf)
+  "#t when BUF is in a mode whose mode line names its llm: chat and morg"
+  (let loop ((ms dash-llm-fact-modes))
+    (cond ((null? ms) #f)
+          ((buffer-derived-mode? buf (car ms)) #t)
+          (else (loop (cdr ms))))))
+
 (define (dash--modeline-facts buf preset-cell)
-  (let* ((preset (if preset-cell (car preset-cell) (dash--preset buf)))
+  (let* ((llm? (dash--llm-buffer? buf))
+         (preset (if preset-cell (car preset-cell) (dash--preset buf)))
          (mode (or (buffer-local-value 'mode-name buf) "Fundamental"))
          (icon (mode-own-icon mode))
          (mode-text (dashboard--mode-name mode)))
     (append
       (list (list "mode" (if icon (string-append icon " " mode-text) mode-text) "glyph" 0))
-      (if preset
-          (list (list "preset" preset "" 1))
-          (list (list "llm" (dash--model buf) "" 1)
-                (list "lane" (dash--lane buf) "ok" 2)))
-      (let ((icons (dash--preset-icons buf)))
+      (cond ((not llm?) '())
+            (preset (list (list "preset" preset "" 1)))
+            (else (list (list "llm" (dash--model buf) "" 1)
+                        (list "lane" (dash--lane buf) "ok" 2))))
+      (let ((icons (and llm? (dash--preset-icons buf))))
         (if icons
             (list (list "tools" (car icons) (cadr icons) 1))
             '()))

@@ -1071,8 +1071,9 @@ defmodule Compos.Core.Session do
     :exit, {:calling_self, _} ->
       record_boot_error!(
         file,
-        "a form called the interpreter while it was still loading. " <>
-          "Boot-time code may not ask for the published interpreter."
+        "a form called the interpreter while it was still loading, from " <>
+          calling_self_site(__STACKTRACE__) <>
+          ". Boot-time code may not ask for the published interpreter."
       )
 
       {@load_failed, store}
@@ -1080,6 +1081,18 @@ defmodule Compos.Core.Session do
     kind, value ->
       record_boot_error!(file, "#{kind}: #{inspect(value)}")
       {@load_failed, store}
+  end
+
+  # The first frame below Session.interp/0 is the Elixir code that asked
+  # for the interpreter: it names the primitive the Scheme form called.
+  defp calling_self_site(stack) do
+    stack
+    |> Enum.drop_while(fn {m, f, _, _} -> m == __MODULE__ and f in [:interp, :boot_load] end)
+    |> Enum.take(3)
+    |> Enum.map_join(" < ", fn {m, f, a, loc} ->
+      arity = if is_list(a), do: length(a), else: a
+      "#{inspect(m)}.#{f}/#{arity} (#{loc[:file]}:#{loc[:line]})"
+    end)
   end
 
   # The boot errors, oldest first. They are collected during init, before

@@ -149,8 +149,16 @@
                   (app-claim! owner (string-append "list:" owner) 'list))))
       (unless (app-id name) (app-claim! name id 'detail)))))
 
+(define (detail--join-owner-group! owner name)
+  (let ((g (and (buffer-known? owner) (buffer-known? name) (buffer-group owner))))
+    (when (and g (not (equal? g (buffer-group name))))
+      (buffer-move-to-group! name g))))
+
 (define (display-buffer-detail! name &optional owner)
   (let* ((o (or owner (window-buffer (active-window))))
+         ;; a page lives in its list's group: a page another group made
+         ;; before moves here, so one group never shows another's buffer
+         (_ (detail--join-owner-group! o name))
          (me (active-window))
          ;; already where you stand, or already in another window: a display
          ;; never moves a buffer that is on screen

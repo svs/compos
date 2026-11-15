@@ -4807,13 +4807,21 @@
 ;; (autoload 'NAME FILE [DOC]): NAME is a function once FILE loads. The
 ;; stub loads FILE, then applies the real definition. A file that does
 ;; not define NAME is an error, not a loop.
+(define (autoload--path file)
+  ;; a stub can outlive its file: a package that moved to a repo of its own
+  ;; leaves the old path behind. Its library name finds it on load-path.
+  (if (and (or (string-prefix? "/" file) (string-prefix? "~" file))
+           (not (file-exists? file)))
+      (or (locate-library (load--library-name file)) file)
+      file))
+
 (define (autoload name file &optional doc)
   (unless (boundp name)
     (let ((self #f))
       (set! self
             (lambda (&rest args)
               (autoload--forget! name)
-              (load file)
+              (load (autoload--path file))
               (let ((fn (and (boundp name) (symbol-value name))))
                 (when (or (not fn) (eq? fn self))
                   (error (string-append "autoload: " file " did not define "
@@ -4834,7 +4842,7 @@
       (set! self
             (lambda (&rest args)
               (autoload--forget! name)
-              (load file)
+              (load (autoload--path file))
               (let ((fn (command-fn name)))
                 (when (or (not fn) (eq? fn self))
                   (error (string-append "autoload: " file " did not define the command " name)))
@@ -4861,7 +4869,7 @@
   (let ((file (autoload-file name)))
     (when file
       (autoload--forget! name)
-      (load file))
+      (load (autoload--path file)))
     (and (mode-get name 'kind) #t)))
 
 ;;; ;;;###autoload cookies: Emacs's loaddefs, read at boot instead of

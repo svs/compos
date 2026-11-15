@@ -366,11 +366,20 @@
       (set! *theme-frame* before)
       value)))
 
+(define (frame-ui-zoom &optional frame)
+  ;; the 'ui zoom FRAME keeps on its own (a factor string), or #f when it
+  ;; follows the global ui-scale. appearance.scm sets it: frame-ui-scale-apply!
+  (and (boundp 'frame-local-in)
+       (frame-local-in (or frame (selected-frame)) 'ui-zoom)))
+
 (define (frame-theme--push! frame)
-  (let ((name (frame-theme frame)))
-    (if name
-        (frame-faces-set! (theme--ops (assoc name *themes*) *current-theme*)
-                          (theme-skin name) frame)
+  ;; FRAME's own faces: its theme, then its own 'ui zoom over it
+  (let* ((name (frame-theme frame))
+         (zoom (frame-ui-zoom frame))
+         (ops (append (if name (theme--ops (assoc name *themes*) *current-theme*) '())
+                      (if zoom (list (list 'set 'ui 'zoom zoom)) '()))))
+    (if (pair? ops)
+        (frame-faces-set! ops (and name (theme-skin name)) frame)
         (frame-faces-set! #f #f frame))))
 
 (define (frame-theme-apply! name &optional frame)
@@ -389,11 +398,12 @@
   ;; and a frame that is gone stops following them
   (let ((frames (frame-list)))
     (set! *frame-faces* (filter (lambda (e) (member (car e) frames)) *frame-faces*))
-    (for-each (lambda (frame) (when (frame-theme frame) (frame-theme--push! frame)))
+    (for-each (lambda (frame) (when (or (frame-theme frame) (frame-ui-zoom frame))
+                                (frame-theme--push! frame)))
               frames)))
 
 (define (frame-theme-attach!)
-  (when (frame-theme) (frame-theme--push! (selected-frame))))
+  (when (or (frame-theme) (frame-ui-zoom)) (frame-theme--push! (selected-frame))))
 
 (add-hook! 'theme-change-hook 'frame-themes-refresh!)
 
@@ -2216,6 +2226,7 @@
 (catalog-meta! 'function "face-color" 'domain 'faces 'effects '(read))
 (public! 'set-face-attribute! "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs")
 (public! 'face-batch! "(face-batch! OPS) — apply a list of face changes as one change: (clear FACE) forgets a face, (set FACE KEY VALUE ...) merges attributes. The page renders once, after the last one")
+(public! 'frame-ui-zoom "(frame-ui-zoom [FRAME]) — the 'ui zoom FRAME keeps on its own, or #f when it follows ui-scale")
 (public! 'frame-faces-set! "(frame-faces-set! OPS SKIN [FRAME]) — lay face-batch! OPS and a SKIN stylesheet over the global faces for FRAME alone; OPS #f gives the frame the global faces again")
 (public! 'face-attribute "(face-attribute FACE ATTR) -> the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here")
 (public! 'face-list "(face-list) -> the names of every face the editor holds")

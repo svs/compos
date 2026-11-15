@@ -70,7 +70,7 @@
 
 (define (package--read-first path)
   (and (file-exists? path)
-       (let ((forms (scheme-read (read-file path #f))))
+       (let ((forms (scheme-read (read-file path))))
          (and (pair? forms) (car forms)))))
 
 (define (package-recipe name)
@@ -107,7 +107,67 @@
 (public! 'package-lock "(package-lock) - the pins of packages.lock as ((NAME URL COMMIT) ...)")
 (public! 'package-installed "(package-installed) - names of the cloned and developed packages")
 (public! 'package-list "(package-list) - names of the installed packages")
-(public! 'package-dir "(package-dir) - <compos-home>/packages, the old home of single-file user packages")
+(public! 'package-dir "(package-dir) - <compos-home>/packages, the user's own packages: the personal tier")
+
+;;; --- the personal tier ------------------------------------------------------
+;; The user's own packages, as ~/.emacs.d/lisp is in Emacs: single files in
+;; (package-dir) and in each folder init.scm puts on load-path. They stay on
+;; this machine; nothing pushes them. A package keeps its data out of these
+;; folders, in (package-data-dir NAME), so the code folder holds only code.
+
+(define (package--under? path dir)
+  (and (string? dir) (or (equal? path dir) (string-prefix? (string-append dir "/") path))))
+
+(define (personal-package-dirs)
+  (let* ((home (compos-home))
+         (not-personal (list (compos-project-dir) (compos-priv-dir) (package-repos-dir)))
+         (dirs (cons (package-dir)
+                     (filter (lambda (d)
+                               (and (not (equal? d home))
+                                    (null? (filter (lambda (o) (package--under? d o)) not-personal))))
+                             load-path))))
+    (let loop ((ds dirs) (acc '()))
+      (cond ((null? ds) (reverse acc))
+            ((or (member (car ds) acc) (not (file-directory? (car ds)))) (loop (cdr ds) acc))
+            (else (loop (cdr ds) (cons (car ds) acc)))))))
+
+(define (personal-file rel)
+  (let loop ((ds (personal-package-dirs)))
+    (cond ((null? ds) #f)
+          ((file-exists? (string-append (car ds) "/" rel)) (string-append (car ds) "/" rel))
+          (else (loop (cdr ds))))))
+
+(public! 'personal-package-dirs "(personal-package-dirs) - the user's own package folders: (package-dir), then each load-path folder outside compos and the clones")
+(public! 'personal-file "(personal-file REL) - the path of REL in the first personal package folder that has it, or #f")
+
+(effects! '(write))
+
+(define *personal-packages* '())
+
+(define (package-data-dir name)
+  (let ((dir (string-append (compos-home) "/" (if (symbol? name) (symbol->string name) name))))
+    (unless (file-directory? dir) (make-directory! dir))
+    dir))
+
+(define (personal-packages! . names)
+  (for-each
+    (lambda (name)
+      (let* ((n (if (symbol? name) (symbol->string name) name))
+             (path (personal-file (string-append n ".scm"))))
+        (if (not path)
+            (message (string-append "personal package not found: " n))
+            (report-errors (string-append "personal package " n)
+              (lambda ()
+                (package! (string->symbol n))
+                (origin! 'user)
+                (load path)
+                (unless (member n *personal-packages*)
+                  (set! *personal-packages* (append *personal-packages* (list n)))))))))
+    names)
+  *personal-packages*)
+
+(public! 'package-data-dir "(package-data-dir NAME) - <compos-home>/NAME, where package NAME keeps the user's data; made on first ask")
+(public! 'personal-packages! "(personal-packages! NAME ...) - load each personal package NAME.scm in order, stamped as the user's; answers the names loaded")
 
 (effects! '(write))
 

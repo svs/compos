@@ -217,6 +217,33 @@
 (define-command "ui-scale-reset" "Give the whole application the normal text size"
   (lambda () (ui-scale-apply! 0)))
 
+;; A frame can keep its own application scale, for a monitor of another
+;; density: its 'ui zoom is laid over the global faces like a frame theme
+;; (themes.scm frame-ui-zoom), and ui-scale no longer moves it.
+(define (frame-ui-scale &optional frame)
+  (let ((z (frame-ui-zoom frame)))
+    (and z (let ((e (find (lambda (e) (equal? (cadr e) z)) *scale-factors*)))
+             (if e (car e) 0)))))
+
+(define (frame-ui-scale-apply! n0 &optional frame)
+  (let ((frame (or frame (selected-frame)))
+        (n (and n0 (scale-clamp n0))))
+    (set-frame-local-in! frame 'ui-zoom (and n (scale-factor n)))
+    (desktop-dirty!)
+    (frame-theme--push! frame)
+    (message (if n (scale-label "frame ui" n) "frame ui scale follows ui-scale"))
+    n))
+
+(define (frame-ui-scale-step! d)
+  (frame-ui-scale-apply! (+ (or (frame-ui-scale) ui-scale 0) d)))
+
+(define-command "frame-ui-scale-increase" "Make this frame's text larger"
+  (lambda () (frame-ui-scale-step! 1)))
+(define-command "frame-ui-scale-decrease" "Make this frame's text smaller"
+  (lambda () (frame-ui-scale-step! -1)))
+(define-command "frame-ui-scale-reset" "Give this frame the application's text size again"
+  (lambda () (frame-ui-scale-apply! #f)))
+
 (global-set-key "s-=" "ui-scale-increase")
 (global-set-key "s--" "ui-scale-decrease")
 (global-set-key "s-0" "ui-scale-reset")
@@ -239,6 +266,10 @@
   "(text-scale-reset-all!) — give every buffer the normal text size; answer how many changed")
 (public! 'ui-scale-apply!
   "(ui-scale-apply! N) — set the whole application's text scale to step N; 0 is normal")
+(public! 'frame-ui-scale
+  "(frame-ui-scale [FRAME]) — FRAME's own text scale step, or #f when it follows ui-scale")
+(public! 'frame-ui-scale-apply!
+  "(frame-ui-scale-apply! N [FRAME]) — give FRAME its own text scale step N; #f makes it follow ui-scale again")
 
 ;;; --- the frame chrome ---------------------------------------------------------
 ;;; Scheme composes the chrome that every frame draws, and publishes each
@@ -388,4 +419,4 @@
 ;; eval-scheme-read takes or refuses them by what they do
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))
   '(text-scale-apply! text-scale-reset-all! text-scale-sync!
-    ui-scale-apply!))
+    ui-scale-apply! frame-ui-scale-apply!))

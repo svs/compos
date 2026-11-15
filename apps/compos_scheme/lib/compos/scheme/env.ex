@@ -108,7 +108,7 @@ defmodule Compos.Scheme.Env do
                 {:ok, val}
 
               [] ->
-                case cached_parent(tid, cache, ref) do
+                case parent_for(tid, cache, ref, name) do
                   nil -> :error
                   parent -> fetch(store, parent, name)
                 end
@@ -634,6 +634,15 @@ defmodule Compos.Scheme.Env do
   end
 
   def end_gc(%__MODULE__{tid: tid}), do: :ets.delete(tid, :gc)
+
+  # a stale frame names what was being looked up, so the error points at
+  # the closure that outlived its frame
+  defp parent_for(tid, cache, ref, name) do
+    cached_parent(tid, cache, ref)
+  rescue
+    e in UnboundError ->
+      reraise UnboundError, [message: "#{e.message} (looking up #{name})"], __STACKTRACE__
+  end
 
   defp shared_parent(tid, ref) do
     case :ets.lookup(tid, {:frame, ref}) do

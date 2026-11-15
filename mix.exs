@@ -2,6 +2,9 @@ defmodule Compos.MixProject do
   use Mix.Project
 
   @version "0.9.2"
+  # one stamp per mix run: two builds of one commit (a jj working copy
+  # keeps git HEAD still) still unpack into their own directories
+  @build_stamp System.os_time(:second)
 
   def project do
     [
@@ -23,8 +26,9 @@ defmodule Compos.MixProject do
     [
       compos: [
         # The commit rides in the release version, so Burrito unpacks each
-        # build into its own directory instead of reusing the last 0.9.0.
-        version: "#{@version}+#{commit()}",
+        # build into its own directory instead of reusing the last 0.9.0; the
+        # build stamp does the same for two builds of one commit.
+        version: "#{@version}+#{commit()}.#{@build_stamp}",
         applications: [
           compos_scheme: :permanent,
           compos_core: :permanent,

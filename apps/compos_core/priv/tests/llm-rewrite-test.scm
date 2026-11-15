@@ -59,7 +59,7 @@
   "prose and code want opposite things from a model"
   (lambda ()
     (t--rw! "x")
-    (buffer-set-local! t--rw-buf 'mode-name "markdown-mode")
+    (buffer-set-local! t--rw-buf 'mode-name "text-mode")
     (check-equal! (car (llm-rewrite-directives t--rw-buf))
                   (car *llm-rewrite-prose-directives*)
                   "a document leads with prose")

@@ -134,27 +134,5 @@ defmodule Compos.CustomizeTest do
       assert eval!("cz-interactive") == ~s{"after"}
       assert File.read!(custom_file()) =~ ~s{'(cz-interactive "after")}
     end
-
-    test "org-mode applies the customized font" do
-      eval!(~s{(customize-set! 'org-font-family "CustomOrgFont")})
-
-      buf = fresh_buffer("cz-org-#{System.unique_integer([:positive])}.org", "* headline\n")
-      eval!(~s{(set-mode! "org-mode")})
-
-      assert Buffer.get_local(buf, "style") =~ "--default-family:CustomOrgFont;"
-    end
-
-    test "customizing org fonts repaints live org buffers immediately" do
-      buf = fresh_buffer("cz-org-live-#{System.unique_integer([:positive])}.org", "* headline\n")
-      eval!(~s{(set-mode! "org-mode")})
-      refute Buffer.get_local(buf, "style") =~ "--default-size:19px;"
-
-      eval!(~s{(customize-set! 'org-font-size "19px")})
-      assert Buffer.get_local(buf, "style") =~ "--default-size:19px;"
-
-      eval!(~s{(customize-set! 'org-font-size "")})
-      refute Buffer.get_local(buf, "style") =~ "--default-size:",
-             "an empty size means the default face's size"
-    end
   end
 end

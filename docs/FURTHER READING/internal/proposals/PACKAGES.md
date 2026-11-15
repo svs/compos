@@ -77,7 +77,7 @@ Boot means: the daemon starts, the browser draws a frame, the user opens, edits 
 - Kernel and buffers: advice, anchor, autorevert, build-identity, custom, db, dismiss, emacs-names, events, format, holds, messages, migrations, scratch, self-healing, title, watchers, cron, daemons
 - Windows and panes: panes, panes-mode, panes-history, popper, window, window-names, window-settings, groups, group-config, tab-bars
 - Input and UI: appearance, capf, completion, keymaps, keys, modeline, palette, prompts, switch, tabulated-list, transient, detail, components, app-registry, apps
-- Packages: package (the manager), http (the manager fetches recipes)
+- Packages: package (the manager), packages (the app), http (the manager fetches recipes)
 
 ### 2. Standard (`compos-packages`) - quality of life
 

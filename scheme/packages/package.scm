@@ -81,7 +81,10 @@
   (let* ((d (package-repos-dir))
          (clones (if (file-directory? d)
                      (filter (lambda (f) (file-exists? (string-append d "/" f "/.git")))
-                             (list-dir d))
+                             (map (lambda (f) (if (string-suffix? "/" f)
+                                                  (substring f 0 (- (string-length f) 1))
+                                                  f))
+                                  (list-dir d)))
                      '())))
     (append clones
             (filter (lambda (n) (not (member n clones)))

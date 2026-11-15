@@ -192,7 +192,8 @@
 (define (packages--sep? row) (equal? (plist-get row 'kind) "sep"))
 
 (define (packages--rows buf)
-  (let ((ps (sort (packages-list) (lambda (a b) (string<? (plist-get a 'name) (plist-get b 'name))))))
+  ;; a row is a plist that starts 'id NAME, so term order sorts by name
+  (let ((ps (sort (packages-list))))
     (apply append
       (map (lambda (tier)
              (let ((in (filter (lambda (r) (equal? (plist-get r 'tier) tier)) ps)))

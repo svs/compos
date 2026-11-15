@@ -248,6 +248,7 @@
            "o or RET opens the app, v visits its source, / narrows the rows, g reads the apps again, q quits.")
     'buffer *app-registry-buffer*
     'transient #f
+    'plain #t
     'rows app-registry--rows
     'key (lambda (buf row) (plist-get row 'id))
     'body (lambda (buf r) (if (app-registry--sep? r) "" (plist-get r 'doc)))

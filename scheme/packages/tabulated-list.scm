@@ -3231,10 +3231,10 @@
 
 (define-command "list-tab-next" "Show the next tab of this list"
   (lambda () (list-tab-cycle! (current-buffer) 1))
-  'modes '(webhooks-detail-mode watchers-mode))
+  'modes '(webhooks-detail-mode watchers-mode packages-mode))
 (define-command "list-tab-prev" "Show the previous tab of this list"
   (lambda () (list-tab-cycle! (current-buffer) -1))
-  'modes '(webhooks-detail-mode watchers-mode))
+  'modes '(webhooks-detail-mode watchers-mode packages-mode))
 
 (add-hook! (list 'block-click 'list-tabs)
   (lambda (buf id)

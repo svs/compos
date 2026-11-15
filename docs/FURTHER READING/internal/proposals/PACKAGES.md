@@ -119,4 +119,4 @@ drive-eval, fast-code-eval, decide-eval, palette-eval, events-demo, test-browser
 
 ## Open points
 
-- The GitHub org name for `compos-packages` and the community repos.
+- The GitHub org is `compos-dev` (chosen 2026-11-15): `compos-dev/compos-packages` and the community repos live there. In a recipe, `:repo NAME` without a user means `compos-dev/NAME` (`package-default-org`). The core stays at `svs/compos` for now.

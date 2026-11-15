@@ -190,7 +190,25 @@
 
 (define (packages--sep? row) (equal? (plist-get row 'kind) "sep"))
 
+;; imenu makes a plural of a lower-case kind (function -> functions); a tier is a name, so it starts upper-case
+(define (packages--tab-name tier)
+  (string-append (string-upcase (substring tier 0 1)) (substring tier 1 (string-length tier))))
+
+(define (packages--imenu-rows buf)
+  "one imenu row per package, its tier the kind: imenu has a tab for each tier"
+  (with-current-buffer buf
+    (lambda ()
+      (let loop ((os (list-offsets buf)) (es (list-entries buf)) (acc '()))
+        (if (or (null? os) (null? es)) (reverse acc)
+            (loop (cdr os) (cdr es)
+                  (if (packages--sep? (car es)) acc
+                      (cons (list (line-number-at-pos (car os)) (packages--tab-name (plist-get (car es) 'tier)) (plist-get (car es) 'name)
+                                  (if (null? (plist-get (car es) 'breaks)) "" (string-append "breaks: " (packages--break-text (car es)))))
+                            acc))))))))
+
 (define (packages--rows buf)
+  ;; the list draws from here, so the buffer takes its imenu here too
+  (buffer-set-local! buf 'imenu-index-function 'packages--imenu-rows)
   ;; a row is a plist that starts 'id NAME, so term order sorts by name
   (let ((ps (sort (packages-list))))
     (apply append
@@ -340,10 +358,18 @@
            "Every package of the compos checkout by tier: core, standard, community, dev and unassigned, "
            "as the assignment table in PACKAGES.md puts them. A row shows how many packages it requires, "
            "how many require it, and its tier breaks: each require of a package of a lower tier. "
-           "Moving the point shows the package's page beside the list. RET or v visits the source, "
+           "The tabs across the top keep one tier, the packages with tier breaks, or all; left and right step them. Moving the point shows the package's page beside the list. RET or v visits the source, "
            "/ narrows the rows (tier:core, breaks:NAME), g scans again, q quits.")
     'buffer *packages-buffer*
     'transient #f
+    'plain #t
+    ;; the list keeps the rows of the tab and of / itself
+    'local-filter #t
+    ;; tabs across the top: one per tier, the breaks, then all with the tier sections
+    'tabs (append (map (lambda (tier) (list tier (lambda (buf r) (equal? (plist-get r 'tier) tier))))
+                       *packages-tiers*)
+                  (list (list "breaks" (lambda (buf r) (pair? (plist-get r 'breaks))))
+                        (list "all" (lambda (buf r) #t))))
     'rows packages--rows
     'key (lambda (buf row) (plist-get row 'id))
     'separator? (lambda (buf row) (packages--sep? row))

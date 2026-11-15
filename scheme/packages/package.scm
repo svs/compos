@@ -31,13 +31,20 @@
 
 (define (package--name x) (if (symbol? x) (symbol->string x) x))
 
+(define package-default-org "compos-dev")
+
 (define (package-recipe-url recipe)
+  ;; :repo is user/repo on github; a bare name is a repo of package-default-org
   (or (plist-get recipe ':url)
       (let ((repo (plist-get recipe ':repo)))
-        (and repo (string-append "https://github.com/" repo ".git")))))
+        (and repo
+             (string-append "https://github.com/"
+                            (if (string-contains? repo "/") repo (string-append package-default-org "/" repo))
+                            ".git")))))
 
 (public! 'compos-api-version "The version of the public API this core keeps; a recipe's :api must not be newer")
-(public! 'package-recipe-url "(package-recipe-url RECIPE) - the git url of a recipe plist: :url, or :repo user/repo on github")
+(public! 'package-default-org "The GitHub org of the standard and community package repos; a bare :repo NAME means ORG/NAME")
+(public! 'package-recipe-url "(package-recipe-url RECIPE) - the git url of a recipe plist: :url, or :repo user/repo (or a bare repo of package-default-org) on github")
 
 (effects! '(read))
 

@@ -3518,6 +3518,10 @@ is forgotten and that group falls back to creation order in the switcher."
 
 (public! 'group-revive!
   "(group-revive! NAME) — make the killed group NAME again, with every member that still exists; #f when none was killed by that name")
+(effects! '(read))
+(public! 'group-graveyard-candidates
+  "(group-graveyard-candidates) -> (NAME MEMBERS) for every killed group, MEMBERS its member names joined")
+(effects! '(write display))
 
 (define-command "group-kill" "Kill every buffer in the current group; in the board, the marked groups"
   (lambda ()

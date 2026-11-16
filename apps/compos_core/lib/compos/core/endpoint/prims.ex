@@ -80,11 +80,13 @@ defmodule Compos.Core.Endpoint.Prims do
   defp endpoint_cb(callback) do
     refkey = {:endpoint_call, make_ref()}
     Roots.hold(refkey, callback)
+    # the callback comes back to the frame and buffer that asked
+    {fid, buffer} = {Compos.Core.Frame.current(), Compos.Core.Frame.buffer_context()}
 
     fn result ->
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         try do
-          Session.apply_callback(callback, endpoint_callback_args(result))
+          Session.apply_callback(callback, endpoint_callback_args(result), fid, nil, buffer)
         after
           Roots.drop(refkey)
         end

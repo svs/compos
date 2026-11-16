@@ -233,15 +233,16 @@ defmodule Compos.Core.Session do
         args,
         fid \\ nil,
         lane \\ nil,
+        buffer \\ nil,
         retries \\ @stale_frame_retries
       ) do
-    result = apply_callback(closure, args, fid, lane)
+    result = apply_callback(closure, args, fid, lane, buffer)
 
     case result do
       {:error, msg} when retries > 0 ->
         if stale_frame?(msg) do
           Process.sleep(20)
-          apply_reply_callback(closure, args, fid, lane, retries - 1)
+          apply_reply_callback(closure, args, fid, lane, buffer, retries - 1)
         else
           result
         end
@@ -918,10 +919,11 @@ defmodule Compos.Core.Session do
 
   defp exec_debounce(key, generation) do
     case Roots.get(key) do
-      {^generation, _timer, callback, arg, fid} ->
+      {^generation, _timer, callback, arg, ctx} ->
+        {fid, buffer} = debounce_ctx(ctx)
         # Delete only this generation; concurrent rescheduling must survive.
         case :ets.select_delete(Roots.table(), [{{key, {generation, :_, :_, :_, :_}}, [], [true]}]) do
-          1 -> exec_apply(callback, [arg], fid)
+          1 -> exec_apply(callback, [arg], fid, buffer)
           0 -> {:reply, :ok}
         end
 
@@ -929,6 +931,11 @@ defmodule Compos.Core.Session do
         {:reply, :ok}
     end
   end
+
+  # a debounce stores the frame and buffer that asked; one stored before that
+  # holds only the frame
+  defp debounce_ctx({:ctx, fid, buffer}), do: {fid, buffer}
+  defp debounce_ctx(fid), do: {fid, nil}
 
   # every place a live closure can be held outside the store: the commands
   # table, escaped fun-wrapped handlers, and buffer-local values. A prompt's
@@ -1300,10 +1307,13 @@ defmodule Compos.Core.Session do
           # root it for the GC, and unroot once it has fired
           key = {:llm, make_ref()}
           Roots.hold(key, callback)
+          # the reply comes back to the frame and buffer that asked, as a
+          # task-run! callback does, so a job: event it publishes wakes that chat
+          {fid, buffer} = {Frame.current(), Frame.buffer_context()}
 
           Compos.Core.LLM.complete(prompt, fn text ->
             try do
-              apply_reply_callback(callback, [text])
+              apply_reply_callback(callback, [text], fid, nil, buffer)
             after
               Roots.drop(key)
             end
@@ -1316,13 +1326,14 @@ defmodule Compos.Core.Session do
         fn [prompt, model, callback | rest] ->
           key = {:llm, make_ref()}
           Roots.hold(key, {callback, rest})
+          {fid, buffer} = {Frame.current(), Frame.buffer_context()}
 
           on_error =
             case rest do
               [fail | _] when fail != false ->
                 fn msg ->
                   try do
-                    apply_reply_callback(fail, [to_string(msg)])
+                    apply_reply_callback(fail, [to_string(msg)], fid, nil, buffer)
                   after
                     Roots.drop(key)
                   end
@@ -1340,7 +1351,7 @@ defmodule Compos.Core.Session do
             to_string(model),
             fn text ->
               try do
-                apply_reply_callback(callback, [text])
+                apply_reply_callback(callback, [text], fid, nil, buffer)
               after
                 Roots.drop(key)
               end
@@ -1362,10 +1373,11 @@ defmodule Compos.Core.Session do
           requested_model = Enum.at(rest, 1)
           key = {:llm_tools, make_ref()}
           Roots.hold(key, [dispatcher, callback, usage_cb])
+          {fid, buffer} = {Frame.current(), Frame.buffer_context()}
 
           on_usage =
             usage_cb &&
-              fn usage -> apply_callback(usage_cb, [usage_to_plist(usage)]) end
+              fn usage -> apply_callback(usage_cb, [usage_to_plist(usage)], fid, nil, buffer) end
 
           Compos.Core.LLM.complete_tools(
             prompt,
@@ -1374,7 +1386,7 @@ defmodule Compos.Core.Session do
             dispatcher,
             fn text ->
               try do
-                apply_reply_callback(callback, [text])
+                apply_reply_callback(callback, [text], fid, nil, buffer)
               after
                 Roots.drop(key)
               end
@@ -2199,7 +2211,9 @@ defmodule Compos.Core.Session do
               trunc(ms)
             )
 
-          Roots.put(key, {generation, timer, callback, arg, Frame.current()})
+          # the frame and buffer that asked, so the callback runs for them and not
+          # for whatever buffer the UI shows when the timer fires
+          Roots.put(key, {generation, timer, callback, arg, {:ctx, Frame.current(), Frame.buffer_context()}})
           :void
         end,
       {"debounce-cancel!",

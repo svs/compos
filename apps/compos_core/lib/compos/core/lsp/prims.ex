@@ -129,11 +129,13 @@ defmodule Compos.Core.LSP.Prims do
   defp lsp_cb(callback, _key) do
     refkey = {:lsp_call, make_ref()}
     Roots.hold(refkey, callback)
+    # the callback comes back to the frame and buffer that asked
+    {fid, buffer} = {Compos.Core.Frame.current(), Compos.Core.Frame.buffer_context()}
 
     fn result ->
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         try do
-          Session.apply_callback(callback, lsp_callback_args(result))
+          Session.apply_callback(callback, lsp_callback_args(result), fid, nil, buffer)
         after
           Roots.drop(refkey)
         end

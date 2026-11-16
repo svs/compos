@@ -86,10 +86,12 @@ defmodule Compos.Core.DB.Prims do
   defp db_cb(callback) do
     refkey = {:db_call, make_ref()}
     Roots.hold(refkey, callback)
+    # the callback comes back to the frame and buffer that asked
+    {fid, buffer} = {Compos.Core.Frame.current(), Compos.Core.Frame.buffer_context()}
 
     fn result ->
       try do
-        Session.apply_callback(callback, db_callback_args(result))
+        Session.apply_callback(callback, db_callback_args(result), fid, nil, buffer)
       after
         Roots.drop(refkey)
       end

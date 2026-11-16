@@ -139,8 +139,11 @@ defmodule Compos.Core.Agent.Backend.ACP do
         {:reply, :ok, set_config_option(state, "model", model_id)}
 
       true ->
+        # the reply does not echo the model, so keep the one we asked for
         {:reply, :ok,
-         request(state, "session/set_model", %{
+         state
+         |> Map.put(:requested_model, model_id)
+         |> request("session/set_model", %{
            "sessionId" => state.session_id,
            "modelId" => model_id
          })}
@@ -357,7 +360,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
         |> session_ready(result)
 
       {"session/set_model", %{"result" => _}} ->
-        state
+        Map.put(state, :current_model, Map.get(state, :requested_model))
 
       {"session/set_mode", %{"result" => _}} ->
         state
@@ -376,6 +379,7 @@ defmodule Compos.Core.Agent.Backend.ACP do
       {"session/prompt", %{"result" => result}} ->
         state
         |> emit_usage(Map.get(result, "usage"))
+        |> record_usage(Map.get(result, "usage"))
         |> emit(type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
 
       {{:steer, token, epoch}, %{"result" => %{"outcome" => "promptRequired"}}} ->
@@ -469,7 +473,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
         state =
           case result do
             %{"models" => %{"currentModelId" => cur} = ms} ->
-              emit(state,
+              state
+              |> Map.put(:current_model, cur)
+              |> emit(
                 type: :"model-state",
                 current: cur,
                 available:
@@ -606,6 +612,31 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp emit_usage(state, _), do: state
+
+  # The ledger gets the same tally, so M-x llm-costs counts the ACP turns
+  # too. The adapter reports tokens and no bill: a subscription bills by its
+  # limits. So the row holds no cost, only an estimate at the catalog price.
+  # The model is the one the session runs: a config option (opencode), else
+  # the adapter's current model.
+  defp record_usage(state, usage) when is_map(usage) do
+    model = state.config_model || Map.get(state, :current_model)
+
+    Compos.Core.LLMUsage.record(
+      model,
+      %{
+        "input_tokens" => acp_int(usage, "inputTokens"),
+        "output_tokens" => acp_int(usage, "outputTokens"),
+        "cache_read_input_tokens" => acp_int(usage, "cachedReadTokens"),
+        "cache_creation_input_tokens" => acp_int(usage, "cachedWriteTokens")
+      },
+      Map.get(state.config, "slug"),
+      billed: false
+    )
+
+    state
+  end
+
+  defp record_usage(state, _), do: state
 
   defp acp_int(map, key) do
     case Map.get(map, key) do

@@ -1,10 +1,14 @@
 defmodule Compos.Core.LLMUsage do
   @moduledoc """
   The usage ledger. Every LLM request records `{ts, model, tokens, cost}`
-  through `record/3`, appended to `llm-usage.jsonl` in the state folder, and
+  through `record/4`, appended to `llm-usage.jsonl` in the state folder, and
   `report/0` aggregates it by day and model. Prices come from
   `Compos.Core.ModelCatalog`. Per-chat attribution lives in chat
   buffer-locals, not here.
+
+  A turn that the backend does not bill, such as an ACP turn on a
+  subscription, records `cost: nil` and an `estimate` at the catalog price.
+  The report keeps the two apart, so an estimate never counts as spend.
   """
 
   @doc """
@@ -52,14 +56,20 @@ defmodule Compos.Core.LLMUsage do
 
   `slug` names the chat that spent it. Without it the ledger could say what
   a day cost but never which conversation ran up the bill.
+
+  With `billed: false` the row holds no cost and an `estimate` at the catalog
+  price, and the function returns nil. An ACP turn uses it: the adapter
+  reports the tokens, and a subscription bills by its limits, not by tokens.
   """
-  def record(model, usage, slug \\ nil) when is_map(usage) do
+  def record(model, usage, slug \\ nil, opts \\ []) when is_map(usage) do
     t = tokens(usage)
-    cost = cost(model, usage)
+    billed = Keyword.get(opts, :billed, true)
+    cost = if billed, do: cost(model, usage)
 
     row =
       t
       |> Map.merge(%{ts: DateTime.to_iso8601(DateTime.utc_now()), model: model, cost: cost})
+      |> then(fn row -> if billed, do: row, else: Map.put(row, :estimate, cost(model, usage)) end)
       |> then(fn row -> if slug, do: Map.put(row, :slug, slug), else: row end)
 
     File.write(ledger_path(), Jason.encode!(row) <> "\n", [:append])
@@ -105,7 +115,8 @@ defmodule Compos.Core.LLMUsage do
         output: sum.("output"),
         cache_read: sum.("cache_read"),
         cache_write: sum.("cache_write"),
-        cost: sum.("cost")
+        cost: sum.("cost"),
+        estimate: sum.("estimate")
       }
     end)
     |> Enum.sort_by(&{&1.day, &1.model}, :desc)

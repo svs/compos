@@ -1414,7 +1414,7 @@ defmodule Compos.Core.Session do
           "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
         end,
       {"llm-cost-report",
-       "(llm-cost-report) — return one usage plist per day and model, with cost."} => fn [] ->
+       "(llm-cost-report) — return one usage plist per day and model, with cost and the estimate for unbilled turns."} => fn [] ->
         for row <- Compos.Core.LLMUsage.report() do
           [
             {:sym, "day"},
@@ -1438,7 +1438,11 @@ defmodule Compos.Core.Session do
               r -> round(r * 100)
             end,
             {:sym, "cost"},
-            row.cost * 1.0
+            row.cost * 1.0,
+            # what the unbilled turns (an ACP lane on a subscription) would
+            # cost at the catalog price; never part of cost
+            {:sym, "estimate"},
+            row.estimate * 1.0
           ]
         end
       end,

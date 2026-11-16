@@ -1286,6 +1286,85 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
   end
 
+  test "an ACP turn lands in the usage ledger, with an estimate and no cost" do
+    ledger = fn slug -> Enum.filter(Compos.Core.LLMUsage.ledger(), &(&1["slug"] == slug)) end
+
+    {:ok, _} = Session.eval(~s[(execute "")])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "sess-u",
+        "models" => %{
+          "currentModelId" => "claude-sonnet-5",
+          "availableModels" => [
+            %{"modelId" => "claude-sonnet-5", "name" => "Sonnet"},
+            %{"modelId" => "claude-opus-4-6", "name" => "Opus"}
+          ]
+        }
+      }
+    })
+
+    buf = "*chat:a1*"
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
+    slug = slug_of(buf)
+
+    usage = %{
+      "inputTokens" => 1200,
+      "outputTokens" => 300,
+      "cachedReadTokens" => 40_000,
+      "cachedWriteTokens" => 2_000
+    }
+
+    done = fn id ->
+      %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn", "usage" => usage}}
+    end
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+    inject(agent, done.(pid))
+
+    assert eventually(fn -> length(ledger.(slug)) == 1 end)
+    [row] = ledger.(slug)
+    assert row["model"] == "claude-sonnet-5"
+
+    assert {row["input"], row["output"], row["cache_read"], row["cache_write"]} ==
+             {1200, 300, 40_000, 2_000}
+
+    # a subscription bills by its limits: no cost, an estimate at the catalog price
+    assert row["cost"] == nil
+    assert row["estimate"] > 0
+
+    # C-c m switches the model, and the next turn's row names the new one
+    focus(buf)
+    press(["C-c", "m"])
+    type("claude-opus-4-6")
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => mid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => mid, "result" => %{}})
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "again")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid2}}, 1_000
+    inject(agent, done.(pid2))
+
+    assert eventually(fn -> length(ledger.(slug)) == 2 end)
+    assert [_, %{"model" => "claude-opus-4-6"}] = ledger.(slug)
+  end
+
+  test "an ACP turn with no usage adds no ledger row" do
+    {slug, _buf, agent} = boot("")
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> Agent.info(slug).status == :idle end)
+    refute Enum.any?(Compos.Core.LLMUsage.ledger(), &(&1["slug"] == slug))
+  end
+
   test "opencode connector: session config options drive model and mode state" do
     assert {:ok, names} = Session.eval(~s[(connector-names)])
     assert names =~ "opencode"

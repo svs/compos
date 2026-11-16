@@ -77,6 +77,32 @@ defmodule Compos.LLMUsageTest do
     assert mystery.requests == 1 and mystery.cost == 0
   end
 
+  test "a turn the backend does not bill records its tokens and an estimate, not a cost" do
+    usage = %{"input_tokens" => 1000, "output_tokens" => 100, "cache_read_input_tokens" => 5000}
+
+    assert LLMUsage.record("anthropic:claude-sonnet-5", usage, "chat-1", billed: false) == nil
+
+    [row] = ledger_rows()
+    assert row["cost"] == nil
+    assert row["estimate"] == LLMUsage.cost("anthropic:claude-sonnet-5", usage)
+    assert row["estimate"] > 0
+    assert row["input"] == 1000 and row["cache_read"] == 5000 and row["slug"] == "chat-1"
+
+    # a billed row next to it: the report keeps cost and estimate apart
+    LLMUsage.record("anthropic:claude-sonnet-5", usage)
+    [sonnet] = Enum.filter(LLMUsage.report(), &(&1.model == "anthropic:claude-sonnet-5"))
+    assert sonnet.requests == 2 and sonnet.input == 2000
+    assert sonnet.cost == LLMUsage.cost("anthropic:claude-sonnet-5", usage)
+    assert sonnet.estimate == row["estimate"]
+  end
+
+  test "a billed row carries no estimate" do
+    LLMUsage.record("anthropic:claude-sonnet-5", %{"input_tokens" => 100, "output_tokens" => 10})
+    [row] = ledger_rows()
+    assert row["cost"] > 0
+    refute Map.has_key?(row, "estimate")
+  end
+
   test "the scheme surface: format-usd, llm-cost-report, chat spend" do
     assert eval!("(format-usd 0.03315)") == ~s{"$0.0332"}
     LLMUsage.record("anthropic:claude-sonnet-5", %{"input_tokens" => 100, "output_tokens" => 10})

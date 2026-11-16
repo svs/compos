@@ -58,8 +58,8 @@ defmodule Compos.Core.LLMUsage do
   a day cost but never which conversation ran up the bill.
 
   With `billed: false` the row holds no cost and an `estimate` at the catalog
-  price, and the function returns nil. An ACP turn uses it: the adapter
-  reports the tokens, and a subscription bills by its limits, not by tokens.
+  price, and the function returns nil. An ACP turn on a subscription uses it:
+  the adapter reports the tokens, and the subscription bills by its limits.
   """
   def record(model, usage, slug \\ nil, opts \\ []) when is_map(usage) do
     t = tokens(usage)

@@ -96,6 +96,14 @@ defmodule Compos.LLMUsageTest do
     assert sonnet.estimate == row["estimate"]
   end
 
+  test "an adapter's provider/model id prices as provider:model" do
+    assert ModelCatalog.price("opencode/claude-sonnet-5") ==
+             ModelCatalog.price("opencode:claude-sonnet-5")
+
+    assert ModelCatalog.price("opencode/claude-sonnet-5") != nil
+    assert ModelCatalog.price("no-such-provider/no-such-model") == nil
+  end
+
   test "a billed row carries no estimate" do
     LLMUsage.record("anthropic:claude-sonnet-5", %{"input_tokens" => 100, "output_tokens" => 10})
     [row] = ledger_rows()

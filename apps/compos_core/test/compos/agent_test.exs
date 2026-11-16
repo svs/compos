@@ -3,7 +3,7 @@ defmodule Compos.AgentTest do
 
   use Compos.Case
 
-  alias Compos.Core.{Agent, Buffer, Editor, Session}
+  alias Compos.Core.{Agent, Buffer, Editor, LLMUsage, Session}
   alias Compos.Core.Agent.Backend
 
   # the live input: everything past the mark. The input carries no marker
@@ -1286,9 +1286,7 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
   end
 
-  test "an ACP turn lands in the usage ledger, with an estimate and no cost" do
-    ledger = fn slug -> Enum.filter(Compos.Core.LLMUsage.ledger(), &(&1["slug"] == slug)) end
-
+  test "an ACP chat turn lands in the usage ledger with its model and tokens" do
     {:ok, _} = Session.eval(~s[(execute "")])
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -1314,31 +1312,16 @@ defmodule Compos.AgentTest do
     assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
     slug = slug_of(buf)
 
-    usage = %{
-      "inputTokens" => 1200,
-      "outputTokens" => 300,
-      "cachedReadTokens" => 40_000,
-      "cachedWriteTokens" => 2_000
-    }
-
-    done = fn id ->
-      %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn", "usage" => usage}}
-    end
-
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
-    inject(agent, done.(pid))
+    inject(agent, turn_done(pid))
 
-    assert eventually(fn -> length(ledger.(slug)) == 1 end)
-    [row] = ledger.(slug)
+    assert eventually(fn -> length(ledger_rows(slug)) == 1 end)
+    [row] = ledger_rows(slug)
     assert row["model"] == "claude-sonnet-5"
 
     assert {row["input"], row["output"], row["cache_read"], row["cache_write"]} ==
              {1200, 300, 40_000, 2_000}
-
-    # a subscription bills by its limits: no cost, an estimate at the catalog price
-    assert row["cost"] == nil
-    assert row["estimate"] > 0
 
     # C-c m switches the model, and the next turn's row names the new one
     focus(buf)
@@ -1350,10 +1333,78 @@ defmodule Compos.AgentTest do
 
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "again")])
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid2}}, 1_000
-    inject(agent, done.(pid2))
+    inject(agent, turn_done(pid2))
 
-    assert eventually(fn -> length(ledger.(slug)) == 2 end)
-    assert [_, %{"model" => "claude-opus-4-6"}] = ledger.(slug)
+    assert eventually(fn -> length(ledger_rows(slug)) == 2 end)
+    assert [_, %{"model" => "claude-opus-4-6"}] = ledger_rows(slug)
+  end
+
+  test "a model the connector's subscription covers records an estimate, not a cost" do
+    backend = ledger_backend(%{"slug" => "led-sub", "subscription" => "."}, "claude-sonnet-5")
+    [row] = ledger_turn(backend, "led-sub")
+
+    assert row["cost"] == nil
+    assert row["estimate"] == LLMUsage.cost("claude-sonnet-5", ledger_usage())
+    assert row["estimate"] > 0
+  end
+
+  test "a model outside the subscription is billed per token" do
+    # opencode-go is the subscription; OpenCode's opencode/ models are
+    # pay-as-you-go, and the catalog files them as opencode:
+    backend =
+      ledger_backend(
+        %{"slug" => "led-oc", "subscription" => "^opencode-go/"},
+        "opencode/claude-sonnet-5"
+      )
+
+    [row] = ledger_turn(backend, "led-oc")
+    assert row["model"] == "opencode/claude-sonnet-5"
+    assert row["cost"] == LLMUsage.cost("opencode:claude-sonnet-5", ledger_usage())
+    assert row["cost"] > 0
+    refute Map.has_key?(row, "estimate")
+
+    # a switch onto the subscription: the next row is an estimate
+    :ok = Backend.ACP.set_model(backend, "opencode-go/deepseek-v4.1-flash")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => mid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => mid, "result" => %{}})
+
+    [_, go] = ledger_turn(backend, "led-oc")
+    assert go["model"] == "opencode-go/deepseek-v4.1-flash"
+    assert go["cost"] == nil
+    assert go["estimate"] == LLMUsage.cost("opencode-go:deepseek-v4.1-flash", ledger_usage())
+  end
+
+  test "a connector without a subscription is billed, under its price provider" do
+    # dsh reports the bare id, on a provider key billed per token
+    backend =
+      ledger_backend(%{"slug" => "led-ds", "price-provider" => "deepseek"}, "deepseek-v4-pro")
+
+    [row] = ledger_turn(backend, "led-ds")
+    assert row["model"] == "deepseek:deepseek-v4-pro"
+    assert row["cost"] == LLMUsage.cost("deepseek:deepseek-v4-pro", ledger_usage())
+    refute Map.has_key?(row, "estimate")
+  end
+
+  test "an adapter that reports no model is recorded under the configured one" do
+    backend = ledger_backend(%{"slug" => "led-cfg", "model" => "claude-sonnet-5"}, nil)
+    [row] = ledger_turn(backend, "led-cfg")
+    assert row["model"] == "claude-sonnet-5"
+  end
+
+  test "two model switches in flight: each reply sets its own model" do
+    backend = ledger_backend(%{"slug" => "led-sw"}, "claude-sonnet-5")
+
+    :ok = Backend.ACP.set_model(backend, "claude-opus-4-6")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => a}}, 1_000
+    :ok = Backend.ACP.set_model(backend, "claude-haiku-4-5")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => b}}, 1_000
+
+    # the first reply lands while the second switch is still pending
+    inject(backend, %{"jsonrpc" => "2.0", "id" => a, "result" => %{}})
+    assert [%{"model" => "claude-opus-4-6"}] = ledger_turn(backend, "led-sw")
+
+    inject(backend, %{"jsonrpc" => "2.0", "id" => b, "result" => %{}})
+    assert [_, %{"model" => "claude-haiku-4-5"}] = ledger_turn(backend, "led-sw")
   end
 
   test "an ACP turn with no usage adds no ledger row" do
@@ -1362,7 +1413,60 @@ defmodule Compos.AgentTest do
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
     assert eventually(fn -> Agent.info(slug).status == :idle end)
-    refute Enum.any?(Compos.Core.LLMUsage.ledger(), &(&1["slug"] == slug))
+    assert ledger_rows(slug) == []
+  end
+
+  defp ledger_rows(slug), do: Enum.filter(LLMUsage.ledger(), &(&1["slug"] == slug))
+
+  defp ledger_usage do
+    %{
+      "input_tokens" => 1200,
+      "output_tokens" => 300,
+      "cache_read_input_tokens" => 40_000,
+      "cache_creation_input_tokens" => 2_000
+    }
+  end
+
+  defp turn_done(id) do
+    usage = %{
+      "inputTokens" => 1200,
+      "outputTokens" => 300,
+      "cachedReadTokens" => 40_000,
+      "cachedWriteTokens" => 2_000
+    }
+
+    %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn", "usage" => usage}}
+  end
+
+  # A backend on the fake transport, its session open on `model` (nil: the
+  # adapter reports none)
+  defp ledger_backend(config, model) do
+    {:ok, backend} =
+      Backend.ACP.start(Map.merge(%{"cmd" => "fake", "cwd" => File.cwd!()}, config), self())
+
+    on_exit(fn -> Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    result =
+      if model,
+        do: %{"sessionId" => "ses-led", "models" => %{"currentModelId" => model}},
+        else: %{"sessionId" => "ses-led"}
+
+    inject(backend, %{"jsonrpc" => "2.0", "id" => nid, "result" => result})
+    backend
+  end
+
+  # one turn that reports usage; answers the slug's rows once it is written
+  defp ledger_turn(backend, slug) do
+    before = length(ledger_rows(slug))
+    :ok = Backend.ACP.prompt(backend, "go", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+    inject(backend, turn_done(pid))
+    assert eventually(fn -> length(ledger_rows(slug)) == before + 1 end)
+    ledger_rows(slug)
   end
 
   test "opencode connector: session config options drive model and mode state" do

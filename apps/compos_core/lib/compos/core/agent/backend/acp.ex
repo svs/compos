@@ -139,14 +139,15 @@ defmodule Compos.Core.Agent.Backend.ACP do
         {:reply, :ok, set_config_option(state, "model", model_id)}
 
       true ->
-        # the reply does not echo the model, so keep the one we asked for
+        # the reply does not echo the model, so the request keeps the one
+        # it asked for: two switches in flight each name their own
         {:reply, :ok,
-         state
-         |> Map.put(:requested_model, model_id)
-         |> request("session/set_model", %{
-           "sessionId" => state.session_id,
-           "modelId" => model_id
-         })}
+         request(
+           state,
+           "session/set_model",
+           %{"sessionId" => state.session_id, "modelId" => model_id},
+           {:set_model, model_id}
+         )}
     end
   end
 
@@ -359,8 +360,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
         |> emit(type: :session, id: sid, resumed: false, loadable: Map.get(state, :can_load, false))
         |> session_ready(result)
 
-      {"session/set_model", %{"result" => _}} ->
-        Map.put(state, :current_model, Map.get(state, :requested_model))
+      {{:set_model, model_id}, %{"result" => _}} ->
+        Map.put(state, :current_model, model_id)
 
       {"session/set_mode", %{"result" => _}} ->
         state
@@ -614,12 +615,19 @@ defmodule Compos.Core.Agent.Backend.ACP do
   defp emit_usage(state, _), do: state
 
   # The ledger gets the same tally, so M-x llm-costs counts the ACP turns
-  # too. The adapter reports tokens and no bill: a subscription bills by its
-  # limits. So the row holds no cost, only an estimate at the catalog price.
-  # The model is the one the session runs: a config option (opencode), else
-  # the adapter's current model.
+  # too. The adapter reports tokens and no bill, so the connector says how
+  # the turn is paid for. A model that its 'subscription pattern matches is
+  # paid by the subscription's limits: the row holds no cost, only an
+  # estimate at the catalog price. Any other model is billed per token (a
+  # provider key, OpenCode's pay-as-you-go models), and the row holds the
+  # cost. The model is the one the session runs: a config option (opencode),
+  # else the adapter's current model, else the configured one.
   defp record_usage(state, usage) when is_map(usage) do
-    model = state.config_model || Map.get(state, :current_model)
+    model =
+      ledger_model(
+        state.config,
+        state.config_model || Map.get(state, :current_model) || Map.get(state.config, "model")
+      )
 
     Compos.Core.LLMUsage.record(
       model,
@@ -630,13 +638,36 @@ defmodule Compos.Core.Agent.Backend.ACP do
         "cache_creation_input_tokens" => acp_int(usage, "cachedWriteTokens")
       },
       Map.get(state.config, "slug"),
-      billed: false
+      billed: not subscription?(state.config, model)
     )
 
     state
   end
 
   defp record_usage(state, _), do: state
+
+  # An adapter can report a bare id that the catalog files under its
+  # provider (dsh: "deepseek-v4-pro"). The connector's 'price-provider names
+  # that provider, so the row reads "deepseek:deepseek-v4-pro".
+  defp ledger_model(config, model) when is_binary(model) do
+    provider = Map.get(config, "price-provider")
+
+    if is_binary(provider) and not String.contains?(model, [":", "/"]),
+      do: provider <> ":" <> model,
+      else: model
+  end
+
+  defp ledger_model(_config, model), do: model
+
+  defp subscription?(config, model) do
+    with pattern when is_binary(pattern) <- Map.get(config, "subscription"),
+         true <- is_binary(model),
+         {:ok, re} <- Regex.compile(pattern) do
+      Regex.match?(re, model)
+    else
+      _ -> false
+    end
+  end
 
   defp acp_int(map, key) do
     case Map.get(map, key) do

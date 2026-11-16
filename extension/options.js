@@ -14,6 +14,17 @@ async function load() {
   $("scanFrom").value = s.scanFrom;
   $("scanTo").value = s.scanTo;
   $("keys").checked = s.keys;
+
+  // the name is this profile's own, so it lives in local, not sync
+  const { profileName = "" } = await chrome.storage.local.get("profileName");
+  $("profileName").value = profileName;
+  try {
+    const p = await chrome.runtime.sendMessage({ cmd: "profile" });
+    const email = p?.ok && p.result?.email;
+    $("email").textContent = email ? `: ${email}` : " — none here, so the name below is used";
+  } catch {
+    /* worker asleep */
+  }
 }
 
 async function save() {
@@ -25,6 +36,7 @@ async function save() {
       return m && Number(m[2]) >= 1 && Number(m[2]) <= 65535;
     });
 
+  await chrome.storage.local.set({ profileName: $("profileName").value.trim() });
   await chrome.storage.sync.remove("ports");
   await chrome.storage.sync.set({
     daemons,

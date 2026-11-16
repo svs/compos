@@ -58,6 +58,41 @@ async function settings() {
   return s;
 }
 
+// --- which profile ---------------------------------------------------------
+//
+// One extension runs per Chrome profile, and each opens its own socket, so
+// the daemon needs to be told which profile a socket is. chrome.identity
+// lives only here in the worker (page JS cannot reach it, and MV3 will not
+// evaluate code sent at runtime). The signed-in email names the profile and
+// its id is the stable key; a profile signed into no account, and Firefox,
+// fall back to the name set in options, kept per profile in storage.local.
+
+async function profile() {
+  let email = "";
+  let id = "";
+  try {
+    const u = await chrome.identity?.getProfileUserInfo?.({ accountStatus: "ANY" });
+    email = u?.email || "";
+    id = u?.id || "";
+  } catch {
+    /* no identity API here */
+  }
+  const { profileName = "", profileKey } = await chrome.storage.local.get(["profileName", "profileKey"]);
+  // no account id: a random key made once stands in, so the profile still
+  // has a key that survives restarts
+  let key = id || profileKey;
+  if (!key) {
+    key = crypto.randomUUID();
+    await chrome.storage.local.set({ profileKey: key });
+  }
+  return { email, id: key, name: profileName.trim(), label: email || profileName.trim() || key.slice(0, 8) };
+}
+
+// a new name in options reaches every daemon at once
+chrome.storage.local.onChanged.addListener((changes) => {
+  if (changes.profileName) for (const c of conns.values()) c.sendProfile();
+});
+
 // --- one daemon ------------------------------------------------------------
 
 class Conn {
@@ -84,6 +119,9 @@ class Conn {
       for (const w of [...connWaiters]) w(this);
       clearInterval(this.heart);
       this.heart = setInterval(() => this.post({ op: "ping" }), HEARTBEAT_MS);
+      // which Chrome profile this is: the daemon sees one connection per
+      // profile and could not otherwise tell them apart
+      this.sendProfile();
       // a fresh daemon knows nothing about our windows; tell it at once, so
       // the first tab it opens already lands beside the frame that asked
       announceAll().catch(() => {});
@@ -115,6 +153,13 @@ class Conn {
 
   post(msg) {
     if (this.up) this.ws.send(JSON.stringify(msg));
+  }
+
+  /** tell the daemon which profile this connection is */
+  sendProfile() {
+    profile()
+      .then((p) => this.post({ event: "profile", ...p }))
+      .catch(() => {});
   }
 
   /** send a line to the daemon's log — see below for why */
@@ -1016,6 +1061,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     }
 
     if (msg.cmd === "settings") return settings();
+
+    if (msg.cmd === "profile") return profile();
 
     // an compos page telling us which frame it is
     if (msg.cmd === "register") {

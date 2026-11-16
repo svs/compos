@@ -436,6 +436,57 @@ defmodule Compos.ChromeTest do
     end
   end
 
+  # One extension per Chrome profile, each on its own socket. Each says which
+  # profile it is; a call can name the profile, and a tabs reply says whose.
+  describe "profiles" do
+    defp profile_socket(tag) do
+      test = self()
+
+      pid =
+        spawn_link(fn ->
+          recv = fn recv ->
+            receive do
+              {:browser_send, text} ->
+                send(test, {:frame, tag, Jason.decode!(text)})
+                recv.(recv)
+            end
+          end
+
+          recv.(recv)
+        end)
+
+      Browser.attach(pid)
+      on_exit(fn -> Browser.detach(pid) end)
+      pid
+    end
+
+    test "each socket's profile is listed, a call reaches the profile it names, and tabs say whose" do
+      a = profile_socket(:a)
+      b = profile_socket(:b)
+
+      for {pid, email, id} <- [{a, "a@svs.io", "111"}, {b, "b@svs.io", "222"}] do
+        Browser.incoming(pid, Jason.encode!(%{event: "profile", email: email, id: id, name: "", label: email}))
+      end
+
+      eventually(fn -> Enum.map(Browser.profiles(), & &1["id"]) |> Enum.sort() == ["111", "222"] end)
+
+      me = self()
+      Browser.call("tabs", %{"profile" => "111"}, &send(me, {:reply, &1}))
+      # attaching may warm a tabs call of its own; ours is the one naming 111
+      assert_receive {:frame, :a, %{"op" => "tabs", "profile" => "111", "id" => id}}
+      refute_received {:frame, :b, %{"profile" => "111"}}
+
+      Browser.incoming(a, Jason.encode!(%{id: id, ok: true, result: %{tabs: [%{id: 5, window: 9}]}}))
+      assert_receive {:reply, {:ok, r}}
+      assert r["profile"] == "a@svs.io"
+      assert r["profile-id"] == "111"
+      assert [%{"profile" => "a@svs.io"}] = r["tabs"]
+
+      Browser.detach(a)
+      eventually(fn -> Enum.map(Browser.profiles(), & &1["id"]) == ["222"] end)
+    end
+  end
+
   describe "scheme_to_json" do
     test "a plist becomes an object, a plain list an array" do
       assert Session.scheme_to_json([{:sym, "a"}, 1, {:sym, "b"}, 2]) == %{"a" => 1, "b" => 2}

@@ -55,6 +55,15 @@ defmodule Compos.Core.Browser do
   def connected?, do: GenServer.call(__MODULE__, :connected?)
 
   @doc """
+  One map per connected extension, the newest first: the Chrome profile it
+  runs in as the extension reported it — `"id"` (the stable key),
+  `"email"`, `"name"` and `"label"` — or only `"connected"` for an
+  extension too old to say. Pass `"profile" => ID` in a call's args to send
+  it to that profile.
+  """
+  def profiles, do: GenServer.call(__MODULE__, :profiles)
+
+  @doc """
   Send OP with ARGS; CALLBACK gets `{:ok, result}` or `{:error, message}`.
   FRAME is the compos frame that asked, so a call that names no tab or window
   goes to the extension that frame's editor page lives in.
@@ -77,6 +86,7 @@ defmodule Compos.Core.Browser do
       frames: %{},
       pending: %{},
       probes: %{},
+      profiles: %{},
       next_id: 1,
       handler: nil
     }
@@ -84,10 +94,12 @@ defmodule Compos.Core.Browser do
 
   # A daemon that reloads this module keeps the one-socket state it started
   # with. Carry that socket over rather than crash the bridge.
-  defp norm(%{socks: _, probes: _} = state), do: state
-  defp norm(%{socks: _} = state), do: Map.put(state, :probes, %{})
+  defp norm(state), do: state |> norm_socks() |> Map.put_new(:profiles, %{})
 
-  defp norm(%{sock: sock} = old) do
+  defp norm_socks(%{socks: _, probes: _} = state), do: state
+  defp norm_socks(%{socks: _} = state), do: Map.put(state, :probes, %{})
+
+  defp norm_socks(%{sock: sock} = old) do
     pending = Map.new(old.pending, fn {id, {cb, timer}} -> {id, {cb, timer, sock}} end)
 
     %{
@@ -103,6 +115,12 @@ defmodule Compos.Core.Browser do
   def handle_call(:connected?, _from, state) do
     state = norm(state)
     {:reply, state.socks != [], state}
+  end
+
+  def handle_call(:profiles, _from, state) do
+    state = norm(state)
+    list = Enum.map(state.socks, fn s -> Map.get(state.profiles, s, %{"connected" => true}) end)
+    {:reply, list, state}
   end
 
   @impl true
@@ -185,6 +203,13 @@ defmodule Compos.Core.Browser do
 
         {:noreply, state}
 
+      # which Chrome profile this socket is, sent on connect and again when
+      # its name changes in the extension's options
+      {:ok, %{"event" => "profile"} = msg} ->
+        p = Map.take(msg, ["id", "email", "name", "label"])
+        Logger.info("browser: profile #{p["label"]} (#{p["id"]})")
+        {:noreply, if(from, do: put_in(state.profiles[from], p), else: state)}
+
       # a reply to something we asked
       {:ok, %{"id" => id, "ok" => _} = msg} ->
         {:noreply, resolve(state, id, reply_of(msg))}
@@ -241,13 +266,33 @@ defmodule Compos.Core.Browser do
         windows: keep.(state.windows),
         tabs: keep.(state.tabs),
         frames: keep.(state.frames),
+        profiles: Map.delete(state.profiles, pid),
         pending: Map.new(rest)
     }
   end
 
-  # The tab, then the window, then the frame's own editor page, then the
-  # profile the editor registered from, then the newest.
+  # The profile the call names, then the tab, then the window, then the
+  # frame's own editor page, then the profile the editor registered from,
+  # then the newest.
   defp route(state, args, fid) do
+    by_profile(state, args) || route_owned(state, args, fid)
+  end
+
+  # the socket of the profile ARGS name: by id, email, name or label
+  defp by_profile(state, args) do
+    case arg(args, "profile") do
+      p when is_binary(p) and p != "" ->
+        Enum.find(state.socks, fn s ->
+          prof = Map.get(state.profiles, s, %{})
+          p in [prof["id"], prof["email"], prof["name"], prof["label"]]
+        end)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp route_owned(state, args, fid) do
     owner = fn map, key ->
       case arg(args, key) do
         nil -> nil
@@ -262,8 +307,13 @@ defmodule Compos.Core.Browser do
       List.first(state.socks)
   end
 
-  # the tab and window ARGS name that no live extension is known to own
+  # the tab and window ARGS name that no live extension is known to own;
+  # a call that names a connected profile owns nothing to look for
   defp unowned(state, args) do
+    if by_profile(state, args), do: [], else: unowned_ids(state, args)
+  end
+
+  defp unowned_ids(state, args) do
     for {key, map} <- [{"tab", state.tabs}, {"window", state.windows}],
         v = arg(args, key),
         v not in [nil, false],
@@ -398,10 +448,36 @@ defmodule Compos.Core.Browser do
           {:error, e} -> Logger.warning("browser <= FAILED: #{e}")
         end
 
+        reply = with_profile(reply, Map.get(state.profiles, sock))
         run(fn -> callback.(reply) end)
         learn_reply(%{state | pending: rest}, sock, reply)
     end
   end
+
+  # A list of tabs or windows says which profile it came from, on the reply
+  # and on each item, so a caller that merges every profile's lists can
+  # still tell them apart.
+  defp with_profile({:ok, %{} = r}, %{} = p) when map_size(p) > 0 do
+    label = p["label"]
+    tag = fn
+      %{} = item -> Map.put(item, "profile", label)
+      other -> other
+    end
+
+    r =
+      Enum.reduce(["tabs", "windows"], r, fn key, acc ->
+        case acc[key] do
+          list when is_list(list) -> Map.put(acc, key, Enum.map(list, tag))
+          _ -> acc
+        end
+      end)
+
+    if Map.has_key?(r, "tabs") or Map.has_key?(r, "windows"),
+      do: {:ok, Map.merge(r, %{"profile" => label, "profile-id" => p["id"]})},
+      else: {:ok, r}
+  end
+
+  defp with_profile(reply, _profile), do: reply
 
   # Anything touching Scheme runs off this process. Doing it inline would
   # serialise the bridge behind the interpreter, and a crash here trips the

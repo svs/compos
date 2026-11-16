@@ -85,6 +85,14 @@ defmodule Compos.Core.Browser.Prims do
        "(browser-connected?) — return #t when a browser extension is connected."} => fn [] ->
         Compos.Core.Browser.connected?()
       end,
+      # One per connected extension, newest first: the Chrome profile it runs
+      # in. M-x browsers asks each profile by its id rather than guessing
+      # from window ids, which change on every Chrome restart.
+      {"browser-profiles",
+       "(browser-profiles) — one plist per connected Chrome profile: 'id 'email 'name 'label; pass 'profile ID to browser-call to reach one."} =>
+        fn [] ->
+          Compos.Core.Browser.profiles() |> Enum.map(&Compos.Core.LLM.json_to_scheme/1)
+        end,
       # A chord arriving from a tab goes through the same dispatcher the GUI
       # uses. It has to run OFF this process: KeyDispatch calls back into
       # Session, and calling it from inside Session would deadlock — hence the

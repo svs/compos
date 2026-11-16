@@ -415,6 +415,30 @@
     (customize-save! 'theme-monospace (not theme-monospace))
     (message (if theme-monospace "Monospace everywhere" "Theme fonts"))))
 
+;; theme-follow-system: the browser tells the system's light or dark
+;; appearance when it connects and when it changes, and the theme goes to
+;; its canonical light or dark variant (theme-variant).
+(define *system-dark* 'unknown)
+
+(domain! 'faces)
+(effects! '(write display))
+(define (system-appearance! dark?)
+  "the system appearance is dark (DARK? #t) or light; the theme follows when theme-follow-system is on"
+  (set! *system-dark* (and dark? #t))
+  (when theme-follow-system (theme-brightness! *system-dark*)))
+
+(define (theme-follow-system--set! on)
+  (when (and on (boolean? *system-dark*)) (theme-brightness! *system-dark*)))
+
+(defcustom 'theme-follow-system #t
+  "Use the system's light or dark appearance: the theme changes to its light or dark variant when the system does."
+  'group 'faces 'type 'boolean 'set theme-follow-system--set!)
+
+(effects! '(read))
+(define (system-dark?)
+  "#t when the system appearance is dark, #f when light, 'unknown before a browser tells it"
+  *system-dark*)
+
 ;; effects stamps for the names declared above without one, so
 ;; eval-scheme-read takes or refuses them by what they do
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write display)))

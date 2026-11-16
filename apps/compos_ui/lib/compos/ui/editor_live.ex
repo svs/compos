@@ -345,6 +345,15 @@ defmodule Compos.Ui.EditorLive do
   end
 
   # a client's JS failure, reported by the root hook: one line in *Messages*
+  # appearance.js: the system's light or dark appearance, on connect and on change
+  def handle_event("appearance", %{"dark" => dark}, socket) when is_boolean(dark) do
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.Session.call_named("system-appearance!", [dark])
+    end)
+
+    {:noreply, socket}
+  end
+
   def handle_event("client_error", %{"m" => m}, socket) when is_binary(m) do
     Compos.Core.Session.call_named("message", ["browser: " <> String.slice(m, 0, 500)])
     {:noreply, socket}

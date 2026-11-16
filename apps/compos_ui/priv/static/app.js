@@ -3459,6 +3459,9 @@
         window.addEventListener("error", this.jsErrH);
         window.addEventListener("unhandledrejection", this.jsErrH);
 
+        // the system's light or dark appearance, for theme-follow-system
+        if (window.composAppearance) window.composAppearance.watch(this);
+
         // wheel scrolls the server-side viewport of the hovered window
         // (falling back to the active one) — batched to one round-trip
         // per animation frame. Raw wheel events fire at native OS

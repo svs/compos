@@ -2263,10 +2263,10 @@
     (when (assoc n *themes*) (theme--put! n (cadr pick)))))
 
 ;; light-theme and dark-theme. A theme is dark by its own default
-;; background, as theme-dark? reads the theme on screen. The other theme of
-;; a family shares its name without -dark, -night or -light: paper-night
-;; and paper, compos-dark and compos. A theme with no such pair goes to the
-;; light or dark theme used last, else the first one there is.
+;; background, as theme-dark? reads the theme on screen. Every theme has a
+;; canonical light and dark variant: define-theme-pair! names them for a
+;; family (paper and paper-night). A theme in no pair is its own variant
+;; for its brightness; paper and paper-night stand in for the other.
 (define (theme-named-dark? name)
   (let* ((spec (assoc 'default (theme-faces name)))
          (bg (and spec (plist-get (cdr spec) 'bg))))
@@ -2275,32 +2275,62 @@
          (< (+ (* (theme--hex-byte bg 1) 299) (* (theme--hex-byte bg 3) 587) (* (theme--hex-byte bg 5) 114))
             128000))))
 
-(define (theme--stem name)
-  (let loop ((sfx '("-dark" "-night" "-light")))
-    (cond ((null? sfx) name)
-          ((string-suffix? (car sfx) name)
-           (substring name 0 (- (string-length name) (string-length (car sfx)))))
-          (else (loop (cdr sfx))))))
+(define (theme--dark? name) (if (theme-named-dark? name) #t #f))
+
+;; *theme-pairs*: ((LIGHT . DARK) ...), the canonical pair of each family
+(define *theme-pairs* '())
+
+(define (define-theme-pair! light dark)
+  (set! *theme-pairs*
+        (cons (cons light dark)
+              (filter (lambda (p) (not (or (member (car p) (list light dark))
+                                           (member (cdr p) (list light dark)))))
+                      *theme-pairs*))))
+
+(define-theme-pair! "paper" "paper-night")
+(define-theme-pair! "compos" "compos-dark")
+(define-theme-pair! "dos" "dos-dark")
+
+;; the canonical light (DARK? #f) or dark (DARK? #t) theme of NAME: its
+;; pair, else NAME itself when it already is that, else paper or paper-night
+(define (theme-variant name dark?)
+  (let ((pair (find (lambda (p) (or (equal? (car p) name) (equal? (cdr p) name))) *theme-pairs*)))
+    (cond (pair (if dark? (cdr pair) (car pair)))
+          ((and name (assoc name *themes*) (eq? (theme--dark? name) dark?)) name)
+          (dark? "paper-night")
+          (else "paper"))))
+
+;; (TO . FROM): the last brightness switch. Switching back from TO goes to
+;; FROM, so a theme with no pair is not lost on a round trip.
+(define *theme-return* #f)
 
 (define (theme-for-brightness dark?)
-  (let* ((current (theme-current))
-         (fits (filter (lambda (n) (equal? (and (theme-named-dark? n) #t) dark?)) (theme-names)))
-         (pair (and current
-                    (find (lambda (n) (equal? (theme--stem n) (theme--stem current))) fits))))
-    (or pair
-        (find (lambda (n) (member n fits)) (history-order 'theme (theme-names)))
-        (and (pair? fits) (car fits)))))
+  (let ((current (theme-current)))
+    (if (and (pair? *theme-return*)
+             (equal? (car *theme-return*) current)
+             (assoc (cdr *theme-return*) *themes*)
+             (eq? (theme--dark? (cdr *theme-return*)) dark?))
+        (cdr *theme-return*)
+        (theme-variant current dark?))))
 
-(define (theme--switch-brightness! dark?)
-  (let ((name (theme-for-brightness dark?)))
-    (cond ((not name) (message (if dark? "No dark theme" "No light theme")))
-          ((equal? name (theme-current)) (message (string-append "Already on " name)))
-          (else (history-push! 'theme name) (load-theme name)))))
+(define (theme--switch-brightness! dark? &optional quiet)
+  (let ((current (theme-current))
+        (name (theme-for-brightness dark?)))
+    (if (equal? name current)
+        (unless quiet (message (string-append "Already on " name)))
+        (begin
+          (set! *theme-return* (cons name current))
+          (history-push! 'theme name)
+          (load-theme name)))))
 
-(define-command "light-theme" "Switch to a light theme: this theme's light pair, else the light one used last"
+;; the theme goes to its light or dark variant, with no message when it
+;; already is one: what theme-follow-system calls
+(define (theme-brightness! dark?) (theme--switch-brightness! (and dark? #t) #t))
+
+(define-command "light-theme" "Switch to this theme's canonical light variant"
   (lambda () (theme--switch-brightness! #f)))
 
-(define-command "dark-theme" "Switch to a dark theme: this theme's dark pair, else the dark one used last"
+(define-command "dark-theme" "Switch to this theme's canonical dark variant"
   (lambda () (theme--switch-brightness! #t)))
 
 (catalog-meta! 'command "light-theme" 'domain 'faces 'effects '(write) 'aliases "light mode day mode bright theme")
@@ -2361,6 +2391,12 @@
 (for-each (lambda (name) (catalog-meta! 'function name 'domain 'faces 'effects '(read)))
           '("face-attribute" "face-list" "style-css"))
 (public! 'theme-names "(theme-names) -> the names of every defined theme, in registry order")
+(public! 'define-theme-pair! "(define-theme-pair! LIGHT DARK) — the canonical light and dark themes of one family")
+(public! 'theme-variant "(theme-variant NAME DARK?) -> NAME's canonical dark (DARK? #t) or light theme: its pair, else NAME when it already is that, else paper or paper-night")
+(public! 'theme-brightness! "(theme-brightness! DARK?) — load the current theme's canonical dark or light variant, quietly when it already is one")
+(catalog-meta! 'function "define-theme-pair!" 'domain 'faces 'effects '(write))
+(catalog-meta! 'function "theme-variant" 'domain 'faces 'effects '(read))
+(catalog-meta! 'function "theme-brightness!" 'domain 'faces 'effects '(write display))
 (catalog-meta! 'function "theme-names" 'domain 'faces 'effects '(read))
 
 ;; effects stamps for the names declared above without one, so

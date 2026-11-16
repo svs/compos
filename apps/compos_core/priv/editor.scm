@@ -383,6 +383,8 @@
                    fn0)))
          (opts (if spec0 (cddr rest) (cdr rest)))
          (modes (let ((m (memq 'modes opts))) (and m (pair? (cdr m)) (cadr m))))
+         ;; 'public #t: offered everywhere when command-public-only is on
+         (public (let ((m (memq 'public opts))) (and m (pair? (cdr m)) (cadr m))))
          ;; 'show PROC: run from M-x, the command hands the function's
          ;; answer to PROC, the echo a code caller does not want
          (show (let ((m (memq 'show opts))) (and m (pair? (cdr m)) (cadr m))))
@@ -406,6 +408,8 @@
     (when modes
       (set! *command-modes*
             (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
+    (when (and public (not (member name *command-public*)))
+      (set! *command-public* (cons name *command-public*)))
     (set! *command-generation* (+ *command-generation* 1))
     (let ((bound (command--bind! name (command--callable name spec fn) entry fn)))
       (catalog-register! 'command name doc
@@ -5929,6 +5933,12 @@
 ;; commands are offered in the app alone, its entry command everywhere
 ;; (apps.scm). M-x and the palette ask command-applicable?, and
 ;; command-mode-scoping #f turns it off.
+;;
+;; With command-public-only on, a package's command that names no modes
+;; is private: offered only where its package's modes are on or a map of
+;; the buffer binds it. Public without a mark: the editor's own commands,
+;; mode toggles, app entries, commands the global map binds, and commands
+;; marked with define-command's 'public #t or command-public!.
 
 ;; NAMES less every name in GONE, sorted: one sort, not a member scan per
 ;; name. A name in GONE sorts before the same name in NAMES.
@@ -5952,6 +5962,63 @@
     (or (buffer-derived-mode? buf m)
         (member (string-append m "-map") maps))))
 
+;; kept across a reload of this file: packages mark their commands once
+(define *command-public* (if (boundp '*command-public*) *command-public* '()))
+(define *command--private* (list #f '()))
+
+(define (command-public! &rest names)
+  (for-each (lambda (n)
+              (unless (member n *command-public*)
+                (set! *command-public* (cons n *command-public*))))
+            (if (and (pair? names) (pair? (car names))) (car names) names))
+  (set! *command-generation* (+ *command-generation* 1))
+  names)
+
+;; the private commands as ((NAME MODES) ...), MODES its package's modes;
+;; built once for each set of commands and catalog
+(define (command--private-rows names)
+  (let ((key (list *command-generation* (length names)
+                   (if (boundp 'catalog-generation) (catalog-generation) 0))))
+    (if (equal? (car *command--private*) key)
+        (cadr *command--private*)
+        (let* ((cat (if (boundp 'catalog) (catalog) '()))
+               (pkg-modes (fold (lambda (acc e)
+                                  (if (equal? (plist-get e 'kind) "mode")
+                                      (let* ((p (plist-get e 'package)) (row (assoc p acc)))
+                                        (cons (list p (cons (plist-get e 'name) (if row (cadr row) '())))
+                                              (remove (lambda (r) (equal? (car r) p)) acc)))
+                                      acc))
+                                '() cat))
+               (scopes (if (boundp 'app-command-scopes) (app-command-scopes names) '()))
+               (open (append (map car *command-modes*) *command-public*
+                             (map car scopes)
+                             (if (boundp '*app-entries*) *app-entries* '())
+                             (command--map-commands "global")))
+               (rows (filter (lambda (e)
+                               (let ((n (plist-get e 'name)))
+                                 (and (equal? (plist-get e 'kind) "command")
+                                      (not (equal? (plist-get e 'namespace) "core"))
+                                      (plist-get e 'package)
+                                      (not (string-suffix? "-mode" n))
+                                      (not (command-internal? n)))))
+                             cat))
+               (keep (names-less (map (lambda (e) (plist-get e 'name)) rows) open))
+               (private (map (lambda (n)
+                               (let* ((e (find (lambda (e) (equal? (plist-get e 'name) n)) rows))
+                                      (row (assoc (plist-get e 'package) pkg-modes)))
+                                 (list n (if row (cadr row) '()))))
+                             keep)))
+          (set! *command--private* (list key private))
+          private))))
+
+(define (command--private-out buf names open maps)
+  (if (and (boundp 'command-public-only) command-public-only)
+      (map car (remove (lambda (row)
+                         (or (member (car row) open)
+                             (any (lambda (m) (command--mode-on? m buf maps)) (cadr row))))
+                       (command--private-rows names)))
+      '()))
+
 (define (commands-out-of-scope buf &optional names)
   (if (and (boundp 'command-mode-scoping) (not command-mode-scoping))
       '()
@@ -5965,6 +6032,7 @@
                                      *command-modes*))))
         ;; an app's commands are offered in the app alone (apps.scm)
         (append named
+                (command--private-out buf (or names (command-names)) open maps)
                 (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open names) '())))))
 
 (define (command-applicable? name &optional buf)
@@ -6069,7 +6137,8 @@
         (if (boundp '*app-entries*) (length *app-entries*) 0)
         (if (boundp '*list-modes*) (length *list-modes*) 0)
         (length (hook-functions 'candidate-face))
-        (and (boundp 'command-mode-scoping) command-mode-scoping))))
+        (and (boundp 'command-mode-scoping) command-mode-scoping)
+        (and (boundp 'command-public-only) command-public-only))))
 
 (define (command-rows)
   (let* ((buf (current-buffer))
@@ -6113,6 +6182,11 @@
   "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as define-command's 'modes and Emacs's (interactive nil MODE ...) do; '() offers it in every buffer")
 (public! 'command-modes-add!
   "(command-modes-add! NAME MODE) -- add MODE to the modes that offer command NAME; for a generated command a package binds in each mode it sets up")
+(public! 'command-public!
+  "(command-public! NAME ...) or (command-public! '(NAME ...)) -- offer these commands in M-x everywhere when command-public-only is on, as define-command's 'public #t does")
+(public! 'command-private-rows
+  "(command-private-rows) -- the commands command-public-only hides outside their package's modes, as ((NAME MODES) ...)")
+(define (command-private-rows) (command--private-rows (command-names)))
 (public! 'command-applicable?
   "(command-applicable? NAME [BUF]) -- #t when command NAME is for BUF: no modes, or one of its modes is on there")
 (public! 'commands-out-of-scope

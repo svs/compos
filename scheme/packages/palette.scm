@@ -381,6 +381,144 @@
   "M-x and the palette offer a mode's commands only in its buffers, as Emacs does with (interactive nil MODE). A command names its modes where it is defined, with define-command's 'modes; a command with none is offered everywhere."
   'group 'interaction)
 
+(defcustom 'command-public-only #t
+  "M-x and the palette offer a package's command outside its package's modes only when it is public: marked with define-command's 'public #t or command-public!, bound in the global map, a mode, or an app's entry. The editor's own commands are public. A hidden command still runs when you type its whole name."
+  'group 'interaction)
+
+;; M-x's public commands: with command-public-only on, a package's command
+;; is offered outside its package's modes only when it is here, marked with
+;; define-command's 'public #t, or bound in the global map. Move a mark to
+;; its definition when you touch the package.
+(command-public!
+ '("llm-models-refresh" "chat-finder" "chats-start-all" "chats-stop-all"
+   "chats-watch" "chats-kill-runtime" "agents-deny" "group-sandbox"
+   "agent-switch" "chat-open-children" "amazon" "amazon-search" "anon-add"
+   "anon-forget" "app-watch" "text-scale-reset" "text-scale-reset-all"
+   "toggle-theme-monospace" "ui-scale-decrease" "ui-scale-increase"
+   "ui-scale-reset" "app-layout" "app-move-to-group" "app-pull-from-group"
+   "app-swap-windows" "app-hide-detail-buffers" "save-buffer-anyway"
+   "bookmark-bmenu-list" "bookmark-delete" "bookmark-insert"
+   "bookmark-insert-location" "bookmark-jump-last" "bookmark-jump-other-window"
+   "bookmark-load" "bookmark-rename" "bookmark-save" "bookmark-write"
+   "build-info" "calendar" "calendar-add-event" "calendar-sync" "llm-costs"
+   "llm-send-to" "list-tabs" "switch-to-tab" "code-browse" "shell"
+   "comint-shell" "tail-file" "opencode" "compile" "recompile"
+   "apropos-components" "component-gallery" "cron-list" "customize"
+   "customize-save-variable" "customize-set-variable" "describe-variable"
+   "diff-show" "doom" "doom-install" "doom-lite" "fast-code" "fast-learned"
+   "fast-toggle" "git-diff" "google-account" "google-compose" "google-connect"
+   "google-disconnect" "goto-address-at-point" "insert-file-link"
+   "graphql-endpoints" "graphql-query" "group-config" "group-cwd"
+   "group-reload-config" "chat-load-config" "buffer-new" "buffer-magic-group"
+   "group-chat" "group-home" "group-next-buffer" "group-previous-buffer"
+   "group-revive" "group-take" "group-dissolve" "pull-buffer-here"
+   "frame-rename" "frame-isolate" "scene" "mode-consolidate"
+   "describe-buffer-locals" "apropos-rebuild-embeddings" "herdr"
+   "graveyard-sweep" "history-sweep-redundant" "html-edit" "http"
+   "image-generate" "insta" "replace-string" "jev" "jev-apropos" "chat-changes"
+   "jj-push" "jj-recheck" "laya-server" "laya-server-stop" "chat-tools"
+   "group-llm" "llm-catalog-refresh" "llm-catalog-status" "llm-prompt-sections"
+   "lsp-diagnostics-list" "lsp-hover" "lsp-status" "chat-tool-list"
+   "mcp-status" "llm-set-preset" "llm-set-preset-once" "llm-unset-preset"
+   "list-migrations" "mode-list" "buffer-switcher" "local-models"
+   "buffer-movie" "needle-index" "needle-server" "needle-server-stop"
+   "onboarding" "package-develop" "package-freeze" "package-install"
+   "package-list" "package-pr" "package-thaw" "reload-file" "reload-scheme"
+   "pane-menu" "pane-switch-buffer" "pane-home-new-chat" "windows-list-ring"
+   "layout-redo" "layout-undo" "buffer-pop" "column-add" "column-remove"
+   "layout-backward" "layout-forward" "pane-add" "unsplit"
+   "window-layout-columns" "window-layout-halves" "window-layout-single"
+   "window-layout-two-chat" "window-layout-two-pane" "pdf-open"
+   "sync-buffer-with-peer" "perf" "popper-toggle" "insert-document-link"
+   "preview-font-toggle" "dired-in-group" "find-file-in-new-group"
+   "project-switch-project-in-group" "chat-show-prompt" "chat-refresh-prompt"
+   "px0" "recording-start" "compos-check-update" "compos-update"
+   "release-build-and-install" "release-install" "repl" "scheme-repl"
+   "definition-go" "scratch-new" "screenshot-frame" "screenshot-window"
+   "screenshot-pick" "screenshot-path" "screenshot-clear" "screenshot-target"
+   "screenshot-highlight" "setup-ai-guide" "setup-bootstrap-gemini" "setup-bot"
+   "setup-install-connector" "setup-report" "setup-secrets" "setup-teach-code"
+   "setup-teach-keys" "setup-welcome" "compos-home" "setup" "setup-inference"
+   "setup-learning-space" "setup-reset" "chat-show-skills" "slides-new"
+   "slides-edit" "slides-present" "slides-demo" "spotify" "spotify-now-playing"
+   "spotify-play-pause" "spotify-search" "spreadsheet-open" "subagents"
+   "substack" "substack-open" "switch-to-buffer" "client-memory"
+   "run-package-tests" "run-scheme-tests" "dark-theme" "light-theme"
+   "load-theme" "title-server" "training-bot" "training-guide"
+   "travel-load-voyage" "travel-new-voyage" "ts-grammars" "ts-install-grammar"
+   "tutorial" "toggle-frame-fullscreen" "vscode-chats" "vscode-llm"
+   "vscode-llm-advanced" "browse" "browse-other-window" "webhook-define"
+   "webhook-delete" "buffer-next-pane" "buffer-previous-pane" "delete-frame"
+   "next-pane" "previous-pane" "quit-window" "reset-layout" "winner-redo"
+   "winner-undo" "debug-last-window-movement" "debug-window-movements"
+   "window-rename" "workspace-cancel" "workspace-init" "workspace-manage"
+   "workspace-new" "count-words" "write" "writing-layout"))
+
+;; commands whose package has no mode of its own; they work in these
+(command-modes! "chat-compact" '(chat-mode))
+(command-modes! "chat-cwd" '(chat-mode))
+(command-modes! "chat-heal" '(chat-mode))
+(command-modes! "chat-refresh-tools" '(chat-mode))
+(command-modes! "chat-restore" '(chat-mode))
+(command-modes! "chat-retitle" '(chat-mode))
+(command-modes! "buffer-summary-log" '(chat-mode))
+(command-modes! "agent-interrupt-send" '(chat-mode))
+(command-modes! "chat-abort" '(chat-mode))
+(command-modes! "chat-dismiss" '(chat-mode))
+(command-modes! "agent-verbosity-info" '(chat-mode))
+(command-modes! "agent-verbosity-log" '(chat-mode))
+(command-modes! "agent-verbosity-summary" '(chat-mode))
+(command-modes! "html-element-backward" '(html-mode html-edit-mode))
+(command-modes! "html-element-beginning" '(html-mode html-edit-mode))
+(command-modes! "html-element-child" '(html-mode html-edit-mode))
+(command-modes! "html-element-children-fold" '(html-mode html-edit-mode))
+(command-modes! "html-element-clone" '(html-mode html-edit-mode))
+(command-modes! "html-element-content-select" '(html-mode html-edit-mode))
+(command-modes! "html-element-down" '(html-mode html-edit-mode))
+(command-modes! "html-element-end" '(html-mode html-edit-mode))
+(command-modes! "html-element-fold" '(html-mode html-edit-mode))
+(command-modes! "html-element-forward" '(html-mode html-edit-mode))
+(command-modes! "html-element-kill" '(html-mode html-edit-mode))
+(command-modes! "html-element-kill-sexp" '(html-mode html-edit-mode))
+(command-modes! "html-element-mark-sexp" '(html-mode html-edit-mode))
+(command-modes! "html-element-move-down" '(html-mode html-edit-mode))
+(command-modes! "html-element-move-up" '(html-mode html-edit-mode))
+(command-modes! "html-element-next" '(html-mode html-edit-mode))
+(command-modes! "html-element-parent" '(html-mode html-edit-mode))
+(command-modes! "html-element-previous" '(html-mode html-edit-mode))
+(command-modes! "html-element-raise" '(html-mode html-edit-mode))
+(command-modes! "html-element-rename" '(html-mode html-edit-mode))
+(command-modes! "html-element-select" '(html-mode html-edit-mode))
+(command-modes! "html-element-tab" '(html-mode html-edit-mode))
+(command-modes! "html-element-unfold-all" '(html-mode html-edit-mode))
+(command-modes! "html-element-up" '(html-mode html-edit-mode))
+(command-modes! "html-element-vanish" '(html-mode html-edit-mode))
+(command-modes! "html-element-wrap" '(html-mode html-edit-mode))
+(command-modes! "html-indent-buffer" '(html-mode html-edit-mode))
+(command-modes! "html-indent-line" '(html-mode html-edit-mode))
+(command-modes! "html-indent-region" '(html-mode html-edit-mode))
+(command-modes! "html-tag-beginning" '(html-mode html-edit-mode))
+(command-modes! "html-tag-end" '(html-mode html-edit-mode))
+(command-modes! "html-tag-match" '(html-mode html-edit-mode))
+(command-modes! "html-tag-next" '(html-mode html-edit-mode))
+(command-modes! "html-tag-previous" '(html-mode html-edit-mode))
+(command-modes! "html-tag-select" '(html-mode html-edit-mode))
+(command-modes! "html-check" '(html-mode html-edit-mode))
+(command-modes! "morg-reply-answer" '(morg-mode))
+(command-modes! "morg-reply-copy" '(morg-mode))
+(command-modes! "morg-reply-dismiss" '(morg-mode))
+(command-modes! "morg-reply-edit" '(morg-mode))
+(command-modes! "morg-reply-fold" '(morg-mode))
+(command-modes! "morg-reply-narrow" '(morg-mode))
+(command-modes! "morg-reply-next" '(morg-mode))
+(command-modes! "morg-reply-previous" '(morg-mode))
+(command-modes! "morg-reply-rewrite" '(morg-mode))
+(command-modes! "morg-reply-split" '(morg-mode))
+(command-modes! "morg-execute-block" '(morg-mode))
+(command-modes! "morg-show-source" '(morg-mode))
+(command-modes! "browse-learn-parser" '(browse-mode))
+
+
 (defcustom 'command-palette-decide-backend 'jev
   "What picks the command for words you type in the palette: jev asks JEV; model asks the command-palette-pick-role model; local asks the small model on this machine (do-endpoint)."
   'group 'interaction)

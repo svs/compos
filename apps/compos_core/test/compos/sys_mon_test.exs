@@ -88,6 +88,20 @@ defmodule Compos.Core.SysMonTest do
     GenServer.stop(pid)
   end
 
+  test "the ETS tables come back largest first, each with its owner, rows and bytes" do
+    table = :ets.new(:sys_mon_test_ets, [:named_table, :public])
+    for i <- 1..1000, do: :ets.insert(table, {i, String.duplicate("x", 100)})
+
+    rows = SysMon.ets(1000)
+    assert {":sys_mon_test_ets", owner, 1000, bytes} =
+             Enum.find(rows, fn {name, _, _, _} -> name == ":sys_mon_test_ets" end)
+
+    assert is_binary(owner) and bytes > 0
+    sizes = Enum.map(rows, &elem(&1, 3))
+    assert sizes == Enum.sort(sizes, :desc)
+    assert length(SysMon.ets(3)) == 3
+  end
+
   test "process info reads one process and kill ends it" do
     pid = spawn(fn -> receive do: (:never -> :ok) end)
     text = pid |> :erlang.pid_to_list() |> to_string()

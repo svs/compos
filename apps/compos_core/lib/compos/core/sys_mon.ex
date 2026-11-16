@@ -195,7 +195,8 @@ defmodule Compos.Core.SysMon do
       case :ets.info(table) do
         info when is_list(info) ->
           owner = info[:owner]
-          owner_info = Process.info(owner, @info_keys) || []
+          # @info_keys is defined below this function, so name the keys here
+          owner_info = Process.info(owner, [:registered_name, :initial_call]) || []
           [{inspect(info[:name]), process_name(owner, owner_info), info[:size], info[:memory] * word}]
 
         _ ->

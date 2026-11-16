@@ -615,6 +615,8 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone")
 (public! 'vm-roots
   "(vm-roots) — the Scheme values that Elixir holds as GC roots, grouped by kind, largest first: a list of (KIND COUNT BYTES LARGEST-KEY)")
+(public! 'vm-ets
+  "(vm-ets [LIMIT]) — the ETS tables that hold the most memory, largest first: a list of (NAME OWNER ROWS BYTES)")
 (public! 'perf-refresh!
   "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
 (for-each

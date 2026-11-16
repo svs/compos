@@ -220,10 +220,13 @@
                      (symbol->string name) " = "
                      (value->string (plist-get d 'value))
                      " — " (or (plist-get d 'doc) "undocumented"))))))))
+(catalog-meta! 'command "describe-variable" 'domain 'customize 'effects '(read display))
 
 ;; the supported customize surface
 (category! 'customize)
 (domain! 'customize)
+(effects! '(read display))
+(public! 'describe-variable "(describe-variable) — pick a variable and echo its value and documentation")
 (effects! '(write))
 (public! 'defcustom "(defcustom 'name DEFAULT DOC 'group G 'type T) — declare a customizable variable")
 (public! 'customize-save! "(customize-save! 'name VALUE) — set + persist to custom.scm")

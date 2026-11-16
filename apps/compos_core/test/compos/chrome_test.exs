@@ -351,6 +351,24 @@ defmodule Compos.ChromeTest do
       assert eval!("(chrome-window)") == "91"
     end
 
+    # a page stuck in a send loop once queued 275,000 of these; the bridge
+    # now answers a registration that already stands without running it again
+    test "a repeated registration is answered without piling up" do
+      stub_socket()
+      frame = this_frame()
+
+      for id <- 100..399, do: request(id, "register", %{"frame" => frame, "window" => 91})
+      for id <- 100..399, do: assert_receive({:frame, %{"id" => ^id, "ok" => true}}, 5000)
+
+      assert eval!("(chrome-window)") == "91"
+      assert :sys.get_state(Browser).inflight == %{}
+
+      # a different window is a new binding, and still runs
+      request(400, "register", %{"frame" => frame, "window" => 93})
+      assert_receive {:frame, %{"id" => 400, "ok" => true}}, 2000
+      assert eval!("(chrome-window)") == "93"
+    end
+
     test "a key pressed in a page binds the window too" do
       stub_socket()
 

@@ -987,10 +987,24 @@ function editorFor(windowId) {
 // page has no window on the daemon side, so the answer to "open this link"
 // used to land in whichever window Chrome focused last. Tell it at register
 // time instead, and again whenever a daemon connects.
+//
+// One announcement per binding per connection, not one per caller: anything
+// that asks again within ANNOUNCE_QUIET_MS for what this socket was already
+// told is dropped here. A loop upstream once sent the daemon a thousand of
+// these a second. A new socket is a daemon that knows nothing, so it is told.
+const ANNOUNCE_QUIET_MS = 5000;
+const announced = new Map(); // `${conn.key}|${windowId}` -> { frame, ws, at }
+
 function announce(windowId, frame) {
   if (!frame) return;
+  const now = Date.now();
   for (const c of conns.values()) {
-    if (c.up) c.ask("register", { frame, window: windowId }).catch(() => {});
+    if (!c.up) continue;
+    const key = `${c.key}|${windowId}`;
+    const last = announced.get(key);
+    if (last && last.frame === frame && last.ws === c.ws && now - last.at < ANNOUNCE_QUIET_MS) continue;
+    announced.set(key, { frame, ws: c.ws, at: now });
+    c.ask("register", { frame, window: windowId }).catch(() => {});
   }
 }
 

@@ -32,6 +32,15 @@ defmodule Compos.Core.Browser do
 
   @timeout 30_000
 
+  # Requests one extension may have running in Scheme at once. Past this the
+  # bridge answers "busy" rather than queue: a page stuck in a send loop once
+  # put 275,000 requests in this mailbox and 20 GB behind them.
+  @max_inflight 64
+
+  # How long a registration stands before the same one is run again. The page
+  # re-registers on every visibility change, so a stale binding heals itself.
+  @register_ttl 10_000
+
   def start_link(_ \\ []), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   @doc "The transport process claims the bridge on connect."
@@ -87,6 +96,9 @@ defmodule Compos.Core.Browser do
       pending: %{},
       probes: %{},
       profiles: %{},
+      inflight: %{},
+      registered: %{},
+      shed_at: nil,
       next_id: 1,
       handler: nil
     }
@@ -94,7 +106,14 @@ defmodule Compos.Core.Browser do
 
   # A daemon that reloads this module keeps the one-socket state it started
   # with. Carry that socket over rather than crash the bridge.
-  defp norm(state), do: state |> norm_socks() |> Map.put_new(:profiles, %{})
+  defp norm(state) do
+    state
+    |> norm_socks()
+    |> Map.put_new(:profiles, %{})
+    |> Map.put_new(:inflight, %{})
+    |> Map.put_new(:registered, %{})
+    |> Map.put_new(:shed_at, nil)
+  end
 
   defp norm_socks(%{socks: _, probes: _} = state), do: state
   defp norm_socks(%{socks: _} = state), do: Map.put(state, :probes, %{})
@@ -188,6 +207,17 @@ defmodule Compos.Core.Browser do
     end
   end
 
+  # A request's task has ended: free its slot, and settle a registration.
+  defp cast({:served, sock, reg, ok}, state) do
+    inflight =
+      case Map.get(state.inflight, sock, 0) do
+        n when n > 1 -> Map.put(state.inflight, sock, n - 1)
+        _ -> Map.delete(state.inflight, sock)
+      end
+
+    {:noreply, settle(%{state | inflight: inflight}, sock, reg, ok)}
+  end
+
   defp cast({:incoming, from, text}, state) do
     state = if from, do: adopt(state, from, :oldest), else: state
 
@@ -217,7 +247,7 @@ defmodule Compos.Core.Browser do
       # a request from the browser
       {:ok, %{"id" => id, "op" => op} = msg} ->
         state = if from, do: learn_request(state, from, op, msg), else: state
-        {:noreply, serve_request(state, from, id, op, msg)}
+        {:noreply, admit(state, from, id, op, msg)}
 
       _ ->
         {:noreply, state}
@@ -267,6 +297,8 @@ defmodule Compos.Core.Browser do
         tabs: keep.(state.tabs),
         frames: keep.(state.frames),
         profiles: Map.delete(state.profiles, pid),
+        inflight: Map.delete(state.inflight, pid),
+        registered: state.registered |> Enum.reject(fn {_f, {s, _w, _at}} -> s == pid end) |> Map.new(),
         pending: Map.new(rest)
     }
   end
@@ -373,6 +405,70 @@ defmodule Compos.Core.Browser do
 
   # --- inbound ---------------------------------------------------------------
 
+  # What a request costs is decided here, in the bridge, before anything is
+  # spawned: a registration that already stands is answered at once, and a
+  # socket with too much running is told so.
+  defp admit(%{handler: nil} = state, from, id, op, msg),
+    do: serve_request(state, from, id, op, msg)
+
+  defp admit(state, from, id, op, msg) do
+    sock = answer_to(state, from)
+
+    cond do
+      op == "register" and registered?(state, sock, msg) ->
+        push(sock, %{"id" => id, "ok" => true, "result" => %{"ok" => true}})
+        state
+
+      Map.get(state.inflight, sock, 0) >= @max_inflight ->
+        push(sock, %{"id" => id, "ok" => false, "error" => "daemon busy: too many browser requests running"})
+        shed(state, op, msg)
+
+      true ->
+        serve_request(state, from, id, op, msg)
+    end
+  end
+
+  # the same frame, window and socket, running now or done a moment ago
+  defp registered?(state, sock, msg) do
+    window = msg["window"]
+
+    case Map.get(state.registered, msg["frame"]) do
+      {^sock, ^window, at} ->
+        at == :pending or System.monotonic_time(:millisecond) - at < @register_ttl
+
+      _ ->
+        false
+    end
+  end
+
+  defp settle(state, _sock, nil, _ok), do: state
+
+  defp settle(state, sock, {frame, window}, ok) do
+    case Map.get(state.registered, frame) do
+      {^sock, ^window, :pending} when ok ->
+        put_in(state.registered[frame], {sock, window, System.monotonic_time(:millisecond)})
+
+      {^sock, ^window, :pending} ->
+        %{state | registered: Map.delete(state.registered, frame)}
+
+      _ ->
+        state
+    end
+  end
+
+  # one line a second at most: the flood this guards against is the last
+  # thing the log needs a copy of
+  defp shed(state, op, msg) do
+    now = System.monotonic_time(:millisecond)
+
+    if state.shed_at == nil or now - state.shed_at >= 1_000 do
+      Logger.warning("browser: shedding requests, #{@max_inflight} already running (#{op} frame=#{msg["frame"] || "-"})")
+      %{state | shed_at: now}
+    else
+      state
+    end
+  end
+
   defp serve_request(%{handler: nil} = state, from, id, _op, _msg) do
     push(answer_to(state, from), %{
       "id" => id,
@@ -395,23 +491,41 @@ defmodule Compos.Core.Browser do
     fid = msg["frame"]
     Logger.info("browser <- #{op} #{brief(args)} frame=#{fid || "-"}")
 
-    run(fn ->
-      reply =
-        case Session.call_fn(handler, [op, Compos.Core.LLM.json_to_scheme(args)], fid, "browser #{op}") do
-          {:ok, value} ->
-            result = Session.scheme_to_json(value)
-            Logger.info("browser -> #{op} ok #{brief(result)}")
-            %{"id" => id, "ok" => true, "result" => result}
+    reg = if op == "register" and is_binary(fid), do: {fid, msg["window"]}
 
-          {:error, reason} ->
-            Logger.warning("browser -> #{op} FAILED: #{reason}")
-            %{"id" => id, "ok" => false, "error" => reason}
+    run(fn ->
+      ok =
+        try do
+          reply =
+            case Session.call_fn(handler, [op, Compos.Core.LLM.json_to_scheme(args)], fid, "browser #{op}") do
+              {:ok, value} ->
+                result = Session.scheme_to_json(value)
+                Logger.info("browser -> #{op} ok #{brief(result)}")
+                %{"id" => id, "ok" => true, "result" => result}
+
+              {:error, reason} ->
+                Logger.warning("browser -> #{op} FAILED: #{reason}")
+                %{"id" => id, "ok" => false, "error" => reason}
+            end
+
+          push(sock, reply)
+          reply["ok"]
+        catch
+          kind, err ->
+            Logger.error("browser task #{kind}: #{inspect(err)}")
+            false
         end
 
-      push(sock, reply)
+      # the slot comes back however the task ended
+      GenServer.cast(__MODULE__, {:served, sock, reg, ok})
     end)
 
-    state
+    state = update_in(state.inflight, &Map.update(&1, sock, 1, fn n -> n + 1 end))
+
+    case reg do
+      {frame, window} -> put_in(state.registered[frame], {sock, window, :pending})
+      nil -> state
+    end
   end
 
   # the socket that asked, else the one calls go to

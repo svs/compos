@@ -153,7 +153,12 @@ defmodule Compos.Scheme.Eval do
 
   defp comp([{:sym, "lambda"}, params | body], sc) do
     params = param_names!(params)
-    {:lambda, params, code(params, body, sc)}
+
+    case code(params, body, sc) do
+      # a lambda in a lexical body names the locals it reads: see captured/2
+      {:lcode, _, _, _} = code when is_map(sc) -> {:lambda, params, code, captured(code, sc)}
+      code -> {:lambda, params, code}
+    end
   end
 
   # a lexical closure never assigns its own locals: those stay in frames
@@ -211,6 +216,25 @@ defmodule Compos.Scheme.Eval do
   defp clause([test | body], sc), do: {compile(test, sc), seq(body, sc)}
   # the walker refused a clause only when cond reached it
   defp clause(other, _sc), do: {:fail, %Error{message: "bad cond clause: #{inspect(other)}"}, []}
+
+  # The slots of SC that the compiled body reads. A lexical closure keeps
+  # its locals by value, so a closure that kept every visible local kept
+  # the accumulator of the loop that made it: each closure in a list held
+  # the list before it. The term then doubled in size with each element
+  # for every walk, copy, and send: 34 closures froze a key for 30 seconds.
+  defp captured({:lcode, body, _source, _slots}, sc) do
+    outer = Map.new(sc, fn {_name, slot} -> {slot, true} end)
+    for {slot, true} <- lvars(body, %{}), is_map_key(outer, slot), do: slot
+  end
+
+  defp lvars({:lvar, slot}, acc), do: Map.put(acc, slot, true)
+  defp lvars({:quote, _form}, acc), do: acc
+  defp lvars({:fail, _error, _stack}, acc), do: acc
+  # the third element is the source of the body: it holds no compiled node
+  defp lvars({:lcode, body, _source, _slots}, acc), do: lvars(body, acc)
+  defp lvars(node, acc) when is_tuple(node), do: node |> Tuple.to_list() |> lvars(acc)
+  defp lvars([head | tail], acc), do: lvars(tail, lvars(head, acc))
+  defp lvars(_leaf, acc), do: acc
 
   defp bindings(bindings), do: Enum.unzip(Enum.map(bindings, fn [{:sym, n}, form] -> {n, form} end))
   defp seq(forms, sc \\ :dyn), do: Enum.map(forms, &compile(&1, sc))
@@ -304,6 +328,12 @@ defmodule Compos.Scheme.Eval do
 
   defp run({:quote, form}, _env, store), do: {form, store}
   defp run({:lambda, params, code}, env, store), do: {{:closure, params, code, env}, store}
+
+  # KEEP is the locals the body reads (see captured/2): the closure takes those
+  defp run({:lambda, params, code, keep}, {:lex, vars, ref}, store),
+    do: {{:closure, params, code, {:lex, Map.take(vars, keep), ref}}, store}
+
+  defp run({:lambda, params, code, _keep}, env, store), do: {{:closure, params, code, env}, store}
 
   defp run({:define, name, value}, env, store) do
     {val, store} = run(value, env, store)

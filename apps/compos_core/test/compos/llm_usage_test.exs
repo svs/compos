@@ -51,6 +51,14 @@ defmodule Compos.LLMUsageTest do
     assert_in_delta LLMUsage.cost("anthropic:claude-sonnet-5", openai), 1000 * p.input / 1_000_000, 1.0e-9
   end
 
+  test "an adapter's provider/model id prices as provider:model" do
+    assert ModelCatalog.price("opencode/claude-sonnet-5") ==
+             ModelCatalog.price("opencode:claude-sonnet-5")
+
+    assert ModelCatalog.price("opencode/claude-sonnet-5") != nil
+    assert ModelCatalog.price("no-such-provider/no-such-model") == nil
+  end
+
   # Only the provider adapter knows whether input_tokens already includes
   # the cached tokens. A usage map carrying its own cost wins.
   test "a usage map's own cost beats the catalog" do

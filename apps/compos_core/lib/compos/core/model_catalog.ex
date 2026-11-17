@@ -392,8 +392,20 @@ defmodule Compos.Core.ModelCatalog do
           not is_binary(spec) -> {:error, :unknown_model}
           byte_size(spec) == 0 -> {:error, :unknown_model}
           String.contains?(spec, ":") -> {:error, :unknown_model}
+          String.contains?(spec, "/") -> slash_model(spec)
           true -> bare_model(spec)
         end
+    end
+  end
+
+  # An ACP adapter names a model "provider/model" (opencode:
+  # "opencode/claude-sonnet-5"). The catalog files it as "provider:model".
+  defp slash_model(spec) do
+    [provider, id] = String.split(spec, "/", parts: 2)
+
+    case LLMDB.model(provider <> ":" <> id) do
+      {:ok, _} = ok -> ok
+      _ -> bare_model(spec)
     end
   end
 

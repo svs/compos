@@ -1509,6 +1509,9 @@
 (catalog-meta! 'function "subagent-gone?" 'domain 'chat 'effects '(read))
 (catalog-meta! 'function "subagent-record!" 'domain 'chat 'effects '(write))
 (catalog-meta! 'function "subagent-cache-rebuild!" 'domain 'chat 'effects '(write))
+(public! 'subagent-live-buffer
+  "(subagent-live-buffer CHAT) - the open buffer of a spawned chat, given its slug or buffer; #f when it is not open")
+(catalog-meta! 'function "subagent-live-buffer" 'domain 'chat 'effects '(read))
 
 ;;; --- the result ---------------------------------------------------------------
 ;;;

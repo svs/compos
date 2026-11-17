@@ -19,19 +19,26 @@
         (string-append root "/scheme/stdlib")
         (string-append (compos-priv-dir) "/stdlib"))))
 
+(domain! 'system)
+(effects! '(read))
 (define (stdlib-dirs)
   "every package directory of the standard library"
   (map (lambda (e) (string-append stdlib-root "/" (substring (plist-get e 'name) 0 (- (string-length (plist-get e 'name)) 1))))
        (filter (lambda (e) (and (equal? (plist-get e 'type) "directory")
                                 (not (string-prefix? "." (plist-get e 'name)))))
                (ls stdlib-root))))
+(public! 'stdlib-dirs "(stdlib-dirs)\nEvery package directory of the standard library.")
 
 (for-each (lambda (d) (unless (member d load-path) (set! load-path (append load-path (list d)))))
           (stdlib-dirs))
 
 ;; the stock set, in load order: (FEATURE) or (FEATURE "dir/file.scm")
 (define stdlib-stock
-  '((chrome)
+  '(;; the page anchors every app reads by; core's lists and components call it once booted
+    (anchor)
+    ;; files that change on disk come back into their buffers
+    (autorevert)
+    (chrome)
     (chat-mode)
     (isearch)
     (visual-line)
@@ -81,6 +88,7 @@
     (cua)
     (vscode)
     (app-watch)
+    (app-registry)
     (occur)
     (paredit)
     (project)
@@ -103,6 +111,8 @@
     (tree-edit)
     (worktrees)
     (content-scale)
+    ;; PDF files read and edited by their structure
+    (pdf)
     (morg-tangle "morg/morg-tangle.scm")
     (morg-show-source "morg/morg-show-source.scm")))
 

@@ -1,4 +1,8 @@
-;;; packages.scm --- M-x packages: every package, its tier, its requires and its tier breaks.
+;;; packages.scm --- M-x packages: every package, where it lives, whether it is loaded, its tier and its tier breaks.
+;;;
+;;; The tabs split the packages by where they live: packages (scheme/packages,
+;;; the clones and the user's own), stdlib (scheme/stdlib) and core (priv and
+;;; scheme/core). l loads the package at point and k unloads it.
 ;;;
 ;;; v0 of the packages app in docs/FURTHER READING/internal/proposals/PACKAGES.md.
 ;;; The tier of a package comes from the assignment table in that document,
@@ -8,12 +12,19 @@
 ;;; init.scm is the boot manifest, not a package: its requires do not count.
 
 (require 'tabulated-list)
+(require 'package-manager)
 
 (domain! 'packages)
 (effects! '(pure))
 
 (define *packages-buffer* "*packages*")
 (define *packages-tiers* '("installed" "core" "standard" "community" "personal" "dev" "unassigned"))
+(define *packages-sections* '("packages" "stdlib" "core"))
+;; feature -> the global names its load through this app made
+(defcustom 'packages-sources '("compos-dev")
+  "Where M-x packages finds packages to install, in order: a GitHub org or user, whose compos-NAME repos are the packages NAME, or OWNER/REPO for one repo. compos-dev is the default source; M-x packages-add-source adds your own.")
+(define packages--source-cache #f)
+(define packages--defs '())
 ;; core by rule: priv/editor.scm, priv/core.scm and the manifest
 (define packages--kernel '("editor" "core" "init"))
 (define packages--manifests '("init"))
@@ -73,7 +84,7 @@
 (define (packages--name rel)
   "the package name of a source path: its path under scheme/packages, scheme/apps or priv, without .scm"
   (let ((bare (substring rel 0 (- (string-length rel) 4))))
-    (let loop ((roots '("scheme/packages/" "scheme/apps/" "scheme/dev/" "scheme/core/" "apps/compos_core/priv/")))
+    (let loop ((roots '("scheme/packages/" "scheme/stdlib/" "scheme/apps/" "scheme/dev/" "scheme/core/" "apps/compos_core/priv/")))
       (cond ((null? roots) bare)
             ((string-prefix? (car roots) bare) (substring bare (string-length (car roots)) (string-length bare)))
             (else (loop (cdr roots)))))))
@@ -89,6 +100,19 @@
 
 (define (packages--top name)
   (let ((i (string-index name "/"))) (if i (substring name 0 i) name)))
+
+(define (packages--section row)
+  "where ROW's package belongs: core (priv, scheme/core, or the core tier of PACKAGES.md), stdlib (scheme/stdlib or the standard tier) or packages"
+  (let ((file (or (plist-get row 'file) "")) (name (plist-get row 'name)) (tier (plist-get row 'tier)))
+    (cond ((or (member name packages--kernel)
+               (equal? tier "core")
+               (string-contains? file "/apps/compos_core/priv/")
+               (string-contains? file "/scheme/core/"))
+           "core")
+          ((or (equal? tier "standard") (string-contains? file "/scheme/stdlib/")) "stdlib")
+          (else "packages"))))
+
+(define (packages--feature row) (string->symbol (packages--base (plist-get row 'name))))
 
 (define (packages--tier-of name table)
   (let ((e (or (assoc name table) (assoc (packages--top name) table))))
@@ -153,8 +177,10 @@
                                 (project-files root))
                         '()))
          ;; (FILE NAME): the checkout's sources, then the standard packages' clone
-         (sources (append (map (lambda (rel) (list (string-append root "/" rel) (packages--name rel))) rels)
-                          (packages--standard-sources)))
+         (std (packages--standard-sources))
+         (sources (append (filter (lambda (src) (not (assoc (car src) std)))
+                                  (map (lambda (rel) (list (string-append root "/" rel) (packages--name rel))) rels))
+                          std))
          (raw (map (lambda (src)
                      (let ((text (read-file (car src))) (name (cadr src)))
                        (list 'name name 'file (car src) 'tier (packages--tier-of name table)
@@ -193,11 +219,14 @@
 (define (packages--installed-rows)
   "a row per installed package with its git state and open PRs; the id keeps it apart from a checkout file of the same name"
   (map (lambda (n)
-         (let ((dir (package-directory n)))
+         (let* ((dir (package-directory n))
+                (git (package-git-status n)))
            (list 'id (string-append "installed:" n) 'name n 'tier "installed"
+                 'repo (let ((u (and git (plist-get git 'url)))) (and (string? u) (package-github-repo u)))
                  'file (string-append dir "/" n ".scm") 'dir dir
                  'requires '() 'required-by '() 'breaks '()
-                 'git (package-git-status n) 'prs (package-prs n))))
+                 'git git 'prs (package-prs n)
+                 'dev (let ((d (assoc n package-develop-directories))) (and d (cadr d))))))
        (package-installed)))
 
 (define (packages--git-text row)
@@ -226,10 +255,73 @@
                                       fresh))
                         acc))))))
 
-(define (packages-list)
-  "(packages-list) -- the installed clones, the user's personal packages, then every package as packages-scan gives it, from the last scan"
+(define (packages--parse-source source json)
+  "the package rows SOURCE's gh answer JSON offers: a list of repos for an org, one repo for OWNER/REPO"
+  (let* ((one? (string-index source "/"))
+         (x (ignore-errors (lambda () (json-parse json))))
+         (repos (cond ((not x) '()) (one? (list x)) ((list? x) x) (else '()))))
+    (filter (lambda (r) r)
+      (map (lambda (r)
+             (let ((repo (plist-get r 'name)))
+               (and (string? repo) (not (eq? (plist-get r 'isArchived) #t))
+                    (or one? (string-prefix? "compos-" repo))
+                    (let ((name (if (string-prefix? "compos-" repo) (substring repo 7 (string-length repo)) repo))
+                          (full (if one? source (string-append source "/" repo))))
+                      (list 'id (string-append "source:" full) 'name name 'tier "available" 'section "packages"
+                            'source source 'repo full 'file #f
+                            'description (let ((d (plist-get r 'description))) (if (string? d) d ""))
+                            'requires '() 'required-by '() 'breaks '())))))
+           repos))))
+
+(define (packages--parse-sources out)
+  "the rows of every source in OUT, the answer of packages--fetch-sources!: one @@source SOURCE line before each gh answer"
+  (apply append
+    (map (lambda (part)
+           (let ((nl (string-index part "\n")))
+             (if (not nl) '()
+                 (let ((source (string-trim (substring part 0 nl))))
+                   (if (member source packages-sources)
+                       (packages--parse-source source (substring part (+ nl 1) (string-length part)))
+                       '())))))
+         (string-split out "@@source "))))
+
+(define (packages--pinned-rows)
+  "the packages init.scm and packages.lock name, as rows a source offers: they come first, so a pin wins over an org"
+  (let ((row (lambda (name url source)
+               (let ((repo (and (string? url) (package-github-repo url))))
+                 (and repo (list 'id (string-append "source:" repo) 'name name 'tier "available" 'section "packages"
+                                 'source source 'repo repo 'file #f 'description ""
+                                 'requires '() 'required-by '() 'breaks '()))))))
+    (filter (lambda (r) r)
+            (append (map (lambda (r) (row (car r) (package-recipe-url (cdr r)) "init.scm")) package--recipes)
+                    (map (lambda (p) (row (car p) (cadr p) "packages.lock")) (package-lock))))))
+
+(define (packages--source-rows have)
+  "what the sources offer, from the last fetch, less the names in HAVE; the first source that offers a name wins"
+  (unless packages--source-cache
+    (let ((c (cache-get 'packages "sources")))
+      (when (string? c) (set! packages--source-cache (packages--parse-sources c)))))
+  (let loop ((rs (append (packages--pinned-rows) (or packages--source-cache '()))) (seen have) (acc '()))
+    (cond ((null? rs) (reverse acc))
+          ((member (plist-get (car rs) 'name) seen) (loop (cdr rs) seen acc))
+          (else (loop (cdr rs) (cons (plist-get (car rs) 'name) seen) (cons (car rs) acc))))))
+
+(define (packages-available? row)
+  "(packages-available? ROW) -- #t when ROW is a package a source offers and this machine does not have"
+  (equal? (plist-get row 'tier) "available"))
+
+(define (packages--all)
+  "the installed clones, the user's personal packages, then every package as packages-scan gives it, each with its section, from the last scan"
   (or packages--scan-cache
-      (begin (set! packages--scan-cache (append (packages--installed-rows) (packages--personal-rows) (packages-scan))) packages--scan-cache)))
+      (begin (set! packages--scan-cache
+                   (map (lambda (r) (append r (list 'section (packages--section r))))
+                        (let ((here (append (packages--installed-rows) (packages--personal-rows) (packages-scan))))
+                          (append here (packages--source-rows (map (lambda (r) (packages--base (plist-get r 'name))) here))))))
+             packages--scan-cache)))
+
+(define (packages-loaded? row)
+  "(packages-loaded? ROW) -- #t when ROW's package is loaded now"
+  (if (featurep (packages--feature row)) #t #f))
 
 (define (packages-tier-breaks)
   "(packages-tier-breaks) -- every require that breaks the tier rules as a plist: from from-tier to to-tier feature file line"
@@ -239,7 +331,7 @@
                                   'to (plist-get b 'target) 'to-tier (plist-get b 'tier)
                                   'feature (plist-get b 'feature) 'file (plist-get p 'file) 'line (plist-get b 'line)))
                 (plist-get p 'breaks)))
-         (packages-list))))
+         (packages--all))))
 
 ;;; the listing
 
@@ -250,30 +342,37 @@
   (string-append (string-upcase (substring tier 0 1)) (substring tier 1 (string-length tier))))
 
 (define (packages--imenu-rows buf)
-  "one imenu row per package, its tier the kind: imenu has a tab for each tier"
+  "one imenu row per package, its section the kind: imenu has a tab for each section"
   (with-current-buffer buf
     (lambda ()
       (let loop ((os (list-offsets buf)) (es (list-entries buf)) (acc '()))
         (if (or (null? os) (null? es)) (reverse acc)
             (loop (cdr os) (cdr es)
                   (if (packages--sep? (car es)) acc
-                      (cons (list (line-number-at-pos (car os)) (packages--tab-name (plist-get (car es) 'tier)) (plist-get (car es) 'name)
+                      (cons (list (line-number-at-pos (car os)) (packages--tab-name (plist-get (car es) 'section)) (plist-get (car es) 'name)
                                   (if (null? (plist-get (car es) 'breaks)) "" (string-append "breaks: " (packages--break-text (car es)))))
                             acc))))))))
 
 (define (packages--rows buf)
   ;; the list draws from here, so the buffer takes its imenu here too
   (buffer-set-local! buf 'imenu-index-function 'packages--imenu-rows)
-  ;; a row is a plist that starts 'id NAME, so term order sorts by name
-  (let ((ps (sort (packages-list))))
+  ;; by name; the id breaks a tie, as a clone and a checkout file can share a name
+  (let ((ps (map caddr (sort (map (lambda (r) (list (plist-get r 'name) (plist-get r 'id) r)) (packages--all))))))
     (apply append
-      (map (lambda (tier)
-             (let ((in (filter (lambda (r) (equal? (plist-get r 'tier) tier)) ps)))
+      (map (lambda (group)
+             (let* ((title (car group))
+                    (in (filter (lambda (r) (and (equal? (plist-get r 'section) (cadr group))
+                                                 (eq? (packages-available? r) (caddr group))))
+                                ps)))
                (if (null? in) '()
-                   (cons (list 'kind "sep" 'id (string-append "sep:" tier)
-                               'title (string-append tier "  ·  " (number->string (length in))))
+                   (cons (list 'kind "sep" 'id (string-append "sep:" title) 'section (cadr group)
+                               'title (string-append title "  ·  " (number->string (length in))
+                                                     (if (caddr group) "  ·  from " "  ·  ")
+                                                     (if (caddr group) (string-join packages-sources ", ")
+                                                         (string-append (number->string (length (filter packages-loaded? in))) " loaded"))))
                          in))))
-           *packages-tiers*))))
+           ;; (TITLE SECTION AVAILABLE?): what is here, by section, then what the sources offer
+           '(("packages" "packages" #f) ("available" "packages" #t) ("stdlib" "stdlib" #f) ("core" "core" #f))))))
 
 (define (packages--count xs) (if (pair? xs) (number->string (length xs)) ""))
 
@@ -282,18 +381,26 @@
                                      (plist-get row 'breaks)))
                ", "))
 
+(define (packages--state-cell row)
+  (cond ((packages-loaded? row) (list "loaded" "success"))
+        ((packages-available? row) (list "get" "link"))
+        (else (list "-" "shadow"))))
+
 (define (packages--cells buf row)
   (if (packages--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "")
-      (list (plist-get row 'name) (plist-get row 'tier)
+      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "" "" "")
+      (list (plist-get row 'name) (or (plist-get row 'source) (plist-get row 'section))
+            (packages--state-cell row)
+            (plist-get row 'tier)
             (packages--count (plist-get row 'requires)) (packages--count (plist-get row 'required-by))
             (packages--git-text row) (packages--count (plist-get row 'prs))
             (if (null? (plist-get row 'breaks)) "" (list (packages--break-text row) "warning")))))
 
 (define (packages--narrow-cells buf row)
   (if (packages--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "")
+      (list (list (plist-get row 'title) "list-section-name") "" "")
       (list (plist-get row 'name)
+            (packages--state-cell row)
             (if (null? (plist-get row 'breaks)) "" (list (packages--break-text row) "warning")))))
 
 ;;; the page
@@ -338,13 +445,24 @@
          (head (let ((n (line! name)))
                  (stop (component 'ui/title (list 'text name 'badge tier 'tone (packages--tone tier))) "Title" n n)))
          (meta (component 'ui/meta
-                 (list 'segs (list (list "" (string-append "requires " (number->string (length reqs))))
+                 (list 'segs (list (cond ((packages-loaded? row) '("c-ok" "loaded"))
+                                         ((packages-available? row) (list "c-accent" (string-append "available from " (plist-get row 'source))))
+                                         (else '("c-dim" "not loaded")))
+                                   (list "c-sep" (string-append "  ·  " (plist-get row 'section) "  ·  "))
+                                   (list "" (string-append "requires " (number->string (length reqs))))
                                    '("c-sep" "  ·  ") (list "" (string-append "required by " (number->string (length by))))
                                    '("c-sep" "  ·  ") (list (if (null? breaks) "c-ok" "c-warn")
                                                              (if (null? breaks) "no tier breaks"
                                                                  (string-append (number->string (length breaks)) " tier breaks")))))))
          (actions (component 'ui/actions
-                    (list 'actions (append (list (list "packages-source" "Source" "v"))
+                    (list 'actions (append (if (equal? (plist-get row 'section) "core") '()
+                                               (cond ((packages-loaded? row) (list (list "packages-unload" "Unload" "k" "bad")))
+                                                     ((packages-available? row) (list (list "packages-load" "Install" "l" "good")))
+                                                     (else (list (list "packages-load" "Load" "l" "good")))))
+                                           (if (and (equal? (plist-get row 'tier) "installed") (not (plist-get row 'dev)))
+                                               (list (list "packages-uninstall" "Uninstall" "d" "bad")) '())
+                                           (if (plist-get row 'repo) (list (list "packages-open-repo" "GitHub ↗" "o")) '())
+                                           (if (plist-get row 'file) (list (list "packages-source" "Source" "v")) '())
                                          (if (plist-get row 'git) (list (list "packages-pr" "Send upstream" "P")) '())
                                          (list (list "packages-refresh" "Scan again" "g"))))))
          (break-part (if (null? breaks) '() (list (part (count "Tier breaks" breaks) "Break" (map req-row breaks)))))
@@ -353,10 +471,10 @@
                           (list 'title "About"
                                 'body (list (component 'ui/kv
                                               (list 'pairs (list (list "Tier" tier)
-                                                                 (list "Source" (plist-get row 'file))
-                                                                 (list "Role" (if (plist-get row 'manifest)
-                                                                                  "the boot manifest: its requires do not count"
-                                                                                  "package"))))))))
+                                                                 (list "Source" (or (plist-get row 'file) (string-append "github.com/" (plist-get row 'repo))))
+                                                                 (list "Role" (cond ((plist-get row 'manifest) "the boot manifest: its requires do not count")
+                                                                                    ((let ((d (plist-get row 'description))) (and (string? d) (not (equal? d "")) d)))
+                                                                                    (else "package")))))))))
                         "About" n n)))
          (git (plist-get row 'git))
          (kv-row (lambda (k v) (cons (string-append k "  " v)
@@ -419,7 +537,7 @@
       (unless (minor-mode-on? buf "anchor-mode") (enable-minor-mode! buf "anchor-mode"))
       (anchor-sync! buf)
       (buffer-set-local! buf 'footer-line-blocks
-        (list (component 'ui/keys-bar (list 'main '(("v" "source") ("P" "send upstream") ("g" "scan again") ("q" "quit"))))))
+        (list (component 'ui/keys-bar (list 'main '(("l" "load/install") ("k" "unload") ("d" "uninstall") ("o" "github") ("v" "source") ("P" "send upstream") ("g" "scan again") ("q" "quit"))))))
       (buffer-set-read-only! buf #t)
       (display-buffer-detail! buf list-buf))))
 
@@ -433,44 +551,46 @@
 (define-list-mode! "packages-mode"
   (list
     'doc (string-append
-           "Every package of the compos checkout by tier: core, standard, community, dev and unassigned, and on top the installed clones with their git state (branch +ahead -behind ~changed files) and open PRs; P sends a clone's changes upstream as a PR. "
-           "as the assignment table in PACKAGES.md puts them. A row shows how many packages it requires, "
-           "how many require it, and its tier breaks: each require of a package of a lower tier. "
-           "The tabs across the top keep one tier, the packages with tier breaks, or all; left and right step them. Moving the point shows the package's page beside the list. RET or v visits the source, "
-           "/ narrows the rows (tier:core, breaks:NAME), g scans again, q quits.")
+           "Every package by where it lives: packages (scheme/packages, the installed clones and your own), stdlib (scheme/stdlib) and core (priv and scheme/core). "
+           "The tabs across the top are all, packages, stdlib and core; left and right step them. "
+           "A row shows whether the package is loaded, its tier from PACKAGES.md, how many packages it requires and how many require it, its git state and open PRs, and its tier breaks. "
+           "Below what is here, available lists what the sources offer: packages-sources holds the GitHub orgs, users and OWNER/REPO repos to read, compos-dev by default; a adds a source of your own and R removes one. Packages init.scm or packages.lock name and this machine lacks show there too. l on an available package installs it: clones, loads, adds its use-package line to init.scm; d uninstalls an installed clone: drops that line and its pin and trashes the clone; o opens the repo on GitHub. "
+           "l loads the package at point and k unloads it: its FEATURE-unload-function runs, its commands, catalog entries and names go, and the feature is forgotten. Core cannot be unloaded. "
+           "Moving the point shows the package's page beside the list. RET or v visits the source, P sends a clone's changes upstream as a PR, "
+           "/ narrows the rows (state:loaded, tier:core, breaks:NAME), g scans again, q quits.")
     'buffer *packages-buffer*
     'transient #f
     'plain #t
     ;; the list keeps the rows of the tab and of / itself
     'local-filter #t
     ;; tabs across the top: one per tier, the breaks, then all with the tier sections
-    'tabs (append (map (lambda (tier) (list tier (lambda (buf r) (equal? (plist-get r 'tier) tier))))
-                       *packages-tiers*)
-                  (list (list "breaks" (lambda (buf r) (pair? (plist-get r 'breaks))))
-                        (list "all" (lambda (buf r) #t))))
+    'tabs (cons (list "all" (lambda (buf r) #t))
+                (map (lambda (section) (list section (lambda (buf r) (equal? (plist-get r 'section) section))))
+                     *packages-sections*))
     'rows packages--rows
     'key (lambda (buf row) (plist-get row 'id))
     'separator? (lambda (buf row) (packages--sep? row))
     'section? (lambda (buf row) (packages--sep? row))
     'section-label (lambda (buf row) (plist-get row 'title))
     'markable? (lambda (buf row) #f)
-    'filters (list (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
+    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (if (packages-loaded? e) "loaded" "unloaded"))) "loaded or unloaded")
+                   (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
                    (list "breaks:" (lambda (b e) (if (packages--sep? e) "" (packages--break-text e))) "a package it breaks the tier rules with"))
-    'columns (lambda (buf) (list (list "package" 26) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
+    'columns (lambda (buf) (list (list "package" 26) (list "in" 9) (list "state" 7) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
     'cells packages--cells
     'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 80)
-                         'columns (lambda (buf) (list (list "package" 24) (list "tier breaks" #f)))
+                         'columns (lambda (buf) (list (list "package" 24) (list "state" 7) (list "tier breaks" #f)))
                          'cells packages--narrow-cells)
                    (list 'name 'wide 'default #t))
     'preview (lambda (buf row) (packages-show-detail! row))
     'title (lambda (buf) (string-append "Packages  ·  " (number->string (length (packages-tier-breaks))) " tier breaks"))
     'total (lambda (buf) (length (filter (lambda (r) (not (packages--sep? r))) (list-entries buf))))
     'noun "package"
-    'footer (lambda (buf) '(("v" "source") ("P" "send upstream") ("/" "filter") ("g" "scan again") ("q" "quit")))
-    'keys '(("RET" "packages-source") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("l" "load/install") ("k" "unload") ("d" "uninstall") ("o" "github") ("a" "add source") ("v" "source") ("P" "send upstream") ("/" "filter") ("g" "scan again") ("q" "quit")))
+    'keys '(("RET" "packages-source") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
 
 (define-mode "packages-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-keys! "packages-detail-mode" '(("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
+(mode-keys! "packages-detail-mode" '(("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
 (define-command "packages-refresh" "Scan the packages again, then fetch the clones and their open PRs"
   (lambda ()
     (set! packages--scan-cache #f)
@@ -480,11 +600,94 @@
   'modes '(packages-detail-mode packages-mode))
 
 (define (packages--fetch!)
-  "fetch the clones and their PRs in a task; the list draws them when they come"
+  "fetch the clones and their PRs, and what the sources offer, in tasks; the list draws them when they come"
+  (packages-fetch-sources!)
   (package-fetch!
     (lambda (_)
       (set! packages--scan-cache #f)
       (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*)))))
+
+(effects! '(write external execute))
+
+(define (packages--source-command source)
+  (if (string-index source "/")
+      (string-append "gh repo view " source " --json name,description,isArchived")
+      (string-append "gh repo list " source " --limit 500 --json name,description,isArchived")))
+
+(define (packages-fetch-sources! . k)
+  "(packages-fetch-sources! [K]) -- read what every source in packages-sources offers with gh, in a task; cache it and redraw the list; K gets the rows"
+  (shell-command->string
+    (string-join (map (lambda (s) (string-append "echo '@@source " s "'; " (packages--source-command s) " 2>&1; echo"))
+                      packages-sources)
+                 "; ")
+    (compos-home)
+    (lambda (out)
+      (cache-put! 'packages "sources" out)
+      (set! packages--source-cache (packages--parse-sources out))
+      (set! packages--scan-cache #f)
+      (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
+      (when (pair? k) ((car k) packages--source-cache)))))
+
+(define (packages-add-source! source)
+  "(packages-add-source! SOURCE) -- add a GitHub org, user or OWNER/REPO to packages-sources, save it, and read it"
+  (let ((s (string-trim source)))
+    (cond ((equal? s "") #f)
+          ((not (re-match "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$" s)) (message "A source is a GitHub org or user, or OWNER/REPO") #f)
+          ((member s packages-sources) (message (string-append s " is already a source")) #f)
+          (else (customize-save! 'packages-sources (append packages-sources (list s)))
+                (message (string-append "reading " s))
+                (packages-fetch-sources!)
+                s))))
+
+(define (packages-remove-source! source)
+  "(packages-remove-source! SOURCE) -- drop SOURCE from packages-sources and save it; installed packages stay"
+  (if (not (member source packages-sources))
+      (begin (message (string-append source " is not a source")) #f)
+      (begin (customize-save! 'packages-sources (filter (lambda (s) (not (equal? s source))) packages-sources))
+             (set! packages--source-cache #f)
+             (set! packages--scan-cache #f)
+             (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
+             (message (string-append "removed the source " source))
+             source)))
+
+(define (packages-on-event e)
+  (when (and (memq (plist-get e 'kind) '(loaded failed changed thawed)) (buffer-known? *packages-buffer*))
+    (set! packages--scan-cache #f)
+    (list-refresh! *packages-buffer*)))
+
+(event-subscribe! "packages" "packages" 'packages-on-event)
+
+(define (packages-uninstall! row)
+  "(packages-uninstall! ROW) -- uninstall ROW's installed clone: drop it from init.scm and packages.lock and trash the clone; its code stays loaded until k or a restart"
+  (let ((name (plist-get row 'name)))
+    (cond ((not (equal? (plist-get row 'tier) "installed")) (message (string-append name " is not an installed clone")) #f)
+          ((plist-get row 'dev) (message (string-append name " is a develop checkout: M-x package-develop with an empty dir first")) #f)
+          (else (package-manager-uninstall! name)
+                (set! packages--scan-cache #f)
+                (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
+                #t))))
+
+(define-command "packages-uninstall" "Uninstall the installed package at point: drop it from init.scm and trash its clone"
+  (lambda ()
+    (let ((row (packages--at)))
+      (if (not row) (message "No package here")
+          (y-or-n (string-append "Uninstall " (plist-get row 'name) "?")
+                  (lambda () (packages-uninstall! row))))))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-open-repo" "Open the GitHub repo of the package at point"
+  (lambda () (package-manager-open-repo! (packages--at)))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-add-source" "Add a package source: a GitHub org or user, or OWNER/REPO"
+  (interactive (lambda (k) (minibuffer-read "Add a source (GitHub org, user, or OWNER/REPO): " '() (lambda (s) (k (list s))))))
+  (lambda (s) (packages-add-source! s))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-remove-source" "Remove a package source; what you installed from it stays"
+  (interactive (lambda (k) (minibuffer-read "Remove the source: " packages-sources (lambda (s) (k (list s))))))
+  (lambda (s) (packages-remove-source! s))
+  'modes '(packages-detail-mode packages-mode))
 
 (define-command "packages-pr" "Send the changes of the installed package at point upstream as a pull request"
   (interactive
@@ -502,11 +705,96 @@
           (message (string-append "opened " url))
           (packages--fetch!)))))
   'modes '(packages-detail-mode packages-mode))
+(effects! '(write display))
 (mode-doc! "packages-detail-mode"
-  "One package: its tier, its tier breaks, what it requires and what requires it. v visits its source, g scans again.")
+  "One package: whether it is loaded, where it lives, its tier, its tier breaks, what it requires and what requires it. l loads it, k unloads it, v visits its source, g scans again.")
+
+;;; load and unload
+
+(effects! '(write execute))
+
+(define (packages--new-names before after)
+  "the names in AFTER and not in BEFORE; both sorted"
+  (let loop ((b before) (a after) (acc '()))
+    (cond ((null? a) (reverse acc))
+          ((null? b) (append (reverse acc) a))
+          ((equal? (car a) (car b)) (loop (cdr b) (cdr a) acc))
+          ((string<? (car a) (car b)) (loop b (cdr a) (cons (car a) acc)))
+          (else (loop (cdr b) a acc)))))
+
+(define (packages--redraw! row)
+  (set! packages--scan-cache #f)
+  (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
+  (let ((buf (string-append "*packages:" (plist-get row 'name) "*")))
+    (when (buffer-known? buf) (packages-show-detail! (buffer-local-value 'packages-row buf)))))
+
+(define (packages-load! row)
+  "(packages-load! ROW) -- load ROW's package into the live session and note the names it defines; #t when it loaded"
+  (let ((name (plist-get row 'name)) (feature (packages--feature row)))
+    (cond ((equal? (plist-get row 'section) "core") (message (string-append name " is core: it is always loaded")) #f)
+          ((packages-loaded? row) (message (string-append name " is already loaded")) #f)
+          ((packages-available? row)
+           (message (string-append "installing " name " from " (plist-get row 'repo)))
+           (package-manager-install! name (plist-get row 'repo))
+           #t)
+          (else
+           (message (string-append "loading " name))
+           (let* ((before (sort (global-names)))
+                  (ok (ignore-errors (lambda () (load (symbol->string feature)) #t)))
+                  (made (packages--new-names before (sort (global-names)))))
+             (set! packages--defs (cons (list feature made) (remove (lambda (d) (eq? (car d) feature)) packages--defs)))
+             (event-publish! "packages" (if ok 'loaded 'failed) name)
+             (message (if ok (string-append "loaded " name ", " (number->string (length made)) " new names")
+                          (string-append "loading " name " failed; see *Messages*")))
+             (packages--redraw! row)
+             (if ok #t #f))))))
+
+(define (packages--names-of-feature feature)
+  "every global name FEATURE owns: what its load here made, its catalog entries, and its private FEATURE-- names"
+  (let* ((f (symbol->string feature))
+         (made (let ((d (assq feature packages--defs))) (if d (cadr d) '())))
+         (entries (filter (lambda (e) (equal? (plist-get e 'package) f)) (catalog)))
+         (private (filter (lambda (n) (string-prefix? (string-append f "--") n)) (global-names))))
+    (list entries (packages--dedup (append made private (map (lambda (e) (plist-get e 'name)) entries))))))
+
+(define (packages-unload! row)
+  "(packages-unload! ROW) -- unload ROW's package: run its FEATURE-unload-function, drop its commands, catalog entries, event subscription and globals, and forget the feature; #t when it unloaded"
+  (let ((name (plist-get row 'name)) (feature (packages--feature row)))
+    (cond ((equal? (plist-get row 'section) "core") (message (string-append name " is core: it cannot be unloaded")) #f)
+          ((eq? feature 'packages) (message "packages runs this list: it cannot unload itself") #f)
+          ((not (packages-loaded? row)) (message (string-append name " is not loaded")) #f)
+          (else
+           (let* ((f (symbol->string feature))
+                  (hook (string->symbol (string-append f "-unload-function")))
+                  (found (packages--names-of-feature feature))
+                  (entries (car found)) (names (cadr found)))
+             (when (boundp hook) (ignore-errors (lambda () ((symbol-value hook)))))
+             (for-each (lambda (e)
+                         (if (equal? (plist-get e 'kind) "command")
+                             (ignore-errors (lambda () (undefine-command (plist-get e 'name))))
+                             (catalog-forget! (string->symbol (plist-get e 'kind)) (plist-get e 'name))))
+                       entries)
+             (ignore-errors (lambda () (event-unsubscribe! f)))
+             (for-each (lambda (n) (let ((s (string->symbol n))) (when (boundp s) (unbind-global! s)))) names)
+             (set! *features* (remove (lambda (x) (eq? x feature)) *features*))
+             (set! packages--defs (remove (lambda (d) (eq? (car d) feature)) packages--defs))
+             (event-publish! "packages" 'unloaded name)
+             (message (string-append "unloaded " name ", " (number->string (length names)) " names"))
+             (packages--redraw! row)
+             #t)))))
+
+(define-command "packages-load" "Load the package at point into the live session"
+  (lambda () (let ((row (packages--at))) (if row (packages-load! row) (message "No package here"))))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-unload" "Unload the package at point: its commands, names and feature"
+  (lambda () (let ((row (packages--at))) (if row (packages-unload! row) (message "No package here"))))
+  'modes '(packages-detail-mode packages-mode))
+
+(effects! '(write display))
 
 ;;;###autoload
-(define-command "packages" "List every package with its tier, its requires and its tier breaks"
+(define-command "packages" "List every package by where it lives (packages, stdlib, core); load and unload them"
   (lambda ()
     (let ((buf (list-mode-show! "packages-mode")))
       (packages-show-detail! (list-current buf))
@@ -524,7 +812,16 @@
 (public! 'packages-break? "(packages-break? FROM-TIER TO-TIER) -- #t when a require from FROM-TIER to TO-TIER breaks the tier rules")
 (effects! '(read))
 (public! 'packages-scan "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks")
-(public! 'packages-list "(packages-list) -- the installed clones (tier installed, with git and prs), then every package as packages-scan gives it, from the last scan")
+(public! 'packages-loaded? "(packages-loaded? ROW) -- #t when ROW's package is loaded now")
+(public! 'packages-available? "(packages-available? ROW) -- #t when ROW is a package a source offers and this machine does not have")
+(effects! '(write execute))
+(public! 'packages-fetch-sources! "(packages-fetch-sources! [K]) -- read what every source in packages-sources offers with gh, in a task; cache it and redraw the list; K gets the rows")
+(public! 'packages-add-source! "(packages-add-source! SOURCE) -- add a GitHub org, user or OWNER/REPO to packages-sources, save it, and read it")
+(public! 'packages-remove-source! "(packages-remove-source! SOURCE) -- drop SOURCE from packages-sources and save it; installed packages stay")
+(public! 'packages-uninstall! "(packages-uninstall! ROW) -- uninstall ROW's installed clone: drop it from init.scm and packages.lock and trash the clone; its code stays loaded until k or a restart")
+(public! 'packages-load! "(packages-load! ROW) -- load ROW's package into the live session and note the names it defines, or install it when a source offers it; #t when it loaded or the install started")
+(public! 'packages-unload! "(packages-unload! ROW) -- unload ROW's package: run its FEATURE-unload-function, drop its commands, catalog entries, event subscription and globals, and forget the feature; #t when it unloaded")
+(effects! '(read))
 (public! 'packages-tier-breaks "(packages-tier-breaks) -- every require that breaks the tier rules as a plist: from from-tier to to-tier feature file line")
 (effects! '(write display))
 (public! 'packages-show-detail! "(packages-show-detail! ROW) -- show the page of package ROW beside the list")

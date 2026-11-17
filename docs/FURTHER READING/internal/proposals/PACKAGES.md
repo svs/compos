@@ -38,6 +38,8 @@ scheme/stdlib/
   ...
 ```
 
+anchor and app-registry are standard: every app uses them, and core's lists and components call anchor only once the editor is up.
+
 One directory for each package, in the core repo, so one change can touch core and stdlib together. A Scheme name lives at one level: `stdlib_levels_test.exs` fails on a file name or top-level define in both `scheme/packages` and `scheme/stdlib`.
 
 ### 3. Community: one repo each
@@ -87,10 +89,10 @@ The never-branch rule applies to the core repo only. Package PRs use branches be
 
 Boot means: the daemon starts, the browser draws a frame, the user opens, edits and saves a file, runs M-x, sets a variable, and installs packages.
 
-- Kernel and buffers: advice, anchor, autorevert, build-identity, custom, db, dismiss, emacs-names, events, format, holds, messages, migrations, scratch, title, watchers, cron, daemons, minibuffer, tree, buffer-relations, tramp (the file primitives that dired and the editor call)
+- Kernel and buffers: advice, build-identity, custom, db, dismiss, emacs-names, events, format, holds, messages, migrations, scratch, title, watchers, cron, daemons, minibuffer, tree, buffer-relations, tramp (the file primitives that dired and the editor call)
 - Windows and panes: panes, panes-mode, panes-history, popper, window, window-log, window-names, window-settings, groups, group-config, tab-bars
-- Input and UI: appearance, capf, completion, keymaps, keys, modeline, palette, prompts, switch, tabulated-list, transient, detail, components, app-registry, apps
-- Packages: package (the manager), packages (the app), http (the manager fetches recipes)
+- Input and UI: appearance, capf, completion, keymaps, keys, modeline, palette, prompts, switch, tabulated-list, transient, detail, components, apps
+- Packages: package (the manager), package-manager (install and uninstall), packages (the app), http (the manager fetches recipes)
 
 ### 2. Standard (`scheme/stdlib`) - quality of life
 
@@ -99,8 +101,10 @@ The everyday set that most users want. On by default. Each one can be turned off
 - Agents and chat: agent, agent-connectors, agent-listen, agent-machine, agent-permissions, agent-sandbox, agent-session, agent-transcript, agent-verbs, ai, chat, chat-mode, llm-config, llm-connectors, llm-gate, llm-presets, models, model-rules, mcp, mcp-hub, skills, subagents, agent-fleet, tools, tool-results, help-chat, decide (the agents' shell gate asks it), jev
 - Tasks: todo, workflows, self-healing
 - Code: code, chrome, diff-mode, git, jj, provenance, project, worktrees, treesit, lsp, comint, compile, repl, test, paredit, scheme-ide
-- Text: morg (with morg/*: blocks, chat, preview and the tutorial read it), markdown-mode, mermaid, isearch, occur, register, bookmark, visual-line, preview, file-view
+- Text: morg (with morg/*: blocks, chat, preview and the tutorial read it), pdf, markdown-mode, mermaid, isearch, occur, register, bookmark, visual-line, preview, file-view
 - Navigation: ibuffer, mode-list, help, peek, pane-menu, pane-overview, panes-board, window-flash, workspace-mode, events-list, collect, index, content-cache, content-scale, housekeeping, app-watch
+- Apps: anchor (the page anchors every app reads by), app-registry, site-app (a website as a list-and-page app)
+- Files: autorevert
 - Editing styles: evil, cua, vscode
 - Setup: setup, setup-wizard, tutorial, howto, show-keys
 - Ops: release, telemetry
@@ -110,10 +114,10 @@ The everyday set that most users want. On by default. Each one can be turned off
 - Mail and calendar: notmuch, google, calendar, agenda
 - Services: linear, sentry, doppler, irc, whatsapp, imessage, feeds, graphql
 - Web: web, xslt, web-server, webhooks, endpoint, sockets
-- Writing: org, writing, ghost-rewrite, annotate, pdf, html-edit
+- Writing: org, writing, ghost-rewrite, annotate, html-edit
 - Diagrams and media: chart, draw, image-gen, screenshot, recording
 - Agent extras: orchestrate, peers, predict, recall, needle, laya, fast-code, herdr, herdr-agent, herdr-claude, connectors/gemini, connectors/kimi, training
-- Apps: amazon, ats, recruiting, doom, doom-lite, insta, linkedin, movie, px0, spotify (with visualisers), substack, spreadsheet, slides, site-app, onboarding, travel
+- Apps: amazon, recruiting, doom, doom-lite, insta, linkedin, movie, px0, spotify (with visualisers), substack, spreadsheet, slides, onboarding
 - Other: anon, handheld, racket
 
 Some of these can share a repo when they always go together, for example notmuch with google, calendar and agenda.

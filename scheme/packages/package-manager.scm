@@ -1,18 +1,13 @@
-;;; package-manager.scm --- every package from every source; install and uninstall
+;;; package-manager.scm --- install and uninstall packages; M-x packages is the app
 ;;
-;; M-x package-manager lists what the compos-dev GitHub org offers, the
-;; use-package recipes of init.scm, the pins of packages.lock, the core pins
-;; and the develop checkouts, merged by name.  Tabs: all and installed.
-;; i installs: clones, loads, adds the use-package line to init.scm.
-;; d uninstalls: drops that line, the recipe and the pin, trashes the clone.
-;; Code already loaded stays until restart.
-
-(require 'tabulated-list)
+;; package-manager-install! clones, loads and adds the use-package line to
+;; init.scm. package-manager-uninstall! drops that line, the recipe and the
+;; pin, and trashes the clone. Each publishes packages changed, which
+;; M-x packages redraws on. package-manager-rows merges every source by name.
 
 (domain! 'packages)
 (effects! '(pure))
 
-(define *package-manager-buffer* "*package-manager*")
 (define package-manager--log "*package-manager-log*")
 (define (package-manager--nl) (list->string (list #\newline)))
 
@@ -146,13 +141,14 @@
     (unless (or known dirty) (buffer-kill! buf))
     (not dirty)))
 
-(define (package-manager-on-event e)
-  (when (equal? (plist-get e 'topic) "packages")
-    (package-manager--redraw!)))
+(define (package-manager--redraw!)
+  "tell M-x packages that the installed packages changed"
+  (event-publish! "packages" 'changed #f))
 
-(define (package-manager-install! name)
+(define (package-manager-install! name . from)
   (let* ((row (package-manager-row name))
-         (repo (or (and row (plist-get row 'repo))
+         (repo (or (and (pair? from) (car from))
+                   (and row (plist-get row 'repo))
                    (string-append package-manager-org "/compos-" name)))
          (line (string-append "(use-package '" name " 'repo " (string #\") repo (string #\") ")")))
     (message (string-append "installing " name " from " repo " …"))
@@ -198,183 +194,8 @@
       (begin (message "no repo for this package") #f)))
 
 (public! 'package-manager-fetch! "(package-manager-fetch! [K]) -- read the GitHub org's package repos with gh in a task, cache them and redraw the list; K gets the rows")
-(public! 'package-manager-install! "(package-manager-install! NAME) -- clone and load package NAME and add its use-package line to init.scm")
+(public! 'package-manager-install! "(package-manager-install! NAME [REPO]) -- clone and load package NAME, from REPO (OWNER/REPO) when given, and add its use-package line to init.scm")
 (public! 'package-manager-uninstall! "(package-manager-uninstall! NAME) -- drop NAME's use-package line from init.scm, its recipe and its lock pin, and move its clone to the trash")
 (public! 'package-manager-open-repo! "(package-manager-open-repo! ROW) -- open ROW's GitHub repo in the system browser")
-
-(event-subscribe! "package-manager" "packages" 'package-manager-on-event)
-
-(effects! '(write display))
-
-(define (package-manager--at)
-  (or (buffer-local-value 'package-manager-row (current-buffer))
-      (and (buffer-known? *package-manager-buffer*) (list-current *package-manager-buffer*))))
-
-(define (package-manager--tone status)
-  (cond ((equal? status "available") "dim")
-        ((equal? status "cloned") "warn")
-        (else "ok")))
-
-(define (package-manager--cells buf row)
-  (list (plist-get row 'name)
-        (plist-get row 'status)
-        (if (plist-get row 'loaded) "yes" "")
-        (package-manager--sources-text row)
-        (or (plist-get row 'description) "")))
-
-(define (package-manager--narrow-cells buf row)
-  (list (plist-get row 'name) (plist-get row 'status) (or (plist-get row 'description) "")))
-
-(define (package-manager--actions row)
-  (append (cond ((or (plist-get row 'core) (plist-get row 'dev)) '())
-                ((package-manager--installed? row) (list (list "package-manager-uninstall" "Uninstall" "d" "bad")))
-                (else (list (list "package-manager-install" "Install" "i" "good"))))
-          (if (plist-get row 'repo) (list (list "package-manager-open-repo" "GitHub ↗" "o")) '())
-          (list (list "package-manager-refresh" "Refresh" "g"))))
-
-(define (package-manager--page row)
-  (let* ((name (plist-get row 'name))
-         (status (plist-get row 'status))
-         (desc (plist-get row 'description))
-         (kv (lambda (pairs) (component 'ui/kv (list 'pairs (filter (lambda (p) (cadr p)) pairs))))))
-    (list
-      (component 'ui/title (list 'text name 'badge status 'tone (package-manager--tone status)))
-      (component 'ui/meta (list 'segs (list (list "" (if (and (string? desc) (not (equal? desc ""))) desc "no description")))))
-      (component 'ui/actions (list 'actions (package-manager--actions row)))
-      (component 'ui/group
-        (list 'title "Package"
-              'body (list (kv (list (list "Status" status)
-                                    (list "Loaded" (if (plist-get row 'loaded) "yes" "no"))
-                                    (list "Loads" (if (plist-get row 'defer) "on first use" "at startup"))
-                                    (list "Sources" (package-manager--sources-text row)))))))
-      (component 'ui/group
-        (list 'title "Where"
-              'body (list (kv (list (list "Repo" (plist-get row 'repo))
-                                    (list "Url" (plist-get row 'url))
-                                    (list "Checkout" (plist-get row 'dir))
-                                    (list "Pinned at" (let ((p (plist-get row 'pin))) (and (string? p) (> (string-length p) 12) (substring p 0 12))))
-                                    (list "Updated" (plist-get row 'updated)))))))
-      (component 'ui/row (list 'segs '(("c-dim" "end")))))))
-
-(define (package-manager-show-detail! row)
-  (when row
-    (let* ((list-buf *package-manager-buffer*)
-           (buf (string-append "*package-manager:" (plist-get row 'name) "*")))
-      (unless (buffer-known? buf)
-        (buffer-create buf)
-        (let ((g (buffer-group list-buf))) (when g (buffer-move-to-group! buf g)))
-        (with-current-buffer buf (lambda () (set-mode! "package-manager-detail-mode")))
-        (app-claim! buf "package-manager" 'detail))
-      (buffer-set-local! buf 'package-manager-row row)
-      (buffer-set-read-only! buf #f)
-      (anchor-page! buf (package-manager--page row))
-      (buffer-set-local! buf 'footer-line-blocks
-        (list (component 'ui/keys-bar (list 'main (map (lambda (a) (list (caddr a) (cadr a))) (package-manager--actions row))))))
-      (buffer-set-read-only! buf #t)
-      (display-buffer-detail! buf list-buf))))
-
-(define (package-manager--imenu buf)
-  "one imenu row per package of the tab, its status the kind: imenu has a tab per status"
-  (with-current-buffer buf
-    (lambda ()
-      (let loop ((os (list-offsets buf)) (es (list-entries buf)) (acc '()))
-        (if (or (null? os) (null? es)) (reverse acc)
-            (let* ((r (car es)) (s (plist-get r 'status)) (d (plist-get r 'description)))
-              (loop (cdr os) (cdr es)
-                    (cons (list (line-number-at-pos (car os))
-                                (string-append (string-upcase (substring s 0 1)) (substring s 1 (string-length s)))
-                                (plist-get r 'name)
-                                (if (and (string? d) (not (equal? d ""))) d (package-manager--sources-text r)))
-                          acc))))))))
-
-(define (package-manager--redraw!)
-  (when (buffer-known? *package-manager-buffer*)
-    (list-refresh! *package-manager-buffer*)
-    (let ((r (list-current *package-manager-buffer*)))
-      (when (and r (buffer-known? (string-append "*package-manager:" (plist-get r 'name) "*")))
-        (package-manager-show-detail! r)))))
-
-(define-list-mode! "package-manager-mode"
-  (list
-    'doc (string-append
-           "Every compos package from every source: the compos-dev GitHub org, the use-package recipes of init.scm, "
-           "packages.lock, the core pins and develop checkouts. Status: installed (cloned and in init.scm), cloned "
-           "(cloned, not in init.scm), core, dev, or available. Tabs: all and installed; left and right step them. "
-           "Moving the point shows the package's page beside the list. i installs: clones, loads and adds the "
-           "use-package line to init.scm. d uninstalls: removes that line and the lock pin and moves the clone to "
-           "the trash; loaded code stays until restart. o opens the repo on GitHub, g reads every source again, "
-           "/ narrows (status:available, source:github), q quits.")
-    'buffer *package-manager-buffer*
-    'transient #f
-    'plain #t
-    'local-filter #t
-    'tabs (list (list "all" (lambda (buf r) #t))
-                (list "installed" (lambda (buf r) (package-manager--installed? r))))
-    'rows (lambda (buf)
-            (buffer-set-local! buf 'imenu-index-function 'package-manager--imenu)
-            (package-manager-rows))
-    'key (lambda (buf row) (plist-get row 'name))
-    'markable? (lambda (buf row) #f)
-    'filters (list (list "status:" (lambda (b e) (or (plist-get e 'status) "")) "the package's status")
-                   (list "source:" (lambda (b e) (package-manager--sources-text e)) "a source that lists it"))
-    'columns (lambda (buf) (list (list "package" 18) (list "status" 10) (list "loaded" 7) (list "sources" 22) (list "description" #f)))
-    'cells package-manager--cells
-    'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 84)
-                         'columns (lambda (buf) (list (list "package" 16) (list "status" 10) (list "description" #f)))
-                         'cells package-manager--narrow-cells)
-                   (list 'name 'wide 'default #t))
-    'preview (lambda (buf row) (package-manager-show-detail! row))
-    'title (lambda (buf)
-             (let ((rows (package-manager-rows)))
-               (string-append "Packages  ·  " (number->string (length (filter package-manager--installed? rows)))
-                              " installed of " (number->string (length rows)))))
-    'noun "package"
-    'footer (lambda (buf) '(("i" "install") ("d" "uninstall") ("o" "github") ("/" "filter") ("g" "refresh") ("q" "quit")))
-    'keys '(("i" "package-manager-install") ("d" "package-manager-uninstall") ("o" "package-manager-open-repo")
-            ("g" "package-manager-refresh") ("q" "quit-window"))))
-
-(define-mode "package-manager-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-keys! "package-manager-detail-mode"
-  '(("i" "package-manager-install") ("d" "package-manager-uninstall") ("o" "package-manager-open-repo")
-    ("g" "package-manager-refresh")))
-(mode-doc! "package-manager-detail-mode"
-  "One package's page. i installs it, d uninstalls it, o opens its repo on GitHub, g reads every source again; M-<down> and M-<up> walk the parts.")
-
-(define-command "package-manager-install" "Install the package at point: clone, load, add to init.scm"
-  (lambda ()
-    (let ((r (package-manager--at)))
-      (cond ((not r) (message "no package here"))
-            ((package-manager--installed? r) (message (string-append (plist-get r 'name) " is already installed")))
-            (else (package-manager-install! (plist-get r 'name))))))
-  'modes '(package-manager-mode package-manager-detail-mode))
-
-(define-command "package-manager-uninstall" "Uninstall the package at point: drop it from init.scm and trash its clone"
-  (lambda ()
-    (let ((r (package-manager--at)))
-      (cond ((not r) (message "no package here"))
-            ((not (package-manager--installed? r)) (message (string-append (plist-get r 'name) " is not installed")))
-            (else (let ((n (plist-get r 'name)))
-                    (y-or-n (string-append "Uninstall " n "?")
-                            (lambda () (package-manager-uninstall! n))))))))
-  'modes '(package-manager-mode package-manager-detail-mode))
-
-(define-command "package-manager-open-repo" "Open the GitHub repo of the package at point"
-  (lambda () (package-manager-open-repo! (package-manager--at)))
-  'modes '(package-manager-mode package-manager-detail-mode))
-
-(define-command "package-manager-refresh" "Read every package source again"
-  (lambda () (package-manager--redraw!) (package-manager-fetch!) (message "reading the package sources …"))
-  'modes '(package-manager-mode package-manager-detail-mode))
-
-;;;###autoload
-(define-command "package-manager" "List every package from every source; install and uninstall them"
-  (lambda ()
-    (let ((buf (list-mode-show! "package-manager-mode")))
-      (app-claim! buf "package-manager" 'listing)
-      (package-manager-show-detail! (list-current buf))
-      (package-manager-fetch!)
-      buf)))
-
-(public! 'package-manager-show-detail! "(package-manager-show-detail! ROW) -- show package ROW's page beside the list")
 
 (provide 'package-manager)

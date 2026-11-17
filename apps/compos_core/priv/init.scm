@@ -60,9 +60,7 @@
 ;; s-p: intent search over commands and past asks
 (require 'palette)
 
-(require 'anchor)
 (require 'appearance)
-(require 'autorevert)
 (require 'daemons)
 (require 'db)
 ;; the window model: a row of panes, each a stack of windows, each a stack
@@ -89,7 +87,6 @@
 (require 'cron)
 (require 'events-demo)
 (require 'watchers)
-(require 'app-registry)
 (require 'keys)
 (require 'keymaps)
 (require 'package)

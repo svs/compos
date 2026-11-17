@@ -621,6 +621,13 @@ defmodule Compos.Core.SchemeAPI do
           [] -> Enum.map(SysMon.ets(), &Tuple.to_list/1)
           [limit] -> Enum.map(SysMon.ets(trunc(limit)), &Tuple.to_list/1)
         end,
+      {"vm-scheme-env",
+       "(vm-scheme-env [LIMIT]) — what the Scheme environment table holds: (FRAMES VARS GLOBAL-VARS ROWS); ROWS are the binding names that hold the most memory over every frame, as (NAME COUNT GLOBAL-COUNT BYTES). Copies every row: a diagnostic, not a sampler."} =>
+        fn args ->
+          limit = with [l] <- args, do: trunc(l), else: (_ -> 25)
+          {frames, vars, globals, rows} = SysMon.scheme_env(limit)
+          [frames, vars, globals, Enum.map(rows, &Tuple.to_list/1)]
+        end,
       {"vm-collect!",
        "(vm-collect! [MIN-BYTES]) — collect the heap of each idle process above MIN-BYTES (default 1 MiB); (PROCESSES BYTES-FREED)."} =>
         fn

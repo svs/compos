@@ -207,6 +207,50 @@ defmodule Compos.Core.SysMon do
     |> Enum.take(limit)
   end
 
+  @doc """
+  What the Scheme environment table holds, for a leak hunt: its frames, its
+  bindings, the bindings of the global frame, and the binding names that
+  hold the most memory summed over every frame that binds them, as
+  `{frames, vars, global_vars, rows}` with rows `{name, count, global_count,
+  bytes}`. A name bound in thousands of frames is a closure kept alive by
+  something that never let it go. It copies every row once, so it is a
+  diagnostic, not a sampler.
+  """
+  def scheme_env(limit \\ 25) do
+    %{store: %{tid: tid}, global: global} = Compos.Core.Session.interp()
+    word = :erlang.system_info(:wordsize)
+
+    {frames, vars, globals, by_name} =
+      :ets.foldl(
+        fn
+          {{:frame, _ref}, _parent}, {f, v, g, acc} ->
+            {f + 1, v, g, acc}
+
+          {{:var, ref, name}, val}, {f, v, g, acc} ->
+            bytes = :erts_debug.flat_size(val) * word
+            gl = if ref == global, do: 1, else: 0
+            acc = Map.update(acc, name, {1, gl, bytes}, fn {n, gn, b} -> {n + 1, gn + gl, b + bytes} end)
+            {f, v + 1, g + gl, acc}
+
+          _, acc ->
+            acc
+        end,
+        {0, 0, 0, %{}},
+        tid
+      )
+
+    rows =
+      by_name
+      |> Enum.map(fn {name, {n, gn, b}} -> {env_name(name), n, gn, b} end)
+      |> Enum.sort_by(fn {_, _, _, b} -> -b end)
+      |> Enum.take(limit)
+
+    {frames, vars, globals, rows}
+  end
+
+  defp env_name(name) when is_binary(name), do: name
+  defp env_name(name), do: inspect(name)
+
   
   
 

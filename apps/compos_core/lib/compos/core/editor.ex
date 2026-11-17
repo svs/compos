@@ -2885,6 +2885,9 @@ defmodule Compos.Core.Editor do
       col: snap.col,
       style: Map.get(locals, "style"),
       render_mode: render_mode(locals),
+      # the anchor at point, by name (anchor.scm): an html preview scrolls
+      # to the element whose id it is
+      anchor: anchor_name(Map.get(locals, "anchor-current-name")),
       visual_line_mode: Map.get(locals, "visual-line-mode") == true,
       # hl-line-mode: the page highlights the current line unless the
       # buffer turned it off, or you are editing in it: the caret is
@@ -3020,6 +3023,9 @@ defmodule Compos.Core.Editor do
   end
 
   defp render_mode(locals), do: Map.get(locals, "render-mode")
+
+  defp anchor_name(name) when is_binary(name), do: name
+  defp anchor_name(_), do: nil
 
   defp visible_geometry(text, point, hidden, narrow_range) do
     len = byte_size(text)

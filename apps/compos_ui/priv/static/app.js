@@ -1180,6 +1180,7 @@
         // seed lastPt so a restored offset wins on mount: the
         // cursor pulls the view only when point MOVES after that
         this.lastPt = this.el.dataset.pt;
+        this.lastAnchor = this.el.dataset.anchor;
         this.lastDoc = null;
         this.onLoad = () => {
           this.lastDoc = null;
@@ -1316,7 +1317,9 @@
         // put the page back where it had been. The editor's echo of the
         // reader's own report asks for nothing.
         const buf = this.el.closest("c-preview")?.getAttribute("buffer");
-        if (buf !== this.lastBuf) { this.lastBuf = buf; this.lastCtop = undefined; }
+        // another buffer in this window brings its own offset, and its
+        // anchor is where it was left: that is no move to follow
+        if (buf !== this.lastBuf) { this.lastBuf = buf; this.lastCtop = undefined; this.lastAnchor = this.el.dataset.anchor; }
         if (want !== this.lastCtop) {
           this.lastCtop = want;
           // a 2px slack stops the applied value from fighting the
@@ -1324,6 +1327,24 @@
           if (want !== this.sentTop && Math.abs(s.scrollTop - want) > 2) s.scrollTop = want;
         }
         this.follow();
+        this.followAnchor();
+      },
+      // An html page has no caret, but its parts are anchors (anchor.scm),
+      // and the name of the one at point is the id of an element of the
+      // page. When point moves to another part, bring that element to the
+      // top, the same way follow() brings in the .pt span.
+      followAnchor() {
+        const name = this.el.dataset.anchor;
+        if (name === this.lastAnchor) return;
+        this.lastAnchor = name;
+        if (!name) return;
+        const d = this.doc();
+        const el = d && d.getElementById(name);
+        const s = this.scroller();
+        if (!el || !s) return;
+        // the frame's own scroller only: scrollIntoView would move the
+        // editor around the frame too
+        s.scrollTop += el.getBoundingClientRect().top;
       },
       // an edit in a markdown preview lands at point, and the
       // rendered page shows point as the .pt span. When point

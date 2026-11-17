@@ -182,3 +182,26 @@
     (anchor-page! *t-anchor-buf* (t--anchor-page-blocks))
     (check-equal! (buffer-point *t-anchor-buf*) 20 "point stays")
     (buffer-kill! *t-anchor-buf*)))
+
+(deftest 'anchor-sync-publishes-the-name-at-point
+  "the anchor at point is named in 'anchor-current-name, the id an html page scrolls to"
+  (lambda ()
+    (t--anchor-with
+      (lambda ()
+        (buffer-goto! *t-anchor-buf* 25)
+        (anchor-sync! *t-anchor-buf*)
+        (check-equal! (buffer-local-value 'anchor-current-name *t-anchor-buf*) "assessment"
+                      "point in a part names it")
+        (buffer-goto! *t-anchor-buf* 40)
+        (anchor-sync! *t-anchor-buf*)
+        (check-equal! (buffer-local-value 'anchor-current-name *t-anchor-buf*) "candidate"
+                      "moving to another part names that one")
+        (buffer-goto! *t-anchor-buf* 0)
+        (anchor-sync! *t-anchor-buf*)
+        (check-false! (buffer-local-value 'anchor-current-name *t-anchor-buf*)
+                      "a position in no part names none")
+        (buffer-goto! *t-anchor-buf* 25)
+        (anchor-sync! *t-anchor-buf*)
+        (disable-minor-mode! *t-anchor-buf* "anchor-mode")
+        (check-false! (buffer-local-value 'anchor-current-name *t-anchor-buf*)
+                      "turning anchor-mode off names none")))))

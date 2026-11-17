@@ -272,12 +272,20 @@
 ;; The anchor at point owns the keys, and the highlight says which anchor
 ;; that is. Both are set after every command, so they follow point; a
 ;; position in no anchor has neither.
+;;
+;; Its name is published as 'anchor-current-name. A page the browser draws
+;; as html has no point to show, so the preview scrolls to the element whose
+;; id is that name: in render-mode "html", an anchor's name is the id of
+;; an element of the page.
 (define (anchor-sync! buf)
   (and (buffer-exists? buf)
        (let* ((a (anchor-at buf (buffer-point buf)))
-              (map (and a (anchor-keymap a))))
+              (map (and a (anchor-keymap a)))
+              (name (and a (anchor-name a))))
          (unless (equal? map (buffer-at-point-map buf))
            (buffer-at-point-map! buf map))
+         (unless (equal? name (buffer-local-value 'anchor-current-name buf))
+           (buffer-set-local! buf 'anchor-current-name name))
          (overlay-set! buf 'anchor
            (if a (list (list (anchor-start a) (anchor-end a) "anchor-current")) '()))
          (anchor--mark-blocks! buf a)
@@ -696,6 +704,7 @@
 (define (anchor--teardown! buf)
   (when (buffer-exists? buf)
     (buffer-at-point-map! buf #f)
+    (buffer-set-local! buf 'anchor-current-name #f)
     (when (eq? (buffer-local-value 'imenu-index-function buf) 'anchor-imenu-rows)
       (buffer-set-local! buf 'imenu-index-function #f))
     (overlay-set! buf 'anchor '())

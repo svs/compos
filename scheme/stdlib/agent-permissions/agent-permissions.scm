@@ -182,12 +182,15 @@
 ;; text that nobody the user trusts wrote, and the editor holds the user's
 ;; data, so a send in that turn waits for the user, whatever the stance:
 ;; untrusted input, private data and a way out never meet without a
-;; person (the "Rule of Two"). agent-note-turn-source! (agent-session.scm)
-;; keeps the mark. A read and a local write still run.
+;; person (the "Rule of Two"). The mark is the well-known untrusted? local
+;; at #t (docs/07. AGENTS.md); agent-note-turn-source!
+;; (agent-session.scm) sets it, and so may a security package. A read and
+;; a local write still run.
 (define *permission-send-effects* '("external" "spend" "destroy" "unknown" "execute"))
 
 (define (permission-outside-text? buf)
-  (and buf (buffer-exists? buf) (buffer-local-value 'agent-outside-text buf) #t))
+  (and buf (buffer-exists? buf)
+       (eq? (buffer-local-value 'untrusted? buf) #t)))
 
 (define (permission-send-effects? fx)
   (and (pair? fx)

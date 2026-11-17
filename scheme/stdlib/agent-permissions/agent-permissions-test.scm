@@ -10,10 +10,10 @@
 
 (define t--pm-buf "*zz-permissions-outside*")
 
-;; a chat buffer in the default stance, marked or not
+;; a chat buffer in the default stance, flagged untrusted? or not
 (define (t--pm-chat! outside)
   (test-buffer! t--pm-buf "")
-  (buffer-set-local! t--pm-buf 'agent-outside-text outside)
+  (buffer-set-local! t--pm-buf 'untrusted? outside)
   t--pm-buf)
 
 (deftest 'a-call-that-can-send-is-told-apart-from-a-read
@@ -57,16 +57,16 @@
   (lambda ()
     (t--pm-chat! #f)
     (agent-note-turn-source! t--pm-buf "no-such-slug" "[cron] the daily sweep")
-    (check-false! (buffer-local-value 'agent-outside-text t--pm-buf) "a cron wake does not mark the turn")
+    (check-false! (eq? (buffer-local-value 'untrusted? t--pm-buf) #t) "a cron wake does not mark the turn")
     (agent-note-turn-source! t--pm-buf "no-such-slug" "[event] What you were listening for arrived: hi")
-    (check-true! (buffer-local-value 'agent-outside-text t--pm-buf) "an event wake marks the turn")
+    (check-true! (eq? (buffer-local-value 'untrusted? t--pm-buf) #t) "an event wake marks the turn")
     (agent-note-turn-source! t--pm-buf "no-such-slug" "[cron] the daily sweep")
-    (check-true! (buffer-local-value 'agent-outside-text t--pm-buf) "another wake leaves the mark")
+    (check-true! (eq? (buffer-local-value 'untrusted? t--pm-buf) #t) "another wake leaves the mark")
     (agent-note-turn-source! t--pm-buf "no-such-slug" "yes, go ahead")
-    (check-false! (buffer-local-value 'agent-outside-text t--pm-buf) "the user's message to a waiting chat clears it")
+    (check-false! (eq? (buffer-local-value 'untrusted? t--pm-buf) #t) "the user's message to a waiting chat clears it")
     (let ((saved agent-outside-sources))
       (set! agent-outside-sources '("event" "cron"))
       (agent-note-turn-source! t--pm-buf "no-such-slug" "[cron] the daily sweep")
-      (check-true! (buffer-local-value 'agent-outside-text t--pm-buf) "a source the user adds marks the turn")
+      (check-true! (eq? (buffer-local-value 'untrusted? t--pm-buf) #t) "a source the user adds marks the turn")
       (set! agent-outside-sources saved))
     (buffer-kill! t--pm-buf)))

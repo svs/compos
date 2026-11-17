@@ -185,7 +185,8 @@
 ;; A turn that an outsider's words started. A listener wakes the chat with
 ;; the text of a WhatsApp message, a mail, a webhook or a job: callback
 ;; ("[event] "), and the model can follow what that text tells it to do.
-;; The chat keeps 'agent-outside-text until the user sends it a message
+;; The chat's untrusted? is #t (the well-known local, docs/07. AGENTS.md)
+;; until the user sends it a message
 ;; while it waits, and permit? asks before such a turn sends
 ;; (agent-permissions.scm). A message the user sends while the woken turn
 ;; still runs leaves the mark.
@@ -198,10 +199,10 @@
     (cond ((not buf) #f)
           ;; the result of the chat's own job: is its work, not an outsider's words
           ((and (member source agent-outside-sources) (not (agent-own-job-event? raw)))
-           (buffer-set-local! buf 'agent-outside-text #t))
+           (buffer-set-local! buf 'untrusted? #t))
           ((and (not source)
                 (not (member (agent-status slug) '(running needs_attention))))
-           (buffer-set-local! buf 'agent-outside-text #f)))))
+           (buffer-set-local! buf 'untrusted? #f)))))
 
 ;; a listener delivery reads "[event] ... arrived: NOTE\nTOPIC KIND\n..."; the
 ;; topic line is the bus's. These topics carry the editor's own facts, never an

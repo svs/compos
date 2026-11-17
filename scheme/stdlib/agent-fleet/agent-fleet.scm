@@ -1227,13 +1227,8 @@
 (ibuffer-view! *chat-prompt-buffer* 'sort 'recent 'grouping 'group)
 
 (define (chat-prompt-open!)
-  ;; a heading is folded by the prompt line itself, so PICK only ever
-  ;; sees a chat: a live one by name, an archived one by its .chat path
-  (ibuffer-prompt! 'chat-list *chat-prompt-buffer* "chat-list-mode" "Chat: "
-    (lambda (row close!)
-      (ibuffer-pick! row close!)
-      (group-current-recalculate!))
-    "minibuffer"))
+  ;; the C-x b prompt, chats only: same look, Group / All / Running tabs
+  (switch-bare-prompt! 'chat))
 
 (define-command "chat-prompt"
   "Switch to a chat with the plain minibuffer list"

@@ -854,9 +854,52 @@ is forgotten and that group falls back to creation order in the switcher."
   (let* ((group (buffer-color-group b))
          (name (let ((n (and group (group-name group)))) (and (string? n) n)))
          (record (and group (group-record-by-id group)))
-         (color (and record (group-color-hex (group-record-color record)))))
+         ;; the buffer's own tab color, else its group's
+         (color (or (group-color-hex (buffer-tab-color b))
+                    (and record (group-color-hex (group-record-color record))))))
     (modeline-cache-set! b 'group name 'group-color color)
     name))
+
+;;; Tab colors. A buffer may wear a color of its own on its header tab, one
+;;; of the group palette slots; lists of buffers draw its row in it.
+
+(define (buffer-tab-color buf)
+  (let ((slot (and (buffer-known? buf) (buffer-local-value 'tab-color buf))))
+    (and (group-color-slot? slot) slot)))
+
+(define (buffer-tab-color-face buf)
+  (let ((slot (buffer-tab-color buf)))
+    (and slot (string-append "group-color-" (number->string slot)))))
+
+(define (buffer-set-tab-color! buf slot)
+  (buffer-set-local! buf 'tab-color (and (group-color-slot? slot) slot))
+  (buffer-modeline-group-refresh! buf)
+  ;; the lists that show it redraw their rows
+  (for-each (lambda (b)
+              (when (and (list-mode-of b) (buffer-shown? b))
+                (list-render! b #t)))
+            (buffer-list))
+  (buffer-tab-color buf))
+
+(define (buffer-tab-color-target)
+  (let* ((here (current-buffer))
+         (row (and (list-mode-of here) (list-current here))))
+    (if (and (string? row) (buffer-known? row)) row here)))
+
+(define-command "buffer-set-tab-color"
+  "Give this buffer, or the buffer of the list row at point, a tab color; lists show its row in it"
+  (lambda ()
+    (let* ((buf (buffer-tab-color-target))
+           (choices (cons "none"
+                          (map (lambda (n) (string-append (number->string n) " " (or (group-color-hex n) "")))
+                               (map (lambda (i) (+ i 1)) (iota *group-colors*))))))
+      (completing-read (string-append "Tab color for " buf ": ") choices
+        (lambda (pick)
+          (let ((slot (and (string? pick) (string->number (car (string-split pick " "))))))
+            (buffer-set-tab-color! buf slot)
+            (message (if slot (string-append buf " wears color " (number->string slot))
+                         (string-append buf " has no tab color")))))
+        'require-match #t))))
 
 ;; A membership change rewrites the headline too: its group segment reads
 ;; the buffer's own group. post-command! syncs the buffer the
@@ -5224,6 +5267,12 @@ is forgotten and that group falls back to creation order in the switcher."
 (catalog-meta! 'function "buffer-color-group" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-color-face" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-color-hex" 'domain 'buffers 'effects '(read))
+(public! 'buffer-tab-color "(buffer-tab-color BUF) — the palette slot BUF's header tab wears, or #f")
+(public! 'buffer-tab-color-face "(buffer-tab-color-face BUF) — the face of BUF's tab color, group-color-N, or #f")
+(public! 'buffer-set-tab-color! "(buffer-set-tab-color! BUF SLOT) — give BUF's header tab palette SLOT (1-6), #f to clear; list rows of BUF wear it")
+(catalog-meta! 'function "buffer-tab-color" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-tab-color-face" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-set-tab-color!" 'domain 'buffers 'effects '(write display))
 (catalog-meta! 'function "buffer-filename-face" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-buffers" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "define-pseudo-group!" 'domain 'buffers 'effects '(write))

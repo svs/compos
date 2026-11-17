@@ -1361,10 +1361,27 @@
 (define (list-row-cells buf e &optional ctx)
   (let ((g (if ctx (list-ctx-row-cells ctx) (list-opt buf 'row-cells)))
         (f (if ctx (list-ctx-cells ctx) (list-opt buf 'cells))))
-    (list-nest-cells buf e
-      (cond (g (g buf e))
-            (f (list (f buf e)))
-            (else '())))))
+    (list-tab-tint e
+      (list-nest-cells buf e
+        (cond (g (g buf e))
+              (f (list (f buf e)))
+              (else '()))))))
+
+;; a row that is a buffer wears that buffer's tab color: the cells of its
+;; first line drawn plain or in the accent take the color; a cell with a
+;; face of its own (a state, a time) keeps it
+(define (list-tab-tint e cells)
+  (let ((face (and (string? e) (pair? cells) (pair? (car cells))
+                   (boundp 'buffer-tab-color-face) (buffer-tab-color-face e))))
+    (if (not face)
+        cells
+        (cons (map (lambda (c)
+                     (let ((own (list-cell-face c)))
+                       (if (or (not own) (equal? own "") (equal? own "accent") (equal? own "default"))
+                           (cons (list-cell-text c) (cons face (if (and (pair? c) (pair? (cdr c))) (cddr c) '())))
+                           c)))
+                   (car cells))
+              (cdr cells)))))
 
 ;; CTX is the answers every row of one draw shares: the mark column,
 ;; the column lines, the mode's cells, row-cells, render, and key fns,

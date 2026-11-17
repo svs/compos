@@ -107,7 +107,15 @@ defmodule Compos.Core.Daemon do
   defp restart_release do
     with {:ok, bin} <- release_bin(),
          :ok <- save_desktop(),
-         :ok <- run_relauncher(release_respawn_script(bin, Compos.Core.home(), System.pid(), Compos.Core.state_dir())) do
+         :ok <-
+           run_relauncher(
+             release_respawn_script(
+               bin,
+               Compos.Core.home(),
+               System.pid(),
+               Compos.Core.state_dir()
+             )
+           ) do
       schedule_stop()
       :ok
     end
@@ -264,8 +272,7 @@ defmodule Compos.Core.Daemon do
 
         command =
           @raise_fd_limit <>
-            "nohup env COMPOS_HOME=#{shq(home)} MIX_DEPS_PATH=#{shq(deps)} " <>
-            "MIX_BUILD_PATH=#{shq(build)} mix run --no-halt >> #{shq(log)} 2>&1 </dev/null &"
+            "nohup " <> workspace_env(home, deps, build) <> " mix run --no-halt >> " <> shq(log) <> " 2>&1 </dev/null &"
 
         case System.cmd("/bin/sh", ["-c", command], cd: workspace, stderr_to_stdout: true) do
           {_out, 0} -> wait_for_port(port, url, home, 600)
@@ -275,6 +282,24 @@ defmodule Compos.Core.Daemon do
     end
   rescue
     e -> {:error, {:provision_failed, Exception.message(e)}}
+  end
+
+  @doc """
+  The `env` prefix a workspace daemon starts under. It drops every COMPOS_*
+  variable this daemon inherited, so the new one takes its port, app port,
+  name, socket and registry from its own daemon.conf, not from ours.
+  """
+  def workspace_env(home, deps, build, env \\ System.get_env()) do
+    unset =
+      env
+      |> Map.keys()
+      |> Enum.filter(&String.starts_with?(&1, "COMPOS_"))
+      |> Enum.sort()
+      |> Enum.map(&"-u #{&1} ")
+
+    "env " <>
+      Enum.join(unset) <>
+      "COMPOS_HOME=#{shq(home)} MIX_DEPS_PATH=#{shq(deps)} MIX_BUILD_PATH=#{shq(build)}"
   end
 
   defp existing_ports(path) do

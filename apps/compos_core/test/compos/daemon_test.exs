@@ -43,6 +43,34 @@ defmodule Compos.DaemonTest do
     assert {"", 0} = System.cmd("/bin/sh", ["-n", "-c", script], stderr_to_stdout: true)
   end
 
+  test "a workspace daemon starts without the live daemon's COMPOS_* variables" do
+    live = %{
+      "COMPOS_PORT" => "4104",
+      "COMPOS_APP_PORT" => "4105",
+      "COMPOS_NAME" => "dev",
+      "COMPOS_HOME" => "/tmp/live-home",
+      "COMPOS_SOCK" => "/tmp/live.sock",
+      "COMPOS_DAEMON_REGISTRY" => "/tmp/live-registry.json"
+    }
+
+    prefix = Daemon.workspace_env("/tmp/wt home", "/tmp/deps", "/tmp/build", live)
+    {out, 0} = System.cmd("/bin/sh", ["-c", prefix <> " env"], env: Map.to_list(live))
+
+    vars =
+      for line <- String.split(out, "\n"),
+          [key, value] <- [String.split(line, "=", parts: 2)],
+          into: %{},
+          do: {key, value}
+
+    assert vars["COMPOS_HOME"] == "/tmp/wt home"
+    assert vars["MIX_DEPS_PATH"] == "/tmp/deps"
+    assert vars["MIX_BUILD_PATH"] == "/tmp/build"
+
+    for key <- Map.keys(live) -- ["COMPOS_HOME"] do
+      refute Map.has_key?(vars, key), "#{key} leaked into the workspace daemon"
+    end
+  end
+
   test "restart-daemon is a registered command with a doc" do
     assert {:ok, ~s{"Save the desktop and restart the daemon"}} =
              Session.eval(~s{(command-doc "restart-daemon")})

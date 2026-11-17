@@ -1081,6 +1081,8 @@
     (if (and (> n 0) (equal? (substring s (- n 1) n) " "))
         (loop (- n 1))
         (substring s 0 n))))
+(public! 'string-trim-right "(string-trim-right S) — S without its trailing spaces; other whitespace stays" 'ui)
+(catalog-meta! 'function "string-trim-right" 'effects '(pure))
 
 (define (list-pad s w align)
   (cond ((not w) s)
@@ -2421,14 +2423,17 @@
             (list 'tag "span" 'class class 'text text)))))
 
 (define (list-grid-template cols)
-  ;; the visible columns on their widths; the last takes what is left
+  ;; the visible columns on their widths; the last takes what is left. A
+  ;; width is the most a column takes, not the least: a window narrower than
+  ;; the widths the list was laid out for shrinks the columns, and a long
+  ;; cell ends in an ellipsis, rather than the row running off the window
   (let ((n (length cols)))
     (string-append "grid-template-columns:"
       (string-join (let loop ((ks cols) (i 1) (out '()))
                      (if (null? ks) (reverse out)
                          (loop (cdr ks) (+ i 1)
                                (cons (if (= i n) "minmax(0,1fr)"
-                                         (string-append (number->string (list-col-width (car ks))) "ch"))
+                                         (string-append "minmax(0," (number->string (list-col-width (car ks))) "ch)"))
                                      out))))
                    " "))))
 

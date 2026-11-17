@@ -20,7 +20,7 @@
 .ml-fact-v.preset-compos::before {
   content: \"\"; display: inline-block; width: 12px; height: 12px;
   margin-right: 4px; vertical-align: -1px;
-  background: url(/images/compos-logo.png) center / contain no-repeat;
+  background: url(/logo) center / contain no-repeat;
 }
 .dash { font-family: var(--font-sans); padding: 2px 6px 8px; }
 .dash-head { display: flex; align-items: flex-end; gap: 16px;

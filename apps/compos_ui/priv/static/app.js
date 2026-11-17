@@ -868,6 +868,18 @@
   let keysHook = null;
 
   const Hooks = {
+    // The frame header wears this daemon's logo (Compos.Ui.Logo); the tab's
+    // icon follows it, so each daemon's tab says which daemon it is.
+    Logo: {
+      mounted() { this.sync(); },
+      updated() { this.sync(); },
+      sync() {
+        const src = this.el.getAttribute("src");
+        document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach((l) => {
+          if (l.getAttribute("href") !== src) l.setAttribute("href", src);
+        });
+      },
+    },
     Terminal: {
       mounted() {
         if (!window.Terminal || !window.FitAddon) {

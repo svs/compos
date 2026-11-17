@@ -58,4 +58,7 @@ defmodule Compos.Ui.Router do
   # A browser-file buffer gets the same signed-path protection. This route
   # serves only image, audio, and video MIME types.
   forward("/local-file", Compos.Ui.LocalFile)
+
+  # this daemon's logo: the compos-logo setting, else the stock one
+  forward("/logo", Compos.Ui.Logo)
 end

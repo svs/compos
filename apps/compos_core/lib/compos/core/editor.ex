@@ -277,6 +277,9 @@ defmodule Compos.Core.Editor do
   """
   def set_chrome(key, value), do: GenServer.call(__MODULE__, {:set_chrome, key, value})
 
+  @doc "The frame chrome values Scheme set, as a map of KEY to VALUE."
+  def chrome, do: GenServer.call(__MODULE__, :chrome)
+
   # minibuffer
   def minibuffer_set_input(input, fid \\ nil), do: prompt_op(:input, [input], fid)
 
@@ -1402,6 +1405,8 @@ defmodule Compos.Core.Editor do
     do: changed(:ok, %{state | modeline_extra: s})
 
   # Map.get: a hot swap keeps a state map that has no :chrome key
+  def handle_call(:chrome, _from, state), do: {:reply, Map.get(state, :chrome, %{}), state}
+
   def handle_call({:set_chrome, key, value}, _from, state) do
     chrome = Map.get(state, :chrome, %{})
 

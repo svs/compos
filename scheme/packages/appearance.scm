@@ -383,6 +383,27 @@
 (frame-chrome-set! "workspace-help" workspace-bar-help)
 (frame-chrome-set! "tabs-more-title" frame-tabs-more-title)
 
+;; This daemon's logo. Several daemons run at once, and each saves its own
+;; in its own custom.scm, so a tab, the frame header and the compos preset
+;; say which daemon they belong to. /logo (Compos.Ui.Logo) draws what the
+;; three chrome values say.
+(define (logo-publish! spec)
+  (let ((field (lambda (key)
+                 (let ((m (and (pair? spec) (memq key spec))))
+                   (if (and m (pair? (cdr m)) (string? (cadr m))) (cadr m) "")))))
+    (frame-chrome-set! "logo-file" (if (and (string? spec) (not (string=? spec "")))
+                                        (expand-file-name spec)
+                                        ""))
+    (frame-chrome-set! "logo-tint" (field 'tint))
+    (frame-chrome-set! "logo-label" (field 'label))))
+
+(defcustom 'compos-logo #f
+  "This daemon's logo in the tab, the frame header and the compos preset: #f for the stock logo, the path of an image file, or (tint COLOR label TEXT) for the stock logo recoloured to COLOR with up to three letters of TEXT in a badge. Either of tint and label may be left out."
+  'group 'appearance
+  'set logo-publish!)
+
+(logo-publish! compos-logo)
+
 (domain! 'unknown)
 (effects! '(unknown))
 

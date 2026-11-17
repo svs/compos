@@ -1298,7 +1298,15 @@ defmodule Compos.Core.Session do
               raise Compos.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"
 
             [{_, closure, _}] ->
-              Compos.Scheme.Eval.apply_fn(closure, [], store)
+              # a command run from inside another (M-x runs it from
+              # minibuffer-confirm) names itself in its error, so the
+              # message reads as the path: minibuffer-confirm: telemetry: ...
+              try do
+                Compos.Scheme.Eval.apply_fn(closure, [], store)
+              rescue
+                e in Compos.Scheme.Eval.Error ->
+                  reraise %{e | message: "#{command_name(name)}: #{e.message}"}, __STACKTRACE__
+              end
           end
         end,
       {"llm", "(llm PROMPT CALLBACK) — start an async completion; CALLBACK gets the reply text."} =>

@@ -1441,7 +1441,7 @@ defmodule Compos.Ui.EditorLive do
     ~M"""
     <c-statusbar class="echo-bar">
       <c-text class="ml-wordmark" title="compos">
-        <img src="/images/compos-logo.png" width="15" height="15" alt="" />compos
+        <img id="compos-logo" phx-hook="Logo" src={Compos.Ui.Logo.url(Map.get(@state, :chrome))} width="15" height="15" alt="" />compos
       </c-text>
       <c-text class="ml-divider"></c-text>
       <c-tabs :if={@tabs.tabs != []} class="ml-tabs" data-walk={chrome(@state, "tabs-walk", "") != ""}>

@@ -65,6 +65,8 @@
           (string-append "job:" (cadr p) "-" (caddr p) ":" (substring topic 4 (string-length topic))))
         topic)))
 
+(public! 'event-job-topic "(event-job-topic TOPIC [CHAT-ID]) — a job: TOPIC made private to a chat: job:NAME becomes job:SECS-N:NAME for CHAT-ID, or for the chat that is the current buffer; any other topic stays as it is")
+
 (define (event-job-topic-chat topic)
   "(event-job-topic-chat TOPIC) — the SECS-N chat key of a private job: TOPIC, or #f"
   (and (string? topic) (string-prefix? "job:" topic)

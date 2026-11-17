@@ -65,6 +65,9 @@
                            (set! *build-identity* value)
                            (build-identity-publish!)))))
           (or *build-identity* "dev")))))
+(effects! '(write execute display))
+(public! 'build-identity-text "(build-identity-text) — the build line the echo area shows; caches it, and in a checkout refreshes it with jj and git in a task every 30 s" 'system)
+(effects! '(read))
 
 (define (build-identity-describe)
   "what build-info says: the build line, and where this compos runs from"

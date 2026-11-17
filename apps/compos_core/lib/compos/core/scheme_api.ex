@@ -1471,6 +1471,16 @@ defmodule Compos.Core.SchemeAPI do
           File.write!(path, text)
           true
         end,
+      # one write in append mode: the bytes go on the end, and a crash never
+      # leaves the file shorter than it was, as a rewrite of the whole can
+      {"append-file!",
+       "(append-file! PATH TEXT) — add TEXT at the end of PATH in one write, create PATH and its parent directories; return #t."} =>
+        fn [p, text] ->
+          path = Path.expand(p)
+          File.mkdir_p!(Path.dirname(path))
+          File.write!(path, text, [:append])
+          true
+        end,
       {"start-process!",
        "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success."} =>
         fn [buffer, cmd, env] ->

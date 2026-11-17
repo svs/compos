@@ -633,6 +633,8 @@
 (public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
 (public! 'chat-presets-set! "(chat-presets-set! BUF '(name ...)) — set a session's whole tool surface at once; #t when it changed")
 (public! 'mcp-call! "(mcp-call! 'name TOOL ARGS [CB]) — call one tool; ARGS is JSON text or a plist")
+;; a tool of any server can reach out: fetch a URL, post a message
+(catalog-meta! 'function "mcp-call!" 'domain 'mcp 'effects '(write external))
 (public! 'mcp-tools "(mcp-tools 'name) — (TOOL DESCRIPTION) per tool an MCP server serves")
 (public! 'mcp-find "(mcp-find \"words|words\" ['name]) — search MCP tools; gives (SERVER TOOL DESC)")
 (public! 'mcp-tool-schema "(mcp-tool-schema 'name TOOL) — that tool's JSON argument schema")

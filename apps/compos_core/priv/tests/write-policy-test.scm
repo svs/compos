@@ -45,6 +45,21 @@
       (check-equal! (read-file p) "the real file\n" "the file keeps its text")
       (t--wp-clean! p))))
 
+(deftest 'append-file-adds-to-the-end-through-the-same-door
+  "append-file! puts its text after what the file holds, and the write rules refuse it as they refuse write-file!"
+  (lambda ()
+    (let ((p (t--wp-path "ledger.txt")))
+      (t--wp-clean! p)
+      (append-file! p "one\n")
+      (append-file! p "two\n")
+      (check-equal! (read-file p) "one\ntwo\n" "a missing file is made, then added to")
+      (write-file! p "the real file\n")
+      (t--wp-make-buffer! t--wp-buf "a transcript\n")
+      (check-false! (ignore-errors (lambda () (append-file! p "more\n" t--wp-buf)))
+                    "a source the rules refuse raises")
+      (check-equal! (read-file p) "the real file\n" "the file keeps its text")
+      (t--wp-clean! p))))
+
 (deftest 'write-policy-allows-a-buffer-to-save-its-own-file
   "the ordinary save is untouched"
   (lambda ()

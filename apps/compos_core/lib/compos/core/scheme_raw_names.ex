@@ -43,6 +43,7 @@ defmodule Compos.Core.SchemeRawNames do
     "raw-buffer-create" => "buffer-create",
     "raw-find-file" => "find-file",
     "raw-write-file!" => "write-file!",
+    "raw-append-file!" => "append-file!",
     "raw-buffer-save!" => "buffer-save!",
     "buffer-kill-raw!" => "buffer-kill!",
     "read-file-source" => "read-file",

@@ -17,17 +17,20 @@
 (define t--costs-acp-usage
   '("cachedReadTokens" 5000 "cachedWriteTokens" 200 "inputTokens" 1000 "outputTokens" 100))
 
-;; run THUNK with an empty ledger of its own
+;; run THUNK with an empty ledger of its own, in the temp folder. The real
+;; ledger comes back and the test file goes, also when THUNK fails.
 (define (t--with-ledger name thunk)
   (let ((saved llm-costs-ledger)
-        (path (string-append (compos-state-dir) "/llm-costs-test-" name ".jsonl")))
+        (path (string-append (or (getenv "TMPDIR") "/tmp/") "/llm-costs-test-" name ".jsonl")))
     (write-file! path "")
     (set! llm-costs-ledger path)
-    (set! *llm-costs-last-seq* #f)
-    (let ((result (thunk)))
-      (set! llm-costs-ledger saved)
-      (set! *llm-costs-last-seq* #f)
-      result)))
+    (llm-costs-forget-index!)
+    (unwind-protect
+      thunk
+      (lambda ()
+        (set! llm-costs-ledger saved)
+        (llm-costs-forget-index!)
+        (delete-file! path)))))
 
 (deftest 'a-subscription-turn-records-an-estimate-not-a-cost
   "a turn that a subscription pays for has no cost, and an estimate at the catalog price"
@@ -64,13 +67,64 @@
                   "another connector's id stays")))
 
 (deftest 'the-backends-own-cost-wins
-  "a cost the backend sends as a number is the row's cost, even on a subscription connector"
+  "a cost the backend sends as a number is the row's cost; on a subscription it is the estimate"
   (lambda ()
-    (let ((row (llm-costs-row (t--costs-event 3 "req-llm" "claude-code" "anthropic:claude-sonnet-5"
+    (let ((row (llm-costs-row (t--costs-event 3 "req-llm" "anthropic" "anthropic:claude-sonnet-5"
                                               '("input_tokens" 11 "output_tokens" 3) 0.0125))))
       (check-equal! (plist-get row 'cost) 0.0125 "the backend's own figure")
       (check-false! (plist-get row 'estimate) "no estimate")
-      (check-equal! (plist-get row 'input) 11 "the direct lane's tokens"))))
+      (check-equal! (plist-get row 'input) 11 "the direct lane's tokens"))
+    (let ((row (llm-costs-row (t--costs-event 3 "req-llm" "claude-code" "claude-sonnet-5"
+                                              '("input_tokens" 11 "output_tokens" 3) 0.0125))))
+      (check-false! (plist-get row 'cost) "a subscription turn is not spend, whoever priced it")
+      (check-equal! (plist-get row 'estimate) 0.0125 "the backend's figure is the estimate"))))
+
+(deftest 'an-acp-session-total-costs-what-it-grew
+  "an ACP adapter sends the session's running total; a turn costs the growth since the chat's last report"
+  (lambda ()
+    (t--with-ledger "session"
+      (lambda ()
+        (let ((turn (lambda (seq amount)
+                      (t--costs-event seq "acp" "my-gateway" "claude-sonnet-5" t--costs-acp-usage
+                                      (list "amount" amount "currency" "USD")))))
+          (check-equal! (llm-costs-session-total '("amount" 0.5 "currency" "USD")) 0.5 "the amount of the total")
+          (check-false! (llm-costs-session-total "0.5") "text is no total")
+          (llm-costs-record! (list (turn 30 0.5) (turn 31 0.75)))
+          (llm-costs-forget-index!)
+          (llm-costs-record! (list (turn 32 1.0) (turn 33 0.25)))
+          (let ((costs (map (lambda (r) (plist-get r 'cost)) (llm-costs-rows))))
+            (check-equal! costs '(0.5 0.25 0.25 0.25)
+                          "each turn its growth, read back across a reload; a total that fell is a new session")))
+        (let ((row (llm-costs-row (t--costs-event 34 "acp" "claude-code" "claude-sonnet-5" t--costs-acp-usage
+                                                  '("amount" 2.0 "currency" "USD"))
+                                  1.5)))
+          (check-false! (plist-get row 'cost) "a subscription turn is not spend")
+          (check-equal! (plist-get row 'estimate) 0.5 "the adapter's growth is the estimate"))))))
+
+(deftest 'a-new-event-log-does-not-hide-new-turns
+  "events.db made again starts its seq at 1; reports below the ledger's old seqs are still new"
+  (lambda ()
+    (t--with-ledger "reset"
+      (lambda ()
+        (let ((old (t--costs-event 500 "acp" "claude-code" "claude-sonnet-5" t--costs-acp-usage))
+              (fresh (plist-put (t--costs-event 1 "acp" "claude-code" "claude-sonnet-5" t--costs-acp-usage)
+                                'at (+ t--costs-at 3600))))
+          (check-equal! (llm-costs-record! (list old)) 1 "the turn before the reset")
+          (llm-costs-forget-index!)
+          (check-equal! (llm-costs-record! (list fresh)) 1 "seq 1 of the new log is a new turn")
+          (check-equal! (llm-costs-record! (list fresh old)) 0 "both are known now")
+          (check-equal! (length (llm-costs-rows)) 2 "two rows"))))))
+
+(deftest 'old-rows-count-on-the-local-day
+  "a row core wrote with a UTC ts counts on the local day, as a new row does; the hit rate is a whole percent"
+  (lambda ()
+    (let ()
+      (check-equal! (llm-costs--utc-ts->secs "2026-11-17T00:30:00Z") 1794875400 "the UTC instant")
+      (check-equal! (llm-costs--day '(ts "2026-11-17T23:30:00Z"))
+                    (format-time (llm-costs--utc-ts->secs "2026-11-17T23:30:00Z") "%Y-%m-%d")
+                    "the local day of the instant")
+      (check-equal! (llm-costs--day '(ts "nonsense")) "?" "a ts that does not read"))
+    (check-equal! (llm-costs--hit-rate '(input 50 cache-read 50)) "50% cached" "no decimal point")))
 
 (deftest 'a-codex-turn-sums-its-requests
   "Codex sends one usage per model request; the row sums them, cached input apart"
@@ -102,7 +156,7 @@
         (let ((events (list (t--costs-event 10 "acp" "claude-code" "claude-sonnet-5" t--costs-acp-usage)
                             (t--costs-event 11 "acp" "claude-code" "claude-sonnet-5" t--costs-acp-usage))))
           (check-equal! (llm-costs-record! events) 2 "two new rows")
-          (set! *llm-costs-last-seq* #f)
+          (llm-costs-forget-index!)
           (check-equal! (llm-costs-record! events) 0 "the same batch adds nothing, read back from the file")
           (check-equal! (length (llm-costs-rows)) 2 "the ledger holds two rows"))))))
 

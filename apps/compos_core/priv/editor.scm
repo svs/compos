@@ -4621,6 +4621,13 @@
         (write-refuse! path no)
         (raw-write-file! path text))))
 
+;; the same door for a write that adds to the end of a file: a log, a ledger
+(define (append-file! path text &optional source)
+  (let ((no (write-check! path (if source source #f))))
+    (if no
+        (write-refuse! path no)
+        (raw-append-file! path text))))
+
 (define (buffer-save! &optional path)
   (let* ((source (current-buffer))
          (target (if path path (buffer-path source))))
@@ -8058,7 +8065,7 @@
   '(copy-file! local-copy-file! make-directory! local-make-directory!
     make-symlink! local-make-symlink! rename-file! local-rename-file!
     set-file-mode! local-set-file-mode! touch-file! local-touch-file!
-    raw-write-file!))
+    raw-write-file! raw-append-file!))
 (domain! 'files)
 (effects! '(destroy))
 (editor--public-primitives!

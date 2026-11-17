@@ -7,6 +7,11 @@
 ;;; and appends one row to llm-usage.jsonl in the state folder. M-x
 ;;; llm-costs shows the ledger by day and model.
 ;;;
+;;; An ACP adapter sends its own cost as the session's running total,
+;;; ("amount" N "currency" "USD"); the turn's cost is the growth since the
+;;; last report of the same chat. A backend that sends a number sends the
+;;; turn's own cost. On a subscription either one is an estimate.
+;;;
 ;;; Usage formats and plans change often. Each step is a function or a
 ;;; setting here, so a fix is a reload, and a user can redefine one in
 ;;; their config: a team plan, a negotiated rate, a local model.
@@ -31,7 +36,7 @@
     ("codex" ".")
     ("opencode" "^opencode-go/")
     ("opencode-go" "^opencode-go/"))
-  "The models a subscription pays for, as ((CONNECTOR REGEX) ...). A turn on such a model records an estimate, not a cost. Any other turn is billed per token."
+  "The models a subscription pays for, as ((CONNECTOR REGEX) ...). A turn on such a model records an estimate, not a cost. Any other turn is billed per token. The defaults count every claude-code and codex turn as a subscription turn: when you run them on an API key, take their lines out, or their turns record an estimate and no spend."
   'group 'llm 'type 'list)
 
 (defcustom 'llm-costs-price-providers
@@ -114,19 +119,33 @@
 (define (llm-costs--put row key value)
   (if value (append row (list key value)) row))
 
-;; one report as one ledger row: a plist with JSON-ready keys. A cost the
-;; backend sends as a number wins over the catalog. A subscription turn
-;; holds an estimate, not a cost. A value that is not there is left out.
-(define (llm-costs-row event)
-  "(llm-costs-row EVENT) - the ledger row of one llm:usage EVENT"
+;; the running total of the session that an ACP adapter sends as its
+;; cost, ("amount" N "currency" "USD"), or #f
+(define (llm-costs-session-total cost)
+  "(llm-costs-session-total COST) - the dollars of the session total an ACP adapter sends as its cost, or #f"
+  (let ((a (and (pair? cost) (or (plist-get cost "amount") (plist-get cost 'amount)))))
+    (and (number? a) a)))
+
+;; one report as one ledger row: a plist with JSON-ready keys. The backend's
+;; own figure wins over the catalog: a number is the turn's cost, and a
+;; session total costs what it grew since PREV, the total the same chat
+;; reported last (all of it when it fell: the adapter started again). On a
+;; subscription the figure is an estimate, not a cost. A value that is not
+;; there is left out.
+(define (llm-costs-row event &optional prev)
+  "(llm-costs-row EVENT [PREV]) - the ledger row of one llm:usage EVENT; PREV is the session total the same chat reported last"
   (let* ((d (plist-get event 'data))
          (backend (plist-get d 'backend))
          (connector (plist-get d 'connector))
          (model (llm-costs-model connector (plist-get d 'model)))
          (tokens (llm-costs-tokens backend (plist-get d 'usage)))
-         (own (and (number? (plist-get d 'cost)) (plist-get d 'cost)))
-         (sub (and (not own) (llm-costs-subscription? connector model)))
-         (price (and (not own) (llm-costs-catalog-price model tokens)))
+         (total (llm-costs-session-total (plist-get d 'cost)))
+         (own (cond ((number? (plist-get d 'cost)) (plist-get d 'cost))
+                    ((not total) #f)
+                    ((and (number? prev) (>= total prev)) (- total prev))
+                    (else total)))
+         (sub (llm-costs-subscription? connector model))
+         (figure (or own (llm-costs-catalog-price model tokens)))
          (at (plist-get event 'at)))
     (fold (lambda (row kv) (llm-costs--put row (car kv) (cadr kv)))
           (list 'seq (plist-get event 'seq) 'at at 'day (format-time at "%Y-%m-%d"))
@@ -141,8 +160,9 @@
                 (list 'cache_read (plist-get tokens 'cache-read))
                 (list 'cache_write (plist-get tokens 'cache-write))
                 (list 'reasoning (plist-get tokens 'reasoning))
-                (list 'cost (or own (and (not sub) price)))
-                (list 'estimate (and sub price))))))
+                (list 'cost (and (not sub) figure))
+                (list 'estimate (and sub figure))
+                (list 'session_cost total)))))
 
 ;;; --- the ledger --------------------------------------------------------------
 
@@ -156,50 +176,95 @@
         (filter pair? (map (lambda (line) (and (not (equal? line "")) (json-parse line)))
                            (string-split text "\n"))))))
 
-;; the newest seq in the ledger, read once. A workflow writes outside the
-;; log at least once, so a batch that runs again skips what it wrote.
-(define *llm-costs-last-seq* (if (boundp '*llm-costs-last-seq*) *llm-costs-last-seq* #f))
-
-(define (llm-costs--last-seq)
-  (or *llm-costs-last-seq*
-      (let ((s (fold (lambda (m r) (max m (llm-costs--n (plist-get r 'seq)))) 0 (llm-costs-rows))))
-        (set! *llm-costs-last-seq* s)
-        s)))
+;; A report is known by its seq AND its time. The seq alone restarts at 1
+;; when events.db is made again, and every report below the ledger's old
+;; maximum would then be skipped as a duplicate.
+(define (llm-costs--key seq at)
+  (and (number? seq) (string-append (number->string seq) "@" (format "~a" at))))
 
 (effects! '(write))
 
+;; What the ledger holds, read from the file once: the key of each report,
+;; and the last session total of each chat. A workflow writes outside the
+;; log at least once, so a batch that runs again skips what it wrote.
+(define *llm-costs-index* (if (boundp '*llm-costs-index*) *llm-costs-index* #f))
+
+(define (llm-costs--index)
+  (or *llm-costs-index*
+      (let ((ix (fold (lambda (ix r)
+                        (llm-costs--index-add ix (llm-costs--key (plist-get r 'seq) (plist-get r 'at))
+                                              (plist-get r 'slug) (plist-get r 'session_cost)))
+                      (list '() '()) (llm-costs-rows))))
+        (set! *llm-costs-index* ix)
+        ix)))
+
+(define (llm-costs--index-add ix key slug total)
+  (list (if key (cons key (car ix)) (car ix))
+        (if (and (string? slug) (number? total)) (alist-put (cadr ix) slug total) (cadr ix))))
+
+(define (llm-costs-forget-index!)
+  "(llm-costs-forget-index!) - read the ledger again at the next record, after it changed outside this package"
+  (set! *llm-costs-index* #f))
+
+;; rows go on the end of the file in one write. A core without append-file!
+;; (before the restart that brings it) writes the whole file again.
+(define (llm-costs--append! text)
+  (if (boundp 'append-file!)
+      (append-file! llm-costs-ledger text)
+      (let ((old (or (read-file llm-costs-ledger) "")))
+        (write-file! llm-costs-ledger
+          (string-append old (if (or (equal? old "") (string-suffix? "\n" old)) "" "\n") text)))))
+
 (define (llm-costs-record! events)
   "(llm-costs-record! EVENTS) - append a ledger row for each llm:usage event that the ledger does not have yet; answer how many"
-  (let* ((last (llm-costs--last-seq))
-         (new (filter (lambda (e) (> (llm-costs--n (plist-get e 'seq)) last)) events)))
-    (when (pair? new)
-      (let ((old (or (read-file llm-costs-ledger) ""))
-            (lines (map (lambda (e) (json-encode (llm-costs-row e))) new)))
-        (write-file! llm-costs-ledger
-          (string-append old
-                         (if (or (equal? old "") (string-suffix? "\n" old)) "" "\n")
-                         (string-join lines "\n") "\n"))
-        (set! *llm-costs-last-seq*
-          (fold (lambda (m e) (max m (plist-get e 'seq))) last new))))
-    (length new)))
+  (let loop ((es events) (ix (llm-costs--index)) (lines '()))
+    (if (null? es)
+        (begin
+          (when (pair? lines)
+            (llm-costs--append! (string-append (string-join (reverse lines) "\n") "\n")))
+          (set! *llm-costs-index* ix)
+          (length lines))
+        (let* ((e (car es))
+               (key (llm-costs--key (plist-get e 'seq) (plist-get e 'at))))
+          (if (and key (member key (car ix)))
+              (loop (cdr es) ix lines)
+              (let* ((slug (plist-get (plist-get e 'data) 'slug))
+                     (prev (and (string? slug) (assoc slug (cadr ix))))
+                     (row (llm-costs-row e (and prev (cadr prev)))))
+                (loop (cdr es)
+                      (llm-costs--index-add ix key slug (plist-get row 'session_cost))
+                      (cons (json-encode row) lines))))))))
 
 (define (llm-costs--handle key events)
   (llm-costs-record! events))
 
+;; 'from 0: the first time it runs, the workflow takes the reports that came
+;; before this package loaded too; the keys keep it from writing one twice
 (define-workflow! "llm-costs"
   'listen '("llm:usage")
-  'handle 'llm-costs--handle)
+  'handle 'llm-costs--handle
+  'from 0)
 
 ;;; --- M-x llm-costs -----------------------------------------------------------
 
 (effects! '(read))
 
-;; a row's day: its own, or the date of the ts that core wrote before this
-;; package kept the ledger
+;; a row's day: its own, or the local day of the UTC ts that core wrote
+;; before this package kept the ledger, so that a turn just after midnight
+;; counts on the same day in old rows and new ones
 (define (llm-costs--day r)
   (or (plist-get r 'day)
-      (let ((ts (plist-get r 'ts)))
-        (if (and (string? ts) (>= (string-length ts) 10)) (substring ts 0 10) "?"))))
+      (let ((at (llm-costs--utc-ts->secs (plist-get r 'ts))))
+        (if at (format-time at "%Y-%m-%d") "?"))))
+
+;; "2026-11-17T19:05:00Z" as unix seconds, or #f. parts->time reads its
+;; parts as local time, so the zone's offset at the epoch goes back on.
+(define (llm-costs--utc-ts->secs ts)
+  (let ((n (lambda (a b) (string->number (substring ts a b)))))
+    (and (string? ts) (>= (string-length ts) 16)
+         (n 0 4) (n 5 7) (n 8 10) (n 11 13) (n 14 16)
+         (- (parts->time (n 0 4) (n 5 7) (n 8 10) (n 11 13) (n 14 16))
+            (parts->time 1970 1 1 0 0)))))
 
 (define (llm-costs--add sums r)
   (list 'requests (+ 1 (plist-get sums 'requests))
@@ -229,7 +294,7 @@
 (define (llm-costs--hit-rate s)
   (let ((total (+ (plist-get s 'input) (plist-get s 'cache-read))))
     (if (> total 0)
-        (string-append (number->string (round (* 100.0 (/ (plist-get s 'cache-read) total)))) "% cached")
+        (string-append (number->string (inexact->exact (round (* 100.0 (/ (plist-get s 'cache-read) total))))) "% cached")
         "")))
 
 (define-command "llm-costs" "Show LLM spend by day and model (the usage ledger)"
@@ -264,9 +329,11 @@
 (public! 'llm-costs-subscription? "(llm-costs-subscription? CONNECTOR MODEL) - #t when a subscription of CONNECTOR pays for MODEL")
 (public! 'llm-costs-model "(llm-costs-model CONNECTOR MODEL) - MODEL as the catalog names it")
 (public! 'llm-costs-catalog-price "(llm-costs-catalog-price MODEL TOKENS) - the dollars of TOKENS at the catalog price of MODEL, or #f")
-(public! 'llm-costs-row "(llm-costs-row EVENT) - the ledger row of one llm:usage EVENT")
+(public! 'llm-costs-row "(llm-costs-row EVENT [PREV]) - the ledger row of one llm:usage EVENT; PREV is the session total the same chat reported last")
+(public! 'llm-costs-session-total "(llm-costs-session-total COST) - the dollars of the session total an ACP adapter sends as its cost, or #f")
 (public! 'llm-costs-rows "(llm-costs-rows) - every row of the ledger, oldest first")
 (public! 'llm-costs-report "(llm-costs-report) - the ledger summed by day and model, newest day first")
 
 (effects! '(write))
 (public! 'llm-costs-record! "(llm-costs-record! EVENTS) - append a ledger row for each llm:usage event the ledger does not have yet; answer how many")
+(public! 'llm-costs-forget-index! "(llm-costs-forget-index!) - read the ledger again at the next record, after it changed outside this package")

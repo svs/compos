@@ -1618,6 +1618,14 @@ defmodule Compos.AgentTest do
     inject(backend, prompt_done(pid, "end_turn"))
     assert eventually(fn -> length(reports_of("rep-cost")) == 1 end)
     assert [%{"cost" => %{"amount" => 0.42, "currency" => "USD"}}] = reports_of("rep-cost")
+
+    # the next turn gets no cost from the adapter, and reports none: the
+    # last turn's must not ride along and be billed again
+    :ok = Backend.ACP.prompt(backend, "again", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid2}}, 1_000
+    inject(backend, prompt_done(pid2, "end_turn"))
+    assert eventually(fn -> length(reports_of("rep-cost")) == 2 end)
+    assert [_, %{"cost" => false}] = reports_of("rep-cost")
   end
 
   test "two model switches in flight: each reply sets its own model" do

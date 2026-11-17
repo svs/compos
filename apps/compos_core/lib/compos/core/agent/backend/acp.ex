@@ -596,7 +596,11 @@ defmodule Compos.Core.Agent.Backend.ACP do
         # moves such a turn's settlement off the result and onto an idle
         # signal it can lose, and then never answers session/prompt. The
         # Agent's settle grace reads this event.
-        # The cost itself goes to the usage report as the adapter sent it.
+        # The cost itself goes to the usage report as the adapter sent it:
+        # claude-agent-acp sends the session's running total as
+        # %{"amount" => usd, "currency" => "USD"} (the SDK's total_cost_usd).
+        # The turn's report carries the last one of that turn alone; the
+        # llm-costs package turns the total into the turn's cost.
         if Map.has_key?(update, "cost"),
           do: state |> Map.put(:adapter_cost, update["cost"]) |> emit(type: :"cycle-result"),
           else: state
@@ -643,7 +647,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
       end: how
     })
 
-    state
+    # a cost belongs to the turn it came in: the next turn that gets none
+    # must not report this one again
+    Map.put(state, :adapter_cost, nil)
   end
 
   defp acp_int(map, key) do

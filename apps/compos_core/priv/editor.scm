@@ -383,6 +383,8 @@
                    fn0)))
          (opts (if spec0 (cddr rest) (cdr rest)))
          (modes (let ((m (memq 'modes opts))) (and m (pair? (cdr m)) (cadr m))))
+         ;; 'public #t: offered everywhere when command-public-only is on
+         (public (let ((m (memq 'public opts))) (and m (pair? (cdr m)) (cadr m))))
          ;; 'show PROC: run from M-x, the command hands the function's
          ;; answer to PROC, the echo a code caller does not want
          (show (let ((m (memq 'show opts))) (and m (pair? (cdr m)) (cadr m))))
@@ -406,6 +408,8 @@
     (when modes
       (set! *command-modes*
             (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
+    (when (and public (not (member name *command-public*)))
+      (set! *command-public* (cons name *command-public*)))
     (set! *command-generation* (+ *command-generation* 1))
     (let ((bound (command--bind! name (command--callable name spec fn) entry fn)))
       (catalog-register! 'command name doc
@@ -1228,6 +1232,29 @@
 
 (define (run-hooks &rest hooks)
   (for-each (lambda (h) (run-hook-with-args h)) hooks))
+
+;;; after-init-hook: Emacs's hook of the same name. The Session runs it once
+;;; for each boot, after the packages and the user config load and the
+;;; interpreter is published. It also waits for the desktop restore of the
+;;; shown buffers, at most 30 seconds. Work that the boot does not need goes here:
+;;; a warm-up, a scan, a service. A function on the hook can call anything,
+;;; because every package is in.
+;;;
+;;; A file that loads after the boot finds *after-init-done* true. It then
+;;; does the work at once: (after-init 'FN) is both cases.
+;; a reload of this file keeps the flag: the boot is over only one time
+(define *after-init-done* (and (boundp '*after-init-done*) *after-init-done*))
+
+(define (run-after-init-hook!)
+  (unless *after-init-done*
+    (set! *after-init-done* #t)
+    (run-hooks 'after-init-hook)))
+
+(define (after-init fn)
+  (if *after-init-done*
+      (let ((p (hook--fn fn))) (when p (p)))
+      (add-hook! 'after-init-hook fn #t))
+  fn)
 
 ;; the first function that answers a true value ends the run
 (define (run-hook-with-args-until-success hook &rest args)
@@ -4027,14 +4054,27 @@
 (define (register-region-lifter! mode fn)
   (set! *region-lifters* (alist-put *region-lifters* mode fn)))
 
+;; A fold hides text from the end of its head line to the end of its last
+;; line. A range that reaches the end of the head line takes the hidden
+;; text with it, as killing a folded line does in Emacs: the reader chose
+;; the line they see, and what it stands for goes with it.
+(define (region-lift-hidden buf start end)
+  (let loop ((hidden (sort (buffer-hidden buf))) (end end))
+    (cond ((null? hidden) (list start end))
+          ((and (< start end) (<= start (car (car hidden))) (>= end (car (car hidden))))
+           (loop (cdr hidden) (max end (cadr (car hidden)))))
+          (else (loop (cdr hidden) end)))))
+
+;; what START..END stands for in BUF: the mode's lifter, then the folds
+(define (region-lift-bounds buf start end)
+  (let* ((hit (assoc (buffer-local-value 'mode-name buf) *region-lifters*))
+         (bounds (if (and hit (procedure? (cadr hit)))
+                     ((cadr hit) buf start end)
+                     (list start end))))
+    (region-lift-hidden buf (car bounds) (cadr bounds))))
+
 (define (region-action-bounds)
-  (let* ((buf (current-buffer))
-         (start (region-beginning))
-         (end (region-end))
-         (hit (assoc (buffer-local-value 'mode-name buf) *region-lifters*)))
-    (if (and hit (procedure? (cadr hit)))
-        ((cadr hit) buf start end)
-        (list start end))))
+  (region-lift-bounds (current-buffer) (region-beginning) (region-end)))
 
 (define-command "forward-word" "Move point forward one word" (interactive 'p)
   (lambda (n) (repeat-count n forward-word! backward-word!)))
@@ -4786,13 +4826,21 @@
 ;; (autoload 'NAME FILE [DOC]): NAME is a function once FILE loads. The
 ;; stub loads FILE, then applies the real definition. A file that does
 ;; not define NAME is an error, not a loop.
+(define (autoload--path file)
+  ;; a stub can outlive its file: a package that moved to a repo of its own
+  ;; leaves the old path behind. Its library name finds it on load-path.
+  (if (and (or (string-prefix? "/" file) (string-prefix? "~" file))
+           (not (file-exists? file)))
+      (or (locate-library (load--library-name file)) file)
+      file))
+
 (define (autoload name file &optional doc)
   (unless (boundp name)
     (let ((self #f))
       (set! self
             (lambda (&rest args)
               (autoload--forget! name)
-              (load file)
+              (load (autoload--path file))
               (let ((fn (and (boundp name) (symbol-value name))))
                 (when (or (not fn) (eq? fn self))
                   (error (string-append "autoload: " file " did not define "
@@ -4813,7 +4861,7 @@
       (set! self
             (lambda (&rest args)
               (autoload--forget! name)
-              (load file)
+              (load (autoload--path file))
               (let ((fn (command-fn name)))
                 (when (or (not fn) (eq? fn self))
                   (error (string-append "autoload: " file " did not define the command " name)))
@@ -4840,7 +4888,7 @@
   (let ((file (autoload-file name)))
     (when file
       (autoload--forget! name)
-      (load file))
+      (load (autoload--path file)))
     (and (mode-get name 'kind) #t)))
 
 ;;; ;;;###autoload cookies: Emacs's loaddefs, read at boot instead of
@@ -5887,6 +5935,12 @@
 ;; commands are offered in the app alone, its entry command everywhere
 ;; (apps.scm). M-x and the palette ask command-applicable?, and
 ;; command-mode-scoping #f turns it off.
+;;
+;; With command-public-only on, a package's command that names no modes
+;; is private: offered only where its package's modes are on or a map of
+;; the buffer binds it. Public without a mark: the editor's own commands,
+;; mode toggles, app entries, commands the global map binds, and commands
+;; marked with define-command's 'public #t or command-public!.
 
 ;; NAMES less every name in GONE, sorted: one sort, not a member scan per
 ;; name. A name in GONE sorts before the same name in NAMES.
@@ -5910,6 +5964,63 @@
     (or (buffer-derived-mode? buf m)
         (member (string-append m "-map") maps))))
 
+;; kept across a reload of this file: packages mark their commands once
+(define *command-public* (if (boundp '*command-public*) *command-public* '()))
+(define *command--private* (list #f '()))
+
+(define (command-public! &rest names)
+  (for-each (lambda (n)
+              (unless (member n *command-public*)
+                (set! *command-public* (cons n *command-public*))))
+            (if (and (pair? names) (pair? (car names))) (car names) names))
+  (set! *command-generation* (+ *command-generation* 1))
+  names)
+
+;; the private commands as ((NAME MODES) ...), MODES its package's modes;
+;; built once for each set of commands and catalog
+(define (command--private-rows names)
+  (let ((key (list *command-generation* (length names)
+                   (if (boundp 'catalog-generation) (catalog-generation) 0))))
+    (if (equal? (car *command--private*) key)
+        (cadr *command--private*)
+        (let* ((cat (if (boundp 'catalog) (catalog) '()))
+               (pkg-modes (fold (lambda (acc e)
+                                  (if (equal? (plist-get e 'kind) "mode")
+                                      (let* ((p (plist-get e 'package)) (row (assoc p acc)))
+                                        (cons (list p (cons (plist-get e 'name) (if row (cadr row) '())))
+                                              (remove (lambda (r) (equal? (car r) p)) acc)))
+                                      acc))
+                                '() cat))
+               (scopes (if (boundp 'app-command-scopes) (app-command-scopes names) '()))
+               (open (append (map car *command-modes*) *command-public*
+                             (map car scopes)
+                             (if (boundp '*app-entries*) *app-entries* '())
+                             (command--map-commands "global")))
+               (rows (filter (lambda (e)
+                               (let ((n (plist-get e 'name)))
+                                 (and (equal? (plist-get e 'kind) "command")
+                                      (not (equal? (plist-get e 'namespace) "core"))
+                                      (plist-get e 'package)
+                                      (not (string-suffix? "-mode" n))
+                                      (not (command-internal? n)))))
+                             cat))
+               (keep (names-less (map (lambda (e) (plist-get e 'name)) rows) open))
+               (private (map (lambda (n)
+                               (let* ((e (find (lambda (e) (equal? (plist-get e 'name) n)) rows))
+                                      (row (assoc (plist-get e 'package) pkg-modes)))
+                                 (list n (if row (cadr row) '()))))
+                             keep)))
+          (set! *command--private* (list key private))
+          private))))
+
+(define (command--private-out buf names open maps)
+  (if (and (boundp 'command-public-only) command-public-only)
+      (map car (remove (lambda (row)
+                         (or (member (car row) open)
+                             (any (lambda (m) (command--mode-on? m buf maps)) (cadr row))))
+                       (command--private-rows names)))
+      '()))
+
 (define (commands-out-of-scope buf &optional names)
   (if (and (boundp 'command-mode-scoping) (not command-mode-scoping))
       '()
@@ -5923,6 +6034,7 @@
                                      *command-modes*))))
         ;; an app's commands are offered in the app alone (apps.scm)
         (append named
+                (command--private-out buf (or names (command-names)) open maps)
                 (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open names) '())))))
 
 (define (command-applicable? name &optional buf)
@@ -6027,7 +6139,8 @@
         (if (boundp '*app-entries*) (length *app-entries*) 0)
         (if (boundp '*list-modes*) (length *list-modes*) 0)
         (length (hook-functions 'candidate-face))
-        (and (boundp 'command-mode-scoping) command-mode-scoping))))
+        (and (boundp 'command-mode-scoping) command-mode-scoping)
+        (and (boundp 'command-public-only) command-public-only))))
 
 (define (command-rows)
   (let* ((buf (current-buffer))
@@ -6071,6 +6184,11 @@
   "(command-modes! NAME '(MODE ...)) -- offer command NAME in M-x and the palette only in buffers of those modes, as define-command's 'modes and Emacs's (interactive nil MODE ...) do; '() offers it in every buffer")
 (public! 'command-modes-add!
   "(command-modes-add! NAME MODE) -- add MODE to the modes that offer command NAME; for a generated command a package binds in each mode it sets up")
+(public! 'command-public!
+  "(command-public! NAME ...) or (command-public! '(NAME ...)) -- offer these commands in M-x everywhere when command-public-only is on, as define-command's 'public #t does")
+(public! 'command-private-rows
+  "(command-private-rows) -- the commands command-public-only hides outside their package's modes, as ((NAME MODES) ...)")
+(define (command-private-rows) (command--private-rows (command-names)))
 (public! 'command-applicable?
   "(command-applicable? NAME [BUF]) -- #t when command NAME is for BUF: no modes, or one of its modes is on there")
 (public! 'commands-out-of-scope
@@ -6277,7 +6395,6 @@
 (bind-prefix! "ctl-x-map" "v" "vc-prefix-map")
 (bind-prefix! "ctl-x-map" "C-g" "buffer-group-map")
 (bind-prefix! "mode-specific-map" "a" "agent-map")
-(bind-prefix! "mode-specific-map" "S" "spotify-map")
 (bind-prefix! "mode-specific-map" "!" "annotate-map")
 
 ;;; --- self-insert-command --------------------------------------------------------
@@ -6875,6 +6992,47 @@
         (kill-top)
         (begin (kill-push! text) text))))
 
+;;; Copy, cut and paste on an editable surface name source text, and the
+;;; rows the browser draws are not the source: a fold hides lines, a fold
+;;; marker and a card add characters. The browser sends its selection as
+;;; bytes FROM..TO, and the text is worked out here. No range (-1, or a
+;;; text version the browser no longer shows) means the region.
+
+(define (clipboard--bounds from to)
+  (let ((buf (current-buffer)))
+    (if (and (integer? from) (integer? to) (<= 0 from) (< from to) (<= to (buffer-size buf)))
+        (region-lift-bounds buf from to)
+        (region-action-bounds))))
+
+(define (clipboard-copy-range from to)
+  (let* ((bounds (clipboard--bounds from to))
+         (text (buffer-substring (car bounds) (cadr bounds))))
+    (unless (equal? text "") (kill-push! text))
+    text))
+
+;; the text that went, "" when there was nothing to cut
+(define (clipboard-cut-range from to)
+  (let* ((bounds (clipboard--bounds from to))
+         (s (car bounds)) (e (cadr bounds)))
+    (if (< s e)
+        (let ((text (buffer-substring s e)))
+          (kill-region-1 s e)
+          text)
+        "")))
+
+;; TEXT over the browser's selection. A caret (FROM = TO) says there is no
+;; selection, so a mark the server still holds is not one to paste over.
+(define (clipboard-paste-range! text from to)
+  (let ((buf (current-buffer)))
+    (cond
+      ((and (integer? from) (integer? to) (<= 0 from) (< from to) (<= to (buffer-size buf)))
+       (let ((bounds (region-lift-bounds buf from to)))
+         (goto-char! (car bounds))
+         (set-mark! (cadr bounds))))
+      ((and (integer? from) (integer? to) (<= 0 from) (= from to))
+       (set-mark! #f)))
+    (clipboard-paste! text)))
+
 ;;; --- buffer links ----------------------------------------------------------
 ;;; A link is one string that points at a buffer, and two readers follow it.
 ;;; A person opens BASE/b/NAME and this editor shows the buffer at the line.
@@ -6991,6 +7149,8 @@
 (global-set-key "C-y" "yank")
 (global-set-key "C-/" "undo")
 (global-set-key "C-x u" "undo")
+(global-set-key "C-x h" "cua-select-all")
+(global-set-key "s-a" "cua-select-all")
 (global-set-key "C-?" "undo-redo")
 (global-set-key "C-M-_" "undo-redo")
 (global-set-key "C-q" "quoted-insert")
@@ -7369,14 +7529,20 @@
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
 (public! 'compos-temp-dir "(compos-temp-dir) — the folder for files one call writes and forgets: $TMPDIR/compos, which the OS clears")
 (public! 'compos-temp-file "(compos-temp-file NAME) — the path of NAME in the temp folder, the folder made")
+(public! 'compos-cache-dir "(compos-cache-dir) — the folder for files compos can make again: $XDG_CACHE_HOME/compos, or ~/.cache/compos; safe to delete")
+(public! 'compos-cache-dir-set! "(compos-cache-dir-set! DIR) — keep every cache in DIR from now on, Scheme and Elixir alike; #f goes back to the default")
 ;; the buffer-name grammar: *strong* ~dim~ `mono` :icon:, and \x for a literal x
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 (catalog-meta! 'function "window-preview-buffer!"
   'domain 'interaction 'effects '(write display))
 (catalog-meta! 'function "message" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "abbreviate-file-name" 'domain 'files 'effects '(pure))
+(public! 'path-split "(path-split PATH) — PATH as (DIR NAME): DIR keeps its trailing slash, \"\" when PATH has none")
+(catalog-meta! 'function "path-split" 'domain 'files 'effects '(pure))
 (catalog-meta! 'function "compos-cache-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-cache-dir-set!" 'domain 'files 'effects '(write))
+(public! 'compos-state-dir "(compos-state-dir) — the folder for what compos keeps but never syncs: the desktop, buffer checkpoints, logs, the socket; ~/.local/state/compos, or state/ in a daemon's own home")
+(catalog-meta! 'function "compos-state-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-temp-dir" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "compos-temp-file" 'domain 'files 'effects '(write))
 
@@ -7623,6 +7789,7 @@
 (public! 'expand-path "(expand-path PATH) — expand PATH to an absolute path, against the home and working directories." 'files)
 (public! 'file-realpath "(file-realpath PATH) — expand PATH and resolve any symlink in it, so two names for one directory compare equal." 'files)
 (effects! '(write))
+(public! 'after-init "(after-init 'FN) — call FN once the boot is complete: on after-init-hook during the boot, at once after it")
 (public! 'provide "(provide 'F) — record the feature F and run the thunks waiting on it; (load) does this for the library name")
 (public! 'require "(require 'F [FILENAME]) — load F once, from FILENAME or F.scm on load-path; a cycle or a missing file is an error")
 (public! 'with-eval-after-load "(with-eval-after-load 'F THUNK) — run THUNK now when F is provided, or when it is")

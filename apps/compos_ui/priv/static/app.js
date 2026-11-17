@@ -878,6 +878,26 @@
         document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]').forEach((l) => {
           if (l.getAttribute("href") !== src) l.setAttribute("href", src);
         });
+        if (src !== this.drawn) this.drawIcon(src);
+      },
+      // An installed app's icon must be a PNG, and a tinted logo is an SVG:
+      // draw it at 512px and hand it to the daemon (Compos.Ui.Logo.store_icon),
+      // whose manifest then names it.
+      drawIcon(src) {
+        this.drawn = src;
+        const v = new URL(src, location.href).searchParams.get("v");
+        if (!v) return;
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = c.height = 512;
+          c.getContext("2d").drawImage(img, 0, 0, 512, 512);
+          try {
+            const data = c.toDataURL("image/png").split(",")[1];
+            this.pushEvent("logo_icon", { v, data });
+          } catch (_) {}
+        };
+        img.src = src;
       },
     },
     Terminal: {

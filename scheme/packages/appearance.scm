@@ -422,8 +422,11 @@
       ":root:root { --sans-family: var(--mono-family); --serif-family: var(--mono-family); --font-sans: var(--font-mono); --font-serif: var(--font-mono); }"
       ""))
 
+;; a rendered page draws in a frame of its own, where these variables do
+;; not reach: theme-monospace-hook tells it (preview.scm)
 (define (theme-monospace--refresh! on)
-  (define-style! 'theme-monospace (theme-monospace--css on)))
+  (define-style! 'theme-monospace (theme-monospace--css on))
+  (run-hook-with-args 'theme-monospace-hook on))
 
 (defcustom 'theme-monospace #f
   "Draw all text in the theme's monospace font, whatever the theme."

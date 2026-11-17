@@ -20,7 +20,7 @@ defmodule Compos.Ui.Layouts do
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
         <meta name="boot-id" content={@boot_id} />
         <title>{@page_title}</title>
-        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="manifest" href="/logo/manifest" />
         <link rel="icon" href="/logo" />
         <link rel="apple-touch-icon" href="/logo" />
         <link

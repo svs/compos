@@ -35,7 +35,7 @@ defmodule Compos.Ui.MobileLayouts do
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="theme-color" content="#efece2" />
         <title>{@page_title}</title>
-        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="manifest" href="/logo/manifest" />
         <link rel="icon" href="/logo" />
         <link rel="apple-touch-icon" href="/logo" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

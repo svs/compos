@@ -24,12 +24,75 @@ defmodule Compos.Ui.Logo do
 
   def url(_), do: "/logo"
 
+  @doc "The version of the logo under CHROME: it changes when the logo does."
+  def version(chrome) when is_map(chrome), do: Integer.to_string(:erlang.phash2(spec(chrome)))
+  def version(_), do: version(%{})
+
+  @doc """
+  Keep PNG as the app icon of logo VERSION. A page draws /logo onto a
+  canvas and sends it here, because an installed app's icon must be a PNG
+  and the tinted logo is an SVG. A PNG for a logo that is no longer the
+  current one is dropped.
+  """
+  def store_icon(version, <<137, 80, 78, 71, _::binary>> = png)
+      when is_binary(version) and byte_size(png) < 4_000_000 do
+    if version == current_version() and stored_version() != version do
+      File.write!(icon_path(), png)
+      File.write!(icon_path() <> ".v", version)
+    end
+
+    :ok
+  end
+
+  def store_icon(_, _), do: :error
+
+  defp current_version, do: version(Compos.Core.Editor.chrome())
+
+  defp stored_version do
+    case File.read(icon_path() <> ".v") do
+      {:ok, v} -> v
+      _ -> nil
+    end
+  end
+
+  defp icon_path, do: Path.join(Compos.Core.config_dir(), "logo-icon.png")
+
   get "/" do
     case spec(Compos.Core.Editor.chrome()) do
       {file, _, _} when file != "" -> send_image(conn, file)
       {_, "", ""} -> send_stock(conn)
       {_, tint, label} -> send_svg(conn, tinted(tint, label))
     end
+  end
+
+  # The installed app's icon (macOS shows it in the Dock and the app
+  # switcher): the PNG a page drew of the current logo, else the stock one.
+  get "/icon.png" do
+    if stored_version() == current_version() and File.regular?(icon_path()),
+      do: conn |> headers("image/png") |> send_file(200, icon_path()),
+      else: send_stock(conn)
+  end
+
+  # This daemon's web app manifest: the static one, with the icon above.
+  # Each daemon is its own origin, so each installs as its own app.
+  get "/manifest" do
+    manifest =
+      Application.app_dir(:compos_ui, "priv/static/manifest.webmanifest")
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("icons", [
+        %{
+          "src" => "/logo/icon.png?v=" <> current_version(),
+          "sizes" => "512x512",
+          "type" => "image/png",
+          "purpose" => "any"
+        }
+      ])
+
+    conn
+    |> put_resp_content_type("application/manifest+json", nil)
+    |> put_resp_header("cache-control", "no-cache")
+    |> send_resp(200, Jason.encode!(manifest))
   end
 
   match _ do

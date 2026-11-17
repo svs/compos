@@ -554,6 +554,14 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
 
+  # the page drew this daemon's logo as a PNG (the Logo hook in app.js): it
+  # becomes the installed app's icon, the one the Dock and the app switcher show
+  def handle_event("logo_icon", %{"v" => v, "data" => data}, socket)
+      when is_binary(v) and is_binary(data) do
+    with {:ok, png} <- Base.decode64(data), do: Compos.Ui.Logo.store_icon(v, png)
+    {:noreply, socket}
+  end
+
   # Browsers expose pasted files as clipboard items. Keep the bytes base64
   # encoded across the LiveView event; Scheme chooses the destination and
   # inserts the document markup.

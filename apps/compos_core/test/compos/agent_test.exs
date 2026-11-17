@@ -1517,6 +1517,42 @@ defmodule Compos.AgentTest do
     assert xp == %{"sessionId" => "ses-ds", "configId" => "reasoning_effort", "value" => "low"}
   end
 
+  test "an adapter that refuses a model switch leaves the backend running" do
+    {:ok, backend} = Backend.ACP.start(%{"cmd" => "fake", "cwd" => File.cwd!()}, self())
+    on_exit(fn -> if Process.alive?(backend), do: Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(backend, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{"sessionId" => "ses-sm", "models" => %{"currentModelId" => "claude-sonnet-5"}}
+    })
+
+    :ok = Backend.ACP.set_model(backend, "no-such-model")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => mid}}, 1_000
+
+    inject(backend, %{
+      "jsonrpc" => "2.0",
+      "id" => mid,
+      "error" => %{"code" => -32602, "message" => "unknown model"}
+    })
+
+    # the refusal reaches the chat as an error, and the backend lives on
+    error =
+      Enum.find_value(1..10, fn _ ->
+        assert_receive {:backend_event, e}, 1_000
+        Backend.event_type(e) == "error" && e
+      end)
+
+    assert Backend.plist_get(error, "text") =~ "session/set_model no-such-model: unknown model"
+    assert Process.alive?(backend)
+    :ok = Backend.ACP.prompt(backend, "still here", %{})
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+  end
+
   test "an adapter that drops _meta takes our sections on the first turn only" do
     # 'system-in-prompt: the connector says its adapter has no system-prompt
     # channel, so the resolved config carries the sections as text

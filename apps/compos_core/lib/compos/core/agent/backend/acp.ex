@@ -139,11 +139,15 @@ defmodule Compos.Core.Agent.Backend.ACP do
         {:reply, :ok, set_config_option(state, "model", model_id)}
 
       true ->
+        # the reply does not echo the model, so the request keeps the one
+        # it asked for: two switches in flight each name their own
         {:reply, :ok,
-         request(state, "session/set_model", %{
-           "sessionId" => state.session_id,
-           "modelId" => model_id
-         })}
+         request(
+           state,
+           "session/set_model",
+           %{"sessionId" => state.session_id, "modelId" => model_id},
+           {:set_model, model_id}
+         )}
     end
   end
 
@@ -356,8 +360,16 @@ defmodule Compos.Core.Agent.Backend.ACP do
         |> emit(type: :session, id: sid, resumed: false, loadable: Map.get(state, :can_load, false))
         |> session_ready(result)
 
-      {"session/set_model", %{"result" => _}} ->
-        state
+      {{:set_model, model_id}, %{"result" => _}} ->
+        Map.put(state, :current_model, model_id)
+
+      # the adapter refused the model: the session keeps the one it runs.
+      # The generic clause below prints the method, and this one is a tuple
+      {{:set_model, model_id}, %{"error" => err}} ->
+        emit(state,
+          type: :error,
+          text: "session/set_model #{model_id}: #{rpc_error_text(err)}"
+        )
 
       {"session/set_mode", %{"result" => _}} ->
         state
@@ -469,7 +481,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
         state =
           case result do
             %{"models" => %{"currentModelId" => cur} = ms} ->
-              emit(state,
+              state
+              |> Map.put(:current_model, cur)
+              |> emit(
                 type: :"model-state",
                 current: cur,
                 available:

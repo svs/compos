@@ -4655,11 +4655,13 @@
   (append (list (compos-priv-dir))
           (let ((root (compos-project-dir)))
             (if root
-                (list (string-append root "/scheme/packages") (string-append root "/scheme/apps"))
+                (list (string-append root "/scheme/packages") (string-append root "/scheme/apps")
+                      (string-append root "/scheme/stdlib"))
                 '()))
-          ;; a release copies scheme/packages and scheme/apps here; a checkout has nothing here
+          ;; a release copies scheme/packages, scheme/apps and scheme/stdlib here; a checkout has nothing here
           (list (string-append (compos-priv-dir) "/packages")
                 (string-append (compos-priv-dir) "/apps")
+                (string-append (compos-priv-dir) "/stdlib")
                 (compos-config-dir)
                 (string-append (compos-config-dir) "/packages")))
   "Directories (load NAME) searches for a relative NAME, in order.")

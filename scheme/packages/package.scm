@@ -201,8 +201,8 @@
     (unless (member dir load-path)
       (set! load-path (append load-path (list dir))))
     ;; the app registry files a package with a source under package, not user
-    ;; content-cache is a standard package: the stock boot activates
-    ;; compos-packages before it loads
+    ;; content-cache is a stdlib package; a package activated before it
+    ;; loads goes unrecorded
     (when (boundp 'cache-put!)
       (cache-put! 'package-source n (or (package-recipe-url recipe) dir)))
     (autoload-harvest! (list dir))
@@ -318,10 +318,11 @@
                       (loop (cdr reqs))
                       (package--use r (lambda (_) (loop (cdr reqs))))))))))))
 
-;; The standard packages ride with core. priv/standard.lock pins the
-;; compos-packages commit this core works with; a release bundles that clone
-;; in priv/repos, and the first boot copies it, so the stock boot never waits
-;; on the network. A checkout without the clone clones it at the pin, at once.
+;; A package can ride with core: priv/standard.lock pins the commit this
+;; core works with; a release bundles that clone in priv/repos, and the first
+;; boot copies it, so it never waits on the network. A checkout without the
+;; clone clones it at the pin, at once. The standard library is not one: it
+;; lives in scheme/stdlib.
 (define (package-core-pins)
   (or (package--read-first (string-append (compos-priv-dir) "/standard.lock")) '()))
 

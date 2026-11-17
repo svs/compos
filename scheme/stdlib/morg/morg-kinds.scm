@@ -1,0 +1,281 @@
+;;; morg-kinds.scm --- the fence-kind registry.
+;;;
+;;; A fenced block's info string names its kind. One registration gives a
+;;; kind its paint, its runner, and its help. The fence itself supplies the
+;;; scan, the folds, the region lift, and the result landing, so a kind
+;;; declares only what differs.
+;;;
+;;; Keys a kind can declare:
+;;;   ts-lang     STRING  the tree-sitter language for the body, or #f for none
+;;;   body-face   STRING  one face for every body line
+;;;   line-face   FN      (FN LINE) -> a face for that body line, or #f
+;;;   header-face STRING  a face for the first body line
+;;;   runnable    #f      the kind refuses to run (a kind runs by default)
+;;;   run         FN      (FN BUF BLOCK LANG BODY) -> (ok LANG),
+;;;                       (pending LANG), or (error MSG); BLOCK is the
+;;;                       finder's (START END INFO BODY-START BODY-END)
+;;;   interpreter STRING  the shell interpreter the shared shell runner uses
+;;;   keymap      STRING  the keymap in force while point is inside a block
+;;;                       of this kind (Emacs's overlay keymap); a kind that
+;;;                       declares 'keys and no keymap gets one built from them
+;;;   row-spans   FN      (FN START LINE LEN HEAD?) -> the spans that draw
+;;;                       one body line in the page, instead of the code
+;;;                       row; HEAD? is #t on the first row after the fence
+;;;   body-spans  FN      (FN TEXT BLOCK) -> extra spans over the body in
+;;;                       both views; BLOCK is (START LANG BODY-START
+;;;                       BODY-END ...), and TEXT is the buffer text
+;;;
+;;; morg.scm and markdown-mode.scm read the paint keys. morg-babel.scm reads
+;;; the run keys and registers the bundled runners.
+
+(require 'diff-block "editor/blocks/diff-block.scm")
+
+(define morg-kinds-parent-package *loading-package*)
+(define morg-kinds-parent-namespace *loading-namespace*)
+(define morg-kinds-parent-domain *catalog-domain*)
+(define morg-kinds-parent-effects *catalog-effects*)
+
+(package! 'morg-kinds 'morg)
+(domain! 'writing)
+(effects! '(pure))
+
+;;; --- the registry ------------------------------------------------------------
+
+;; The registry table fence-kind: the PLIST under the kind's name.
+;; Registration by name replaces the old entry, so a package reload does
+;; not stack duplicates.
+(define (fence-kind--put! name plist)
+  (registry-register! 'fence-kind name plist))
+
+(define (fence-kind name)
+  (registry-lookup 'fence-kind (string-downcase name)))
+
+(define (fence-kind--value plist key default)
+  (cond ((or (null? plist) (null? (cdr plist))) default)
+        ((equal? (car plist) key) (cadr plist))
+        (else (fence-kind--value (cdr (cdr plist)) key default))))
+
+(define (fence-kind--keys plist)
+  (if (or (null? plist) (null? (cdr plist)))
+      '()
+      (cons (car plist) (fence-kind--keys (cdr (cdr plist))))))
+
+(define (fence-kind--strip plist keys)
+  (cond ((or (null? plist) (null? (cdr plist))) '())
+        ((member (car plist) keys) (fence-kind--strip (cdr (cdr plist)) keys))
+        (else (cons (car plist)
+                    (cons (cadr plist)
+                          (fence-kind--strip (cdr (cdr plist)) keys))))))
+
+(define (define-fence-kind! name doc &rest opts)
+  (let ((n (string-downcase name)))
+    (fence-kind--put! n (append (list 'doc doc) opts))
+    (catalog-register! 'fence-kind n doc
+      'use (string-append "```" n " ... ``` in a Morg buffer"))
+    n))
+
+;; Add or replace KEY VALUE pairs on NAME. The kind is created when absent.
+;; A package that owns one aspect of a kind merges; it does not replace.
+(define (fence-kind-merge! name &rest opts)
+  (let ((n (string-downcase name)))
+    (fence-kind--put! n
+      (append opts
+        (fence-kind--strip (or (fence-kind n) '())
+                           (fence-kind--keys opts))))
+    n))
+
+(define (fence-kind-get lang key default)
+  (let ((k (fence-kind lang)))
+    (if k (fence-kind--value k key default) default)))
+
+;;; --- what the painters ask ---------------------------------------------------
+
+;; The tree-sitter language for a fence's body, or #f. An info string with
+;; no registration names its own grammar when that grammar is loaded.
+(define (fence-kind-ts-lang lang)
+  (let* ((l (string-downcase lang))
+         (t (fence-kind-get l 'ts-lang l)))
+    (and (string? t) (member t (ts-langs)) t)))
+
+;; The face for one body line, or #f. A line-face function sees the line
+;; text and the fence's arguments; a body-face is one face for every line.
+(define (fence-kind-line-face lang line &optional args)
+  (let ((f (fence-kind-get lang 'line-face #f)))
+    (if (procedure? f)
+        (f line args)
+        (fence-kind-get lang 'body-face #f))))
+
+(define (fence-kind-runnable? lang)
+  (not (equal? (fence-kind-get lang 'runnable 'yes) #f)))
+
+(define (fence-kind-run lang)
+  (fence-kind-get lang 'run #f))
+
+;;; --- the head on the rendered page -------------------------------------------
+
+(effects! '(read))
+
+;; The head of a fenced block on the rendered page: the language, and the
+;; keys that act on the block. It draws no source, so it is chrome, and no
+;; caret lands in it. morg-babel runs a block by its language alone, so
+;; the run key needs no argument; a key that does nothing is not offered.
+;; ARGS is the info string after the language. The Markdown renderer asks
+;; once per fence and puts the answer in the page as it is.
+(define (fence-kind-page-head lang args)
+  (let ((target (fence-kind--tangle-target args)))
+    (string-append
+      "<div class=\"code-block-head\" data-chrome=\"1\"><span class=\"code-lang\">"
+      (html-escape lang)
+      "</span>"
+      (if (and (fence-kind-run lang) (fence-kind-runnable? lang))
+          "<span class=\"code-action\"><kbd>C-c C-c</kbd> run</span>"
+          "")
+      (if target
+          (string-append
+            "<span class=\"code-action\"><kbd>C-c C-x</kbd> tangle &rarr; <code>"
+            (html-escape target)
+            "</code></span>")
+          "")
+      "</div>")))
+
+(effects! '(pure))
+
+;; How many lines of a CSV block the page previews: :lines N or :preview N
+;; in the arguments, else five.
+(define (fence-kind-preview-lines args)
+  (let* ((at (re-find "(?i):(?:lines|preview)[ \t]+[0-9]+" args 0))
+         (n (and at (string->number
+                      (substring-bytes args (car (re-find "[0-9]+" args (car at))) (cadr at))))))
+    (if (and n (> n 0)) n 5)))
+
+;; The file a block tangles to, from its arguments: the word after
+;; :tangle. The word no means the block stays where it is.
+(define (fence-kind--tangle-target args)
+  (let ((at (re-find "(?i):tangle[ \t]+[^ \t]+" args 0)))
+    (and at
+         (let* ((word (cadr (re-find "[ \t]+" args (car at))))
+                (target (substring-bytes args word (cadr at))))
+           (and (not (equal? (string-downcase target) "no")) target)))))
+
+;; The block-level spans every painter shares: tree-sitter spans for a body
+;; with a language, and the header face of a kind that declares one.
+;; BLOCKS is (morg-blocks scan buf); TEXT is the buffer text.
+(define (fence-kind-body-spans text blocks)
+  (fold
+    (lambda (acc b)
+      (let* ((lang (nth 1 b)) (bs (nth 2 b)) (be (nth 3 b))
+             (tsl (fence-kind-ts-lang lang))
+             (hf (fence-kind-get lang 'header-face #f))
+             (bf (fence-kind-get lang 'body-spans #f)))
+        (append acc
+          (if (and (procedure? bf) (> be bs)) (bf text b) '())
+          (if (and tsl (> be bs))
+              (map (lambda (sp)
+                     (list (+ bs (car sp)) (+ bs (cadr sp))
+                           (string-append "ts-" (caddr sp))))
+                   (ts-highlight-string tsl (substring-bytes text bs be)))
+              '())
+          (if (and hf (> be bs))
+              (let ((header (car (split-lines (substring-bytes text bs be)))))
+                (list (list bs (+ bs (string-byte-length header)) hf)))
+              '()))))
+    '()
+    blocks))
+
+;; the keymap in force inside a block of LANG, or #f: the declared one,
+;; else one built once from the kind's keys
+(define (fence-kind-keymap lang)
+  (let ((declared (fence-kind-get lang 'keymap #f))
+        (keys (fence-kind-get lang 'keys #f)))
+    (cond (declared declared)
+          ((pair? keys)
+           (let ((name (string-append (string-downcase lang) "-block-map")))
+             (define-keymap! name)
+             (for-each (lambda (kv) (define-key name (car kv) (cadr kv))) keys)
+             (fence-kind-merge! lang 'keymap name)
+             name))
+          (else #f))))
+
+(define (describe-fence-kind name)
+  (let ((k (fence-kind name)))
+    (and k
+         (list 'name (string-downcase name)
+               'doc (fence-kind--value k 'doc "")
+               'runs (and (fence-kind-runnable? name)
+                          (if (fence-kind-run name) #t #f))
+               'ts-lang (fence-kind-ts-lang name)
+               'keys (fence-kind--keys k)))))
+
+;;; --- the bundled paint kinds -------------------------------------------------
+
+(define-fence-kind! "result"
+  "Plain output below the block that made it. It does not run."
+  'runnable #f 'body-face "morg-result")
+
+(define-fence-kind! "result-scheme"
+  "A Scheme value below the block that made it. It does not run."
+  'runnable #f 'ts-lang "scheme")
+
+(define-fence-kind! "result-csv"
+  "A CSV preview below the block that made it. It does not run."
+  'runnable #f 'body-face "morg-result" 'header-face "morg-bold")
+
+;; A live diff's one-sided views (the fence args lead with the view:
+;; theirs or ours) are prose: a dash there is a dash, and no line wears
+;; a diff face.
+(define (fence-kind--diff-line-face line &optional args)
+  (cond ((and (string? args)
+              (let ((a (string-trim args)))
+                (or (string-prefix? "theirs" a) (string-prefix? "ours" a))))
+         #f)
+        ((string-prefix? "+++" line) "diff-file")
+        ((string-prefix? "---" line) "diff-file")
+        ((string-prefix? "@@" line) "diff-hunk")
+        ((string-prefix? "+" line) "diff-add")
+        ((string-prefix? "-" line) "diff-del")
+        ((string-prefix? "diff " line) "diff-file")
+        ((string-prefix? "index " line) "diff-file")
+        (else #f)))
+
+(define-fence-kind! "diff"
+  "A unified diff. Its lines wear the diff faces. It does not run."
+  'runnable #f 'ts-lang "diff" 'line-face fence-kind--diff-line-face
+  'fence-face "diff-file"
+  ;; the kind carries its keys (diff-block.scm defines them at boot): a
+  ;; mode that finds a diff block in its text arms them, so the fence
+  ;; line's promise holds across a restart
+  'keys diff-block--keys)
+
+(define-fence-kind! "patch"
+  "A unified diff. The same paint as the diff kind."
+  'runnable #f 'ts-lang "diff" 'line-face fence-kind--diff-line-face)
+
+(define-fence-kind! "rewrite"
+  "A legacy name for a hand-written waiting block. It does not run."
+  'runnable #f 'ts-lang #f)
+
+(define-fence-kind! "options"
+  "Saved rewrite alternatives. Use llm-rewrite to show, hide, choose, or iterate."
+  'runnable #f 'ts-lang #f)
+
+;; Info strings whose tree-sitter grammar wears another name and that
+;; morg-babel gives no runner.
+(for-each
+  (lambda (row) (fence-kind-merge! (car row) 'ts-lang (cadr row)))
+  '(("jsx" "javascript") ("ts" "typescript") ("ex" "elixir")))
+
+;;; --- the public vocabulary ---------------------------------------------------
+
+(public! 'define-fence-kind!
+  "(define-fence-kind! NAME DOC KEY VALUE ...) — register a fenced-block kind: its paint, its runner, and its help in one form")
+(public! 'fence-kind-merge!
+  "(fence-kind-merge! NAME KEY VALUE ...) — add or replace keys on the kind NAME; the kind is created when absent")
+(public! 'describe-fence-kind
+  "(describe-fence-kind NAME) — the kind's doc, runnability, tree-sitter language, and declared keys, or #f")
+(public! 'fence-kind-ts-lang
+  "(fence-kind-ts-lang LANG) — the loaded tree-sitter language for a fence body, or #f")
+
+;; Do not leak this extension's catalog context into the next package.
+(package! morg-kinds-parent-package morg-kinds-parent-namespace)
+(domain! morg-kinds-parent-domain)
+(effects! morg-kinds-parent-effects)

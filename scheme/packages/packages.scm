@@ -132,9 +132,9 @@
                      (else (loop (cdr ps)))))))
       (let ((e (assoc feature features))) (and e (cadr e)))))
 
-;; compos-packages: DIR/DIR.scm is the package DIR, DIR/FILE.scm is DIR/FILE
+;; stdlib: DIR/DIR.scm is the package DIR, DIR/FILE.scm is DIR/FILE
 (define (packages--standard-sources)
-  (if (not (boundp 'compos-packages-dirs))
+  (if (not (boundp 'stdlib-dirs))
       '()
       (apply append
         (map (lambda (dir)
@@ -143,7 +143,7 @@
                                     (list (string-append dir "/" f) (if (equal? b d) d (string-append d "/" b)))))
                       (filter (lambda (f) (and (string-suffix? ".scm" f) (not (string-suffix? "-test.scm" f))))
                               (map (lambda (e) (plist-get e 'name)) (ls dir))))))
-             (compos-packages-dirs)))))
+             (stdlib-dirs)))))
 
 (define (packages-scan)
   "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks"

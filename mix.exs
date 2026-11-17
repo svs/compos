@@ -48,20 +48,20 @@ defmodule Compos.MixProject do
     ]
   end
 
-  # The packages and apps live at the project root, and a release has no
-  # checkout: they ride in compos_core's priv/packages and priv/apps, the
+  # The packages, apps and stdlib live at the project root, and a release has no
+  # checkout: they ride in compos_core's priv/packages, priv/apps and priv/stdlib, the
   # load-path entries that stay in a release, so the Scheme side needs no
   # release branch.
   defp copy_scheme_packages(release) do
     vsn = release.applications[:compos_core][:vsn]
 
-    for dir <- ["packages", "apps"] do
+    for dir <- ["packages", "apps", "stdlib"] do
       dest = Path.join([release.path, "lib", "compos_core-#{vsn}", "priv", dir])
       File.mkdir_p!(dest)
       File.cp_r!(Path.join("scheme", dir), dest)
     end
 
-    # The standard packages: each clone priv/standard.lock pins goes into
+    # The pinned packages: each clone priv/standard.lock pins goes into
     # priv/repos at its commit, and package-seed! copies it into
     # <compos-home>/repos on the first boot, so that boot needs no network.
     priv = Path.join([release.path, "lib", "compos_core-#{vsn}", "priv"])

@@ -1,3 +1,4 @@
 ;; standard.lock --- the standard packages this core works with. A release
 ;; bundles each at its commit; a checkout clones it there on the first boot.
-(("compos-packages" "https://github.com/compos-dev/compos-packages.git" "b24de7653983213db3900168488e95ac38a3ecfb"))
+;; The standard library is no longer one of them: it lives in scheme/stdlib.
+()

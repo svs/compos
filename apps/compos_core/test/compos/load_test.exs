@@ -96,15 +96,15 @@ defmodule Compos.LoadTest do
     assert Enum.sort(Enum.uniq(loaded) -- expected) == [], "loaded, but not a stock package"
     assert Enum.sort(expected -- loaded) == [], "a stock package init.scm does not reach: #{inspect(Enum.sort(expected -- loaded))}"
 
-    # the standard packages come from compos-packages, in its stock order
-    assert init =~ "(use-package 'compos-packages)"
-    assert {:ok, "#t"} = Session.eval("(featurep 'compos-packages)")
-    assert {:ok, stock} = Session.eval("(map car compos-packages-stock)")
+    # the standard library comes from scheme/stdlib, in its stock order
+    assert init =~ "(require 'stdlib)"
+    assert {:ok, "#t"} = Session.eval("(featurep 'stdlib)")
+    assert {:ok, stock} = Session.eval("(map car stdlib-stock)")
     assert stock =~ "chat-mode"
     assert stock =~ "agent"
     assert {:ok, "#t"} = Session.eval("(and (featurep 'agent) (featurep 'todo) (featurep 'chat) #t)")
 
-    {:ok, std} = Session.eval(~s{(package-directory "compos-packages")})
+    {:ok, std} = Session.eval("stdlib-root")
     agent_modules = Path.join([String.trim(std, "\""), "agent", "agent.scm"]) |> File.read!() |> loads()
 
     assert agent_modules == [

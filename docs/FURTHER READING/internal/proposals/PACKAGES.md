@@ -1,13 +1,13 @@
 # Packages - three tiers of repos
 
-Status: proposal, 2026-11-15. The assignment table is a first cut. A dependency check must confirm it before any file moves.
+Status: proposal, 2026-11-15. On 2026-11-18 the standard tier moved back into this repo as `scheme/stdlib`; `compos-dev/compos-packages` keeps its history before that. The assignment table is a first cut. A dependency check must confirm it before any file moves.
 
 ## The tiers
 
 | Tier | Repo | Count | Installed | Who owns it |
 |---|---|---|---|---|
 | 1. Core | `compos` (this repo) | one | always, cannot be removed. Only what boot needs | the compos team |
-| 2. Standard | `compos-packages` | one repo, many packages | on by default, the user can turn each one off. Quality of life: chat, todo, git, code | the compos team, PRs welcome |
+| 2. Standard | `compos`, in `scheme/stdlib` | one directory per package | on by default, the user can turn each one off. Quality of life: chat, todo, git, code | the compos team, PRs welcome |
 | 3. Community | one repo per package, anywhere on GitHub | unlimited | only when the user asks. Mail, linear, apps, services | the package author |
 | 4. Personal | none: `~/.compos/packages` and each folder `init.scm` puts on `load-path` | any | only what `init.scm` names. Never pushed | the user |
 
@@ -27,19 +27,18 @@ Status: proposal, 2026-11-15. The assignment table is a first cut. A dependency 
 
 The Elixir apps, `priv/editor.scm`, and `scheme/core/`. `scheme/packages/` and `scheme/apps/` go away.
 
-### 2. Standard: `compos-packages`
+### 2. Standard: `scheme/stdlib`
 
 ```
-compos-packages/
+scheme/stdlib/
+  stdlib.scm             ; puts each package directory on load-path, loads the stock set
   recipes.scm            ; one recipe for every standard package
-  index.scm              ; recipes of known community packages (the MELPA role)
-  mail/notmuch.scm
-  mail/notmuch-test.scm
-  linear/linear.scm
+  chat-mode/chat-mode.scm
+  todo/todo.scm
   ...
 ```
 
-One directory for each package. One clone gives all of them. One CI runs all of their tests against core main.
+One directory for each package, in the core repo, so one change can touch core and stdlib together. A Scheme name lives at one level: `stdlib_levels_test.exs` fails on a file name or top-level define in both `scheme/packages` and `scheme/stdlib`.
 
 ### 3. Community: one repo each
 
@@ -93,7 +92,7 @@ Boot means: the daemon starts, the browser draws a frame, the user opens, edits 
 - Input and UI: appearance, capf, completion, keymaps, keys, modeline, palette, prompts, switch, tabulated-list, transient, detail, components, app-registry, apps
 - Packages: package (the manager), packages (the app), http (the manager fetches recipes)
 
-### 2. Standard (`compos-packages`) - quality of life
+### 2. Standard (`scheme/stdlib`) - quality of life
 
 The everyday set that most users want. On by default. Each one can be turned off.
 

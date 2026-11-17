@@ -1,0 +1,1265 @@
+;;; agent-fleet.scm --- Chat fleet list, archive, and attention UI.
+;;;
+;;; This module owns the *chat-list* application and the actions across chat
+;;; buffers. Runtime lifecycle and transcript rendering remain in agent.scm.
+
+;; the chats table is the mode list of chat-mode
+(require 'mode-list)
+(require 'chat-mode)
+
+(domain! 'chat)
+(effects! '(write))
+(category! 'chat)
+
+;; one list over the chats: the application's buffer, which every fleet
+;; action reads its targets from. docs/CHAT-LIST.md is the contract.
+(define *chat-list-buffer* "*chat-list*")
+(define (chat-list-buffer) (mode-list-buffer "chat-mode"))
+
+
+(define (agent-threads)
+  (map (lambda (b) (list (buffer-local-value 'agent-slug b) (chat-row-status b)))
+       (filter (lambda (b) (buffer-local-value 'agent-slug b)) (chat-list-bufs))))
+
+(define (agent-status-rank s)
+  (cond ((equal? s 'needs_attention) 0)
+        ((equal? s 'running) 1)
+        ((equal? s 'starting) 1)
+        ((equal? s 'idle) 2)
+        ((equal? s 'api) 2)
+        (else 3)))
+
+(define (agent-status-glyph s)
+  (cond ((equal? s 'needs_attention) "!")
+        ((equal? s 'running) "*")
+        ((equal? s 'starting) "*")
+        ((equal? s 'idle) "-")
+        ((equal? s 'api) "-")
+        (else "x")))
+
+;; Every chat, most recently used first. The order is the editor's one
+;; MRU, so a view that sorts by recency reads it and sorts nothing: the
+;; chat you were last in leads the table. The MRU names sleeping chats
+;; too, and (buffer-list) catches a chat nobody has shown yet.
+(define (chat-list-buf? b)
+  (and (not (string-prefix? " " b))
+       (or (buffer-local-value 'agent-slug b) (chat-buffer? b))))
+
+(define (chat-list-bufs)
+  ;; the chats and the agents, most recent first, from one snapshot
+  (mode-list-buffers "chat-mode"))
+
+;; the ibuffer row kind asks this three times for one row (dot, label,
+;; face), and a read from a chat buffer's own process is far slower than
+;; from a plain one. The second and third ask of the same row reuse the
+;; first's answer instead of paying its cost again.
+(define *chat-row-status-memo* (list #f #f))
+
+;; a list reads every chat's agent in one snapshot
+(ibuffer-prefetch-local! 'agent-slug)
+
+(define (chat-row-status b)
+  (if (equal? (car *chat-row-status-memo*) b)
+      (cadr *chat-row-status-memo*)
+      (let* ((slug (ibuffer-row-local b 'agent-slug))
+             (status (if slug (agent-status slug) 'api)))
+        (set! *chat-row-status-memo* (list b status))
+        status)))
+
+(define (agents-sorted &optional bufs)
+  (let ((bs (or bufs (chat-list-bufs))))
+    (let loop ((rank 0) (acc '()))
+      (if (> rank 3) (reverse acc)
+          (loop (+ rank 1)
+                (let inner ((bs bs) (acc acc))
+                  (cond ((null? bs) acc)
+                        ((= (agent-status-rank (chat-row-status (car bs))) rank)
+                         (inner (cdr bs) (cons (car bs) acc)))
+                        (else (inner (cdr bs) acc)))))))))
+
+(category! 'chat)
+
+(effects! '(read))
+
+(defcustom 'chats-archived-limit 15
+  "How many saved chats the candidate prompt shows below the live ones."
+  'group 'chat 'type 'integer)
+
+(defcustom 'chat-list-preview #f
+  "Whether the chat list floats a preview card of the chat at point.
+   ibuffer-toggle-preview turns it on or off in one list."
+  'group 'chat)
+
+(define (chats-live-log-paths)
+  ;; every open chat's log, from one read of the chats' locals: a chat's
+  ;; log lies in its group's folder, and each folder is looked up once
+  (let ((known (group-ids)) (dirs '()))
+    (let loop ((rows (buffer-read-many (chat-list-bufs) '() '(chat-log-id group-id mode-name)))
+               (acc '()))
+      (if (null? rows)
+          acc
+          (let* ((row (car rows)) (id (nth 1 row)) (gid (nth 2 row)))
+            (loop (cdr rows)
+                  (if (string? id)
+                      ;; group-id names a chat's group; any other buffer
+                      ;; answers buffer-group its own way
+                      (let ((dir (if (and (equal? (nth 3 row) "chat-mode") (string? gid) (member gid known))
+                                     (let ((hit (assoc gid dirs)))
+                                       (if hit
+                                           (cadr hit)
+                                           (let ((d (string-append (group-home-dir gid) "/chats")))
+                                             (set! dirs (cons (list gid d) dirs))
+                                             d)))
+                                     (chat-log-dir-for (car row)))))
+                        (cons (string-append dir "/" id ".chat") acc))
+                      acc)))))))
+
+(define (chats-archived-rows &optional limit)
+  (if (not (boundp (quote chat-log-files-newest)))
+      '()
+      ;; the newest closed logs, read until there are enough: the rest of
+      ;; the 600 are never shown, so they are never checked. A log is open
+      ;; when an open chat holds its id, and its file is named for the id.
+      (let ((live (filter string? (map (lambda (r) (nth 1 r))
+                                       (buffer-read-many
+                                         (map car (cadr (buffer-rows '(hidden #t context-only #t))))
+                                         '() '(chat-log-id))))))
+        (let loop ((paths (chat-log-files-newest)) (n 0) (out '()))
+          (if (or (null? paths) (>= n (or limit chats-archived-limit)))
+              (reverse out)
+              (let* ((path (car paths))
+                     (leaf (file-name-nondirectory path))
+                     (id (if (string-suffix? ".chat" leaf)
+                             (substring leaf 0 (- (string-length leaf) 5))
+                             leaf)))
+                (if (or (buffer-known? path) (member id live))
+                    (loop (cdr paths) n out)
+                    (loop (cdr paths) (+ n 1) (cons path out)))))))))
+
+(define (chats-archived-row? e)
+  (and (string? e) (not (buffer-known? e))))
+
+;; The name of a saved chat is the sentence its header carries, not the
+;; group slug its file is named for. The header is line one, and an
+;; archived file no longer changes, so one read per path answers for the
+;; whole session.
+(define *chats-archived-summaries* '())
+
+(define (chats-archived-summary--read path)
+  ;; ignore-errors: the file may go between the listing and the read
+  (let ((text (ignore-errors (lambda () (read-file path)))))
+    (and (string? text)
+         (let* ((nl (string-index text "\n"))
+                (head (chat-parse-header
+                        (if nl (substring-bytes text 0 nl) text)))
+                ;; the title if the file carries one; a file written
+                ;; before titles existed answers with its last summary
+                (s (and head (or (plist-get head 'title)
+                                 (plist-get head 'summary)))))
+           (and (string? s) (not (equal? s "")) s)))))
+
+(define (chats-archived-summary path)
+  (let ((hit (assoc path *chats-archived-summaries*)))
+    (if hit
+        (cadr hit)
+        (let ((title (chats-archived-summary--read path)))
+          (set! *chats-archived-summaries*
+                (cons (list path title) *chats-archived-summaries*))
+          title))))
+
+(define (chats-archived-title path)
+  (or (chats-archived-summary path)
+      (let* ((leaf (chat-log-leaf path))
+             (title (re-replace "\\.chat$" (re-replace "^[0-9]+-" leaf "") "")))
+        (if (equal? title "") leaf title))))
+
+;;; --- the chat rows in the ibuffer template --------------------------------------
+;;; *chats* is the ibuffer table over the chat buffers: the same sections,
+;;; sort, folds, marks and keys, with the chat verbs added. The table
+;;; asks a row's kind what to show; the chat kind and the archived kind
+;;; are registered here. C-x C-c opens it in a window, as C-x C-b opens
+;;; the buffers; C-x c is the same rows as a prompt.
+
+;;; --- last activity ------------------------------------------------------------
+;;; The editor keeps no clock on a chat. This table notes the time the
+;;; last event batch reached each chat. It starts empty at boot, so a
+;;; chat with no event since the restart shows the time it was last seen.
+
+(define *chats-activity* '())
+
+(define (chats-note-activity! b)
+  (when (string? b)
+    (set! *chats-activity* (alist-put *chats-activity* b (current-time)))))
+
+(define (chats-activity-at b)
+  (let ((e (assoc b *chats-activity*)))
+    (and e (cadr e))))
+
+(define (chats-age-label t)
+  (ibuffer-age-label (and t (- (current-time) t))))
+
+;;; --- one row's facts ----------------------------------------------------------
+
+;; the state in the words the row shows: what the chat waits for
+(define (chats-state-label status)
+  (cond ((equal? status 'needs_attention) "your turn")
+        ((equal? status 'running) "streaming")
+        ((equal? status 'starting) "starting")
+        ((equal? status 'idle) "idle")
+        ((equal? status 'api) "idle")
+        (else "stopped")))
+
+;; the goal status the newest turn summary judged, in the row's words
+(define (chats-goal-label b)
+  (let ((g (buffer-local-value 'chat-goal-status b)))
+    (and (symbol? g) (if (eq? g 'needs-you) "needs you" (symbol->string g)))))
+
+;; while the runtime works or asks, it says so; between turns the goal
+;; status says where the chat stands
+(define (chats-row-label b)
+  (let ((s (chat-row-status b))
+        (g (chats-goal-label b)))
+    (if (and g (not (memq s '(running starting needs_attention))))
+        g
+        (chats-state-label s))))
+
+;; The colours a chat's state wears. They are this package's defaults,
+;; so a theme can say otherwise, and they are the ones the design names:
+;; a live chat teal, a stopped one coral, an idle one out of the way.
+(defface! 'chat-live 'fg "#6fb8a5")
+(defface! 'chat-stopped 'fg "#e08d78")
+(defface! 'chat-idle 'fg "#4a4660")
+(defface! 'chat-archived 'fg "#3a3746")
+;; the bolt in the title: green while the list watches the chats, muted red while it stands still
+(defface! 'chat-watch-on 'fg "#5fbf77")
+(defface! 'chat-watch-off 'fg "#8a5a55")
+
+(define (chats-state-face status)
+  (cond ((equal? status 'needs_attention) "alert")
+        ((or (equal? status 'running) (equal? status 'starting)) "chat-live")
+        ((equal? status 'dead) "chat-stopped")
+        (else "chat-idle")))
+
+(define (chats-model b)
+  (or (buffer-local-value 'agent-model b) (buffer-local-value 'llm-model b) ""))
+
+;; the size of a chat is the size of its transcript on disk -- the
+;; number dired would show for that file: what the size column shows,
+;; what the size sort reads, what a heading adds up. A chat that has
+;; not written its file yet has no size to show
+(define (chats-filesize b)
+  ;; the number the writer left behind. Two syscalls per chat row, on
+  ;; every draw of every buffer table, to learn a size the save already
+  ;; knew. The stat stays as the answer for a chat written before this
+  ;; local existed, and for one whose log another process changed.
+  (or (buffer-local-value 'chat-log-size b)
+      ;; the id the chat already carries, never a fresh one: drawing a row
+      ;; must not name a file the chat has not asked for
+      (let ((id (buffer-local-value 'chat-log-id b)))
+        (and (string? id)
+             (let ((p (string-append (chat-log-dir-for b) "/" id ".chat")))
+               (and (file-exists? p) (file-size p)))))))
+
+(define (chats-summary b)
+  (let ((s (buffer-local-value 'chat-summary b)))
+    (and (string? s) (not (equal? s "")) s)))
+
+;; the row names the chat by its title -- the name somebody gave it, or
+;; the first label its summary wrote -- else its buffer name. The table
+;; is the broad form, in a window or in the wide C-x c popup, so the
+;; whole title stands; only the narrow candidate line clips.
+(define (chats-title b) (chat-prompt-full-label b))
+
+(define (chats-cost-label b)
+  (let ((s (chat-spend b)))
+    (if (and s (not (cadr s))) (chat-usd-short (car s)) "")))
+
+(define (chats-turn-label b)
+  (let ((n (chat-turn-tokens b)))
+    (if n (string-append (chat-tokens-short n) "/turn") "")))
+
+;; a chat needing a reply wears its alert glyph in the name itself, so it
+;; survives even a narrow table that drops the dot and label columns
+;; a chat that works a task wears the task's mark in the icon column: an
+;; open task a hollow diamond, a closed one a tick. One read of the todo
+;; files serves a whole draw; the index is read again after a second.
+(define *chats-todo-index* (list #f '()))
+
+(define (chats-todo-index)
+  (let ((now (monotonic-ms)))
+    (if (and (car *chats-todo-index*) (< (- now (car *chats-todo-index*)) 1000))
+        (cadr *chats-todo-index*)
+        (let ((idx (if (todo-ready?)
+                       (fold
+                         (lambda (acc t)
+                           (let ((ids (todo-chats t))
+                                 (open? (not (member (plist-get t 'state) '("done" "cancelled")))))
+                             (if (null? ids)
+                                 acc
+                                 (let ((prev (assoc (car ids) acc)))
+                                   ;; an open task outranks a closed one
+                                   (if (and prev (cdr prev))
+                                       acc
+                                       (cons (cons (car ids) open?) acc))))))
+                         '()
+                         (todo-list '(all #t)))
+                       '())))
+          (set! *chats-todo-index* (list now idx))
+          idx))))
+
+(define (chats-todo-icon b)
+  (let* ((id (buffer-local-value 'chat-id b))
+         (hit (and id (assoc id (chats-todo-index)))))
+    (cond ((not hit) (buffer-icon b))
+          ((cdr hit) "◇")
+          (else "✓"))))
+
+(define (chats-alert-name b)
+  (if (equal? (chat-row-status b) 'needs_attention)
+      (string-append "! " (chats-title b))
+      (chats-title b)))
+
+(define (chats-metadata-text b)
+  ;; Keep metadata separate from transcript snippets so search results can
+  ;; explain which source matched without scanning the text again.
+  (string-append (chats-title b) " "
+                 (or (chats-summary b) "") " "
+                 (or (chat-subject b) "") " "
+                 (chats-model b) " "
+                 (chats-row-label b) " "
+                 (or (buffer-local-value 'agent-slug b) "")))
+
+(define (chats-match-text b)
+  (string-append (chats-metadata-text b) " " (or (chat-list-hit b) "")))
+
+(ibuffer-kind! 'chat
+  (list 'mode "chat-mode"
+        'when? (lambda (b) (and (buffer-known? b) (chat-buffer? b)))
+        ;; a round dot, lit by what the chat is doing: the eye reads a
+        ;; colour before it reads a word, and the live one pulses
+        'dot (lambda (b)
+               (let ((s (chat-row-status b)))
+                 (list (if (equal? s 'needs_attention) "!" "●")
+                       (chats-state-face s))))
+        'icon (lambda (b) (chats-todo-icon b))
+        'name (lambda (b) (list "" (chats-alert-name b)))
+        ;; by name, never by value: a reload redefines the function and a
+        ;; kind registered with the old one keeps calling it
+        'size (lambda (b) (chats-filesize b))
+        ;; what the backend billed, and what the last turn read. An ACP
+        ;; chat on a subscription bills no dollars, so the list shows no
+        ;; estimate: its tokens per turn are the number that counts
+        'cost (lambda (b) (chats-cost-label b))
+        'turn (lambda (b) (chats-turn-label b))
+        ;; a chat found by a word in its text says which word, in place of
+        ;; the state: you searched for the words, not for the state
+        'label (lambda (b)
+                 (let ((hit (chat-list-hit b)))
+                   (if hit
+                       (chat-prompt-clip hit)
+                       (chats-row-label b))))
+        'last (lambda (b)
+                (let ((t (chats-activity-at b)))
+                  (if t (chats-age-label t) (ibuffer-last-label b))))
+        ;; by name, not by value: a reload redefines chats-match-text after
+        ;; this form runs, and a captured procedure would stay the old one
+        'match (lambda (b) (chats-metadata-text b))
+        'face (lambda (b)
+                (if (equal? (chat-row-status b) 'needs_attention) "alert" "accent"))
+        'modified? (lambda (b) #f)
+        ;; the watch puts the chat that did something last at the top
+        'activity (lambda (b) (chats-activity-at b))
+        ;; a spawned chat sits under the chat that spawned it
+        'parent (lambda (b)
+                  (let ((p (buffer-local-value 'subagent-parent b)))
+                    (and p (subagent-live-buffer p))))))
+
+;; a saved conversation is a file no buffer holds
+(ibuffer-kind! 'archived
+  (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
+        'dot (lambda (b) (list "●" "chat-archived"))
+        'name (lambda (b) (list "" (chats-archived-title b)))
+        ;; the row is the file, so its size is the file's own
+        'size (lambda (b) (and (file-exists? b) (file-size b)))
+        'label (lambda (b) "archived")
+        'match (lambda (b) (string-append (chats-archived-title b) " archived"))
+        'face (lambda (b) "dim")
+        'modified? (lambda (b) #f)))
+
+(effects! '(write))
+
+;; The chat list is a still picture. A streaming turn hands the fleet an
+;; event batch many times a second, and a list that redraws under the
+;; reader re-sorts its rows and carries the cursor off the chat they were
+;; reading. So no event ever draws it. The modeline carries the news
+;; instead, and g draws the list again when the reader asks for it.
+(define (agents-refresh!)
+  (when (buffer-known? (chat-list-buffer))
+    (list-refresh! (chat-list-buffer))))
+
+;; a verb ran on the chat at point, so the row it acted on is stale and so
+;; is the pane that previews it: the list draws again and looks again
+(define (agents-relist!)
+  (when (buffer-known? (chat-list-buffer))
+    (list-refresh! (chat-list-buffer))
+    (chat-list-preview!)))
+
+;; A list that never draws LIES. The state column reads agent-status at draw
+;; time, so a chat that finished keeps the word "streaming" until somebody
+;; presses g. Two things make drawing it safe here. The draw happens on the
+;; state CHANGE, twice a turn instead of many times a second. And it is a
+;; REDRAW, not a refresh: the rows stay as they were fetched, so nothing
+;; re-sorts and no cursor moves. Only the words a column reads from live
+;; state change.
+(define *agents-state-last* '())
+
+(define (agents-state-moved? slug)
+  (let ((now (agent-status slug))
+        (was (alist-get *agents-state-last* slug)))
+    (and (not (equal? now was))
+         (begin (set! *agents-state-last* (alist-put *agents-state-last* slug now))
+                #t))))
+
+(define (agents-restate!)
+  ;; Reload each visible view once after a burst. Hidden views wait for show.
+  (for-each (lambda (b)
+              (buffer-request-refresh! b 'list
+                (lambda () (list-refresh! b))))
+            (mode-list-views "chat-mode")))
+
+;; A chat that closes leaves every chat list. The kill seam asks each
+;; repair in turn and the first answer wins, so this one answers #f and
+;; only schedules the read for after the kill; a global hook runs before
+;; the keyed ones (panes, groups), so a winner never stops it
+(define (agents-chat-killed! name)
+  (when (chat-list-buf? name)
+    (task-run! (lambda () #t) (lambda (ok? v) (agents-restate!))))
+  #f)
+
+(add-hook! 'buffer-kill-repair 'agents-chat-killed!)
+
+;; A title renames a chat, and a list holds its rows by name: a redraw keeps
+;; the old name and the state it had, so a chat that ended its turn still
+;; says "streaming". A rename reads the chats again.
+(add-hook! 'buffer-renamed-hook
+  (lambda (old new)
+    (when (chat-buffer? new)
+      (for-each (lambda (b) (when (buffer-known? b) (list-refresh! b)))
+                (mode-list-views "chat-mode")))))
+
+;; the fleet's surfaces after an event batch: the modeline answers every
+;; batch, and the list answers the state changes inside it.
+(define (agents-note-event! &optional slug)
+  ;; the row-status memo holds one row's answer for one draw; an event
+  ;; may change it, so the next draw asks again
+  (set! *chat-row-status-memo* (list #f #f))
+  (when slug (chats-note-activity! (agent-buf slug)))
+  ;; a status that moved is news for more than this list: the event log
+  ;; publishes it on the chat's topic
+  (when (and slug (agents-state-moved? slug))
+    (run-hook-with-args 'agent-status-hook slug)
+    (agents-restate!))
+  (agents-modeline-refresh!))
+
+(define (agents-current-buf)
+  (let ((row (list-current (chat-list-buffer))))
+    (and (string? row) row)))
+
+(define (agents-current-slug)
+  (let ((b (agents-current-buf)))
+    (and b (buffer-local-value 'agent-slug b))))
+
+;; the chats a verb acts on: the row at point, or every chat under it
+;; when that row is a group. A chat the editor put to sleep is still a
+;; chat the list shows, and its locals still answer, so the question is
+;; buffer-known?: buffer-exists? dropped every dormant row, which left
+;; nearly every verb saying there was no chat here.
+(define (agents-targets)
+  ;; the chat you are in, else the list the key was pressed in;
+  ;; *chat-list*<2> is no other list
+  (let ((here (current-buffer)))
+    (if (chat-buffer? here)
+        (list here)
+        (filter buffer-known?
+                (ibuffer-targets (if (equal? (mode-list-of here) "chat-mode") here (chat-list-buffer)))))))
+
+;; the slug of a chat whose runtime is up. A dormant chat keeps its slug
+;; local, so the local alone does not say there is a runtime to answer.
+(define (agents-runtime-slug b)
+  (let ((slug (buffer-local-value 'agent-slug b)))
+    (and slug (not (equal? (agent-status slug) 'dead)) slug)))
+
+(define (agents-report verb bs)
+  (message (if (= (length bs) 1)
+               (string-append verb " " (car bs))
+               (string-append verb " " (number->string (length bs)) " chats"))))
+
+(define-command "chat-retitle-at-point" "Title the chat at point again; a blank title asks the model"
+  (lambda ()
+    (let ((b (ibuffer-current (chat-list-buffer))))
+      (if (not (and (string? b) (buffer-known? b)))
+          (message "no chat here")
+          (chat-retitle! b agents-relist!))))
+  'modes '(chat-list-mode))
+
+(catalog-meta! 'command "chat-retitle-at-point" 'domain 'chat 'effects '(write external spend))
+(catalog-meta! 'command "chat-goto-todo-at-point" 'domain 'chat 'effects '(write display))
+;; ibuffer lists chats too, with the same mark: t there goes to the task
+(define-key "ibuffer-mode-map" "t" "chat-goto-todo-at-point")
+
+;; A chat's subject tells the chats of one group apart: the goal chats
+;; from the editor chats, say. It rides in the .chat header beside the
+;; title, so a kill, an archive and a restart keep it. C-x b shows one tab
+;; for each subject of the group's chats.
+(effects! '(read))
+
+(define (chat-subject buf)
+  (let ((c (and (buffer-known? buf) (buffer-local-value 'chat-subject buf))))
+    (and (string? c) (not (equal? c "")) c)))
+
+(define (chat-subjects &optional bufs)
+  (sort (dedupe-names (filter string? (map chat-subject (or bufs (chat-list-bufs)))))))
+
+;; the subject whose chats share the most title words with BUF's title
+(define (chat-subject-suggest buf)
+  (let* ((words (lambda (s)
+                  (filter (lambda (w) (> (string-length w) 3))
+                          (string-split (string-downcase (or s "")) " "))))
+         (mine (words (chats-title buf)))
+         (others (filter (lambda (b) (not (equal? b buf))) (chat-list-bufs)))
+         (score (lambda (s)
+                  (fold (lambda (n b)
+                          (+ n (length (filter (lambda (w) (member w mine)) (words (chats-title b))))))
+                        (if (member (string-downcase s) mine) 1 0)
+                        (filter (lambda (b) (equal? (chat-subject b) s)) others)))))
+    (let loop ((cs (chat-subjects)) (best #f) (top 0))
+      (if (null? cs)
+          best
+          (let ((n (score (car cs))))
+            (if (> n top) (loop (cdr cs) (car cs) n) (loop (cdr cs) best top)))))))
+
+(effects! '(write))
+
+;; a blank SUBJECT takes the chat out of its subject
+(define (chat-subject-set! buf subject)
+  (let ((c (string-trim (or subject ""))))
+    (buffer-set-local! buf 'chat-subject (if (equal? c "") #f c))
+    (chat-log-save! buf)
+    (chat-subject buf)))
+
+(define (chat-subject-read! buf &optional after)
+  (completing-read (string-append "Subject for " (chats-title buf) ": ")
+    (chat-subjects)
+    (lambda (c)
+      (when (string? c)
+        (let ((now (chat-subject-set! buf c)))
+          (message (if now (string-append "Subject: " now) "No subject")))
+        (when after (after))))
+    'initial (or (chat-subject buf) (chat-subject-suggest buf) "")))
+
+(define-command "chat-set-subject" "Give this chat a subject; C-x b shows each subject as a tab"
+  (lambda ()
+    (let ((b (current-buffer)))
+      (if (chat-buffer? b)
+          (chat-subject-read! b)
+          (message "not a chat")))))
+
+(define-command "chat-goto-todo-at-point" "Show the task the chat at point works as its own page; with several, ask which"
+  (lambda ()
+    ;; the row at point of the list this runs in: the chat list or ibuffer
+    (let* ((row (list-current (current-buffer)))
+           (chat (and (string? row) (buffer-known? row) (chat-buffer? row) row)))
+      (if (not chat)
+          (message "No chat at point")
+          (todo--show-chat-task! chat))))
+  'modes '(chat-list-mode ibuffer-mode))
+
+(define-command "chat-set-subject-at-point" "Give the chat at point a subject"
+  (lambda ()
+    (let ((b (ibuffer-current (chat-list-buffer))))
+      (if (not (and (string? b) (buffer-known? b)))
+          (message "no chat here")
+          (chat-subject-read! b agents-relist!)))))
+
+(define (agents-live-slug buf)
+  (let ((slug (or (buffer-local-value 'agent-slug buf) (chat-ensure-runtime! buf))))
+    (if (equal? (agent-status slug) 'dead) (agent-revive! slug) slug)))
+
+(define-command "agents-steer" "Send a steering message to the chat at point"
+  (lambda ()
+    (let ((bs (agents-targets)))
+      (if (null? bs)
+          (message "no chat here")
+          (minibuffer-read
+            (if (= (length bs) 1)
+                (string-append "Steer " (car bs) ": ")
+                (string-append "Steer " (number->string (length bs)) " chats: "))
+            '()
+            (lambda (msg)
+              (unless (equal? msg "")
+                (for-each (lambda (b) (agent-send-msg! (agents-live-slug b) msg)) bs)
+                (agents-relist!)
+                (agents-report "steered" bs)))))))
+  'modes '(chat-list-mode))
+
+(define (agents-answer! exact prefix verb)
+  (let* ((targets (agents-targets))
+         (bs (filter agents-runtime-slug targets)))
+    (cond ((null? targets) (message "no chat here"))
+          ;; the row is a chat, it is just not awake to be asking: say
+          ;; which chat, not that there is nothing here
+          ((null? bs)
+           (message (string-append (chats-title (car targets))
+                                   " is asleep: nothing is asking")))
+          (else
+           (for-each (lambda (b)
+                       (agent-answer-permission! (agents-runtime-slug b) exact prefix))
+                     bs)
+           (agents-relist!)
+           (agents-report verb bs)))))
+
+(define-command "agents-allow" "Allow the pending permission of the chat at point"
+  (lambda () (agents-answer! "allow_once" "allow" "allowed"))
+  'modes '(chat-list-mode))
+
+(define-command "agents-deny" "Deny the pending permission of the chat at point"
+  (lambda () (agents-answer! "reject_once" "reject" "denied")))
+
+(define (agent-note-stopped! slug)
+  (unless (equal? (agent-status slug) 'dead)
+    (let ((buf (agent-buf slug)))
+      (agent-clear-waiting! buf)
+      (agent-block-drop-kind! buf "permission")
+      (let ((start (agent-render! slug "\n[agent stopped]\n" "agent-meta")))
+        (agent-block-push! buf start (agent-mark slug) "meta" '())))))
+
+;; A revived chat drops the "[agent stopped]" lines its stops left behind
+;; (the owner, 2026-09-19): the transcript says what was said, and a stop
+;; the chat came back from is not part of that. Each marker is a meta block
+;; of exactly that text; tool output that quotes it stays.
+(define (agent-drop-stopped-markers! buf)
+  (let* ((text (buffer-text buf))
+         (marks (filter (lambda (blk)
+                          (and (equal? (nth 2 blk) "meta")
+                               (equal? (string-trim (substring-bytes text (car blk) (cadr blk)))
+                                       "[agent stopped]")))
+                        (or (buffer-local-value 'agent-blocks buf) '())))
+         ;; last first, so each cut leaves the earlier offsets as they were
+         (spans (reverse (sort (map (lambda (blk) (list (car blk) (cadr blk))) marks)))))
+    (for-each (lambda (s) (agent-excise-range! buf (car s) (cadr s))) spans)
+    (when (and (pair? spans) (boundp (quote chat-view-sync!)))
+      (chat-view-sync! buf))
+    (length spans)))
+
+(define (agent-release-windows! buf)
+  (let* ((others (filter (lambda (b) (and (not (equal? b buf))
+                                          (not (string-prefix? "*agent" b))))
+                         (buffer-list-mru)))
+         (repl (if (null? others) "*scratch*" (car others))))
+    (for-each
+      (lambda (w)
+        (when (equal? (car (cdr w)) buf)
+          (window-set-buffer! (car w) repl)))
+      (window-list-all))))
+
+(define (agents-kill-runtime! b)
+  (let ((slug (agents-runtime-slug b)))
+    (and slug
+         (begin (agent-note-stopped! slug)
+                (llm-session-close! slug)
+                ;; the chat remembers it was running, so chats-start-all has
+                ;; something durable to read instead of a list in memory
+                (buffer-set-local! b 'chat-was-running #t)
+                #t))))
+
+(define (agents-archive! b)
+  (let ((here (active-window)))
+    (agents-kill-runtime! b)
+    (agent-release-windows! b)
+    (buffer-kill! b)
+    (when (window-exists? here) (select-window! here))))
+
+(define-command "agents-refresh" "Refresh the chat list"
+  (lambda () (agents-refresh!))
+  'modes '(chat-list-mode))
+
+(define-command "chats-watch" "Watch the chats: one list, the busiest first, kept up as they change"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (was (buffer-local-value 'chats-watch buf)))
+      (buffer-set-locals! buf
+        (if was
+            (list 'chats-watch #f 'list-sort (car was) 'ibuffer-grouping (cadr was))
+            (list 'chats-watch (list (ibuffer-sort buf) (ibuffer-grouping buf))
+                  'list-sort 'activity 'ibuffer-grouping 'none)))
+      (list-refresh! buf)
+      (message (if was "Chats: watch off" "Chats: watching")))))
+
+(define-command "chats-archive"
+  "Archive the chat at point: the runtime stops, the buffer goes, the file stays"
+  (lambda ()
+    (let ((bs (agents-targets)))
+      (if (null? bs)
+          (message "no chat here")
+          (begin
+            (for-each agents-archive! bs)
+            (agents-relist!)
+            (agents-report "archived" bs)))))
+  'modes '(chat-list-mode))
+
+(define (agents-delete! b)
+  ;; a chat is never trashed: delete archives it, its .chat file stays
+  (report-errors "chat-delete: save the .chat file" (lambda () (chat-log-save! b)))
+  (agents-archive! b))
+
+(define-command "chat-delete"
+  "Delete this chat, or the chat at point: the runtime stops, the buffer goes, the .chat file stays as its archive"
+  (lambda ()
+    (let ((bs (agents-targets)))
+      (if (null? bs)
+          (message "no chat here")
+          (yes-or-no?
+            (if (= (length bs) 1)
+                (string-append "Delete " (chats-title (car bs)) "?")
+                (string-append "Delete " (number->string (length bs)) " chats?"))
+            (lambda (yes)
+              (when yes
+                (for-each agents-delete! bs)
+                (agents-relist!)
+                (agents-report "deleted" bs)))))))
+  'modes '(chat-list-mode))
+
+;; k stops the runtime and keeps the transcript: the chat stays in the
+;; list, readable, and the next message you send revives it
+(define-command "chats-kill-runtime"
+  "Stop the runtime of the chat at point and keep its transcript"
+  (lambda ()
+    (let* ((targets (agents-targets))
+           (bs (filter agents-kill-runtime! targets)))
+      (cond ((null? targets) (message "no chat here"))
+            ((null? bs)
+             (message (string-append (chats-title (car targets))
+                                     " is already stopped")))
+            (else (agents-relist!) (agents-report "stopped" bs))))))
+
+;; the other half of agents-kill-runtime!: give a dormant chat its
+;; runtime back and send it nothing. agent-continue! is this plus a
+;; message, so a chat started here is the same chat a send would revive.
+(define (agents-start-runtime! b)
+  (buffer-set-local! b 'chat-was-running #f)
+  (and (not (agents-runtime-slug b))
+       (let ((slug (chat-ensure-runtime! b)))
+         (and slug
+              (begin (when (equal? (agent-status slug) 'dead)
+                       (agent-revive! slug))
+                     #t)))))
+
+;; every chat at once, for when you want the filesystem quiet. stop-all
+;; closes every runtime and keeps every transcript; start-all opens again
+;; exactly the ones it closed, so a chat you left dormant on purpose stays
+;; that way and a hundred old conversations never wake together.
+;;
+;; which chats those are is the chat's own answer, not a list kept here:
+;; agents-kill-runtime! leaves chat-was-running on the buffer, and that
+;; local survives a daemon restart the way chat-turn-active does. So a
+;; restart between the two commands loses nothing.
+(define (chats-was-running-bufs)
+  (filter (lambda (b) (buffer-local-value 'chat-was-running b)) (chat-list-bufs)))
+
+(define-command "chats-stop-all"
+  "Stop every chat runtime and keep the transcripts"
+  (lambda ()
+    (let ((bs (filter agents-kill-runtime! (chat-list-bufs))))
+      (if (null? bs)
+          (message "no chat is running")
+          (begin (agents-relist!) (agents-report "stopped" bs))))))
+
+(define-command "chats-start-all"
+  "Start every chat whose runtime was stopped"
+  (lambda ()
+    (let ((targets (chats-was-running-bufs)))
+      (if (null? targets)
+          (message "no chat is waiting to be started")
+          (let ((bs (filter agents-start-runtime! targets)))
+            (if (null? bs)
+                (message "every stopped chat is running again")
+                (begin (agents-relist!) (agents-report "started" bs))))))))
+
+;;; --- the chats, as a candidate prompt -------------------------------------
+;;; The chat list is the application; this is the same chats drawn as a
+;;; plain candidate prompt, for a surface that can only draw one.
+;;; You know a chat by what it is about, so every
+;;; row leads with its title -- the name somebody gave it, or the sentence
+;;; its running summary wrote -- and the title is what you type at. The
+;;; buffer name and the status follow as the annotation, which tells two
+;;; chats apart when they read alike. The saved conversations come under
+;;; the live ones, and RET on one reads its file back.
+
+(define *chat-prompt-label-width* 62)
+
+(define (chat-prompt-clip s)
+  (if (> (string-length s) *chat-prompt-label-width*)
+      (string-append (substring s 0 (- *chat-prompt-label-width* 3)) "...")
+      s))
+
+;; a titled chat wears its title as its buffer name (chat-title renames
+;; it). A derived *chat:group* name is not a title, so the chat's own
+;; title -- the first label its running summary wrote -- stands in.
+;; The whole title: a broad list shows it in full.
+(define (chat-prompt-full-label b)
+  (if (not (string-prefix? "*" b))
+      b
+      (let ((s (chat-title-of b)))
+        (if (and (string? s) (not (equal? s ""))) s b))))
+
+;; the narrow form: one candidate line beside an annotation, so it clips
+(define (chat-prompt-label b) (chat-prompt-clip (chat-prompt-full-label b)))
+
+;; a row is (LABEL ANNOTATION KIND TARGET); the prompt gets the first
+;; three, and the annotation's first two fields are typeable kinds, so
+;; "run" narrows to the running chats and "saved" to the archive
+(define (chat-prompt-live-row b)
+  (list (chat-prompt-label b)
+        (string-append (symbol->string (chat-row-status b)) "  " b)
+        "chat"
+        b))
+
+(define (chat-prompt-saved-row path)
+  (list (chat-prompt-clip (chats-archived-title path))
+        (string-append "archived  " (format-time (file-mtime path) "%Y-%m-%d %H:%M"))
+        "saved"
+        path))
+
+;; attention first, then the order you last used them: the chat you were
+;; last in is the one you come back to
+(define (chat-prompt-live-bufs) (chat-list-bufs))
+
+(define (chat-prompt-tag r)
+  (if (equal? (nth 2 r) "saved") (chat-log-leaf (nth 3 r)) (nth 3 r)))
+
+;; two chats can wear one sentence, and the prompt answers with the
+;; label: a repeat takes its buffer name and stays its own row
+(define (chat-prompt-unique-rows rows)
+  (let loop ((rs rows) (seen '()) (out '()))
+    (if (null? rs)
+        (reverse out)
+        (let* ((r (car rs))
+               (label (if (member (car r) seen)
+                          (string-append (car r) "  (" (chat-prompt-tag r) ")")
+                          (car r))))
+          (loop (cdr rs) (cons label seen) (cons (cons label (cdr r)) out))))))
+
+;; a heading row is (LABEL "" "separator"): the prompt steps over it and
+;; drops it when its section empties, as C-x b does
+(define (chat-prompt-separator label) (list label "" "separator"))
+
+(define (chat-prompt-separator? r) (equal? (nth 2 r) "separator"))
+
+(define (chat-prompt-section label rows)
+  (if (pair? rows) (cons (chat-prompt-separator label) rows) '()))
+
+;; the rows in sections by group, the way C-x b is: this group's chats
+;; first, then the other groups by name, then the chats no group claims,
+;; then the archived conversations
+(define (chat-prompt-sectioned-rows live saved current)
+  (let* ((tagged (map (lambda (r) (cons (buffer-group (nth 3 r)) r)) live))
+         (rows-of (lambda (id)
+                    (map cdr (filter (lambda (t) (equal? (car t) id)) tagged))))
+         (named (sort (map (lambda (id)
+                             (list (string-downcase (or (group-name id) "")) id))
+                           (filter (lambda (id) (not (equal? id current)))
+                                   (group-ids)))))
+         (ordered (append (if current (list current) '()) (map cadr named)))
+         (ungrouped (map cdr (filter (lambda (t) (not (member (car t) ordered)))
+                                     tagged))))
+    (append
+      (fold (lambda (out id)
+              (append out
+                (chat-prompt-section
+                  (or (group-name id) id)
+                  (rows-of id))))
+            '() ordered)
+      (chat-prompt-section "ungrouped" ungrouped)
+      (chat-prompt-section "archived" saved))))
+
+(define (chat-prompt-rows &optional current)
+  (let ((rows (chat-prompt-unique-rows
+                (append (map chat-prompt-live-row (chat-prompt-live-bufs))
+                        (map chat-prompt-saved-row (chats-archived-rows))))))
+    (chat-prompt-sectioned-rows
+      (filter (lambda (r) (equal? (nth 2 r) "chat")) rows)
+      (filter (lambda (r) (equal? (nth 2 r) "saved")) rows)
+      current)))
+
+(define-command "chat-switch-prompt"
+  "Switch to a chat by its title; with a prefix, show it in another window"
+  (lambda ()
+    (let* ((other-window? (and (current-prefix-arg) #t))
+           (here (or (window-buffer (active-window)) (current-buffer)))
+           (rows (chat-prompt-rows
+                   (or (buffer-group here)
+                       (frame-group))))
+           ;; a heading is not a chat: typing its label names nothing
+           (row-of (lambda (label)
+                     (let ((r (assoc label rows)))
+                       (and r (not (chat-prompt-separator? r)) r))))
+           ;; the preview wakes a sleeping chat; every one nobody picked
+           ;; goes back to sleep (the switcher's contract)
+           (woken '())
+           (sleep-woken! (lambda (keep)
+                           (for-each (lambda (b)
+                                       (unless (equal? b keep) (buffer-sleep! b)))
+                                     woken)
+                           (set! woken '()))))
+      (if (null? rows)
+          (message "No chats")
+          (minibuffer-read-preview
+            "Chat: "
+            (map (lambda (r) (list (nth 0 r) (nth 1 r) (nth 2 r))) rows)
+            ;; Choosing a row does not display or wake its buffer.
+            (lambda (label) #f)
+            (lambda (label)
+              (let ((r (row-of label)))
+                (cond
+                  ((not r) (message "No chat by that name"))
+                  ((equal? (nth 2 r) "saved")
+                   (visit-in-group (nth 3 r) (frame-group))
+                   (end-of-buffer!))
+                  (other-window?
+                   (let ((win (display-buffer-other-window! (nth 3 r))))
+                     (when win (select-window! win))))
+                  (else (switch-to-buffer! (nth 3 r)) (end-of-buffer!)))
+                (sleep-woken! (and r (nth 3 r)))))
+            (lambda () (sleep-woken! #f))
+            ;; the status and the buffer name match what you type, so a
+            ;; chat is found by its title first and by its state second
+            2)))))
+
+
+(define (agents-attention)
+  (let loop ((ts (agent-threads)) (acc '()))
+    (cond ((null? ts) (reverse acc))
+          ((equal? (car (cdr (car ts))) 'needs_attention)
+           (loop (cdr ts) (cons (car (car ts)) acc)))
+          (else (loop (cdr ts) acc)))))
+
+(define *agents-attention-last* #f)
+
+(define (agents-modeline-refresh!)
+  (let* ((att (agents-attention))
+         (text (if (null? att) #f (string-append "! " (string-join att " ")))))
+    ;; unchanged is not news: the old refresh repainted the modeline of
+    ;; every frame on every event batch to say the same thing
+    ;; it sits on the echo area at the bottom: the top bar is crowded, and
+    ;; a segment that comes and goes there makes it jump
+    (unless (equal? text *agents-attention-last*)
+      (set! *agents-attention-last* text)
+      (frame-chrome-set! "echo-status"
+        (if text (list (list "ml-attention" text)) '())))))
+
+;; An idle chat whose newest turn was judged needs-you or blocked waits
+;; on the person too. The modeline keeps to permissions and questions; the
+;; jump takes these after them.
+(define (agents-goal-attention)
+  (let loop ((ts (agent-threads)) (acc '()))
+    (if (null? ts)
+        (reverse acc)
+        (let* ((slug (car (car ts)))
+               (b (agent-buf slug)))
+          (loop (cdr ts)
+                (if (and (not (member slug acc))
+                         (string? b) (buffer-exists? b)
+                         (equal? (agent-status slug) 'idle)
+                         (memq (buffer-local-value 'chat-goal-status b) '(needs-you blocked)))
+                    (cons slug acc)
+                    acc))))))
+
+;; A chat that comes to need the person says so once, unless a window
+;; shows it already.
+(define (agents-goal-notify! buf status why)
+  "a notice only when a question waits for the user in the chat: the turn is over and the agent asked"
+  (let ((waits? (and (eq? status 'needs-you) (not (buffer-local-value 'chat-turn-active buf)))))
+    ;; no question waits any more: its notice has nothing left to ask
+    (unless waits?
+      (buffer-set-local! buf 'chat-goal-noted #f)
+      (notifications-resolve! buf))
+    (when (and waits? (not (buffer-local-value 'chat-goal-noted buf)) (not (window-showing buf)))
+      (buffer-set-local! buf 'chat-goal-noted status)
+      (notify! "chat" (string-append "Needs you: " (chats-title buf)) why
+               (list 'buffer buf 'sticky #t)))))
+(add-hook! 'chat-status-hook 'agents-goal-notify!)
+
+(define (agents-goal-restate! buf status why)
+  ;; a row's label is the goal a turn's summary judged (working, needs
+  ;; you); the summary lands after the status event that last drew the
+  ;; list, so the list draws again when it does
+  (set! *chat-row-status-memo* (list #f #f))
+  (agents-restate!))
+
+(add-hook! 'chat-status-hook 'agents-goal-restate!)
+
+(define-command "agent-goto-attention" "Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked"
+  (lambda ()
+    (let ((att (append (agents-attention) (agents-goal-attention))))
+      (if (null? att)
+          (message "no agent needs attention")
+          (begin (switch-to-buffer! (agent-buf (car att)))
+                 (end-of-buffer!))))))
+
+(define-key "agent-map" "n" "agent-open")
+
+;; C-x C-b is the buffers in a window; C-x C-c is the chats. There is one
+;; chat list and one arrival, so both keys reach the same application.
+(define-key "ctl-x-map" "C-c" "chat-list")
+
+(define-key "agent-map" "a" "agent-goto-attention")
+
+;; C-x b is the buffers; C-x c is the chats — each the minibuffer form
+;; of its own table. The control counterparts open the applications:
+;; C-x C-b the buffers in a window, C-x C-c the chat list in its group.
+;; chat-switch-prompt, the candidate prompt, stays for the surfaces that
+;; draw only a prompt.
+(global-set-key "C-x c" "chat-prompt")
+
+(category! 'chat)
+(catalog-meta! 'command "chats-archive" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-watch" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-delete" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-kill-runtime" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-stop-all" 'domain 'chat 'effects '(destroy))
+(catalog-meta! 'command "chats-start-all" 'domain 'chat 'effects '(write external execute))
+(public! 'chats-note-activity!
+  "(chats-note-activity! BUF) — stamp the time of the last event that reached the chat BUF")
+(public! 'chats-state-label
+  "(chats-state-label STATUS) — the words a chat list row shows for a runtime status")
+(public! 'chats-row-label
+  "(chats-row-label B) — the state a chat list row shows: the runtime while it works or asks, else the goal status of the newest turn")
+
+(effects! '(destroy))
+(public! 'agents-archive!
+  "(agents-archive! B) — archive the chat B: stop its runtime, release its windows and kill its buffer")
+
+
+;;; ------------------------------------------------------------ the chat list
+;; The chat list is the mode list of chat-mode (mode-list.scm): ibuffer
+;; over the chats. What is the chats' own is here: the agents that are no
+;; chat buffer, the rows at rest, the state and model sections, the saved
+;; conversations under the live ones, the transcript a filter reads, and
+;; the verbs on the chat at point.
+(category! 'chat)
+(effects! '(write display))
+
+
+(define (chat-list--read-text b)
+  ;; a chat is found by what its summaries say, never by its whole transcript
+  (let ((raw (if (buffer-exists? b)
+                 (string-join
+                   (append (list (or (chat-title-of b) b) (or (buffer-local-value 'chat-summary b) ""))
+                           (map cadr (or (buffer-local-value 'chat-summary-log b) '())))
+                   "\n")
+                 (let ((id (buffer-local-value 'chat-log-id b)))
+                   (and (string? id)
+                        (let ((path (string-append (chat-log-dir-for b) "/" id ".chat")))
+                          (and (file-exists? path)
+                               ;; ignore-errors: the file may go between the check and the read
+                               (let ((text (ignore-errors (lambda () (read-file path)))))
+                                 (and (string? text)
+                                      ;; the header holds the title and the last summary
+                                      (string-join
+                                        (filter (lambda (l) (or (string-prefix? "#+chat:" l)
+                                                                (string-prefix? chat-summary-prefix l)))
+                                                (string-split text "\n"))
+                                        "\n"))))))))))
+    (string-downcase (if (string? raw) raw ""))))
+
+(define (chat-list-hit b) (mode-list-hit "chat-mode" b))
+(define (chat-list-search-reset!) (mode-list-search-reset!))
+
+(define (chat-list-search-hits q)
+  ;; the transcript search at once, for a caller that waits for it
+  (let ((q (string-downcase (string-trim q))))
+    (if (< (string-length q) 3)
+        '()
+        (car (mode-list--scan (chat-list-bufs) chat-list--read-text q '())))))
+
+(define (chats-live-note members)
+  (let ((live (length (filter (lambda (b)
+                                (and (buffer-known? b)
+                                     (member (chat-row-status b) '(running starting))))
+                              (filter string? members)))))
+    (if (> live 0) (string-append (number->string live) " live") "")))
+
+(mode-icon! "chat-list-mode" "")
+
+(define-command "chats-show-archived" "Show only the archived chats in the chat list, or the live ones again"
+  ;; under hundreds of live chats the archived section is never reached
+  (lambda ()
+    (let* ((buf (or (mb-list-target) (current-buffer)))
+           (on (not (buffer-local-value 'mode-list-extra-only buf))))
+      (buffer-set-local! buf 'mode-list-extra-only on)
+      (list-refresh! buf)
+      (list-goto-first-entry buf)
+      (message (if on "The 100 newest archived chats; A shows the live ones again" "The live chats"))))
+  'modes '(chat-list-mode))
+
+;; / on the chat list has a Status tab: working, needs you, streaming and
+;; the rest, the words the row shows. is:needs types the same filter.
+(define chats-status-order
+  '("your turn" "needs you" "blocked" "working" "streaming" "starting"
+    "success" "idle" "stopped"))
+
+(define (chats-row-status-label e)
+  ;; an archived row is a saved file and has no state
+  (and (string? e) (not (string-prefix? "/" e)) (chats-row-label e)))
+
+(define (chats-status-options buf)
+  (let ((seen (filter (lambda (s) s) (map chats-row-status-label (list-entries buf)))))
+    (map (lambda (s) (list s s))
+         (filter (lambda (s) (member s seen)) chats-status-order))))
+
+(define chats-facets
+  (list (list 'label "Status" 'kind "status" 'options chats-status-options)))
+
+(define (chats-filter buf e f)
+  (if (equal? (car f) "status")
+      (equal? (chats-row-status-label e) (cadr f))
+      (let ((m (plist-get *ibuffer-opts* 'filter)))
+        (if m (m buf e f) #t))))
+
+(list-define-filter! "chat-list-mode" "is:"
+  (lambda (buf e) (or (chats-row-status-label e) "")) "status")
+
+(mode-list-define! "chat-mode"
+  (list
+    ;; an agent is listed with the chats even where its buffer is no chat
+    'agents #t
+    ;; a new chat list previews only when chat-list-preview says so
+    'locals (lambda () (list 'listing-preview-disabled (not chat-list-preview)))
+    'member? (lambda (row) (or (equal? (cadr row) "chat-mode") (and (list-ref row 2) #t)))
+    'defaults '(sort recent grouping group)
+    ;; a subject runs through every group: < puts the chats under their subjects
+    'groupings (list (list 'subject (lambda (b) (or (chat-subject b) "no subject")) "no subject"))
+    ;; a chat you archived is still a chat you switch to: the saved
+    ;; conversations come under the live ones, and RET reads one back
+    'extra-rows (lambda (buf)
+                  (ibuffer-section buf "archived" "archived"
+                    (chats-archived-rows (and (buffer-local-value 'mode-list-extra-only buf) 100)) "faint" #t))
+    'text (lambda (b) (chat-list--read-text b))
+    ;; only a saved conversation is a file: a row whose chat was killed
+    ;; since the list was drawn names no file, and visiting its title
+    ;; made an empty file buffer in its place
+    'visit-row (lambda (path)
+                 (if (and (string-prefix? "/" path) (file-exists? path))
+                     (let ((buf (visit-in-group path (group-here))))
+                       (end-of-buffer!)
+                       ;; the chats it spawned come back with it
+                       (when (and buf (boundp 'chat-open-children))
+                         (chat-open-children buf)))
+                     (message (string-append path " is gone; g reads the chats again"))))
+    'after-visit (lambda (b) (end-of-buffer!))
+    'opts
+      (list
+        'doc (string-append
+               "The chats, as ibuffer lists buffers: the recent ones at rest, the "
+               "chat you used last at the top. f filters every chat, by title, "
+               "state, model, and by a word somebody said in it; / has a Status tab "
+               "(working, needs you, ...), and is:needs types the same filter. < cycles the "
+               "sections (group, subject, none: the most recent first), > the order. t "
+               "shows the task the chat works. RET enters the chat; on a saved "
+               "conversation at the bottom, RET reads it back. SPC marks, as in "
+               "ibuffer. s steers the chat at point or the marked ones, y and d "
+               "answer a permission, r gives a title, k kills, a archives, D deletes, "
+               "+ starts a chat, w watches: one list, the busiest first, kept up as chats change, . shows the hidden chats too, the ones an agent "
+               "started for itself, and puts them away again, A shows the 100 newest archived chats alone and the live ones again, g reads the "
+               "chats again, and q gives the frame back.")
+        'category 'chat
+        ;; the title says whether the rows follow the chats (w) or stand still
+        'title (lambda (buf) "Chats ⚡")
+        'title-spans (lambda (buf)
+                       (list (list (string-byte-length "Chats ") (string-byte-length "⚡")
+                                   (if (buffer-local-value 'chats-watch buf) "chat-watch-on" "chat-watch-off"))))
+        'noun "chat"
+        ;; a chat's transcript size is not what you pick a chat by
+        'hide-fields '(size)
+        'show-fields '(cost turn)
+        'facets chats-facets
+        'filter chats-filter
+        'section-note (lambda (buf members) (chats-live-note members))
+        ;; the list stands still: g draws it again when you ask
+        'stamp #f
+        'keys '(("s" "agents-steer") ("y" "agents-allow") ("d" "agents-deny")
+                ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
+                ("g" "agents-refresh") ("w" "chats-watch")
+                ("t" "chat-goto-todo-at-point")
+                ("+" "agent-open")
+                ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")
+                ;; / is the Status picker, not ibuffer's old / prefix
+                ("/" "list-filter")))))
+
+(define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))
+
+(define (chat-list-back!)
+  ;; leave the list the way q leaves it
+  (let ((view (chat-list-buffer)))
+    (mode-list-search-reset!)
+    (when (buffer-known? view)
+      (listing-preview-dismiss! view)
+      (unless (transient-frame-exit! 'ibuffer)
+        (when (window-showing view) (listing-quit! view))))))
+
+(define (chat-list-open! &optional standing)
+  (mode-list "chat-mode" standing))
+
+(define-command "chat-list"
+  "Switch to a chat, by its name or by a word somebody said in it"
+  (lambda () (chat-list-open!)))
+
+;;; --- the minibuffer form ------------------------------------------------------
+;;; C-x c is these rows in the minibuffer's form, the way C-x b is the
+;;; buffers': a popup under the work with its filter line already open.
+;;; You type, the rows narrow, RET takes the row and the popup goes.
+;;; The form keeps its own view buffer, so the sort, folds and grouping
+;;; of the application on C-x C-c stay what you set them to — the
+;;; application has one state and this borrows none of it.
+
+(define *chat-prompt-buffer* " *chats*")
+(add-display-rule! *chat-prompt-buffer* 'shaped '(side bottom size 0.4))
+(ibuffer-view! *chat-prompt-buffer* 'sort 'recent 'grouping 'group)
+
+(define (chat-prompt-open!)
+  ;; a heading is folded by the prompt line itself, so PICK only ever
+  ;; sees a chat: a live one by name, an archived one by its .chat path
+  (ibuffer-prompt! 'chat-list *chat-prompt-buffer* "chat-list-mode" "Chat: "
+    (lambda (row close!)
+      (ibuffer-pick! row close!)
+      (group-current-recalculate!))
+    "minibuffer"))
+
+(define-command "chat-prompt"
+  "Switch to a chat with the plain minibuffer list"
+  (lambda () (chat-prompt-open!)))
+
+;; the name is gone but the words are not: you remember what the chat said
+(define-command "chat-where"
+  "Switch to the chat where this was said"
+  (lambda ()
+    (minibuffer-read "Chat where: " '()
+      (lambda (words) (chat-list-open! (string-trim words))))))
+
+(define-command "chat-finder"
+  "Find chats by a keyword in their content"
+  (lambda ()
+    (minibuffer-read "Chat keyword: " '()
+      (lambda (keyword)
+        (let ((q (string-trim keyword)))
+          (if (equal? q "")
+              (message "Enter a keyword")
+              (chat-list-open! q)))))))
+
+
+(category! 'chat)
+(catalog-meta! 'command "chat-list" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-where" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'command "chat-finder" 'domain 'chat 'effects '(write display))
+(public! 'chat-list-open!
+  "(chat-list-open! [SEARCH]) — open the chat list, with SEARCH standing")

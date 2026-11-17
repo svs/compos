@@ -111,13 +111,11 @@
 (require 'profile)
 (require 'dismiss)
 
-;; the standard packages: chat, agents, todo, git, code and the everyday
-;; set, one directory each in compos-dev/compos-packages. package-seed!
-;; makes the clone from the copy a release bundles, or from the pin in
-;; standard.lock, before anything else runs; compos-packages.scm then loads
-;; the stock set in the order this file used to.
-(package-seed! 'compos-packages)
-(use-package 'compos-packages)
+;; the standard library: chat, agents, todo, git, code and the everyday
+;; set, one directory each in scheme/stdlib (a release carries it in
+;; priv/stdlib). stdlib.scm loads the stock set in the order this file
+;; used to.
+(require 'stdlib)
 
 ;; the run and result blocks live with the other blocks and lean on
 ;; block.scm; they load here because their kind registrations need the

@@ -406,9 +406,10 @@
   (let loop ((rs rows) (acc '()))
     (if (null? rs)
         acc
+        ;; a row of (llm-costs-report) is (DAY MODEL SUMS)
         (let* ((r (car rs))
-               (day (plist-get r 'day))
-               (cost (or (plist-get r 'cost) 0))
+               (day (car r))
+               (cost (or (plist-get (caddr r) 'cost) 0))
                (hit (assoc day acc)))
           (loop (cdr rs)
                 (if hit
@@ -566,7 +567,8 @@
               (list (dash--row "servers" "M-x mcp-hub" "dim"))))))))
 
 (define (dash--llm buf)
-  (let* ((rows (llm-cost-report))
+  ;; the ledger is the llm-costs package's: without it, no spend to show
+  (let* ((rows (if (boundp 'llm-costs-report) (llm-costs-report) '()))
          (days (sort-by-car (dash--day-costs rows)))
          (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
          (today (if (pair? days) (car (reverse days)) #f))

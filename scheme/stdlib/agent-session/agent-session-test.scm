@@ -242,4 +242,7 @@
                   "a job: result is the chat's own")
     (check-equal! (agent-own-job-event? "[event] What you were listening for arrived: reply\nwhatsapp:123 received\n\njob:tests done") #f
                   "job: in the data of another topic does not count")
+    (check-equal! (agent-own-job-event? "[event] fallback\ntime:l179 \n") #t "a timed wake-up the chat set")
+    (check-equal! (agent-own-job-event? "[event] hold\nholds released\n\n(id hold-1)") #t "a hold released")
+    (check-equal! (agent-own-job-event? "[event] mail\nmail:svs received\n\nhi") #f "mail is outside")
     (check-equal! (agent-own-job-event? "[event] one line") #f "no topic line")))

@@ -204,10 +204,16 @@
            (buffer-set-local! buf 'agent-outside-text #f)))))
 
 ;; a listener delivery reads "[event] ... arrived: NOTE\nTOPIC KIND\n..."; the
-;; topic line is the bus's, and a job: topic is private to the chat that runs it
+;; topic line is the bus's. These topics carry the editor's own facts, never an
+;; outsider's words: a chat's private job: results, its timed wake-ups (time:),
+;; and the reload and test holds.
+(define agent-own-event-topics '("job:" "time:" "holds "))
+
 (define (agent-own-job-event? raw)
   (let ((lines (split-lines (or raw ""))))
-    (and (pair? lines) (pair? (cdr lines)) (string-prefix? "job:" (cadr lines)))))
+    (and (pair? lines) (pair? (cdr lines))
+         (let ((topic (cadr lines)))
+           (and (find (lambda (p) (string-prefix? p topic)) agent-own-event-topics) #t)))))
 
 (define (agent-send-msg! slug raw)
   (agent-note-turn-source! (agent-buf slug) slug raw)

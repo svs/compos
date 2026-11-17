@@ -2458,8 +2458,18 @@
     (map (lambda (i) (take i 4)) ordered)))
 
 ;; the panel as it draws: the rows in their groups of one modifier set
+(define (which-key--labelled pending row)
+  ;; (KEY TEXT) for one panel row: TEXT is the buffer's own label for the
+  ;; whole sequence when its 'which-key-labels has one, else the command.
+  ;; A key that takes one of many things (a tab, a profile) names the thing
+  (let* ((buf (car (key-context)))
+         (labels (and buf (buffer-local-value 'which-key-labels buf)))
+         (seq (string-append (if (string? pending) pending (string-join pending " ")) " " (car row)))
+         (hit (and (pair? labels) (assoc seq labels))))
+    (list (car row) (if hit (cadr hit) (cadr row)))))
+
 (define (which-key-groups pending)
-  "(COUNT GROUPS) for PENDING: the which-key-rows in runs of one modifier set, each group (LABEL MODIFIERS ((KEY COMMAND) ...)); #f when there are none"
+  "(COUNT GROUPS) for PENDING: the which-key-rows in runs of one modifier set, each group (LABEL MODIFIERS ((KEY COMMAND) ...)); #f when there are none. COMMAND is the buffer's 'which-key-labels text for the sequence when it has one"
   (let loop ((rows (which-key-rows pending)) (n 0) (out '()))
     (cond ((null? rows)
            (and (> n 0)
@@ -2467,11 +2477,11 @@
           ((and (pair? out) (equal? (cadr (car out)) (caddr (car rows))))
            (let ((g (car out)))
              (loop (cdr rows) (+ n 1)
-                   (cons (list (car g) (cadr g) (cons (take (car rows) 2) (caddr g))) (cdr out)))))
+                   (cons (list (car g) (cadr g) (cons (which-key--labelled pending (car rows)) (caddr g))) (cdr out)))))
           (else
            (let ((r (car rows)))
              (loop (cdr rows) (+ n 1)
-                   (cons (list (list-ref r 3) (caddr r) (list (take r 2))) out)))))))
+                   (cons (list (list-ref r 3) (caddr r) (list (which-key--labelled pending r))) out)))))))
 
 ;;; --- the API packages write keys with -----------------------------------------
 
@@ -7199,7 +7209,10 @@
 (global-set-key "M-v" "scroll-down-command")
 (global-set-key "<next>" "scroll-up-command")
 (global-set-key "<prior>" "scroll-down-command")
-(global-set-key "C-l" "recenter-top-bottom")
+;; C-l is the LLM prefix: C-l l changes this chat's preset and tools in a
+;; popup, C-l C-l opens the AI app: setup, prompts, connectors and models.
+(global-set-key "C-l l" "vscode-llm")
+(global-set-key "C-l C-l" "ai")
 (global-set-key "C-M-i" "completion-at-point")
 (global-set-key "M-/" "completion-at-point")
 (global-set-key "C-M-f" "forward-sexp")
@@ -8003,7 +8016,8 @@
 (editor--public-primitives!
   '(autoload-cookies desktop-file-globals directory-entries file-directory?
     file-mtime file-stat file-writable? list-dir read-file-source
-    local-directory-entries local-file-stat local-list-dir git-prefix))
+    local-directory-entries local-file-stat local-list-dir git-prefix
+    file-glob))
 (domain! 'windows)
 (effects! '(read))
 (editor--public-primitives!

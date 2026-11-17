@@ -297,33 +297,71 @@
         (string-append (number->string (inexact->exact (round (* 100.0 (/ (plist-get s 'cache-read) total))))) "% cached")
         "")))
 
+(define (llm-costs--count n)
+  "N tokens short: 186.7k, 68.0M"
+  (cond ((>= n 1000000) (string-append (number->string (/ (round (/ n 100000.0)) 10)) "M"))
+        ((>= n 1000) (string-append (number->string (/ (round (/ n 100.0)) 10)) "k"))
+        (else (number->string n))))
+
+(define (llm-costs--pct s)
+  (let ((total (+ (plist-get s 'input) (plist-get s 'cache-read))))
+    (if (> total 0)
+        (string-append (number->string (inexact->exact (round (* 100.0 (/ (plist-get s 'cache-read) total))))) "%")
+        "")))
+
+(define (llm-costs--cells buf row)
+  (let ((s (caddr row)))
+    (list (car row)
+          (cadr row)
+          (format-usd (plist-get s 'cost))
+          (if (> (plist-get s 'estimate) 0) (format-usd (plist-get s 'estimate)) "")
+          (number->string (plist-get s 'requests))
+          (llm-costs--count (plist-get s 'input))
+          (llm-costs--count (plist-get s 'output))
+          (llm-costs--count (plist-get s 'cache-read))
+          (llm-costs--count (plist-get s 'cache-write))
+          (llm-costs--pct s))))
+
+(define (llm-costs--title buf)
+  (let ((rows (llm-costs-report)))
+    (string-append "LLM spend "
+      (format-usd (fold (lambda (a r) (+ a (plist-get (caddr r) 'cost))) 0 rows))
+      " · about "
+      (format-usd (fold (lambda (a r) (+ a (plist-get (caddr r) 'estimate))) 0 rows))
+      " on subscriptions")))
+
+(effects! '(write display))
+
+(define-list-mode! "llm-costs-mode"
+  (list
+    'doc (string-append
+           "LLM spend from the usage ledger: one row per day and model, newest day first. "
+           "spend is billed per token; sub est is what a subscription's turns would cost at API prices, apart from the spend. "
+           "hit is cached input over all input: low means the prefix is written again every turn. "
+           "/ narrows the rows, g reads the ledger again, q quits. C-c $ in a chat shows that chat's spend.")
+    'buffer "*llm-costs*"
+    'transient #f
+    'rows (lambda (buf) (llm-costs-report))
+    'key (lambda (buf row) (string-append (car row) " " (cadr row)))
+    'no-marks #t
+    'columns (lambda (buf)
+               (list (list "day" 10)
+                     (list "model" (min 30 (+ 1 (fold (lambda (a r) (max a (string-length (cadr r)))) 5 (llm-costs-report)))))
+                     (list "spend" 8) (list "sub est" 8) (list "reqs" 5)
+                     (list "in" 6) (list "out" 7) (list "cache r" 7) (list "cache w" 7)
+                     (list "hit" #f)))
+    'cells llm-costs--cells
+    'title llm-costs--title
+    'total (lambda (buf) (length (list-entries buf)))
+    'noun "row"
+    'footer (lambda (buf) '(("/" "filter") ("g" "refresh") ("q" "quit")))
+    'keys '(("g" "llm-costs-refresh") ("q" "quit-window"))))
+
+(define-command "llm-costs-refresh" "Read the usage ledger again"
+  (lambda () (list-refresh! "*llm-costs*")))
+
 (define-command "llm-costs" "Show LLM spend by day and model (the usage ledger)"
-  (lambda ()
-    (let ((buf "*llm-costs*"))
-      (buffer-create buf)
-      (buffer-delete-range! buf 0 (string-byte-length (buffer-text buf)))
-      (buffer-append! buf
-        (fold (lambda (acc row)
-                (let ((s (caddr row)))
-                  (string-append acc
-                    (car row) "  "
-                    (format-usd (plist-get s 'cost))
-                    (if (> (plist-get s 'estimate) 0)
-                        (string-append " (+ about " (format-usd (plist-get s 'estimate)) " on a subscription)")
-                        "")
-                    "  " (number->string (plist-get s 'requests)) " reqs  "
-                    (number->string (plist-get s 'input)) "->"
-                    (number->string (plist-get s 'output)) "  "
-                    "cache " (number->string (plist-get s 'cache-read)) "r/"
-                    (number->string (plist-get s 'cache-write)) "w  "
-                    (string-pad-right (llm-costs--hit-rate s) 12)
-                    "  " (cadr row) "\n")))
-              (string-append
-                "LLM spend - ledger " llm-costs-ledger " - per-chat: C-c $\n"
-                "a subscription bills by its limits: its turns show an estimate at API prices, apart from the spend\n"
-                "hit rate is cached input over all input: low means the prefix is written again every turn\n\n")
-              (llm-costs-report)))
-      (switch-to-buffer! buf))))
+  (lambda () (list-mode-show! "llm-costs-mode")))
 
 (public! 'llm-costs-tokens "(llm-costs-tokens BACKEND USAGE) - the tokens of one usage report as (input N output N cache-read N cache-write N reasoning N)")
 (public! 'llm-costs-subscription? "(llm-costs-subscription? CONNECTOR MODEL) - #t when a subscription of CONNECTOR pays for MODEL")

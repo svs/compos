@@ -54,6 +54,35 @@ defmodule Compos.TestHelpers do
   @doc "The agent slug of chat buffer BUF: the chat's stable id (chat-...), not the aN of its name."
   def slug_of(buf), do: Compos.Core.Buffer.get_local(buf, "agent-slug")
 
+  @doc """
+  The usage reports on "llm:usage" (Compos.Core.LLM.report_usage/2), oldest
+  first, each as a map with string keys plus "seq" and "kind". A plist in
+  the data becomes a map; the usage keeps the keys the backend gave it.
+  """
+  def usage_reports(limit \\ 200) do
+    "llm:usage"
+    |> Compos.Core.Events.Log.newest(limit)
+    |> Enum.reverse()
+    |> Enum.map(fn e ->
+      e.data |> scheme_map() |> Map.merge(%{"seq" => e.seq, "kind" => scheme_map(e.kind)})
+    end)
+  end
+
+  defp scheme_map({:sym, name}), do: name
+
+  defp scheme_map(list) when is_list(list) do
+    if plist?(list),
+      do: list |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {scheme_map(k), scheme_map(v)} end),
+      else: Enum.map(list, &scheme_map/1)
+  end
+
+  defp scheme_map(other), do: other
+
+  defp plist?(list) do
+    list != [] and rem(length(list), 2) == 0 and
+      list |> Enum.take_every(2) |> Enum.all?(&(is_binary(&1) or match?({:sym, _}, &1)))
+  end
+
   @doc "Evaluate an (execute* ...) form; answer the new chat's {slug, buffer}. A buffer name is not stable across tests."
   def spawn_chat!(code) do
     slug = code |> eval!() |> String.trim("\"")

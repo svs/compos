@@ -7831,7 +7831,7 @@
 (editor--public-primitives!
   '(agent-info agent-list agent-mark backend-capabilities
     llm-available-models llm-catalog-entries llm-context-limit
-    llm-cost-report llm-max-tokens llm-model-reasoning llm-price
+    llm-max-tokens llm-model-reasoning llm-price
     mcp-tool-specs event-log-position event-log-read event-log-seq
     workflow-in-batch? workflow-names workflow-once workflow-status
     browser-profiles))

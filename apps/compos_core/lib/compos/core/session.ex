@@ -1425,35 +1425,6 @@ defmodule Compos.Core.Session do
         fn [amount] when is_number(amount) ->
           "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
         end,
-      {"llm-cost-report",
-       "(llm-cost-report) — return one usage plist per day and model, with cost."} => fn [] ->
-        for row <- Compos.Core.LLMUsage.report() do
-          [
-            {:sym, "day"},
-            row.day,
-            {:sym, "model"},
-            row.model,
-            {:sym, "requests"},
-            row.requests,
-            {:sym, "input"},
-            row.input,
-            {:sym, "output"},
-            row.output,
-            {:sym, "cache-read"},
-            row.cache_read,
-            {:sym, "cache-write"},
-            row.cache_write,
-            # as whole percent: Scheme has no float formatting worth the name
-            {:sym, "hit-rate"},
-            case Compos.Core.LLMUsage.hit_rate(row) do
-              nil -> false
-              r -> round(r * 100)
-            end,
-            {:sym, "cost"},
-            row.cost * 1.0
-          ]
-        end
-      end,
       {"set-llm-model!", "(set-llm-model! MODEL) — set the active LLM model."} => fn [m] ->
         Compos.Core.LLM.set_model(m)
         :void

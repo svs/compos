@@ -28,6 +28,9 @@ defmodule Compos.Core.Agent.Backend.ChromeGeminiNano do
      %{
        owner: owner,
        model: Map.get(config, "model", "gemini-nano"),
+       # what the usage report names
+       slug: Map.get(config, "slug"),
+       connector: Map.get(config, "connector"),
        request: nil
      }}
   end
@@ -59,6 +62,7 @@ defmodule Compos.Core.Agent.Backend.ChromeGeminiNano do
   def handle_call({:set_model, _model}, _from, state), do: {:reply, {:error, :unsupported}, state}
 
   def handle_call(:cancel, _from, %{request: ref} = state) when is_reference(ref) do
+    report_usage(state, "cancelled")
     emit(state, type: :"turn-end", "stop-reason": "cancelled")
     {:reply, :ok, %{state | request: nil}}
   end
@@ -72,15 +76,18 @@ defmodule Compos.Core.Agent.Backend.ChromeGeminiNano do
     case result do
       {:ok, text} when is_binary(text) ->
         emit(state, type: :chunk, text: text)
+        report_usage(state, "done")
         emit(state, type: :"turn-end", "stop-reason": "end_turn")
 
       {:ok, other} ->
         emit(state, type: :error, text: "Chrome Gemini Nano returned a non-text result")
+        report_usage(state, "failed")
         emit(state, type: :"turn-end", "stop-reason": "error")
         _ = other
 
       {:error, reason} ->
         emit(state, type: :error, text: "Chrome Gemini Nano: #{reason}")
+        report_usage(state, "failed")
         emit(state, type: :"turn-end", "stop-reason": "error")
     end
 
@@ -90,6 +97,19 @@ defmodule Compos.Core.Agent.Backend.ChromeGeminiNano do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp emit(state, kvs), do: send(state.owner, {:backend_event, Backend.plist(kvs)})
+
+  # The model runs in the browser and reports no tokens. The turn still
+  # goes to the usage report (Compos.Core.LLM.report_usage/2), so a reader
+  # can count it, or cost it in its own terms.
+  defp report_usage(state, how) do
+    Compos.Core.LLM.report_usage(%{
+      slug: Map.get(state, :slug),
+      connector: Map.get(state, :connector),
+      backend: "chrome-gemini-nano",
+      model: state.model,
+      end: how
+    })
+  end
 
   defp history(turns) do
     Enum.flat_map(turns, fn turn ->

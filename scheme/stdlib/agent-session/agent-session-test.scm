@@ -233,3 +233,13 @@
     (let ((made (t--exec-spawn "zz-parent")))
       (check-true! (buffer-context-only? made) "hidden after the command")
       (buffer-kill! made))))
+
+
+(deftest 'a-chat-s-own-job-result-is-not-outsider-text
+  "the result of the chat's own job: does not mark the turn; any other event does"
+  (lambda ()
+    (check-equal! (agent-own-job-event? "[event] What you were listening for arrived: tests\njob:tests done\n\n3 failures") #t
+                  "a job: result is the chat's own")
+    (check-equal! (agent-own-job-event? "[event] What you were listening for arrived: reply\nwhatsapp:123 received\n\njob:tests done") #f
+                  "job: in the data of another topic does not count")
+    (check-equal! (agent-own-job-event? "[event] one line") #f "no topic line")))

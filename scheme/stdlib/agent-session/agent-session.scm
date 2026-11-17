@@ -196,11 +196,18 @@
 (define (agent-note-turn-source! buf slug raw)
   (let ((source (and buf (agent-wake-source raw))))
     (cond ((not buf) #f)
-          ((member source agent-outside-sources)
+          ;; the result of the chat's own job: is its work, not an outsider's words
+          ((and (member source agent-outside-sources) (not (agent-own-job-event? raw)))
            (buffer-set-local! buf 'agent-outside-text #t))
           ((and (not source)
                 (not (member (agent-status slug) '(running needs_attention))))
            (buffer-set-local! buf 'agent-outside-text #f)))))
+
+;; a listener delivery reads "[event] ... arrived: NOTE\nTOPIC KIND\n..."; the
+;; topic line is the bus's, and a job: topic is private to the chat that runs it
+(define (agent-own-job-event? raw)
+  (let ((lines (split-lines (or raw ""))))
+    (and (pair? lines) (pair? (cdr lines)) (string-prefix? "job:" (cadr lines)))))
 
 (define (agent-send-msg! slug raw)
   (agent-note-turn-source! (agent-buf slug) slug raw)

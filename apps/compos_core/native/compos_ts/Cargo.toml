@@ -21,3 +21,9 @@ tree-sitter-diff = "0.1.0"
 # Markdown is built in: previews and chat prose draw through it, so a new
 # home must not need `M-x ts-install-grammar markdown` first
 tree-sitter-md = "0.5"
+
+# Cargo strips a release build by default, and Xcode's strip (ld-27106)
+# leaves this dylib's LINKEDIT string pool mis-aligned: dlopen refuses it.
+# The release profile has no debuginfo to strip, and the unstripped file loads.
+[profile.release]
+strip = "none"

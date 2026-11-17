@@ -117,6 +117,8 @@
   "(event-view-get NAME KEY) — KEY's entry in a view whose state is an alist, or #f"
   (alist-get (or (event-view name) '()) key))
 (public! 'event-view-get "(event-view-get NAME KEY) — KEY's entry in a view whose state is an alist, or #f")
+(public! 'event-position "(event-position NAME) — the seq of the last event the subscriber NAME took, or #f")
+(public! 'events-since "(events-since NAME) — the events after NAME's position that its pattern matches, oldest first")
 (public! 'event-log-newest "(event-log-newest PATTERN LIMIT) — at most LIMIT events whose topic PATTERN matches (#f: every topic), newest first")
 
 (effects! '(write))

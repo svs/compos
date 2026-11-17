@@ -273,6 +273,20 @@
       (buffer-set-read-only! buf #t)
       (display-buffer-detail! buf list-buf))))
 
+(define (package-manager--imenu buf)
+  "one imenu row per package of the tab, its status the kind: imenu has a tab per status"
+  (with-current-buffer buf
+    (lambda ()
+      (let loop ((os (list-offsets buf)) (es (list-entries buf)) (acc '()))
+        (if (or (null? os) (null? es)) (reverse acc)
+            (let* ((r (car es)) (s (plist-get r 'status)) (d (plist-get r 'description)))
+              (loop (cdr os) (cdr es)
+                    (cons (list (line-number-at-pos (car os))
+                                (string-append (string-upcase (substring s 0 1)) (substring s 1 (string-length s)))
+                                (plist-get r 'name)
+                                (if (and (string? d) (not (equal? d ""))) d (package-manager--sources-text r)))
+                          acc))))))))
+
 (define (package-manager--redraw!)
   (when (buffer-known? *package-manager-buffer*)
     (list-refresh! *package-manager-buffer*)
@@ -296,7 +310,9 @@
     'local-filter #t
     'tabs (list (list "all" (lambda (buf r) #t))
                 (list "installed" (lambda (buf r) (package-manager--installed? r))))
-    'rows (lambda (buf) (package-manager-rows))
+    'rows (lambda (buf)
+            (buffer-set-local! buf 'imenu-index-function 'package-manager--imenu)
+            (package-manager-rows))
     'key (lambda (buf row) (plist-get row 'name))
     'markable? (lambda (buf row) #f)
     'filters (list (list "status:" (lambda (b e) (or (plist-get e 'status) "")) "the package's status")

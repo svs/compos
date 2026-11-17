@@ -3371,6 +3371,9 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (public! 'list-mode-opts
   "(list-mode-opts NAME) — the options list mode NAME was defined with, as a plist; () when NAME is no list mode"
   'ui)
+(public! 'list-mode-of
+  "(list-mode-of BUF) — the name of the list mode BUF draws with; #f when BUF is no list"
+  'ui)
 
 (public! 'list-opt
   "(list-opt BUF KEY) — the option KEY of the list in BUF: the active layout profile's value when it holds KEY, else the list mode's"

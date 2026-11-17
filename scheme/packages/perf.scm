@@ -317,6 +317,140 @@
             (list (component 'ui/empty '(text "reading ps")))
             (map (lambda (r) (perf--app-row r (quotient total 1024))) apps))))))
 
+;; --- browsers: the memory of every Chrome tab, profile by profile -----------
+;; One extension call per connected profile; each answers its tabs with the
+;; JS heap of the tab's renderer and its DOM size. Tabs of one site can share
+;; a renderer, so their heaps can be the same number.
+
+
+
+
+
+;; one row of tabs over every perf view: system, compos memory, then the
+;; browsers list as all browsers and one tab per Chrome profile. ON is
+;; system, compos, All or a profile's name
+(define (perf--tab-keys) '("system" "compos" "browsers"))
+
+;; one row of tabs over every perf view; the Chrome profiles are imenu's
+;; tabs in the browsers list, not the header's. ON is system, compos or browsers
+(define (perf--tabs-on on)
+  (component 'ui/tabs
+    (list 'class "perf-tabs"
+          'leader "SPC"
+          'tabs (list (list "perf-tab-system" "system" (equal? on "system") "s")
+                      (list "perf-tab-compos" "compos memory" (equal? on "compos") "c")
+                      (list "perf-tab-browsers" "browsers" (equal? on "browsers") "b")))))
+
+(define (perf--tabs buf) (perf--tabs-on (perf--tab buf)))
+
+;; the tabs live in the header line, over every perf tab alike
+(define *perf-tab-order* '("system" "compos" "browsers"))
+
+(define (perf--header-sync! buf tab)
+  (desktop-skip! buf 'header-line-blocks)
+  (perf--which-key-labels! buf '())
+  (let ((blocks (list (perf--tabs-on tab))))
+    (unless (equal? blocks (buffer-local-value 'header-line-blocks buf))
+      (buffer-set-local! buf 'header-line-blocks blocks)
+      (when (boundp 'dashboard--sync!) (dashboard--sync! buf)))))
+
+;; which-key names what each SPC key takes: the tab, or the profile, not the
+;; command that takes it. EXTRA is ((KEY LABEL) ...) after perf's own three
+(define (perf--which-key-labels! buf extra)
+  (let ((labels (map (lambda (p) (list (string-append "SPC " (car p)) (cadr p)))
+                     (append '(("s" "system") ("c" "compos memory") ("b" "browsers")) extra))))
+    (unless (equal? labels (buffer-local-value 'which-key-labels buf))
+      (buffer-set-local! buf 'which-key-labels labels))))
+
+
+
+
+
+;; PROFILES is (LABEL TABS ERROR) per profile, in the order browser-profiles gives
+;; The extension before tab-memory: the tab list, then one eval per web tab.
+;; Only http(s) pages that are not this machine's: an editor tab refuses
+;; string eval, and the eval op would then attach the debugger.
+(define *perf-tab-probe*
+  "(()=>{const m=performance.memory||{};return [m.usedJSHeapSize||0,m.totalJSHeapSize||0,document.getElementsByTagName('*').length,document.getElementsByTagName('iframe').length]})()")
+
+(define (perf--probe-tab? t)
+  (let ((url (perf--get t 'url "")))
+    (and (or (string-prefix? "http://" url) (string-prefix? "https://" url))
+         (not (string-contains? url "://localhost"))
+         (not (string-contains? url "://127.0.0.1")))))
+
+(define *perf-probe-cap-ms* 4000)
+
+;; a tab that never answers (a frozen or sleeping one) must not hold the
+;; sample: after *perf-probe-cap-ms* K gets every tab, the silent ones
+;; without a heap
+(define (perf--tab-memory-by-eval profile k)
+  (browser-call "tabs" (list 'profile profile)
+    (lambda (r)
+      (let* ((tabs (or (perf--get r 'tabs '()) '()))
+             (left (length tabs))
+             (got '())
+             (sent #f)
+             (finish (lambda ()
+                       (unless sent
+                         (set! sent #t)
+                         (k (list 'ok #t 'tabs
+                                  (map (lambda (t) (cdr (or (assoc (perf--get t 'id 0) got) (cons (perf--get t 'id 0) t))))
+                                       tabs))))))
+             (done (lambda (row)
+                     (set! got (cons (cons (perf--get row 'id 0) row) got))
+                     (set! left (- left 1))
+                     (when (= left 0) (finish)))))
+        (if (null? tabs)
+            (k r)
+            (begin
+              (debounce! (string-append "perf-probe:" (or profile "")) *perf-probe-cap-ms* (lambda (_) (finish)) #f)
+              (for-each
+                (lambda (t)
+                  (if (perf--probe-tab? t)
+                      (browser-call "eval" (list 'profile profile 'tab (perf--get t 'id 0) 'code *perf-tab-probe*)
+                        (lambda (e)
+                          (let ((v (perf--get e 'value #f)))
+                            (done (if (and (list? v) (= (length v) 4))
+                                      (append t (list 'heap (car v) 'total (cadr v) 'nodes (caddr v) 'iframes (cadddr v)))
+                                      t)))))
+                      (done t)))
+                tabs)))))))
+
+;; K gets the tab-memory reply; an extension without the op answers by eval
+(define (perf--tab-memory profile k)
+  (let ((sent #f))
+    ;; an extension whose tab-memory waits on a frozen tab answers late or
+    ;; never; past the cap the eval path, which caps each tab, answers
+    (debounce! (string-append "perf-tm:" (or profile "")) (* 2 *perf-probe-cap-ms*)
+      (lambda (_) (unless sent (set! sent #t) (perf--tab-memory-by-eval profile k))) #f)
+    (browser-call "tab-memory" (list 'profile profile)
+      (lambda (r)
+        (unless sent
+          (set! sent #t)
+          (if (or (perf--get r 'error #f) (not (perf--get r 'ok #t)))
+              (perf--tab-memory-by-eval profile k)
+              (k r)))))))
+
+;; the public name: M-x browsers and a reaper read the tabs through it
+(define (browser-tab-memory profile k) (perf--tab-memory profile k))
+
+;; --- closing tabs and windows -----------------------------------------------
+;; What a reaper on a schedule calls, and k in the browsers lists.
+
+(define (browser-tab-close! profile tab &optional k)
+  (browser-call "close" (list 'profile profile 'tab tab) (or k (lambda (r) r))))
+
+;; closing every tab closes the window; no extension op is needed
+(define (browser-window-close! profile window &optional k)
+  (browser-call "tabs" (list 'profile profile)
+    (lambda (r)
+      (let ((ids (map (lambda (t) (plist-get t 'id))
+                      (filter (lambda (t) (equal? (plist-get t 'window) window))
+                              (or (plist-get r 'tabs) '())))))
+        (for-each (lambda (id) (browser-call "close" (list 'profile profile 'tab id) (lambda (_) #t))) ids)
+        (when k (k (length ids)))))))
+
 (define (perf--process-row r total)
   (let* ((bytes (perf--get r 'memory 0))
          (pct (perf--pct bytes total)))
@@ -369,8 +503,8 @@
 (define (perf--footer buf)
   (perf--div "perf-bar"
     (perf--txt "perf-strong" *perf-buffer*)
-    (perf--txt "" "1 system") (perf--txt "" "2 compos memory")
-    (perf--txt "" "g refresh") (perf--txt "" "SPC pause") (perf--txt "" "q quit")
+    (perf--txt "" "←→ tabs")
+    (perf--txt "" "g refresh") (perf--txt "" "SPC 1-3 tabs") (perf--txt "" "P pause") (perf--txt "" "q quit")
     (perf--txt "perf-spacer" "")
     (perf--txt (if (buffer-local-value 'perf-paused buf) "perf-warm" "perf-dim")
                (if (buffer-local-value 'perf-paused buf) "paused" (string-append "tick " (number->string (or (buffer-local-value 'perf-tick buf) 0)))))))
@@ -378,31 +512,29 @@
 ;; the tab the buffer shows: "system", the lanes and the host memory, or
 ;; "compos", the memory of this daemon
 (define (perf--tab buf)
-  (if (equal? (buffer-local-value 'perf-tab buf) "compos") "compos" "system"))
+  (let ((t (buffer-local-value 'perf-tab buf)))
+    (if (equal? t "compos") t "system")))
 
-(define (perf--tabs buf)
-  (let ((tab (perf--tab buf)))
-    (component 'ui/tabs
-      (list 'class "perf-tabs"
-            'tabs (list (list "perf-tab-system" "system" (equal? tab "system") "1")
-                        (list "perf-tab-compos" "compos memory" (equal? tab "compos") "2"))))))
+
 
 (define (perf--blocks buf)
   (list (apply perf--div "perf-root"
           (append
-            (list (perf--tabs buf))
-            (if (equal? (perf--tab buf) "compos")
+            (cond
+              ((equal? (perf--tab buf) "compos")
                 (list (perf--vm-panel (or (buffer-local-value 'perf-vm buf) '())
                                       (or (buffer-local-value 'perf-procs buf) '())
-                                      (or (buffer-local-value 'perf-ets buf) '())))
+                                      (or (buffer-local-value 'perf-ets buf) '()))))
+              (else
                 (list (perf--lanes-panel (or (buffer-local-value 'perf-lanes buf) '()))
-                      (perf--memory-panel buf)))
+                      (perf--memory-panel buf))))
             (list (perf--footer buf))))))
 
 ;;; --- the tick ---------------------------------------------------------------------
 
 ;; a render is two changes: the text, then the blocks
 (define (perf--render! buf)
+  (perf--header-sync! buf (perf--tab buf))
   (perf--replace-text! buf (perf--text buf))
   (buffer-set-locals! buf (list 'render-blocks (perf--blocks buf))))
 
@@ -452,16 +584,24 @@
   (lambda () (perf--setup! (current-buffer))))
 
 (mode-keys! "perf-mode"
-  '(("1" "perf-tab-system")
-    ("2" "perf-tab-compos")
+  '(("<right>" "perf-tab-next")
+    ("<left>" "perf-tab-prev")
     ("g" "perf-refresh")
-    ("SPC" "perf-pause")
+    ("P" "perf-pause")
     ("n" "next-line")
     ("p" "previous-line")
     ("q" "quit-window")))
 
+;; SPC leads perf's tabs: s, c and b, the letters marked in their names.
+;; A keymap of its own, so SPC is a prefix wherever point is and which-key
+;; shows what follows it
+(define-keymap! "perf-leader-map")
+(for-each (lambda (p) (define-key "perf-leader-map" (car p) (cadr p)))
+  '(("s" "perf-tab-system") ("c" "perf-tab-compos") ("b" "perf-tab-browsers")))
+(bind-prefix! "perf-mode-map" "SPC" "perf-leader-map")
+
 (mode-doc! "perf-mode"
-  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, the perf-vm-process-rows BEAM processes that hold the most memory, and the perf-vm-ets-rows ETS tables that hold the most, each with its owner and row count. 1 and 2 take the tabs, g samples now, SPC pauses, q quits.")
+  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, the perf-vm-process-rows BEAM processes that hold the most memory, and the perf-vm-ets-rows ETS tables that hold the most, each with its owner and row count. The browsers tab is the list of every Chrome window and tab with its memory. The tabs sit in the header line: <left> and <right> step them; SPC s, SPC c and SPC b take one, the letter marked in its name. g samples now, P pauses, q quits.")
 
 (register-context-provider! "perf-mode"
   (lambda (buf)
@@ -483,17 +623,260 @@
   'modes '(perf-mode))
 
 (define (perf--show-tab! tab)
-  (let ((buf (current-buffer)))
-    (buffer-set-local! buf 'perf-tab tab)
-    (perf--render! buf)))
+  ;; from the browsers list, the other tabs bring *perf* back into this window
+  (if (equal? (current-buffer) *perf-browsers-buffer*)
+      (begin
+        (buffer-set-local! *perf-buffer* 'perf-tab tab)
+        (switch-to-buffer-here! *perf-buffer*)
+        (perf--render! *perf-buffer*))
+      (let ((buf (current-buffer)))
+        (buffer-set-local! buf 'perf-tab tab)
+        (perf--render! buf))))
 
 (define-command "perf-tab-system" "Show the lanes and the host memory"
   (lambda () (perf--show-tab! "system"))
-  'modes '(perf-mode))
+  'modes '(perf-mode perf-browsers-mode))
 
 (define-command "perf-tab-compos" "Show the memory of this daemon and the processes that hold it"
   (lambda () (perf--show-tab! "compos"))
-  'modes '(perf-mode))
+  'modes '(perf-mode perf-browsers-mode))
+
+(define *perf-browsers-buffer* "*perf:browsers*")
+
+;; perf's tab 3 is the M-x browsers list itself, in a list mode of its own:
+;; the same rows, columns and folds, perf's tabs over it, perf's keys on it.
+;; The options are browsers-mode's, read when the tab is first taken, since
+;; web.scm may load after this file.
+;; Chrome as a whole: every process of Google Chrome.app, all profiles
+;; together, read from ps off the lane. RSS counts shared pages in each
+;; process, so the sum is the upper bound Activity Monitor's figure sits under.
+(define *perf-chrome-every-ms* 5000)
+
+(define (perf--chrome-total ps-out)
+  (fold (lambda (acc line)
+          (let* ((words (string-split (string-trim line) " "))
+                 (kib (and (pair? words) (string->number (car words)))))
+            (if (and kib (string-contains? line "Google Chrome"))
+                (list (+ (car acc) kib) (+ (cadr acc) 1))
+                acc)))
+        '(0 0) (string-split ps-out "\n")))
+
+(define (perf--sample-chrome! buf)
+  (let ((at (buffer-local-value 'perf-chrome-at buf)))
+    (unless (or (buffer-local-value 'perf-chrome-busy buf)
+                (and at (< (- (monotonic-ms) at) *perf-chrome-every-ms*)))
+      (buffer-set-local! buf 'perf-chrome-busy #t)
+      (shell-command->string "ps -axo rss=,comm=" "/"
+        (lambda (out)
+          (when (buffer-exists? buf)
+            (buffer-set-locals! buf (list 'perf-chrome (perf--chrome-total out)
+                                          'perf-chrome-at (monotonic-ms)
+                                          'perf-chrome-busy #f))
+            (list-refresh! buf)))))))
+
+(define (perf--chrome-meta buf)
+  ;; the totals, on the list's meta line under its title
+  (let* ((own (buffer-local-value 'perf-chrome buf))
+         (app (let ((a (buffer-local-value 'perf-apps *perf-buffer*))) (and a (assoc "Google Chrome" a))))
+         ;; ps from here, else the apps panel's last reading of the same ps
+         (c (cond ((and own (> (cadr own) 0)) own)
+                  (app (list (cadr app) (caddr app)))
+                  (else #f)))
+         (tabs (if (boundp 'web--browsers-tabs) web--browsers-tabs '()))
+         (wins (if (boundp 'web--browsers-windows) (length (web--browsers-windows)) 0))
+         (heap (if (boundp 'web--browsers-heap)
+                   (fold (lambda (a t) (+ a (or (web--browsers-heap (plist-get t 'id)) 0))) 0 tabs)
+                   0))
+         (ram (let ((m (buffer-local-value 'perf-mem *perf-buffer*))) (and m (car m)))))
+    (string-join
+      (filter (lambda (s) s)
+        (list (if c (string-append "Chrome " (perf--bytes (* 1024 (car c))) " resident") "Chrome …")
+              (and c ram (> ram 0) (string-append (number->string (perf--pct (* 1024 (car c)) ram)) "% of RAM"))
+              (and c (string-append (number->string (cadr c)) " processes"))
+              (string-append "tab heap " (perf--bytes heap))
+              (string-append (number->string (length tabs)) " tabs in " (number->string wins) " windows")))
+      " · ")))
+
+(define (perf--browsers-head buf)
+  (perf--sample-chrome! buf)
+  (let ((keys (perf--profile-keys (perf--profile-tab-names))))
+    (perf--which-key-labels! buf (map (lambda (nk) (list (cadr nk) (car nk))) keys))
+    ;; SPC leads only to the profiles there are: which-key lists no number
+    ;; that takes nothing
+    (for-each (lambda (d)
+                (if (find (lambda (nk) (equal? (cadr nk) d)) keys)
+                    (unless (keymap-lookup "perf-browsers-leader-map" d)
+                      (define-key "perf-browsers-leader-map" d "perf-profile-key"))
+                    (when (keymap-lookup "perf-browsers-leader-map" d)
+                      (keymap-unset! "perf-browsers-leader-map" d))))
+              *perf-profile-digits*))
+  (list (perf--tabs-on "browsers")))
+
+;; the Chrome profiles are tabs inside the buffer, over the list's own head:
+;; the list draws as list-mode's grid so its head can hold a block
+(define (perf--browsers-body-head buf head)
+  (cons (perf--profile-tabs buf) (list-grid-head buf head)))
+
+;; the Chrome profiles are the list's own tab row, in the body over its head: All, then
+;; each profile. imenu is their selector: it lists the tab rows; [ and ] step.
+(define (perf--profile-tab-names)
+  (cons "All" (if (boundp 'web--browsers-profile-names) (web--browsers-profile-names) '())))
+
+
+
+
+
+
+
+;; imenu holds the tab rows and nothing else, in two tabs of its own: Tabs,
+;; perf's row in the header, and Profiles, the row in the buffer. Each row
+;; takes its tab; point stays on the row it was on.
+(define (perf--browsers-imenu buf)
+  (buffer-set-local! buf 'imenu-snapshot 'perf--browsers-imenu-snapshot)
+  (let ((line (car (buffer-line-at-point buf))))
+    (apply append
+      (map (lambda (bar)
+             (let ((kind (if (find (lambda (t) (string-prefix? "perf-profile:" (car t))) (cadr bar)) "Profiles" "Tabs")))
+               (map (lambda (t)
+                      (list line kind (cadr t) "" (lambda () (tab-bars-take! buf t)) ""
+                            (and (> (length t) 3) (nth 3 t)) (and (> (length t) 2) (nth 2 t))))
+                    (cadr bar))))
+           (tab-bars-all buf)))))
+
+;; leaving imenu without a pick takes back the tabs that were on
+(define (perf--browsers-imenu-snapshot buf)
+  (let ((on (filter (lambda (t) (and (> (length t) 2) (nth 2 t))) (apply append (map cadr (tab-bars-all buf))))))
+    (lambda () (for-each (lambda (t) (tab-bars-take! buf t)) on))))
+
+(define *perf-profile-digits* '("1" "2" "3" "4" "5" "6" "7" "8" "9"))
+
+;; each profile's key is its place in the row: All 1, then 2, 3 ...; perf's
+;; own row takes letters, so the two rows never share a key
+(define (perf--profile-keys names)
+  (let loop ((ns names) (ds *perf-profile-digits*) (out '()))
+    (if (or (null? ns) (null? ds)) (reverse out)
+        (loop (cdr ns) (cdr ds) (cons (list (car ns) (car ds)) out)))))
+
+(define (perf--profile-tabs buf)
+  (let ((on (web--browsers-on buf)))
+    (component 'ui/tabs
+      (list 'class "perf-profile-tabs"
+            'leader "SPC"
+            'tabs (map (lambda (nk) (list (string-append "perf-profile:" (car nk)) (car nk) (equal? (car nk) on) (cadr nk)))
+                       (perf--profile-keys (perf--profile-tab-names)))))))
+
+;; SPC and a profile's number take that profile
+(define-command "perf-profile-key" "Show the Chrome profile whose number follows SPC"
+  (lambda ()
+    (let* ((keys (last-keys))
+           (k (if (string? keys) (car (reverse (string-split keys " "))) (and (pair? keys) (car (reverse keys)))))
+           (hit (find (lambda (nk) (equal? (cadr nk) k)) (perf--profile-keys (perf--profile-tab-names))))
+           (buf (current-buffer)))
+      (if hit
+          (web--browsers-show-profile! buf (car hit))
+          (message (string-append "perf: no profile on SPC " (or k "?")))))))
+
+(define (perf--browsers-mode!)
+  (let ((base (alist-get *list-modes* "browsers-mode")))
+    (and base
+         (begin
+           (define-list-mode! "perf-browsers-mode"
+             (append
+               (list 'doc (string-append
+                            "The browsers tab of *perf*: every Chrome window and its tabs, the heap of each, the compos frame a tab holds. "
+                            "<left> and <right> step the perf tabs; SPC s, SPC c and SPC b take one. s-i (imenu) has a tab for all browsers and one per Chrome profile; SPC and a profile's number (SPC 1 is All), or [ and ], narrow the list to one profile. TAB folds the window at point and S-TAB every window. "
+                            "k closes the tab, or on a window row the whole window. RET brings a tab to the front. "
+                            "/ narrows, g reads the tabs again, q quits.")
+                     'buffer *perf-browsers-buffer*
+                     'head-blocks perf--browsers-head
+                     'plain #f
+                     'composml-head perf--browsers-body-head
+                     'meta perf--chrome-meta
+                     'preview #f
+                     'title (lambda (buf) "Browsers")
+                     'no-marks #t
+                     'footer (lambda (buf) '(("SPC s c b" "tabs") ("←→" "tabs") ("s-i" "profiles") ("SPC 1-9" "profile") ("[ ]" "profile") ("TAB" "fold") ("S-TAB" "fold all")
+                                             ("k" "close") ("RET" "front") ("g" "refresh") ("q" "quit")))
+                     'keys '(("TAB" "list-toggle-children") ("S-TAB" "list-toggle-all-children")
+                             ("k" "browsers-close") ("RET" "browsers-activate")
+                             ("<right>" "perf-tab-next") ("<left>" "perf-tab-prev")
+                             ("]" "browsers-profile-next") ("[" "browsers-profile-prev")
+                             ("g" "browsers-refresh") ("q" "quit-window")))
+               base))
+           ;; a browsers list: the browsers commands take it as their own
+           (mode-parent! "perf-browsers-mode" "browsers-mode")
+           ;; SPC leads both rows here: perf's letters, then the profiles'
+           ;; numbers. Its own map: the list's SPC (mark) must not answer first
+           (define-keymap! "perf-browsers-leader-map" "perf-leader-map")
+           (bind-prefix! (mode-keymap "perf-browsers-mode") "SPC" "perf-browsers-leader-map")
+           #t))))
+
+(define (perf--browsers-buffer!)
+  (let ((buf *perf-browsers-buffer*))
+    (unless (buffer-known? buf)
+      (buffer-create buf)
+      (let ((g (and (buffer-known? *perf-buffer*) (buffer-group *perf-buffer*))))
+        (when g (buffer-move-to-group! buf g)))
+      (with-current-buffer buf (lambda () (set-mode! "perf-browsers-mode"))))
+    (buffer-set-local! buf 'browsers-list buf)
+    (buffer-set-local! buf 'imenu-index-function 'perf--browsers-imenu)
+    buf))
+
+(add-hook! (list 'block-click 'perf-browsers-tabs)
+  (lambda (buf id)
+    (and (member buf (list *perf-buffer* *perf-browsers-buffer*)) (string? id)
+         (cond ((string-prefix? "perf-profile:" id)
+                (web--browsers-show-profile! buf (substring id 13 (string-length id)))
+                #t)
+               ((string-prefix? "perf-tab-" id)
+                (with-current-buffer buf (lambda () (run-command id)))
+                #t)
+               (else #f)))))
+
+(define-command "perf-tab-browsers" "Show every browser tab and its memory, as the browsers list"
+  (lambda () (perf--take-tab! "browsers"))
+  'modes '(perf-mode perf-browsers-mode))
+
+(define (perf--current-tab)
+  (if (equal? (current-buffer) *perf-browsers-buffer*) "browsers" (perf--tab (current-buffer))))
+
+;; take one tab of the row
+(define (perf--take-tab! key)
+  (cond ((equal? key "system") (run-command "perf-tab-system"))
+        ((equal? key "compos") (run-command "perf-tab-compos"))
+        ((not (perf--browsers-mode!)) (message "The browsers list is not loaded (web package)"))
+        (else
+          (let ((buf (perf--browsers-buffer!)))
+            (unless (equal? (current-buffer) buf) (switch-to-buffer-here! buf))
+            (web--browsers-refresh! buf)))))
+
+;; take one tab of the row: a perf tab, or the browsers list on a profile
+(define (perf--take-tab! key)
+  (cond ((equal? key "system") (run-command "perf-tab-system"))
+        ((equal? key "compos") (run-command "perf-tab-compos"))
+        ((not (perf--browsers-mode!)) (message "The browsers list is not loaded (web package)"))
+        (else
+          (let* ((buf (perf--browsers-buffer!))
+                 (fresh (null? web--browsers-tabs)))
+            (unless (equal? (current-buffer) buf) (switch-to-buffer-here! buf))
+            (buffer-set-local! buf 'browsers-profile key)
+            (if fresh (web--browsers-refresh! buf) (list-refresh! buf))))))
+
+(define (perf--step-tab! d)
+  (let* ((keys (perf--tab-keys))
+         (n (length keys))
+         (i (let loop ((ts keys) (k 0))
+              (cond ((null? ts) 0) ((equal? (car ts) (perf--current-tab)) k) (else (loop (cdr ts) (+ k 1))))))
+         (next (list-ref keys (modulo (+ i d n) n))))
+    (perf--take-tab! next)))
+
+(define-command "perf-tab-next" "Show the next perf tab"
+  (lambda () (perf--step-tab! 1))
+  'modes '(perf-mode perf-browsers-mode))
+
+(define-command "perf-tab-prev" "Show the previous perf tab"
+  (lambda () (perf--step-tab! -1))
+  'modes '(perf-mode perf-browsers-mode))
 
 (define-command "perf-pause" "Pause or resume the samples"
   (lambda ()
@@ -589,6 +972,9 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
 .perf-phead { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim-fg); border-bottom: 1px solid var(--border-bg); }
 .perf-name { color: var(--default-fg); }
 .perf-arow { display: grid; grid-template-columns: minmax(0, 1.4fr) 56px 88px minmax(0, 2fr); gap: 10px; align-items: center; padding: 4px 12px; border-bottom: 1px dotted var(--border-bg); font-size: 12px; }
+.perf-arow.perf-brow { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 56px 80px minmax(0, 1.2fr) 64px; }
+.perf-whead { text-transform: none; letter-spacing: 0; font-size: 11px; padding: 4px 12px; background: var(--hl-line-bg); }
+.perf-kill { justify-content: flex-end; }
 .perf-arow.perf-vrow { grid-template-columns: minmax(0, 1.4fr) 104px 88px minmax(0, 2fr); }
 .perf-arow > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perf-meter { height: 8px; margin: 6px 12px; border: 1px solid var(--border-bg); background: var(--hl-line-bg); }
@@ -627,6 +1013,16 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
 (public! 'vm-process-kill!
   "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive")
 (catalog-meta! 'function "vm-process-kill!" 'domain 'diagnostics 'effects '(destroy))
+(public! 'browser-tab-close!
+  "(browser-tab-close! PROFILE TAB [K]) — close Chrome tab TAB in the profile with id PROFILE (see browser-profiles); K gets the reply")
+(catalog-meta! 'function "browser-tab-close!" 'domain 'chrome 'effects '(destroy external))
+(public! 'browser-window-close!
+  "(browser-window-close! PROFILE WINDOW [K]) — close every tab of Chrome window WINDOW in profile PROFILE; K gets how many")
+(catalog-meta! 'function "browser-window-close!" 'domain 'chrome 'effects '(destroy external))
+(effects! '(read))
+(public! 'browser-tab-memory
+  "(browser-tab-memory PROFILE K) — K gets (ok #t tabs ROWS): every tab of Chrome profile PROFILE as plists of id, title, url, window, discarded, heap, total, nodes, iframes; a tab that would not answer has no heap")
+(catalog-meta! 'function "browser-tab-memory" 'domain 'chrome 'effects '(read external))
 (effects! '(read))
 
 ;;; --- descriptors ---------------------------------------------------------------

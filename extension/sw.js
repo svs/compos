@@ -707,6 +707,46 @@ const OPS = {
     };
   },
 
+  // Memory of every tab: the JS heap of its renderer and its DOM size. A
+  // function, not a string, so no page's CSP can refuse it and the debugger
+  // never attaches. A discarded tab holds no renderer; a chrome:// page
+  // refuses scripts. Both come back with no heap rather than an error.
+  async "tab-memory"() {
+    const tabs = await chrome.tabs.query({});
+    const probe = async (t) => {
+      const row = {
+        id: t.id,
+        title: t.title,
+        url: t.url,
+        window: t.windowId,
+        active: t.active,
+        discarded: !!t.discarded,
+        audible: !!t.audible
+      };
+      if (t.discarded) return row;
+      try {
+        // a frozen tab never answers; it must not hold the others
+        const late = new Promise((_, no) => setTimeout(() => no(new Error("late")), 3000));
+        const [res] = await Promise.race([late, chrome.scripting.executeScript({
+          target: { tabId: t.id },
+          func: () => {
+            const m = performance.memory || {};
+            return {
+              heap: m.usedJSHeapSize || 0,
+              total: m.totalJSHeapSize || 0,
+              nodes: document.getElementsByTagName("*").length,
+              iframes: document.getElementsByTagName("iframe").length
+            };
+          }
+        })]);
+        return { ...row, ...(res?.result || {}) };
+      } catch {
+        return row;
+      }
+    };
+    return { tabs: await Promise.all(tabs.map(probe)) };
+  },
+
   // world "MAIN" reaches the page's own globals; the default isolated world
   // sees the DOM but not the page's JS
   async eval({ tab, code, world }) {

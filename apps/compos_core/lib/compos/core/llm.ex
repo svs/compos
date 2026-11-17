@@ -28,6 +28,40 @@ defmodule Compos.Core.LLM do
   @doc "Synchronous request — for callers managing their own tasks."
   def request(prompt), do: run_request(prompt, model())
 
+  @doc """
+  Report what one turn or one call used, as the backend got it.
+
+  Core does not read usage. It publishes one event on "llm:usage", and a
+  package that listens there turns it into tokens and dollars. Usage
+  formats change with every provider and adapter; a package can follow
+  them with a reload.
+
+  A backend reports when a turn ends, on every way out: done, cancelled,
+  failed, crashed. A one-off call (llm, llm-tools) reports as kind :call.
+  The report holds:
+
+    * `:usage` - the usage as the backend or the adapter gave it, or nil
+    * `:slug`, `:connector`, `:backend`, `:model` - what ran the turn
+    * `:cost` - the adapter's own cost, as it sent it, or nil
+    * `:end` - "done", "cancelled", "failed" or "crashed"
+
+  It never raises: a lost report must not stop the turn.
+  """
+  def report_usage(report, kind \\ :turn) when is_map(report) do
+    data =
+      Map.merge(
+        %{usage: nil, slug: nil, connector: nil, backend: nil, model: nil, cost: nil, end: "done"},
+        Map.take(report, [:usage, :slug, :connector, :backend, :model, :cost, :end])
+      )
+
+    Compos.Core.Events.publish("llm:usage", kind, data)
+    :ok
+  rescue
+    _ -> :error
+  catch
+    :exit, _ -> :error
+  end
+
   def complete(prompt, callback) when is_function(callback, 1),
     do: complete(prompt, model(), callback)
 
@@ -73,7 +107,7 @@ defmodule Compos.Core.LLM do
   `dispatcher` is a Scheme closure `(name args-plist) -> result`; `callback`
   gets the final text. opts: `:on_usage` is called (before `callback`) with
   the summed usage map of every round, plus "cost" when llmdb prices the
-  model; the request is also recorded in the LLMUsage ledger.
+  model; the call is also reported on "llm:usage" (report_usage/2).
   """
   def complete_tools(prompt, system, specs, dispatcher, callback, opts \\ [])
       when is_function(callback, 1) do
@@ -81,7 +115,7 @@ defmodule Compos.Core.LLM do
       Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
         case run_tool_loop([%{role: "user", content: prompt}], system, specs, dispatcher, opts) do
           {:ok, text, usage, _stop} ->
-            deliver_usage(usage, opts[:on_usage])
+            deliver_usage(usage, opts[:model] || model(), opts[:on_usage])
             callback.(text)
 
           {:error, msg} ->
@@ -176,9 +210,15 @@ defmodule Compos.Core.LLM do
   defp kt(n) when n >= 1000, do: "#{div(n, 1000)}k"
   defp kt(n), do: "#{n}"
 
-  defp deliver_usage(usage, on_usage) do
-    cost = Compos.Core.LLMUsage.record(model(), usage)
-    if on_usage, do: on_usage.(Map.put(usage, "cost", cost))
+  # the model the call ran, not the global one: llm-tools can pin a model
+  defp deliver_usage(usage, requested_model, on_usage) do
+    report_usage(
+      %{usage: usage, model: requested_model, backend: "llm-tools", cost: usage["cost"]},
+      :call
+    )
+
+    if on_usage,
+      do: on_usage.(Map.put(usage, "cost", Compos.Core.LLMUsage.cost(requested_model, usage)))
   end
 
   defp tool_loop(_messages, _system, _tools, _dispatcher, rounds, _usage, opts)
@@ -227,14 +267,14 @@ defmodule Compos.Core.LLM do
           messages ++ [%{role: "assistant", content: blocks}, %{role: "user", content: results}]
 
         usage = add_usage(usage, resp)
-        report_usage(opts, usage)
+        report_round_usage(opts, usage)
         tool_loop(messages, system, tools, dispatcher, rounds + 1, usage, opts)
 
       {:ok, %{"content" => blocks} = resp} ->
         emit_unstreamed_text(resp, opts)
         record(opts, "assistant", blocks)
         usage = add_usage(usage, resp)
-        report_usage(opts, usage)
+        report_round_usage(opts, usage)
 
         text = Enum.map_join(blocks, "", &(&1["text"] || ""))
 
@@ -409,8 +449,8 @@ defmodule Compos.Core.LLM do
   # The running total, after every round. A turn that is cancelled or that
   # dies mid-loop still spent what it spent: the caller holds this figure
   # and can bill it even though no result ever came back.
-  defp report_usage(%{on_round_usage: f}, usage) when is_function(f, 1), do: f.(usage)
-  defp report_usage(_opts, _usage), do: :ok
+  defp report_round_usage(%{on_round_usage: f}, usage) when is_function(f, 1), do: f.(usage)
+  defp report_round_usage(_opts, _usage), do: :ok
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
@@ -1061,9 +1101,11 @@ defmodule Compos.Core.LLM do
              with_deadline(fn -> ReqLLM.generate_text(req_model_arg(plan["wire"]), prompt, opts) end)
            end) do
         {:ok, resp} ->
-          Compos.Core.LLMUsage.record(
-            requested_model,
-            usage_strings(ReqLLM.Response.usage(resp), plan)
+          usage = usage_strings(ReqLLM.Response.usage(resp), plan)
+
+          report_usage(
+            %{usage: usage, model: requested_model, backend: "llm", cost: usage["cost"]},
+            :call
           )
 
           {:ok, ReqLLM.Response.text(resp) || ""}

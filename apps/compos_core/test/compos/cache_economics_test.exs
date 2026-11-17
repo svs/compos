@@ -217,7 +217,7 @@ defmodule Compos.CacheEconomicsTest do
 
   # --- what a turn costs -----------------------------------------------------
 
-  test "a cancelled turn still writes its ledger row, priced and attributed" do
+  test "a cancelled turn still reports its usage, attributed" do
     me = self()
 
     stub_chat(fn req ->
@@ -253,9 +253,6 @@ defmodule Compos.CacheEconomicsTest do
       end
     end)
 
-    ledger = Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
-    File.rm(ledger)
-
     buf = api_chat("cancel")
     focus(buf)
     type("run a tool then hang")
@@ -268,18 +265,17 @@ defmodule Compos.CacheEconomicsTest do
     press(["C-g"])
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug_of("*chat:a1*"))) end)
 
-    # the round that DID complete is billed: cancelling is not a refund
-    assert eventually(fn -> File.exists?(ledger) end)
+    # the round that DID complete is reported: cancelling is not a refund
+    slug = slug_of("*chat:a1*")
+    assert eventually(fn -> Enum.any?(usage_reports(), &(&1["slug"] == slug)) end)
+    report = usage_reports() |> Enum.filter(&(&1["slug"] == slug)) |> List.last()
 
-    row =
-      ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+    assert report["end"] == "cancelled"
+    assert report["backend"] == "req-llm"
+    assert report["usage"]["input_tokens"] == 400
+    assert report["usage"]["cache_read_input_tokens"] == 900
 
-    assert row["input"] == 400
-    assert row["cache_read"] == 900
-    # ...and the row names the chat that spent it
-    assert row["slug"] == slug_of("*chat:a1*")
-
-    # the chat's own totals agree with the ledger
+    # the chat's own totals agree with the report
     assert eventually(fn ->
              eval!(~s{(plist-get (chat-usage-total "#{buf}") 'cache-read)}) == "900"
            end)

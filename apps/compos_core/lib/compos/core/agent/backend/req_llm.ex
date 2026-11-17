@@ -56,6 +56,8 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
      %{
        owner: owner,
        slug: Map.get(config, "slug"),
+       # what the usage report names, besides the slug and the model
+       connector: Map.get(config, "connector"),
        model: Map.get(config, "model"),
        effort: normalize_effort(Map.get(config, "effort")),
        task: nil,
@@ -95,7 +97,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   def handle_call(:cancel, _from, %{task: %Task{} = task} = state) do
     Task.shutdown(task, :brutal_kill)
-    state = bill(state)
+    state = bill(state, "cancelled")
     emit(state, type: :"turn-end", "stop-reason": "cancelled")
     {:reply, :ok, %{state | task: nil}}
   end
@@ -131,14 +133,14 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
     state =
       case result do
         {:ok, _text, usage, stop} ->
-          state = bill(%{state | turn_usage: usage})
+          state = bill(%{state | turn_usage: usage}, "done")
           emit(state, type: :"turn-end", "stop-reason": stop)
           state
 
         # the loop ended without a result — a round cap, a wire error. It
         # still ran rounds, and those rounds still cost money.
         {:error, msg} ->
-          state = bill(state)
+          state = bill(state, "failed")
           emit(state, type: :error, text: msg)
           emit(state, type: :"turn-end", "stop-reason": "error")
           state
@@ -149,7 +151,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   # turn task crashed (a cancel's :brutal_kill DOWN is flushed above)
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
-    state = bill(state)
+    state = bill(state, "crashed")
     emit(state, type: :error, text: "the turn crashed: #{Backend.error_text(reason)}")
     emit(state, type: :"turn-end", "stop-reason": "error")
     {:noreply, %{state | task: nil}}
@@ -166,16 +168,32 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   end
 
   # Every path out of a turn passes through here — done, error, round cap,
-  # crash, cancel — so the ledger and the chat's own total never disagree
-  # with what was actually sent. An empty total (a turn that died before
-  # its first round returned) bills nothing.
-  defp bill(%{turn_usage: usage} = state) when map_size(usage) == 0, do: state
+  # crash, cancel — so the usage report and the chat's own total never
+  # disagree with what was actually sent. The report goes out on every
+  # path, with no usage when the turn died before its first round
+  # returned; the chat's total then has nothing to add.
+  defp bill(state, how) do
+    model = state.turn_model || LLM.model()
+    usage = state.turn_usage
 
-  defp bill(state) do
-    cost =
-      Compos.Core.LLMUsage.record(state.turn_model || LLM.model(), state.turn_usage, state.slug)
+    LLM.report_usage(%{
+      usage: if(map_size(usage) == 0, do: nil, else: usage),
+      slug: state.slug,
+      connector: Map.get(state, :connector),
+      backend: "req-llm",
+      model: model,
+      cost: usage["cost"],
+      end: how
+    })
 
-    t = Compos.Core.LLMUsage.tokens(state.turn_usage)
+    chat_usage(state, model, usage)
+  end
+
+  defp chat_usage(state, _model, usage) when map_size(usage) == 0, do: state
+
+  defp chat_usage(state, model, usage) do
+    cost = Compos.Core.LLMUsage.cost(model, usage)
+    t = Compos.Core.LLMUsage.tokens(usage)
 
     emit(state,
       type: :usage,

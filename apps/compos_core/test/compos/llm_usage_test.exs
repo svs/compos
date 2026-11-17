@@ -1,14 +1,9 @@
 defmodule Compos.LLMUsageTest do
-  @moduledoc "Model pricing from the catalog, cost math, and the usage ledger."
+  @moduledoc "Model pricing from the catalog, cost math, and the usage report."
 
   use Compos.Case
 
   alias Compos.Core.{LLMUsage, ModelCatalog}
-
-  setup do
-    File.rm(Path.join(Compos.Core.state_dir(), "llm-usage.jsonl"))
-    :ok
-  end
 
   test "price answers per provider, and a bare id is Anthropic" do
     assert %{input: i, output: o} = ModelCatalog.price("anthropic:claude-sonnet-5")
@@ -51,36 +46,54 @@ defmodule Compos.LLMUsageTest do
     assert_in_delta LLMUsage.cost("anthropic:claude-sonnet-5", openai), 1000 * p.input / 1_000_000, 1.0e-9
   end
 
+  test "an adapter's provider/model id prices as provider:model" do
+    assert ModelCatalog.price("opencode/claude-sonnet-5") ==
+             ModelCatalog.price("opencode:claude-sonnet-5")
+
+    assert ModelCatalog.price("opencode/claude-sonnet-5") != nil
+    assert ModelCatalog.price("no-such-provider/no-such-model") == nil
+  end
+
   # Only the provider adapter knows whether input_tokens already includes
   # the cached tokens. A usage map carrying its own cost wins.
   test "a usage map's own cost beats the catalog" do
     usage = %{"input_tokens" => 1000, "output_tokens" => 2000, "cost" => 0.0125}
     assert LLMUsage.cost("anthropic:claude-sonnet-5", usage) == 0.0125
     assert LLMUsage.cost("no-such-model", usage) == 0.0125
-    assert LLMUsage.record("anthropic:claude-sonnet-5", usage) == 0.0125
-    [row | _] = ledger_rows()
-    assert row["cost"] == 0.0125
-    assert row["input"] == 1000
     # a non-numeric cost falls back to the catalog
     assert LLMUsage.cost("anthropic:claude-sonnet-5", Map.put(usage, "cost", nil)) > 0
   end
 
-  test "record appends to the ledger and report aggregates by day and model" do
-    LLMUsage.record("anthropic:claude-sonnet-5", %{"input_tokens" => 100, "output_tokens" => 10})
-    LLMUsage.record("anthropic:claude-sonnet-5", %{"input_tokens" => 300, "output_tokens" => 30})
-    LLMUsage.record("mystery-model", %{"input_tokens" => 5, "output_tokens" => 5})
-    rows = LLMUsage.report()
-    sonnet = Enum.find(rows, &(&1.model == "anthropic:claude-sonnet-5"))
-    assert sonnet.requests == 2 and sonnet.input == 400 and sonnet.output == 40
-    assert sonnet.cost > 0
-    mystery = Enum.find(rows, &(&1.model == "mystery-model"))
-    assert mystery.requests == 1 and mystery.cost == 0
+  test "a usage report goes on the event log as the backend gave it" do
+    usage = %{"inputTokens" => 1200, "cachedReadTokens" => 40_000, "anything" => "as is"}
+
+    assert :ok =
+             Compos.Core.LLM.report_usage(%{
+               usage: usage,
+               slug: "zz-report-1",
+               connector: "claude-code",
+               backend: "acp",
+               model: "claude-sonnet-5",
+               end: "cancelled"
+             })
+
+    assert [r] = Enum.filter(usage_reports(), &(&1["slug"] == "zz-report-1"))
+    assert r["kind"] == "turn"
+    assert r["usage"] == usage
+    assert {r["connector"], r["backend"], r["model"], r["end"]} ==
+             {"claude-code", "acp", "claude-sonnet-5", "cancelled"}
+
+    # a field the caller leaves out is still there, as false
+    assert r["cost"] == false
+
+    # a one-off call reports as a call, and a turn with no usage reports too
+    Compos.Core.LLM.report_usage(%{slug: "zz-report-2", backend: "llm"}, :call)
+    assert [c] = Enum.filter(usage_reports(), &(&1["slug"] == "zz-report-2"))
+    assert {c["kind"], c["usage"], c["end"]} == {"call", false, "done"}
   end
 
-  test "the scheme surface: format-usd, llm-cost-report, chat spend" do
+  test "the scheme surface: format-usd, chat spend" do
     assert eval!("(format-usd 0.03315)") == ~s{"$0.0332"}
-    LLMUsage.record("anthropic:claude-sonnet-5", %{"input_tokens" => 100, "output_tokens" => 10})
-    assert eval!("(llm-cost-report)") =~ "claude-sonnet-5"
 
     on_exit(fn -> Compos.Core.kill_buffer("*zz-cost-chat*") end)
     eval!(~s{(buffer-create "*zz-cost-chat*")})
@@ -91,12 +104,5 @@ defmodule Compos.LLMUsageTest do
     # an unpriced turn keeps the running total instead of poisoning it
     eval!(~s{(chat-usage-note! "*zz-cost-chat*" (list 'input 5 'output 5 'cost #f))})
     assert eval!(~s{(format-usd (buffer-local "*zz-cost-chat*" 'chat-cost))}) == ~s{"$0.0300"}
-  end
-
-  defp ledger_rows do
-    Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
-    |> File.read!()
-    |> String.split("\n", trim: true)
-    |> Enum.map(&Jason.decode!/1)
   end
 end

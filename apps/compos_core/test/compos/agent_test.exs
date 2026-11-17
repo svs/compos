@@ -1517,6 +1517,273 @@ defmodule Compos.AgentTest do
     assert xp == %{"sessionId" => "ses-ds", "configId" => "reasoning_effort", "value" => "low"}
   end
 
+  # --- usage reports (Compos.Core.LLM.report_usage/2) ----------------------
+
+  @acp_usage %{
+    "inputTokens" => 1200,
+    "outputTokens" => 300,
+    "cachedReadTokens" => 40_000,
+    "cachedWriteTokens" => 2_000
+  }
+
+  test "an ACP chat turn reports its usage as the adapter sent it, with the chat's model" do
+    {:ok, _} = Session.eval(~s[(execute "")])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "sess-u",
+        "models" => %{
+          "currentModelId" => "claude-sonnet-5",
+          "availableModels" => [
+            %{"modelId" => "claude-sonnet-5", "name" => "Sonnet"},
+            %{"modelId" => "claude-opus-4-6", "name" => "Opus"}
+          ]
+        }
+      }
+    })
+
+    buf = "*chat:a1*"
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
+    slug = slug_of(buf)
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+    inject(agent, prompt_done(pid, "end_turn"))
+
+    assert eventually(fn -> length(reports_of(slug)) == 1 end)
+    [r] = reports_of(slug)
+    assert r["usage"] == @acp_usage
+    assert {r["kind"], r["backend"], r["connector"], r["model"], r["end"]} ==
+             {"turn", "acp", "claude-code", "claude-sonnet-5", "done"}
+
+    # C-c m switches the model, and the next report names the new one
+    focus(buf)
+    press(["C-c", "m"])
+    type("claude-opus-4-6")
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => mid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => mid, "result" => %{}})
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "again")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid2}}, 1_000
+    inject(agent, prompt_done(pid2, "end_turn"))
+
+    assert eventually(fn -> length(reports_of(slug)) == 2 end)
+    assert [_, %{"model" => "claude-opus-4-6"}] = reports_of(slug)
+  end
+
+  test "every way out of an ACP turn reports: cancelled, failed, crashed" do
+    backend = acp_backend("rep-exits", "claude-sonnet-5")
+
+    :ok = Backend.ACP.prompt(backend, "one", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => p1}}, 1_000
+    inject(backend, prompt_done(p1, "cancelled"))
+    assert eventually(fn -> length(reports_of("rep-exits")) == 1 end)
+
+    :ok = Backend.ACP.prompt(backend, "two", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => p2}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => p2, "error" => %{"code" => -32603, "message" => "boom"}})
+    assert eventually(fn -> length(reports_of("rep-exits")) == 2 end)
+
+    :ok = Backend.ACP.prompt(backend, "three", %{})
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+    send(backend, {:acp_exit, 1})
+    assert eventually(fn -> length(reports_of("rep-exits")) == 3 end)
+
+    assert [
+             %{"end" => "cancelled", "usage" => @acp_usage},
+             %{"end" => "failed", "usage" => false},
+             %{"end" => "crashed", "usage" => false}
+           ] = reports_of("rep-exits")
+  end
+
+  test "an ACP adapter's own cost goes into the report as it sent it" do
+    backend = acp_backend("rep-cost", "claude-sonnet-5")
+    :ok = Backend.ACP.prompt(backend, "go", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+
+    update(backend, "ses-rep", %{
+      "sessionUpdate" => "usage_update",
+      "used" => 1000,
+      "size" => 200_000,
+      "cost" => %{"amount" => 0.42, "currency" => "USD"}
+    })
+
+    inject(backend, prompt_done(pid, "end_turn"))
+    assert eventually(fn -> length(reports_of("rep-cost")) == 1 end)
+    assert [%{"cost" => %{"amount" => 0.42, "currency" => "USD"}}] = reports_of("rep-cost")
+  end
+
+  test "two model switches in flight: each reply sets its own model" do
+    backend = acp_backend("rep-switch", "claude-sonnet-5")
+
+    :ok = Backend.ACP.set_model(backend, "claude-opus-4-6")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => a}}, 1_000
+    :ok = Backend.ACP.set_model(backend, "claude-haiku-4-5")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => b}}, 1_000
+
+    # the first reply lands while the second switch is still pending
+    inject(backend, %{"jsonrpc" => "2.0", "id" => a, "result" => %{}})
+    :ok = Backend.ACP.prompt(backend, "one", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => p1}}, 1_000
+    inject(backend, prompt_done(p1, "end_turn"))
+    assert eventually(fn -> length(reports_of("rep-switch")) == 1 end)
+
+    inject(backend, %{"jsonrpc" => "2.0", "id" => b, "result" => %{}})
+    :ok = Backend.ACP.prompt(backend, "two", %{})
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => p2}}, 1_000
+    inject(backend, prompt_done(p2, "end_turn"))
+    assert eventually(fn -> length(reports_of("rep-switch")) == 2 end)
+
+    assert [%{"model" => "claude-opus-4-6"}, %{"model" => "claude-haiku-4-5"}] =
+             reports_of("rep-switch")
+  end
+
+  test "a Codex turn reports every token usage notification it got, as Codex sent them" do
+    backend = codex_turn("rep-codex")
+
+    note = fn last ->
+      %{
+        "threadId" => "thread-1",
+        "turnId" => "turn-1",
+        "tokenUsage" => %{
+          "last" => last,
+          "total" => last,
+          "modelContextWindow" => 400_000
+        }
+      }
+    end
+
+    first = %{"inputTokens" => 900, "cachedInputTokens" => 600, "outputTokens" => 40,
+              "reasoningOutputTokens" => 10, "totalTokens" => 940}
+    second = %{"inputTokens" => 1100, "cachedInputTokens" => 800, "outputTokens" => 60,
+               "reasoningOutputTokens" => 0, "totalTokens" => 1160}
+
+    inject(backend, %{"method" => "thread/tokenUsage/updated", "params" => note.(first)})
+    inject(backend, %{"method" => "thread/tokenUsage/updated", "params" => note.(second)})
+
+    inject(backend, %{
+      "method" => "turn/completed",
+      "params" => %{"turn" => %{"id" => "turn-1", "status" => "completed"}}
+    })
+
+    assert eventually(fn -> length(reports_of("rep-codex")) == 1 end)
+    [r] = reports_of("rep-codex")
+    assert {r["backend"], r["model"], r["end"]} == {"codex-app-server", "gpt-5.5", "done"}
+    assert r["usage"] == [note.(first), note.(second)]
+  end
+
+  test "a Codex turn that dies with its adapter reports as crashed" do
+    backend = codex_turn("rep-codex-dead")
+    send(backend, {:acp_exit, 1})
+    assert eventually(fn -> length(reports_of("rep-codex-dead")) == 1 end)
+    assert [%{"end" => "crashed", "usage" => false}] = reports_of("rep-codex-dead")
+  end
+
+  defp reports_of(slug), do: Enum.filter(usage_reports(), &(&1["slug"] == slug))
+
+  defp prompt_done(id, stop),
+    do: %{
+      "jsonrpc" => "2.0",
+      "id" => id,
+      "result" => %{"stopReason" => stop, "usage" => @acp_usage}
+    }
+
+  # an ACP backend on the fake transport, its session open on MODEL
+  defp acp_backend(slug, model) do
+    {:ok, backend} =
+      Backend.ACP.start(
+        %{"cmd" => "fake", "cwd" => File.cwd!(), "slug" => slug, "connector" => "claude-code"},
+        self()
+      )
+
+    on_exit(fn -> if Process.alive?(backend), do: Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(backend, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{"sessionId" => "ses-rep", "models" => %{"currentModelId" => model}}
+    })
+
+    backend
+  end
+
+  # a Codex backend on the fake transport with turn-1 running
+  defp codex_turn(slug) do
+    alias Compos.Core.Agent.Backend.CodexAppServer
+
+    {:ok, backend} =
+      CodexAppServer.start(
+        %{"cmd" => "fake", "cwd" => File.cwd!(), "model" => "gpt-5.5", "slug" => slug},
+        self()
+      )
+
+    on_exit(fn -> if Process.alive?(backend), do: CodexAppServer.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => init_id}}, 1_000
+    inject(backend, %{"id" => init_id, "result" => %{}})
+    assert_receive {:frame, %{"method" => "model/list", "id" => models_id}}, 1_000
+    inject(backend, %{"id" => models_id, "result" => %{"data" => []}})
+
+    :ok = CodexAppServer.prompt(backend, "hello", %{})
+    assert_receive {:frame, %{"method" => "thread/start", "id" => thread_id}}, 1_000
+
+    inject(backend, %{
+      "id" => thread_id,
+      "result" => %{"thread" => %{"id" => "thread-1"}, "model" => "gpt-5.5"}
+    })
+
+    assert_receive {:frame, %{"method" => "turn/start", "id" => turn_request}}, 1_000
+    inject(backend, %{"id" => turn_request, "result" => %{"turn" => %{"id" => "turn-1"}}})
+    backend
+  end
+
+  test "an adapter that refuses a model switch leaves the backend running" do
+    {:ok, backend} = Backend.ACP.start(%{"cmd" => "fake", "cwd" => File.cwd!()}, self())
+    on_exit(fn -> if Process.alive?(backend), do: Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(backend, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(backend, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{"sessionId" => "ses-sm", "models" => %{"currentModelId" => "claude-sonnet-5"}}
+    })
+
+    :ok = Backend.ACP.set_model(backend, "no-such-model")
+    assert_receive {:frame, %{"method" => "session/set_model", "id" => mid}}, 1_000
+
+    inject(backend, %{
+      "jsonrpc" => "2.0",
+      "id" => mid,
+      "error" => %{"code" => -32602, "message" => "unknown model"}
+    })
+
+    # the refusal reaches the chat as an error, and the backend lives on
+    error =
+      Enum.find_value(1..10, fn _ ->
+        assert_receive {:backend_event, e}, 1_000
+        Backend.event_type(e) == "error" && e
+      end)
+
+    assert Backend.plist_get(error, "text") =~ "session/set_model no-such-model: unknown model"
+    assert Process.alive?(backend)
+    :ok = Backend.ACP.prompt(backend, "still here", %{})
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+  end
+
   test "an adapter that drops _meta takes our sections on the first turn only" do
     # 'system-in-prompt: the connector says its adapter has no system-prompt
     # channel, so the resolved config carries the sections as text

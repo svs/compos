@@ -139,11 +139,15 @@ defmodule Compos.Core.Agent.Backend.ACP do
         {:reply, :ok, set_config_option(state, "model", model_id)}
 
       true ->
+        # the reply does not echo the model, so the request keeps the one
+        # it asked for: two switches in flight each name their own
         {:reply, :ok,
-         request(state, "session/set_model", %{
-           "sessionId" => state.session_id,
-           "modelId" => model_id
-         })}
+         request(
+           state,
+           "session/set_model",
+           %{"sessionId" => state.session_id, "modelId" => model_id},
+           {:set_model, model_id}
+         )}
     end
   end
 
@@ -356,8 +360,16 @@ defmodule Compos.Core.Agent.Backend.ACP do
         |> emit(type: :session, id: sid, resumed: false, loadable: Map.get(state, :can_load, false))
         |> session_ready(result)
 
-      {"session/set_model", %{"result" => _}} ->
-        state
+      {{:set_model, model_id}, %{"result" => _}} ->
+        Map.put(state, :current_model, model_id)
+
+      # the adapter refused the model: the session keeps the one it runs.
+      # The generic clause below prints the method, and this one is a tuple
+      {{:set_model, model_id}, %{"error" => err}} ->
+        emit(state,
+          type: :error,
+          text: "session/set_model #{model_id}: #{rpc_error_text(err)}"
+        )
 
       {"session/set_mode", %{"result" => _}} ->
         state
@@ -374,9 +386,12 @@ defmodule Compos.Core.Agent.Backend.ACP do
         )
 
       {"session/prompt", %{"result" => result}} ->
+        stop = Map.get(result, "stopReason", "end_turn")
+
         state
         |> emit_usage(Map.get(result, "usage"))
-        |> emit(type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
+        |> report_usage(Map.get(result, "usage"), if(stop == "cancelled", do: "cancelled", else: "done"))
+        |> emit(type: :"turn-end", "stop-reason": stop)
 
       {{:steer, token, epoch}, %{"result" => %{"outcome" => "promptRequired"}}} ->
         emit(state, type: :"steering-fallback", token: token, epoch: epoch)
@@ -400,7 +415,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
         # a failed prompt still ends the turn — a thread must never wedge
         # in :running with no reply coming
         if method == "session/prompt" do
-          emit(state, type: :"turn-failed")
+          state
+          |> report_usage(nil, "failed")
+          |> emit(type: :"turn-failed")
         else
           state
         end
@@ -469,7 +486,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
         state =
           case result do
             %{"models" => %{"currentModelId" => cur} = ms} ->
-              emit(state,
+              state
+              |> Map.put(:current_model, cur)
+              |> emit(
                 type: :"model-state",
                 current: cur,
                 available:
@@ -577,8 +596,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
         # moves such a turn's settlement off the result and onto an idle
         # signal it can lose, and then never answers session/prompt. The
         # Agent's settle grace reads this event.
+        # The cost itself goes to the usage report as the adapter sent it.
         if Map.has_key?(update, "cost"),
-          do: emit(state, type: :"cycle-result"),
+          do: state |> Map.put(:adapter_cost, update["cost"]) |> emit(type: :"cycle-result"),
           else: state
 
       "config_option_update" ->
@@ -606,6 +626,25 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp emit_usage(state, _), do: state
+
+  # The turn's usage goes to the usage report as the adapter sent it, with
+  # what ran the turn (Compos.Core.LLM.report_usage/2). The model is the one
+  # the session runs: a config option (opencode), else the adapter's
+  # current model, else the configured one.
+  defp report_usage(state, usage, how) do
+    Compos.Core.LLM.report_usage(%{
+      usage: usage,
+      slug: Map.get(state.config, "slug"),
+      connector: Map.get(state.config, "connector"),
+      backend: Map.get(state.config, "backend", "acp"),
+      model:
+        state.config_model || Map.get(state, :current_model) || Map.get(state.config, "model"),
+      cost: Map.get(state, :adapter_cost),
+      end: how
+    })
+
+    state
+  end
 
   defp acp_int(map, key) do
     case Map.get(map, key) do
@@ -801,6 +840,12 @@ defmodule Compos.Core.Agent.Backend.ACP do
   defp meta_json(plist), do: Compos.Core.Plist.to_json(plist)
 
   defp adapter_exit(state, status) do
+    # a turn that was running when the adapter died still ends
+    state =
+      if "session/prompt" in Map.values(state.pending_rpc),
+        do: report_usage(state, nil, "crashed"),
+        else: state
+
     emit(state, type: :dead, exit: status)
     {:noreply, %{state | partial: ""}}
   end

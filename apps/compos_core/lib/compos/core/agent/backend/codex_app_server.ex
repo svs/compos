@@ -247,6 +247,7 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
         state
         |> fallback_pending_steers()
         |> emit(type: :error, text: error_message("turn/start", error))
+        |> report_usage(nil, "failed")
         |> emit(type: :"turn-failed")
 
       {{:steer, token, epoch}, %{"result" => %{"turnId" => _turn_id}}} ->
@@ -308,7 +309,15 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
       "turn/completed" ->
         turn = Map.get(params, "turn", %{})
         status = Map.get(turn, "status", "completed")
-        state = %{state | turn_id: nil}
+
+        how =
+          case status do
+            "failed" -> "failed"
+            "interrupted" -> "cancelled"
+            _ -> "done"
+          end
+
+        state = %{report_usage(state, Map.get(turn, "id") || state.turn_id, how) | turn_id: nil}
 
         if status == "failed" do
           state
@@ -352,6 +361,12 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
 
       "error" ->
         emit(state, type: :error, text: error_message("codex", params))
+
+      # Codex reports usage per model request, so a turn can get several.
+      # They are kept as Codex sent them and go to the usage report when
+      # the turn ends; summing them is the reader's work.
+      "thread/tokenUsage/updated" ->
+        Map.put(state, :turn_usage, Map.get(state, :turn_usage, []) ++ [params])
 
       _ ->
         state
@@ -804,7 +819,34 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
   defp put_if(map, _key, nil), do: map
   defp put_if(map, key, value), do: Map.put(map, key, value)
 
+  # The turn's token usage notifications go to the usage report as Codex
+  # sent them (Compos.Core.LLM.report_usage/2), the ones of TURN_ID or of
+  # no turn. Codex sends no cost.
+  defp report_usage(state, turn_id, how) do
+    {mine, _others} =
+      Enum.split_with(Map.get(state, :turn_usage, []), fn p ->
+        Map.get(p, "turnId") in [turn_id, nil]
+      end)
+
+    Compos.Core.LLM.report_usage(%{
+      usage: if(mine == [], do: nil, else: mine),
+      slug: Map.get(state.config, "slug"),
+      connector: Map.get(state.config, "connector"),
+      backend: "codex-app-server",
+      model: state.model,
+      end: how
+    })
+
+    Map.put(state, :turn_usage, [])
+  end
+
   defp adapter_exit(state, status) do
+    # a turn that was running when Codex died still ends
+    state =
+      if is_binary(state.turn_id),
+        do: report_usage(state, state.turn_id, "crashed"),
+        else: state
+
     emit(state, type: :dead, exit: status)
     {:noreply, %{state | partial: ""}}
   end

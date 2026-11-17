@@ -641,13 +641,13 @@ defmodule Compos.LLMToolsTest do
     # req_llm prices the request against its own model database, and it
     # knows the one thing the token counts don't say: whether the
     # provider's input_tokens already includes the cached tokens. Ours
-    # cannot, so its figure — not our table's — is what the ledger keeps.
-    test "the ledger records req_llm's cost, not the local table's" do
-      ledger = Path.join(Compos.Core.state_dir(), "llm-usage.jsonl")
-      File.rm(ledger)
+    # cannot, so its figure — not our table's — is what the usage report
+    # carries, as the call's own cost.
+    test "the usage report carries req_llm's cost, not the local table's" do
+      before = Compos.TestHelpers.usage_reports() |> Enum.map(& &1["seq"]) |> Enum.max(fn -> 0 end)
 
       # a deliberately absurd local price: if this figure ever reaches the
-      # ledger, the local table won and the wiring is broken
+      # report, the local table won and the wiring is broken
       :persistent_term.put(:compos_llmdb, %{
         "anthropic" => %{
           "models" => %{
@@ -699,20 +699,19 @@ defmodule Compos.LLMToolsTest do
 
       eval!(~s{(llm-with-tools "hello" (lambda (t) (set-symbol-value! 'zz-cost t)))})
       wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-cost)")) end)
-      wait_until(fn -> File.exists?(ledger) end)
-
-      row =
-        ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+      wait_until(fn -> Enum.any?(Compos.TestHelpers.usage_reports(), &(&1["seq"] > before)) end)
+      report = Compos.TestHelpers.usage_reports() |> Enum.filter(&(&1["seq"] > before)) |> List.last()
+      assert {report["kind"], report["backend"]} == {"call", "llm-tools"}
 
       # the token counts still land verbatim
-      assert row["input"] == 11
-      assert row["cache_read"] == 100
-      assert row["cache_write"] == 50
+      assert report["usage"]["input_tokens"] == 11
+      assert report["usage"]["cache_read_input_tokens"] == 100
+      assert report["usage"]["cache_creation_input_tokens"] == 50
 
       # a real price, and nowhere near the absurd local one (which would
       # bill 161 tokens x $9999/M ≈ $1.61)
-      assert is_number(row["cost"]) and row["cost"] > 0
-      assert row["cost"] < 0.01
+      assert is_number(report["cost"]) and report["cost"] > 0
+      assert report["cost"] < 0.01
     end
   end
 end

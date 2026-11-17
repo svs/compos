@@ -13,6 +13,11 @@
 (require 'panes)
 (require 'groups)
 (require 'window-log)
+(require 'window)
+(require 'components)
+;; make-list draws the layout previews. An autoload at the first draw
+;; registers its file after the boot and starts a second apropos build.
+(require 'emacs-names)
 
 (domain! 'windows)
 (effects! '(write display))
@@ -601,18 +606,20 @@
     (window-log-note! "panes" kind buf mode "->" (cadr shown))
     (panes-handle layout (cadr shown))))
 
-(define (panes--show-in-pane! to buf note)
+(define (panes--show-in-pane! to buf note &optional stay)
   "TO is (LAYOUT PANE-ID). BUF takes the window of its mode in that pane,
    else its mode's window in another pane, else a new window at the
-   front of that pane. The focus stays. NOTE goes to the window log.
+   front of that pane. With STAY, BUF never leaves that pane: no other
+   pane's window takes it. The focus stays. NOTE goes to the window log.
    Answers the window's handle."
   (let* ((mode (panes--buffer-mode buf))
          (l (car to)) (pid (cadr to))
          (same (or (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l pid))
                    ;; a mode keeps one window across the panes: a Dired opened
                    ;; from the chat's pane goes to the Dired window beside it
-                   (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-windows-holding l buf))
-                   (panes-mode-window l mode)))
+                   (and (not stay)
+                        (or (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-windows-holding l buf))
+                            (panes-mode-window l mode)))))
          (placed (if same
                      (list (if (member buf (panes-window-buffers l same))
                                (panes-show l same buf)
@@ -818,9 +825,11 @@
           ((and k (equal? (panes-window-buffer l k) buf)) #f)
           ;; a buffer of another mode goes to its own mode's window in this
           ;; pane, not onto this one: a chat in the morg window made the
-          ;; window list name morg for what was the chat
+          ;; window list name morg for what was the chat. An agent's buffer
+          ;; stays in the pane it named, so it never lands on the agent's chat
           ((and k (not (equal? (panes-window-mode l k) (panes--buffer-mode buf))))
-           (panes--show-in-pane! (list l (panes-pane-of l k)) buf "panes follows"))
+           (panes--show-in-pane! (list l (panes-pane-of l k)) buf "panes follows"
+                                 (and (boundp 'llm-tool-buffer) (llm-tool-buffer) #t)))
           (k (panes-layout-set! (panes-show l k buf)) #f)
           ((and pid (panes-pane l pid))
            ;; the blank window becomes the pane's window: it takes its id
@@ -1571,10 +1580,13 @@
 
 (define (pane-home--review-count)
   "The tasks of the group you are in that wait for your review: the ones
-   the todo list opens on."
-  (let ((g (frame-group)))
-    (length (filter (lambda (t) (or (not g) (equal? (plist-get t 'group) g)))
-                    (todo-list '(state "review"))))))
+   the todo list opens on. 0 until the todo files are found: a page drawn
+   when its buffer wakes must not walk the folders for a count."
+  (if (not (and (boundp 'todo-ready?) (todo-ready?)))
+      0
+      (let ((g (frame-group)))
+        (length (filter (lambda (t) (or (not g) (equal? (plist-get t 'group) g)))
+                        (todo-list '(state "review")))))))
 
 (define (pane-home--current-layout)
   (or (and (boundp 'panes-current-layout) (panes-current-layout)) 'free))
@@ -1754,10 +1766,18 @@
     (when (and (buffer-exists? pane-home-buffer)
                (not (equal? (pane-home--blocks) (buffer-local-value 'render-blocks pane-home-buffer))))
       (pane-home--render!))
-    (let ((card (pane-home--empty-blocks "Pane")))
+    ;; a card's text holds the count of tasks; its blocks do not
+    (let ((card (pane-home--empty-blocks "Pane")) (text (pane-home--text)))
       (for-each (lambda (b)
-                  (unless (equal? card (buffer-local-value 'render-blocks b)) (pane-card--render! b)))
+                  (unless (and (equal? card (buffer-local-value 'render-blocks b))
+                               (equal? text (buffer-text b)))
+                    (pane-card--render! b)))
                 (pane-card--buffers)))))
+
+;; the pages drew a count of 0 when they woke before the todo files were found
+(define (pane-home--todos-found!)
+  (report-errors "pane-home-todos" (lambda () (pane-home--redraw!))))
+(add-hook! 'todo-files-hook 'pane-home--todos-found!)
 
 ;; the empty pane is the home page too: its layouts, next steps and lessons
 (define (pane-home--key k)

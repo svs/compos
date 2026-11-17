@@ -26,3 +26,23 @@
       (check-false! (runtime-owed? buf) "the lookup ran the restore")
       (check-equal! (buffer-local-value 'zz-owed-setup-ran buf) #t "and the mode setup ran")
       (buffer-kill! buf))))
+
+(define-mode "zz-raise-mode"
+  (lambda () (error "zz-raise-mode: the setup raises")))
+
+(define *zz-woken* '())
+(define (zz--note-woken! buf) (set! *zz-woken* (cons buf *zz-woken*)))
+
+(deftest 'a-mode-setup-that-raises-does-not-end-the-wake
+  "the owners on buffer-woken-hook still run, and the waking flag comes back"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-raise-buf" "text")))
+      (buffer-set-local! buf 'mode-name "zz-raise-mode")
+      (set! *zz-woken* '())
+      (add-hook! 'buffer-woken-hook 'zz--note-woken!)
+      (restore-buffer-runtime! buf)
+      (remove-hook! 'buffer-woken-hook 'zz--note-woken!)
+      (check-true! (if (member buf *zz-woken*) #t #f) "the wake hook ran for the buffer")
+      (check-false! *buffer-waking* "the waking flag is off again")
+      (buffer-set-local! buf 'mode-name #f)
+      (buffer-kill! buf))))

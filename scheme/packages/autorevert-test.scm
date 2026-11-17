@@ -272,6 +272,43 @@
       (buffer-kill! p)
       (shell-command->string (string-append "unlink " p) "/tmp"))))
 
+(deftest 'a-clean-buffer-that-slept-through-a-change-takes-the-file
+  "a checkpoint drops the mark of a clean buffer; its own text is the mark when it wakes"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-slept-test.txt"))
+      (shell-command->string
+        (string-append "printf 'one\\ntwo\\nthree\\n' > " p) "/tmp")
+      (find-file p)
+      ;; what a wake from a checkpoint leaves: the old text, no mark, clean
+      (buffer-set-local! p 'auto-revert-base #f)
+      (shell-command->string
+        (string-append "printf 'one\\nTWO-from-disk\\nthree\\n' > " p) "/tmp")
+      (check-false! (buffer-modified? p) "the buffer is clean")
+      (auto-revert-woken! p)
+      (check-equal! (buffer-text p) "one\nTWO-from-disk\nthree\n"
+                    "the buffer takes the file")
+      (check-false! (buffer-modified? p) "and stays clean")
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))
+
+(deftest 'a-buffer-with-work-and-no-mark-keeps-its-text
+  "unsaved work with no mark has no common text with the file, so nothing is written"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-work-test.txt"))
+      (shell-command->string
+        (string-append "printf 'one\\n' > " p) "/tmp")
+      (find-file p)
+      (buffer-append! p "my work\n")
+      (buffer-set-local! p 'auto-revert-base #f)
+      (shell-command->string
+        (string-append "printf 'ONE\\n' > " p) "/tmp")
+      (check-true! (buffer-modified? p) "the buffer holds unsaved work")
+      (auto-revert-woken! p)
+      (check-equal! (buffer-text p) "one\nmy work\n" "the work is not written over")
+      (buffer-mark-saved! p)
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))
+
 (deftest 'an-attaching-frame-catches-every-buffer-up
   "no frame means no one has decided, so nothing follows until one attaches"
   (lambda ()

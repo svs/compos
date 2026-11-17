@@ -189,15 +189,25 @@
 ;; from agreement: a buffer that already differs from its file may be
 ;; holding unsaved work, and a guess there writes over it.
 (define (auto-revert-seed-base! buf)
-  (let* ((path (buffer-path buf))
-         (disk (and path
-                    (not (auto-revert-base buf))
-                    ;; a file shown from disk is never read, not even to
-                    ;; seed a mark: the read is the whole cost avoided
-                    (not (buffer-unread-file? buf))
-                    (read-file path))))
-    (when (and (string? disk) (equal? disk (buffer-text buf)))
-      (auto-revert-base! buf disk))))
+  ;; A buffer with no mark came back from a checkpoint. A checkpoint drops
+  ;; the mark of a clean buffer only, so the text of a clean buffer is the
+  ;; text it last agreed with its file on: that text is the mark, and a file
+  ;; that moved while the buffer slept is then a change the buffer follows.
+  ;; Before, the mark was set only when buffer and file were equal. A buffer
+  ;; that slept through a change had no mark, never followed, and its next
+  ;; save wrote the old text over the file.
+  (let ((path (buffer-path buf)))
+    (when (and path
+               (not (auto-revert-base buf))
+               ;; a file shown from disk is never read, not even to
+               ;; seed a mark: the read is the whole cost avoided
+               (not (buffer-unread-file? buf)))
+      (if (not (buffer-modified? buf))
+          (auto-revert-base! buf (buffer-text buf))
+          ;; unsaved work and no mark: only an equal file gives one
+          (let ((disk (read-file path)))
+            (when (and (string? disk) (equal? disk (buffer-text buf)))
+              (auto-revert-base! buf disk)))))))
 
 ;;; --- the minimal edit ---------------------------------------------------------
 

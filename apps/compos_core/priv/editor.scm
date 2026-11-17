@@ -3486,18 +3486,22 @@
 (define *buffer-waking* #f)
 
 (define (with-buffer-waking thunk)
+  ;; unwind-protect: a setup that raises must not leave every later wake
+  ;; reading *buffer-waking* as #t
   (let ((was *buffer-waking*))
     (set! *buffer-waking* #t)
-    (let ((r (thunk)))
-      (set! *buffer-waking* was)
-      r)))
+    (unwind-protect thunk (lambda () (set! *buffer-waking* was)))))
 
 ;; A dormant buffer wakes with literal persisted locals but none of the
 ;; runtime machinery those locals describe. Re-run both setup layers with a
 ;; logical current buffer: restoration must not display or select BUF.
 (define (restore-buffer-runtime! buf)
   (runtime--mark! buf)
-  (begin
+  ;; A setup that raises does not end the wake. A Scheme file whose language
+  ;; server was not there raised here, the owners below never ran, and the
+  ;; buffer kept a text older than its file. The error goes to the log.
+  (report-errors (string-append "restore-buffer-runtime! " buf)
+    (lambda ()
       (with-current-buffer buf
         (lambda ()
           (with-buffer-waking
@@ -3507,7 +3511,7 @@
               (run-hook-with-args 'buffer-restore-hook buf)
               (let ((mode (buffer-local-value 'mode-name buf)))
                 (when mode (set-mode! mode)))
-              (restore-minor-modes! buf))))))
+              (restore-minor-modes! buf)))))))
   ;; The modeline is derived state. Rebuild it here so a restored desktop
   ;; shows its top line and its short name before the first command runs.
   (when (boundp (quote dashboard--sync!))

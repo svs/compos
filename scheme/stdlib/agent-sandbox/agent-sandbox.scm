@@ -154,16 +154,12 @@
                  (map (lambda (a) (agent-sandbox--in-chat chat a)) more)))))
 
 (define (agent-sandbox--in-chat chat f)
-  "F run with CHAT as the current buffer when F is a callback and CHAT is live, so what F does is done for the chat that asked; else F. CHAT is found again by its chat id when it was renamed meanwhile, as a chat that takes a task is"
+  "F run with CHAT as the current buffer when F is a callback and CHAT is live, so what F does is done for the chat that asked; else F"
   (if (and chat (procedure? f))
-      (let ((cid (buffer-local-value 'chat-id chat)))
-        (lambda args
-          (let ((buf (cond ((and (buffer-exists? chat) (equal? (buffer-local-value 'chat-id chat) cid)) chat)
-                           ((string? cid) (let ((hit (chat-list (list 'chat-ids (list cid))))) (and (pair? hit) (car hit))))
-                           (else #f))))
-            (if buf
-                (with-current-buffer buf (lambda () (apply f args)))
-                (apply f args)))))
+      (lambda args
+        (if (buffer-exists? chat)
+            (with-current-buffer chat (lambda () (apply f args)))
+            (apply f args)))
       f))
 
 (effects! '(write))

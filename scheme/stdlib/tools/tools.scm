@@ -1654,7 +1654,11 @@
                         (let* ((row (nth 2 x))
                                (nm (let ((s (plist-get (nth 1 row) 'name)))
                                      (if (string? s) (string-downcase s) "")))
-                               (toks (string-split nm "-"))
+                               ;; a part keeps no ! or ?: id is a part of chat-stable-id!
+                               (toks (map (lambda (p) (if (or (string-suffix? "!" p) (string-suffix? "?" p))
+                                                          (substring p 0 (- (string-length p) 1))
+                                                          p))
+                                          (string-split nm "-")))
                                (k (fold (lambda (s w)
                                           (let ((wt (nth 1 (assoc w weight))))
                                             (+ s (cond ((equal? nm w) (* 4 wt))

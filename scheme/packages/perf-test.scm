@@ -69,7 +69,7 @@
            (rows (list (list 'name "Compos.Core.Desktop" 'pid "<0.933.0>" 'memory 14680064)
                        (list 'name "Compos.Core.Session" 'pid "<0.900.0>" 'memory 267386880)
                        (list 'name "Compos.Core.Buffer.init/1" 'pid "<0.956.0>" 'memory 1048576)))
-           (texts (perf-test--texts (perf--vm-panel mem rows))))
+           (texts (perf-test--texts (perf--vm-panel mem rows '()))))
       (check-true! (member "total 1.0 GiB = processes 512 MiB + ets 256 MiB + binary 128 MiB + code 64 MiB + other 64 MiB" texts)
                    "the head holds the split, and the parts sum to the total")
       (check-equal! (filter (lambda (t) (string-prefix? "Compos." t)) texts)

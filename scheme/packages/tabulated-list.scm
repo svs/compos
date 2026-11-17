@@ -2571,7 +2571,9 @@
                         (let loop ((rest rows) (i 0) (out '()))
                           (if (null? rest) (reverse out)
                             (let* ((row (car rest))
-                                   (key (list-key buf row))
+                                   ;; a mode with no 'key keys a row by the entry
+                                   ;; itself; the anchor and the click are text
+                                   (key (let ((k (list-key buf row))) (if (string? k) k (value->string k))))
                                    (block (render buf row))
                                    (start (+ first (* i per) 1)))
                               (loop (cdr rest) (+ i 1)

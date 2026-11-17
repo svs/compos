@@ -8059,6 +8059,22 @@
     ;; they start the history store when a hot reload left none
     ;; (Recent.ready), so their first call writes
     mru-groups mru-list))
+
+;; primitives with no catalog entry yet, some of them used by packages that
+;; live outside this checkout (endpoint, google, web-server). They are
+;; published and stamped here: the stamp belongs to the primitive, and a
+;; read is taken or refused by it whether or not the package loaded
+(let ((stamps '(((read) count-words file-glob google-accounts google-oauth-status)
+                ((write) append-file! redo! vm-collect!)
+                ((write execute) release-install-binary!)
+                ((write external) google-http! google-oauth-start! web-server-start! web-server-stop!)
+                ((write external execute) endpoint-ask endpoint-send! endpoint-start! endpoint-stop!)
+                ((destroy external) google-revoke!))))
+  (for-each (lambda (pair)
+              (editor--public-primitives! (cdr pair))
+              (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects (car pair)))
+                        (cdr pair)))
+            stamps))
 (domain! 'files)
 (effects! '(write))
 (editor--public-primitives!

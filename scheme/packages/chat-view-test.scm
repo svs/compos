@@ -29,7 +29,9 @@
              (tool (nth 2 rows))
              (details (car (chat-view-test--children tool)))
              (summary (car (chat-view-test--children details))))
-        (check-equal! (length tree) 2 "the transcript and the prompt, no activity")
+        (check-equal! (map (lambda (b) (plist-get b 'tag)) tree)
+                      '("c-transcript" "c-activity" "c-prompt")
+                      "the transcript, the activity row (blank while idle), and the prompt")
         (check-equal! (plist-get list-block 'isolate) #t "the transcript is an isolated list")
         (check-equal! (plist-get list-block 'follow) #t "the transcript follows its tail")
         (check-equal! (map (lambda (r) (plist-get r 'tag)) rows)
@@ -113,14 +115,21 @@
     (let ((buf (chat-view-test--buffer "*zz-chat-view-activity*")))
       (buffer-set-local! buf 'chat-activity "streaming")
       (chat-view-sync! buf)
-      (check-true! (re-match? "ag-activity"
+      (check-true! (re-match? "⋯ streaming"
                               (value->string (buffer-local-value 'render-blocks buf)))
-                   "the row is in the tree while the work runs")
+                   "the row says what runs while the work runs")
+      (check-false! (re-match? "ag-idle"
+                               (value->string (buffer-local-value 'render-blocks buf)))
+                    "and is not idle")
       (buffer-set-local! buf 'chat-activity #f)
       (chat-view-sync! buf)
-      (check-false! (re-match? "ag-activity"
+      ;; the row stays, blank, so the input does not move under the reader
+      (check-true! (re-match? "ag-idle"
+                              (value->string (buffer-local-value 'render-blocks buf)))
+                   "the turn ends and the row goes idle")
+      (check-false! (re-match? "⋯ streaming"
                                (value->string (buffer-local-value 'render-blocks buf)))
-                    "the turn ends and the row leaves the tree")
+                    "and says nothing")
       (buffer-kill! buf))))
 
 (deftest 'chat-view-labels

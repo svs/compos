@@ -364,7 +364,11 @@
 ;; Scheme and never lets it leave as a message: it takes a newline and
 ;; waits for the expression to close.
 (define (chat-scheme-well-formed? text)
-  (null? (ts-query-string "scheme" text "(ERROR) @err")))
+  ;; the reader decides even where no scheme grammar is installed (it
+  ;; answers #f for unbalanced text); the
+  ;; grammar, where there is one, also catches what the reader takes
+  (and (ignore-errors (lambda () (scheme-read text)))
+       (null? (ts-query-string "scheme" text "(ERROR) @err"))))
 
 ;;; Pretty printing. (apropos "windows") answers a list of plists, and one
 ;;; long line of it is unreadable. A value that fits stays on its line; one

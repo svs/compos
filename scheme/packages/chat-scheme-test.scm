@@ -42,14 +42,17 @@
 (deftest 'a-bang-input-is-prose-for-fast-code
   "! resolves to Scheme here and never reaches the model"
   (lambda ()
-    (check-true! (chat-fast-input? "!switch to paper") "a bang opens a fast intent")
+    ;; the bang is fast-code's (a community package); without it a bang is prose
+    (when (boundp 'fast-chat-input?)
+      (check-true! (chat-fast-input? "!switch to paper") "a bang opens a fast intent"))
     (check-false! (chat-fast-input? "what does ! mean") "a bang mid-sentence is prose")
     (check-false! (chat-fast-input? "(+ 1 2)") "a parenthesised input is the other path")))
 
 (deftest 'a-bang-run-is-told-to-the-agent
   "it spends no turn, but the next message says what it typed, ran and gave"
   (lambda ()
-    ;; the words resolve without the model: fast-chat-resolve answers them
+   ;; the words resolve without the model: fast-chat-resolve, fast-code's, answers them
+   (when (boundp 'fast-chat-resolve)
     (let ((orig fast-chat-resolve))
       (set! fast-chat-resolve (lambda (text k) (k "(with-frame-windows (lambda () (+ 1 2)))")))
       (let ((buf (t--cs-chat! "!zz add two numbers")))
@@ -61,7 +64,7 @@
         (buffer-set-local! buf 'chat-fast-runs '())
         (check-equal! (chat-fast-note buf) "" "no runs, no note")
         (buffer-kill! buf))
-      (set! fast-chat-resolve orig))))
+      (set! fast-chat-resolve orig)))))
 
 (deftest 'malformed-scheme-goes-nowhere
   "an unbalanced expression is neither evaluated nor sent"
@@ -195,7 +198,8 @@
 (deftest 'a-bare-command-call-runs-the-command
   "an M-x command is not a variable, so (name) reads as the command"
   (lambda ()
-    (check-equal! (chat-scheme-command "(previous-buffer)") "previous-buffer"
+    ;; most commands are functions too now; describe-key--page is not
+    (check-equal! (chat-scheme-command "(describe-key--page)") "describe-key--page"
                   "a command name the environment does not bind")
     (check-equal! (chat-scheme-command "(buffer-list)") #f
                   "a bound function stays a function")
@@ -207,11 +211,11 @@
 (deftest 'an-unbound-command-name-says-where-it-lives
   "nested, the rewrite cannot help, so the error names the command table"
   (lambda ()
-    (let ((body (chat-scheme-report "(list (previous-buffer))"
-                                    (eval-string-safe "(list (previous-buffer))"))))
+    (let ((body (chat-scheme-report "(list (describe-key--page))"
+                                    (eval-string-safe "(list (describe-key--page))"))))
       (check-true! (string-index body "is an M-x command")
                    "the hint follows the error")
-      (check-true! (string-index body "(run-command \"previous-buffer\")")
+      (check-true! (string-index body "(run-command \"describe-key--page\")")
                    "and spells the call out"))
     (check-equal! (chat-scheme-hint "unbound variable: not-a-command-anywhere") ""
                   "a name no command table knows gets no hint")))

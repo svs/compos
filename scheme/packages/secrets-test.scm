@@ -75,11 +75,13 @@
       (check-equal! (plist-get out 'adapter) "postgres" "the adapter is not a secret")
       (check-equal! (plist-get out 'database) "app" "a plain value survives"))
 
-    ;; an endpoint subprocess environment is the same shape MCP uses
-    (let ((out (endpoint-resolve-spec
+    ;; an endpoint subprocess environment is the same shape MCP uses; the
+    ;; endpoint package is a community one, checked when it is loaded
+    (when (boundp 'endpoint-resolve-spec)
+     (let ((out (endpoint-resolve-spec
                  '(command "psql" env (PGPASSWORD "@T_TOKEN") framing "line"))))
       (check-equal! (plist-get (plist-get out 'env) 'PGPASSWORD) "s3cret" "the env resolved")
-      (check-equal! (plist-get out 'framing) "line" "the framing is not a secret"))
+      (check-equal! (plist-get out 'framing) "line" "the framing is not a secret")))
 
     ;; mcp keeps the behaviour it had before it shared the function
     (let ((out (mcp-resolve-spec

@@ -91,13 +91,14 @@
                     "match searches the items of a one-line list")
       (delete-file! path))))
 
-(deftest 'mcp-proxy-answer-sends-the-reference
-  "the proxy answer for a long result is the reference, base64 for the socket"
+(deftest 'mcp-proxy-cap-sends-the-reference
+  "the proxy's answer for a long result is the reference"
   (lambda ()
-    (let* ((text (tr--lines 400))
-           (sent (base64-decode
-                   (tr--with-cap 1000 (lambda () (mcp-proxy--answer "eval-scheme" #f text))))))
-      (check-true! (string-prefix? "[The tool result is " sent) "the agent gets the reference")
-      (delete-file! (tr--path sent)))
-    (check-equal! (base64-decode (mcp-proxy--answer "eval-scheme" #f "ok")) "ok"
-                  "a short answer is unchanged")))
+    (with-stub 'mcp-proxy-max-chars 500
+      (lambda ()
+        (let* ((text (tr--lines 400))
+               (sent (tr--with-cap 1000 (lambda () (mcp-proxy--cap "eval-scheme" text)))))
+          (check-true! (string-prefix? "[The tool result is " sent) "the agent gets the reference")
+          (delete-file! (tr--path sent)))
+        (check-equal! (mcp-proxy--cap "eval-scheme" "ok") "ok"
+                      "a short answer is unchanged")))))

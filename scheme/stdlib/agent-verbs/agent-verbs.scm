@@ -96,9 +96,7 @@
 ;;;###autoload
 (define (shell-job! topic cmd note &optional dir)
   "(shell-job! TOPIC CMD NOTE [DIR]) - run a long shell command in the background and wake this chat with its output when it ends, in one call; answer the listener id. TOPIC gets job: in front when it has no prefix, so it is private to this chat. Write CMD so its output is the answer. A mix test takes a test hold and a reload hold until it ends: one mix test at a time, and agent saves wait for it. While another chat's test runs, it refuses and names the holder; wait with (agent-listen! '(topic \"holds\" kind released) NOTE)."
-  ;; the topic carries its chat from the start, so the callback wakes this chat
-  ;; whatever buffer is current when the command ends
-  (let* ((topic (event-job-topic (if (string-contains? topic ":") topic (string-append "job:" topic))))
+  (let* ((topic (if (string-contains? topic ":") topic (string-append "job:" topic)))
          (why (string-append "mix test: " (if (> (string-length cmd) 80) (substring cmd 0 80) cmd)))
          (hs (if (string-contains? cmd "mix test")
                  (let ((t (hold! 'test why))) (list t (hold! 'reload why)))
@@ -107,9 +105,7 @@
          (ok (ignore-errors
                (lambda ()
                  (shell-command->string cmd (or dir (default-directory))
-                   (lambda (out)
-                     (for-each (lambda (h) (ignore-errors (lambda () (release! h)))) hs)
-                     (event-publish! topic 'done out)))
+                   (lambda (out) (for-each release! hs) (event-publish! topic 'done out)))
                  #t))))
     ;; a command that did not start leaves no hold behind
     (unless ok

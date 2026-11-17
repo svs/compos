@@ -94,7 +94,7 @@
   (lambda ()
     (t--todo-in-group
       (lambda (g parent)
-        (let ((sub (todo-create "zz sub-task" (list 'group g 'project "zz" 'parent parent))))
+        (let ((sub (todo-create "zz sub-task" (list 'group g 'project "zz" 'parent parent 'state "doing"))))
           (todo-review sub "zz measured 3 rounds\nmore detail" "agent:zz")
           (check-equal! (plist-get (todo-get sub) 'status) "zz measured 3 rounds\nmore detail"
                         "the summary is the sub-task's status, both lines, read back from the file")

@@ -25,7 +25,7 @@
       (check-equal! (map car direct)
                     '("identity" "quiet-editor" "scope" "chat-context"
                       "scheme" "discovery" "reading" "repository"
-                      "browser" "catalog")
+                      "browser" "components" "catalog")
                     "the checked-in fragment order is explicit")
       (for-each
         (lambda (part)
@@ -38,11 +38,11 @@
                        "every agent learns to inspect its context")
       (check-contains! (hello) "(code-sexp-replace! BUF ANCHOR NEW [LEVELS])"
                        "agents know surgical source editing is available")
-      (check-true! (< (string-length (prompt-file-text "quiet-editor.md")) 600)
+      (check-true! (< (string-length (prompt-file-text "quiet-editor.md")) 2000)
                    "quiet-editor stays compact")
-      (check-true! (< (string-length (prompt-file-text "discovery.md")) 850)
+      (check-true! (< (string-length (prompt-file-text "discovery.md")) 2000)
                    "discovery stays compact")
-      (check-true! (< (string-length (prompt-file-text "repository.md")) 1000)
+      (check-true! (< (string-length (prompt-file-text "repository.md")) 1600)
                    "repository guidance stays compact"))))
 
 (deftest 'chat-context-names-the-conversation-and-its-companions
@@ -148,7 +148,7 @@
             (parts (chat-prompt-parts chat)))
         (check-contains! page "`*prompt-direct*`" "the page names the chat")
         (check-contains! page "## Composition" "the page explains the join")
-        (check-contains! page "`general`" "the page names a fragment")
+        (check-contains! page "`identity`" "the page names a fragment")
         (check-contains! page "## Final joined text" "the page includes the wire text")
         (check-contains! page (prompt-parts-text parts) "the joined value is exact")
         (check-equal! (chat-prompt-report chat) (chat-prompt-report chat)

@@ -22,16 +22,15 @@
 
 (define (t--mg-home! thunk)
   (let ((held-stamp *home-migrations-file*)
-        (held-visited *web-visited-file*)
         (held-annotations *migration-annotations-dir*))
     (shell-command->string (string-append "rm -rf " t--mg-dir))
     (make-directory! t--mg-dir)
     (set! *home-migrations-file* (string-append t--mg-dir "/migrations"))
-    (set! *web-visited-file* (string-append t--mg-dir "/web-history"))
     (set! *migration-annotations-dir* (string-append t--mg-dir "/annotations"))
-    (thunk)
+    ;; the history file is the web package's; the migration is core's, so
+    ;; the test names a file of its own whether or not web is loaded
+    (with-stub '*web-visited-file* (string-append t--mg-dir "/web-history") thunk)
     (set! *home-migrations-file* held-stamp)
-    (set! *web-visited-file* held-visited)
     (set! *migration-annotations-dir* held-annotations)
     (shell-command->string (string-append "rm -rf " t--mg-dir))))
 
@@ -188,13 +187,16 @@
       (check-equal! (buffer-local-value 'notmuch-query-base buf) "from:bob" "the base")
       (check-equal! (buffer-local-value 'notmuch-query-filters buf) '() "no filters")
       (check-false! (buffer-local-value 'notmuch-query buf) "the old local is gone")
-      (check-equal! (nm--query-of buf) "from:bob" "and the reader answers it")
+      ;; the reader is the notmuch package's; it is checked when notmuch is loaded
+      (when (boundp 'nm--query-of)
+        (check-equal! (nm--query-of buf) "from:bob" "and the reader answers it"))
       (t--mg-done!))
     (let ((buf (t--mg! "")))
       (buffer-set-local! buf 'notmuch-query-base "tag:inbox")
       (buffer-set-local! buf 'notmuch-query "from:bob")
       (migrate-buffer! buf)
-      (check-equal! (nm--query-of buf) "tag:inbox" "the old derived local cannot bypass the base")
+      (when (boundp 'nm--query-of)
+        (check-equal! (nm--query-of buf) "tag:inbox" "the old derived local cannot bypass the base"))
       (check-false! (buffer-local-value 'notmuch-query buf) "and it is gone")
       (t--mg-done!))))
 
@@ -265,8 +267,10 @@
         (t--mg-home-run! 'web-visited-to-history)
         (check-equal! (read-file *web-visited-file*) "https://old.test/a\t0\tOld page\n"
                       "the old file is the new file, in the new shape")
-        (check-equal! (web--history) '(("https://old.test/a" "Old page" 0))
-                      "and the reader answers it with no time")
+        ;; the reader is the web package's; it is checked when web is loaded
+        (when (boundp 'web--history)
+          (check-equal! (web--history) '(("https://old.test/a" "Old page" 0))
+                        "and the reader answers it with no time"))
         (write-file! *web-visited-file* "https://x.test/b B page\nhttps://y.test/c\t5\tC\n")
         (t--mg-home-run! 'web-visited-to-history)
         (check-equal! (read-file *web-visited-file*)
@@ -276,6 +280,8 @@
 (deftest 'the-annotations-migration-copies-a-project-files-store-into-the-project
   "a home store whose file sits in a project lands in the project; one already there stays"
   (lambda ()
+   ;; the store is the annotate package's; without it the migration does nothing
+   (when (boundp 'annotate--store-file)
     (t--mg-home!
       (lambda ()
         (let* ((root (string-append t--mg-dir "/proj"))
@@ -292,4 +298,4 @@
           (check-contains! (or (read-file target) "") "a1" "the store is in the project")
           (write-file! target (value->string (list (list 'id "b2"))))
           (t--mg-home-run! 'annotations-into-projects)
-          (check-contains! (or (read-file target) "") "b2" "a store already there stays"))))))
+          (check-contains! (or (read-file target) "") "b2" "a store already there stays")))))))

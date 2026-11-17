@@ -53,26 +53,17 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 | a-minor-mode-map-answers-ahead..., every-major-mode-key-leads-to-a-live-command | the keymap ladder |
 | fence-markers-step-back-with-other-preview-markup, a-link-keeps-its-text-and-hides-its-target, a-csv-block-draws-as-a-table | blocks |
 | the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface | llm-setup-test; 41ffa950 clears 'modeline-info |
-| a-chat-title-holds-at-most-six-words | the title clip: chat.scm 165291b4 (2026-10-12) trims 'is' from the title; not caused today |
-| the-header-line-carries-identity-and-the-mode-line-carries-state | the switcher test expects buffer-switcher, renamed to modeline-expand in aacfe2e6; not caused today |
-| an-editing-buffer-wears-the-cua-tag | the state-tag test expects 'cua', but the code shows 'ESC' since 8b639fbd; not caused today |
-| the-api-lane-adds-a-usage-fact-once-a-turn-has-billed, the-acp-lane-reports-no-usage-fact, usage-never-borrows-a-groups-other-buffers-spend, a-preset-still-carries-its-usage-fact | the four usage-fact tests call dash--usage, removed in aacfe2e6 (three raise unbound; a-preset fails its usage check); not caused today |
 | a-project-file-keeps-a-project-relative-buffer-modeline-name | passes alone; the full run raises an LSP connection error (scheme-langserver); cause open; not caused today |
-| unstamped-bundled-declarations-do-not-multiply, a-near-miss-on-a-name-lands-anyway, kind-package-namespace-domain-and-effect-filters-compose, components-use-the-main-catalog-and-expose-a-runnable-contract | apropos and the catalog |
-| malformed-scheme-goes-nowhere, code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode |
+| code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode |
 | subagents-table-draws-one-row-per-edge, overview-uses-only-the-current-group | one each |
 | a-pasted-images-link-is-relative-to-the-document | the test home is not a git repository; the git rev-parse error list reaches string-append |
 | a-blocks-presence-arms-its-keys, a-scheme-result-pretty-prints-nested-property-lists | one each |
-| agent-excision-repairs-every-transcript-offset, agent-excision-counts-bytes-after-multibyte-text | agent-excise-range! no longer moves 'agent-saved-mark by hand (the buffer keeps the marker); the test still expects the hand-moved value; red at HEAD 4f0a0be9 in a worktree run |
 | a-floating-surface-does-not-change-the-frame-group | window-config-test; left to the other agent |
 | a-buffer-that-wakes-catches-up-with-its-file | autorevert; red alone at HEAD 22ba6cd2 in a worktree run: the woken buffer keeps its old text |
 | the-companion-chat-opens-into-the-documents-group | red alone at HEAD 3ffe7c4a in a worktree run |
 | a-kill-after-a-kill-appends-and-last-command-names-the-kill | kernel: last-command is next-line after kill-word, so kill-word is not recorded as the last command (last-command builtin scheme_api.ex:2725; kill check editor.scm:636); kill appending from a86ad804 (2026-09-02); not caused today |
 | a-command-enters-the-editing-state-and-keyboard-quit-leaves-it | kernel: a landing that comes back is still in the editing state (expected #f, got #t); landing check editing--check-landing! (editor.scm:5135) from 1770e36a (2026-09-04); not caused today |
 | a-session-event-is-kept-with-the-conversation | a reset does not clear the session event with the conversation (expected #t, got #f); agent.scm last changed 2fa47cf5 |
-| semantic-results-join-the-catalog-and-keep-filters | the semantic search declares read and external but not spend (API cost); apropos-test.scm last changed 50ca5373 |
-| a-bang-input-is-prose-for-fast-code | in the focused run fast-code names are unbound (fast-accept, fast-chat-resolve, fast-palette-rows), so chat-fast-input? (agent-session.scm:364, b158e827) answers #f; fast-code.scm last changed 9b0cc4ad (2026-09-24); the loader path that leaves fast-code unloaded is not pinned; not confirmed caused today |
-| a-bang-run-is-told-to-the-agent | same cause as a-bang-input: fast-chat-resolve is unbound in the focused run, so the bang never resolves; fast-code.scm last changed 9b0cc4ad (2026-09-24); not confirmed caused today |
 | agent-discovery-hides-display-effects-until-presentation-is-explicit | default agent discovery shows display effects (expected #f, got #t); code-mode-test.scm last changed e65a25fe |
 | an-answer-must-read-and-name-nothing-unbound | fast-accept is unbound; dbd43ee3 changed it last; fast-code.scm last changed c4145124 |
 | a-function-takes-the-requests-values-as-parameters | fast-accept is unbound; dbd43ee3 changed it last; fast-code.scm last changed c4145124 |
@@ -84,16 +75,39 @@ writing go red by order only; each passes when its file runs alone (see "Tests l
 | the-buffer-prompt-is-the-plain-minibuffer-list | fixed 2026-10-17, passes: the same switch.scm filter as the pool-flat row (00b284e7). The test reads the All tab through ibp-open-plain! |
 | typing-narrows-the-plain-prompt-and-previews-the-selection | passes in the focused run after the All-tab read (ibp-open-plain!); the earlier history-loss note was wrong |
 | confirm-takes-the-row-and-brings-it-here | the row is not the current buffer and the buffer does not join the group; the ibuffer Group tab hides other groups' buffers; ibuffer.scm last changed 7a6abfe5 |
-| an-open-shows-the-first-page-again | passes in the focused run; full-run order pollution (one page on the open: expected 50, got 100); list-page-test.scm last changed 97645579 |
 | notmuch-starts-at-the-mailboxes-and-a-row-opens-its-search | the mailbox row's query is tag:"important", not tag:inbox; notmuch.scm last changed 781170ae |
 | typing-a-form-end-to-end-keeps-the-text-balanced | passes in the focused run; full-run order pollution (point ends past the closer, expected 5, got 4); paredit.scm last changed cfd2b97e |
-| the-mcp-proxy-refuses-deny-listed-payloads | the test calls mail-send, now unbound (mail-send! exists); the refusal never runs; permission-test.scm last changed f82cbe98 |
-| direct-and-acp-agents-share-the-same-standing-guidance | the quiet-editor, discovery and repository guidance is not compact (expected true, got #f); prompts.scm cd9259ad and aacfe2e6 (removed general.md) are the nearest prompt changes; cause not pinned; not confirmed caused today |
-| chat-show-prompt-shows-the-direct-prompt-and-its-composition | the page names no general section: aacfe2e6 removed general.md; prompt-test.scm last changed aa2f39cf |
 | find-def-reaches-the-bundled-source-and-every-catalogued-package | scheme-ide--find-def answers #f (a miss where a hit was expected) for paredit-in-scheme-mode, so cadr of #f raises in Builtins.entries/0; scheme-ide--sources scans apps/compos_core/priv/packages, which is empty (packages moved to scheme/packages by 52dd7acf, 2026-09-18); not caused today |
 | narrowing-to-a-dormant-candidate-wakes-it-and-leaving-sleeps-it | passes in the focused run; full-run order pollution (leaving does not sleep the candidate); switcher-sleep-test.scm last changed 97645579 |
 | visiting-keeps-the-pick-awake-and-sleeps-the-other-woken-candidate | passes in the focused run; full-run order pollution (the other woken candidate stays awake); switcher-sleep-test.scm last changed 97645579 |
 | telemetry-toggle-opens-the-list-and-closes-it | the same command does not close the list, and the buffer back is *Telemetry*, not *scratch*; telemetry.scm last changed b158e827 |
+
+## The package suite on main, 2026-11-18
+
+Measured on main f17239453 and again after 27cece54, in a worktree with its own
+deps and build (the live libcompos_ts.so copied in), with
+`mix test --include packages test/compos/package_suite_test.exs test/compos/load_test.exs`.
+Main had 113 red package tests and 2 red load tests. The fix (todo
+t-261118-015522-928) took the package suite to 64. Every one of the 64 below also
+fails with its file run alone, except where the note says order. Fix the defect or
+rewrite the test; the follow-up todo for the window group is
+t-261118-031310-144.
+
+| Test | Note |
+|---|---|
+| app-layout-starts-at-the-app-start-pane, arriving-is-a-request-to-look, chats-sections-by-group-or-none, a-word-nobody-titled-schedules-a-search, mode-consolidate-includes-hidden-mode-buffers, mode-consolidate-keeps-the-other-stack-invisible-at-target-capacity, a-listing-seeds-no-new-group, the-visible-verbs-take-the-windows-as-they-stand, moving-the-visible-buffers-keeps-them-on-screen, a-freed-frame-stays-free-in-a-new-group, the-buffer-prompt-is-the-plain-minibuffer-list, typing-narrows-the-table-and-arrows-move-its-highlight, confirm-takes-the-row-and-brings-it-here, cancel-still-closes-the-table-when-the-dock-is-the-only-window, a-move-previews-the-row-beside-the-list-and-takes-no-focus, q-takes-the-look-before-it-takes-the-list, a-visit-after-a-look-lands-in-the-looks-window, moving-previews-the-capture-and-the-row-command-visits-it, coming-back-to-a-group-never-shows-another-groups-buffer, narrowing-to-a-dormant-candidate-wakes-it-and-leaving-sleeps-it, visiting-keeps-the-pick-awake-and-sleeps-the-other-woken-candidate, kill-removes-the-dormant-buffer-the-row-names, a-floating-surface-does-not-change-the-frame-group, a-visit-commits-a-look-and-a-kill-ends-it, the-pool-is-the-groups-members-and-nothing-from-elsewhere, a-popup-is-not-a-fill-candidate, a-tile-keeps-each-panes-own-history, a-kill-after-a-tile-refills-the-pane-from-its-own-past, a-pane-a-tile-leaves-out-waits-in-the-model, focus-selects-the-neighbor-and-comes-back, focus-stays-put-at-the-edge, toggle-type-lowers-a-popup-and-raises-it-again, subagents-ret-shows-the-child-in-the-other-window, subagents-log-outlives-the-child-buffer, telemetry-toggle-opens-the-list-and-closes-it, the-messages-list-draws-one-page, a-killed-messages-buffer-returns-as-the-list | windows, panes, groups and the switcher, 37 names. The window and pane work of 2026-11-13 to 11-15 (41ddcb2e, d9e84af6, f9a683f4 and their neighbours) changed what a look, a tile and a quit leave behind: a tile keeps no window-prev-buffers, a list move previews nothing, a one-window toggle has no restore record. layout--fill-to and window-in-direction, which two tests call, are gone. Not triaged into stale and broken yet: that is the follow-up |
+| the-tab-row-marks-the-tab, the-side-arrows-wrap-the-tabs | the switcher grew Pane and Mode tabs; the tests expect three |
+| llm-config-menu-is-presets-left-config-right, llm-config-field-edit-changes-only-the-box, llm-config-esc-and-c-g-both-apply-the-selection, llm-config-cursor-shows-a-preset-and-keeps-its-draft, llm-config-ret-selects-and-esc-applies-the-selection, the-tools-key-opens-a-menu-not-a-buffer, prompt-sections-are-one-multi-select-transaction, the-stance-is-set-in-one-place, the-modeline-names-the-tool-surface, chat-header-always-starts-with-a-prominent-title | the LLM config menu and the chat header: the menu has more keys (M-u ...), ESC and C-g no longer apply the selection, a row shows "default" for a chat's own model. Five of the seven transient names pass alone, so the transient file is partly order |
+| project-file-loads-project-defaults, project-defaults-refresh-inherited-values, project-defaults-map-llm-values-to-project-chats, project-config-runs-on-every-file-visit-in-that-buffer | order only: green with project-defaults-test.scm alone. So are the panes-mode, popper and window-config names above |
+| every-major-mode-enters-re-enters-rebuilds-and-leaves-cleanly, every-seeded-mode-rebuilds-its-view-from-the-locals | the lifecycle sweep names component-gallery-mode, events-mode, notmuch-mode, irc-mode, doom-lite-mode: some are community packages the suite no longer loads |
+| agent-discovery-hides-display-effects-until-presentation-is-explicit, code-mode-denies-browser-tools-until-the-user-enables-browser-mode, code-mode-asks-before-it-assigns-this-frame-a-worktree | code-mode: display-buffer-other-window! carries no display stamp and an exact-name search adds display hits back on purpose (apropos--with-exact); tab-list answers "" where chrome-call refuses; the worktree chat keeps the project's name |
+| a-blocks-presence-arms-its-keys, copying-part-of-a-folded-line-keeps-the-literal-region, a-scheme-result-pretty-prints-nested-property-lists | morg: a block's key, the folded-line copy and the result highlighter |
+| a-buffer-without-the-mode-binds-none-of-the-keys, show-paren-lights-the-pair-in-a-large-buffer-through-a-window | paredit: global keys (s-P, s-o ...) sit in the buffer's own map; show-paren lights nothing through a window in the test env |
+| turning-preview-off-restores-the-morg-source-font | preview keeps its variable font |
+| load_test "stock init reaches every bundled package" | agent-answer-question! is stamped agent/..., the test wants agent-transcript/...: a module of a compound package takes the package's name since the stdlib move (43e248b) |
+| load_test "the reload prompt completes over ... user packages" | (reload-file PATH) of ~/.compos/packages/zz-user-pkg.scm leaves its define unbound, called directly too |
+| an-llm-config-change-refreshes-the-dashboard-line, telemetry-list-redraws-on-its-own-while-it-shows, kill-removes-the-dormant-buffer-the-row-names | order: red in some full runs, green with their file alone; the dashboard one sees a minibuffer an earlier test left in the group |
+| hidden-dashboard-updates-wait-for-display, hidden-dashboard-without-presentation-catches-up | the other way round: green in the full run, red with modeline-test.scm alone. Showing the buffer clears its dashboard key and no line is drawn, though dashboard--on-refresh! called by hand draws it |
 
 ## A store moved by a kernel reload
 

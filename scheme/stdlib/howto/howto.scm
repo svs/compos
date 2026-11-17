@@ -627,7 +627,7 @@ The agent can read the buffers of the group, so you do not paste them. {{chat-co
   "Select the text, then press {{chat-send-region}}. The chat gets the region as context.")
 
 (defhowto! "Agents and chat" "stop the agent"
-  "In the chat, press {{chat-mode:chat-abort}}. The reply in progress stops, and the transcript keeps what arrived.
+  "In the chat, press {{keyboard-quit}} while the agent works. The reply in progress stops, and the transcript keeps what arrived.
 
 {{chat-reset}} clears the transcript and starts again.")
 
@@ -645,23 +645,35 @@ The agent can read the buffers of the group, so you do not paste them. {{chat-co
 
 ;;; --- Web, mail, and feeds --------------------------------------------------------
 
-(defhowto! "Web, mail, and feeds" "read a web page"
-  "Press {{browse}} and type a URL or some search words. The page opens as readable text in a buffer.
+;; web is a community package: the howto names its commands, so it
+;; is listed once the package loads
+(with-eval-after-load 'web
+  (lambda ()
+    (defhowto! "Web, mail, and feeds" "read a web page"
+    "Press {{browse}} and type a URL or some search words. The page opens as readable text in a buffer.
 
 - {{browse-mode:browse-follow}} follows the link at point.
 - {{browse-mode:browse-next-link}} moves to the next link.
 - {{browse-mode:browse-back}} goes back.
 - {{browse-mode:browse-open-external}} opens the page in your real browser.
 
-{{browse-history}} lists every page you read.")
+{{browse-history}} lists every page you read.")))
 
-(defhowto! "Web, mail, and feeds" "read my mail"
-  "Press {{notmuch}} to see the mailboxes, or {{mail}} for the three-pane view. The mail comes from notmuch, so notmuch must index it first.
+;; notmuch is a community package: the howto names its commands, so it
+;; is listed once the package loads
+(with-eval-after-load 'notmuch
+  (lambda ()
+    (defhowto! "Web, mail, and feeds" "read my mail"
+    "Press {{notmuch}} to see the mailboxes, or {{mail}} for the three-pane view. The mail comes from notmuch, so notmuch must index it first.
 
-In the mail list, {{notmuch-mode:notmuch-archive}} archives a thread, and {{notmuch-mode:notmuch-reply}} replies.")
+In the mail list, {{notmuch-mode:notmuch-archive}} archives a thread, and {{notmuch-mode:notmuch-reply}} replies.")))
 
-(defhowto! "Web, mail, and feeds" "follow a news feed"
-  "Press {{feeds-subscribe}} and give a feed URL or a page that has one. {{feeds}} lists the new items of every feed.")
+;; feeds is a community package: the howto names its commands, so it
+;; is listed once the package loads
+(with-eval-after-load 'feeds
+  (lambda ()
+    (defhowto! "Web, mail, and feeds" "follow a news feed"
+    "Press {{feeds-subscribe}} and give a feed URL or a page that has one. {{feeds}} lists the new items of every feed.")))
 
 ;;; --- Customizing -----------------------------------------------------------------
 

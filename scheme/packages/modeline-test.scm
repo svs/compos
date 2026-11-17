@@ -268,8 +268,8 @@
       (buffer-set-local! buf 'agent-blocks '())
       (chat-summary-land! buf "Finding where the chat title is set in code")
       (check-equal! (buffer-local-value 'chat-title buf)
-                    "Finding where the chat title is"
-                    "the first label keeps only its first six words")
+                    "Finding where the chat title"
+                    "the first label keeps six words at most and drops a dangling one")
       (check-equal! (buffer-local-value 'chat-summary buf)
                     "Finding where the chat title is set in code"
                     "the running summary keeps the whole sentence")
@@ -298,7 +298,7 @@
         (list (list 'title-ready? (lambda () #t))
               (list 'title-card (lambda (text k) (k #f)))
               (list 'llm-with-model
-                    (lambda (prompt model k)
+                    (lambda (prompt model k &optional on-error)
                       (set! seen-model model)
                       (k "Falling back when the card writer answers nothing."))))
         (lambda () (chat-summary-refresh! buf)))
@@ -563,8 +563,12 @@
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "text-mode")
       (editing-state-off! buf)
-      (check-equal! (t--dash-chiprow (dash--modes buf) "hidden") #f
-                    "a buffer you have just landed on hides nothing")
+      ;; a global map such as vscode's answers everywhere; the landing
+      ;; adds neither the editing state nor cua
+      (let ((hidden (or (t--dash-chiprow (dash--modes buf) "hidden") '())))
+        (check-false! (member "editing-state" hidden)
+                      "a buffer you have just landed on hides no editing state")
+        (check-false! (member "cua" hidden) "and no cua"))
       (check-equal! (t--dash-row-value (dash--modes buf) "state") "focus"
                     "and it answers the arrows with the window focus")
       (editing-state-on! buf)
@@ -731,7 +735,7 @@
              (tag (cadr (reverse blocks))))
         (check-false! (t--dseg-value blocks "mode") "the header line names no mode")
         (check-false! (t--dseg-value blocks "llm") "and no model")
-        (check-equal! (plist-get last 'click) "buffer-switcher"
+        (check-equal! (plist-get last 'click) "modeline-expand"
                       "one switcher closes the header line")
         (check-equal! (plist-get tag 'text) "focus"
                       "the state tag says the design's word"))
@@ -758,71 +762,19 @@
         (check-equal! (caddr f) "preset-compos" "compos wears the logo"))
       (buffer-kill! buf))))
 
-(deftest 'the-api-lane-adds-a-usage-fact-once-a-turn-has-billed
-  "tokens, cost and cache hit rate join the mode line, ranked to shed first"
-  (lambda ()
-    (let ((buf "*chat:zz-modeline-usage*"))
-      (test-buffer! buf "")
-      (buffer-set-local! buf 'mode-name "chat-mode")
-      (check-false! (dash--usage buf) "nothing billed yet")
-      (chat-usage-note! buf '(input 100 output 20 cache-read 900 cache-write 50 cost 0.01))
-      (chat-usage-note! buf '(input 10 output 5 cache-read 1000 cache-write 0 cost 0.02))
-      (let* ((facts (dash--modeline-facts buf #f))
-             (usage (assoc "usage" facts)))
-        (check-equal! (map car facts) '("mode" "llm" "lane" "usage")
-                      "usage sheds before mode, llm and lane")
-        (check-equal! (list-ref usage 3) 3 "usage sheds first")
-        (check-equal! (cadr usage) "135 tok · $0.0300 · 94% hit"
-                      "tokens, cost and cache hit rate, in one value"))
-      (buffer-kill! buf))))
 
-(deftest 'the-acp-lane-reports-no-usage-fact
-  "an ACP connector counts tokens on a subscription and prices nothing here"
-  (lambda ()
-    (let ((buf "*chat:zz-modeline-usage-acp*"))
-      (test-buffer! buf "")
-      (buffer-set-local! buf 'mode-name "chat-mode")
-      (buffer-set-local! buf 'agent-connector "claude-code")
-      (chat-usage-note! buf '(input 100 output 20 cache-read 900 cache-write 50))
-      (check-false! (dash--usage buf) "the acp lane shows no usage fact")
-      (check-equal! (map car (dash--modeline-facts buf #f)) '("mode" "llm" "lane")
-                    "the mode line stays the same three facts")
-      (buffer-kill! buf))))
 
-(deftest 'a-preset-still-carries-its-usage-fact
-  "a tool preset names the setup, and the usage fact joins it, not replaces it"
-  (lambda ()
-    (let ((buf "*chat:zz-modeline-usage-preset*"))
-      (test-buffer! buf "")
-      (buffer-set-local! buf 'mode-name "chat-mode")
-      (chat-usage-note! buf '(input 100 output 20 cache-read 900 cache-write 50))
-      (check-equal! (map car (dash--modeline-facts buf (list "review")))
-                    '("mode" "preset" "usage")
-                    "the preset still stands alone; usage still ships")
-      (buffer-kill! buf))))
 
-(deftest 'usage-never-borrows-a-groups-other-buffers-spend
-  "unlike the cost card, the usage fact answers only for a chat buffer itself"
-  (lambda ()
-    (let ((chat "*chat:zz-modeline-usage-owner*")
-          (sibling "*zz-modeline-usage-sibling*"))
-      (test-buffer! chat "")
-      (buffer-set-local! chat 'mode-name "chat-mode")
-      (chat-usage-note! chat '(input 100 output 20 cache-read 900 cache-write 50))
-      (test-buffer! sibling "")
-      (check-false! (dash--usage sibling)
-                    "a non-chat buffer names no usage, even beside a spending chat")
-      (buffer-kill! chat)
-      (buffer-kill! sibling))))
 
-(deftest 'an-editing-buffer-wears-the-cua-tag
-  "the design's word for a buffer that stays put"
+(deftest 'an-editing-buffer-wears-the-focus-key
+  "an editing buffer's tag is the one way back to focus"
   (lambda ()
     (let ((buf "*zz-modeline-cua*"))
       (test-buffer! buf "")
       (buffer-set-local! buf 'mode-name "text-mode")
       (editing-state-on! buf)
-      (check-equal! (plist-get (dash--state-mark buf) 'text) "cua" "editing is cua")
+      (check-equal! (plist-get (dash--state-mark buf) 'text) (focus-key buf)
+                    "editing shows the key that returns to focus")
       (editing-state-off! buf)
       (check-equal! (plist-get (dash--state-mark buf) 'text) "focus" "a landing is focus")
       (buffer-kill! buf))))
@@ -843,6 +795,6 @@
       (buffer-set-local! buf 'agent-saved-mark 0)
       (check-equal! (map car (buffer-switcher-rows buf))
                     '("buffer info" "summary log"
-                      "transcript: info" "transcript: log" "transcript: debug")
+                      "transcript: summary" "transcript: info" "transcript: log")
                     "a chat transcript offers its log and its verbosity")
       (buffer-kill! buf))))

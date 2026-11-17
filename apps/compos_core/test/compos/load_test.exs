@@ -75,10 +75,10 @@ defmodule Compos.LoadTest do
       |> Enum.reject(&String.ends_with?(&1, "-test.scm"))
 
     # what the stock boot leaves out: apps a user init may load by name, and
-    # the dev harnesses. The ones with commands reach M-x through their
+    # the dev harnesses. palette-eval is not one: palette.scm loads it. The ones with commands reach M-x through their
     # ;;;###autoload cookies, which the harvest at the end of init.scm installs.
     opt_in =
-      ~w(title housekeeping packages decide-eval drive-eval palette-eval test-browser)
+      ~w(title housekeeping packages package-manager decide-eval drive-eval test-browser)
       |> Enum.map(&(&1 <> ".scm"))
 
     libraries = Enum.flat_map(packages, fn pkg -> pkg |> locate.() |> File.read!() |> requires() end)
@@ -93,7 +93,8 @@ defmodule Compos.LoadTest do
     end
 
     expected = packages -- opt_in
-    assert Enum.sort(Enum.uniq(loaded) -- expected) == [], "loaded, but not a stock package"
+    assert Enum.sort(Enum.uniq(loaded) -- expected) == [],
+           "loaded, but not a stock package: #{inspect(Enum.sort(Enum.uniq(loaded) -- expected))}"
     assert Enum.sort(expected -- loaded) == [], "a stock package init.scm does not reach: #{inspect(Enum.sort(expected -- loaded))}"
 
     # the standard library comes from scheme/stdlib, in its stock order

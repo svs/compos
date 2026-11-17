@@ -8,15 +8,16 @@
 
 (define (t--wiz-text blocks) (value->string blocks))
 
-(deftest 'wizard-steps-mark-done-current-and-todo
-  "the steps before the current one are done, and the steps after it are to do"
+(deftest 'wizard-steps-mark-the-current-step
+  "the steps are tabs: the current one is marked, and every one is a click"
   (lambda ()
     (let ((text (t--wiz-text
                   (component 'wizard/steps
                     '(steps (("a" "One") ("b" "Two") ("c" "Three")) current "b")))))
-      (check-contains! text "wizard-step-done" "the first step")
-      (check-contains! text "wizard-step-current" "the second step")
-      (check-contains! text "wizard-step-todo" "the third step"))))
+      (check-contains! text "wizard-step-current" "a step is current")
+      (check-contains! text "wizard:step:b" "the second step is a click")
+      (check-contains! text "wizard:step:a" "the first step is a click")
+      (check-contains! text "wizard:step:c" "and so is the third"))))
 
 (deftest 'every-wizard-component-renders-its-example
   "the wizard components render their declared examples without an error"
@@ -70,7 +71,9 @@
           (check-true! (string-prefix? "https://" (secret-prop s 'key-page)) s)
           (check-true! (string? (secret-prop s 'model)) s)))
       (secret-settings))
-    (check-true! (memq 'gemini-api-key (secret-settings)) "the gemini package declares its key")))
+    ;; gemini is a community package; when it loads, it declares its key
+    (when (featurep 'gemini)
+      (check-true! (memq 'gemini-api-key (secret-settings)) "the gemini package declares its key"))))
 
 (deftest 'the-home-page-is-setup-until-setup-is-done
   "before a connector is chosen the home page is the wizard"

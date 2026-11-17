@@ -124,11 +124,13 @@
 (deftest 'the-mcp-proxy-refuses-deny-listed-payloads
   "the gate holds even when the agent stopped asking"
   (lambda ()
-    (let* ((args (base64-encode (json-encode (list 'code "(mail-send \"bob\" \"hi\")"))))
+    ;; the deny-list reads the shell commands a payload runs; the command
+    ;; here only echoes, so nothing is lost if the gate ever lets it by
+    (let* ((args (base64-encode (json-encode (list 'code "(shell-command->string \"echo empty-trash\" \"/tmp\")"))))
            (out (base64-decode (mcp-proxy-call "eval-scheme" args))))
       (check-contains! out "refused" "the call is refused")
       ;; the pattern that caught it, so the agent knows what to ask for
-      (check-contains! out "mail" "and it names the pattern"))
+      (check-contains! out "trash" "and it names the pattern"))
 
     (let* ((ok (base64-encode (json-encode (list 'code "(+ 20 22)"))))
            (out (base64-decode (mcp-proxy-call "eval-scheme" ok))))

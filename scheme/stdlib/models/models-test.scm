@@ -342,6 +342,9 @@
 (deftest 'models-a-daemon-host-comes-from-the-endpoint-registry
   "a package registers its daemon once, and the list reads that registry"
   (lambda ()
+   ;; the registry is the endpoint package's, a community one; models reads
+   ;; it only when endpoint is loaded
+   (when (featurep 'endpoint)
     (endpoint-register! "t-models-daemon" '(command "cat" framing "line" serves "models"))
     (endpoint-register! "t-models-other" '(command "cat" framing "line"))
     (check-true! (member "endpoint:t-models-daemon" (models--daemon-hosts))
@@ -349,7 +352,7 @@
     (check-false! (member "endpoint:t-models-other" (models--daemon-hosts))
                   "and one that says nothing is not")
     (check-true! (member "endpoint:t-models-daemon" (models-host-list))
-                 "so it is in the list with no host saved anywhere")))
+                 "so it is in the list with no host saved anywhere"))))
 
 (deftest 'models-a-daemon-is-a-kind-of-its-own
   "a program behind a pipe is not a URL, and not a file"
@@ -401,6 +404,7 @@
 (deftest 'models-a-daemon-loads-and-unloads-and-installs-nothing
   "s and k are one request each; i has no route and sends none"
   (lambda ()
+   (when (featurep 'endpoint)
     (t--models-scene
       (lambda ()
         (set! models-host "endpoint:t-laya")
@@ -433,4 +437,4 @@
         (check-false! (member "unload"
                               (map (lambda (c) (plist-get (nth 1 c) 'op)) t--daemon-calls))
                       "K stops the program; it does not ask the program to unload")
-        (check-equal! t--models-calls '() "and no server is asked anything")))))
+        (check-equal! t--models-calls '() "and no server is asked anything"))))))

@@ -23,6 +23,7 @@
       (buffer-set-local! buf 'agent-waiting '(8 10))
       (buffer-set-local! buf 'agent-prose-from 9)
       (buffer-set-local! buf 'agent-saved-mark 20)
+      (buffer-marker-local! buf 'agent-saved-mark 'stay)
 
       (agent-excise-range! buf 5 8)
 
@@ -52,6 +53,7 @@
     (let ((buf (test-buffer! "*zz-agent-excise-utf8*" "αabcdefghij")))
       (buffer-set-local! buf 'agent-blocks '((2 10 "prose")))
       (buffer-set-local! buf 'agent-saved-mark 12)
+      (buffer-marker-local! buf 'agent-saved-mark 'stay)
 
       (agent-excise-range! buf 4 7)
 

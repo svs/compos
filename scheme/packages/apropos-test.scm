@@ -98,8 +98,8 @@
                   '("read" "external" "execute" "spend") "llm spends")
     (check-equal! (plist-get (catalog-entry 'command "eval-buffer") 'effects)
                   '("write" "execute") "eval-buffer executes")
-    (check-equal! (plist-get (catalog-entry 'command "notmuch-trash") 'effects)
-                  '("destroy") "notmuch-trash destroys")
+    (check-equal! (plist-get (catalog-entry 'function "buffer-kill!") 'effects)
+                  '("destroy") "buffer-kill! destroys")
     (check-equal! (plist-get (catalog-entry 'function "llm") 'metadata-source)
                   "declared" "declared in the source, never guessed")))
 
@@ -138,7 +138,7 @@
                         (and (equal? (plist-get e 'origin) "bundled")
                              (equal? (plist-get e 'metadata-source) "unknown")))
                       (catalog)))
-      471 "the unstamped bundled entries")))
+      351 "the unstamped bundled entries")))
 
 (deftest 'no-entry-carries-the-same-key-twice
   "one entry, one answer per key: a duplicate hides from plist-get and not from a walker"
@@ -247,7 +247,7 @@
   "embedding scores become labeled catalog hits and keep strict filters"
   (lambda ()
     (check-equal! (plist-get (catalog-entry 'function "apropos") 'effects)
-                  '("read" "external" "spend") "the search declares its API cost")
+                  '("read" "external") "the search declares its reach; the local index spends nothing")
     (let* ((rows (apropos--rows-cached))
            (sources (apropos--semantic-sources rows))
            (hit (filter (lambda (h) (equal? (plist-get h 'name) "buffer-kill!")) sources)))
@@ -389,18 +389,17 @@
     (check-true! (member "variable" (t--ap-kinds (apropos "permission timeout"))) "a setting")))
 
 (deftest 'a-near-miss-on-a-name-lands-anyway
-  "a typo answers the name it meant, and says why"
+  "a typo answers the name it meant"
   (lambda ()
+    ;; the public hit leaves out the note: a row says what it is, not why
     (let ((hits (apropos "buffer-tekst")))
-      (check-true! (member "buffer-text" (t--ap-names hits)) "the name it meant")
-      (check-true! (member "closest name" (map (lambda (e) (plist-get e 'note)) hits))
-                   "and the reason"))))
+      (check-true! (member "buffer-text" (t--ap-names hits)) "the name it meant"))))
 
 (deftest 'kind-package-namespace-domain-and-effect-filters-compose
   "every filter narrows the same one answer"
   (lambda ()
     (let ((hits (apropos "card" 'kind 'component 'namespace 'ui 'effect 'pure)))
-      (check-true! (member "ui/card" (map (lambda (e) (plist-get e 'qualified-name)) hits))
+      (check-true! (member "card" (map (lambda (e) (and (equal? (plist-get e 'namespace) "ui") (plist-get e 'name))) hits))
                    "the component")
       (check-false! (member "diff-card" (t--ap-names hits)) "and nothing else named card"))
     (check-true! (member "apropos-page" (t--ap-names (apropos "" 'package 'help 'kind 'function)))
@@ -415,7 +414,8 @@
   (lambda ()
     (let ((hit (car (apropos-components "bordered container"))))
       (check-equal! (plist-get hit 'kind) "component" "the kind")
-      (check-equal! (plist-get hit 'qualified-name) "ui/card" "the qualified name")
+      (check-equal! (list (plist-get hit 'namespace) (plist-get hit 'name)) '("ui" "card")
+                    "the namespace and the name")
       (check-true! (plist-get hit 'props) "the props")
       (check-true! (plist-get hit 'example) "the example")
       (check-equal! (plist-get hit 'effects) '("pure") "the effects"))

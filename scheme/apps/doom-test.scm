@@ -3,6 +3,9 @@
 (deftest 'doom-writes-its-page-and-script-beside-the-engine
   "the page names doom.js and holds no inline script; the sync copies the package's script"
   (lambda ()
+   ;; doom is a community package: SCHEME_TESTS=doom loads its clone and
+   ;; runs this; a suite without doom has nothing here to check
+   (when (boundp 'doom--sync-page!)
     (let ((dir (string-append (compos-config-dir) "/zz-doom-test")))
       (with-stub 'doom-home dir
         (lambda ()
@@ -14,4 +17,4 @@
             (check-false! (string-contains? page "<script>") "the page holds no inline script")
             (check-false! (string-contains? page "oncontextmenu") "and no inline handler")
             (check-equal! script (read-file (locate-library "doom/doom.js")) "the script is the package's")
-            (check-contains! script "window.Module" "the script starts the engine")))))))
+            (check-contains! script "window.Module" "the script starts the engine"))))))))

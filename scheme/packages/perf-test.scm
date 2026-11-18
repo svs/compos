@@ -133,6 +133,17 @@
         (check-true! (buffer-read-only? buf) "the buffer stays read-only through the write"))
       (buffer-kill! buf))))
 
+(deftest 'perf-typing-names-the-keys
+  "a key that would type, delete or yank into the monitor runs perf-key-hint, not the read-only refusal"
+  (lambda ()
+    (let ((buf (perf-test--buffer)))
+      (buffer-create buf)
+      (with-current-buffer buf (lambda () (set-mode! "perf-mode")))
+      (for-each (lambda (c) (check-equal! (keymap--remap buf c) "perf-key-hint" c))
+                '("self-insert-command" "preview-newline" "delete-backward-char" "yank"))
+      (check-equal! (keymap--remap buf "next-line") "next-line" "motion keeps its own command")
+      (buffer-kill! buf))))
+
 (deftest 'fd-pressure-passes-at-the-ratio
   "the descriptor check reports at fd-warn-ratio of the limit and not below it"
   (lambda ()

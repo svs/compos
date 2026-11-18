@@ -571,8 +571,16 @@
 
 (define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-vm perf-procs perf-ets perf-apps perf-ps-busy perf-tick))
 
+; the monitor takes no text: a key perf does not bind, which would type,
+; delete or yank into it, names perf's keys instead of "read-only"
+(define *perf-typing-commands*
+  '("self-insert-command" "preview-newline" "newline" "delete-backward-char"
+    "delete-char" "indent-for-tab" "yank" "yank-pop" "kill-line" "kill-word"
+    "backward-kill-word" "kill-region" "quoted-insert"))
+
 (define (perf--setup! buf)
   (buffer-set-read-only! buf #t)
+  (for-each (lambda (c) (local-remap*! buf c "perf-key-hint")) *perf-typing-commands*)
   (buffer-set-local! buf 'render-mode "blocks")
   (for-each (lambda (k) (desktop-skip! buf k)) *perf-runtime-locals*)
   (perf--refresh! buf)
@@ -620,6 +628,12 @@
 
 (define-command "perf-refresh" "Sample the lanes now"
   (lambda () (perf--refresh! (current-buffer)))
+  'modes '(perf-mode))
+
+(define-command "perf-key-hint" "Name the keys perf answers, in place of typing into the monitor"
+  (lambda ()
+    (message (string-append (string-join (last-keys) " ")
+                            " is not a perf key · g samples · SPC s, c, b take a tab · <left> <right> step · P pauses · q quits")))
   'modes '(perf-mode))
 
 (define (perf--show-tab! tab)
@@ -1003,11 +1017,13 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "(vm-roots) — the Scheme values that Elixir holds as GC roots, grouped by kind, largest first: a list of (KIND COUNT BYTES LARGEST-KEY)")
 (public! 'vm-ets
   "(vm-ets [LIMIT]) — the ETS tables that hold the most memory, largest first: a list of (NAME OWNER ROWS BYTES)")
+(public! 'vm-scheme-env
+  "(vm-scheme-env [LIMIT]) — what the Scheme environment table holds: (FRAMES VARS GLOBAL-VARS ROWS); ROWS are the binding names that hold the most memory over every frame, as (NAME COUNT GLOBAL-COUNT BYTES). Copies every row: a diagnostic, not a sampler")
 (public! 'perf-refresh!
   "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'diagnostics 'effects '(read)))
-  '("vm-sample" "vm-processes" "vm-process-info" "vm-roots" "vm-ets" "perf-refresh!"))
+  '("vm-sample" "vm-processes" "vm-process-info" "vm-roots" "vm-ets" "vm-scheme-env" "perf-refresh!"))
 
 (effects! '(destroy))
 (public! 'vm-process-kill!

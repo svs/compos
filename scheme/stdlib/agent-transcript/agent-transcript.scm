@@ -1580,11 +1580,57 @@
                   (car (car ws)))
                  (else (loop (cdr ws))))))))
 
+;; M-u/M-d in a chat: a page with anchors (a mail thread's messages, an
+;; app page's parts) steps to the previous or next one; past the last, or
+;; on a page without anchors, the window scrolls a page.
+(define (chat--step-linked-anchor! win sign)
+  (let* ((buf (window-buffer win))
+         (as (anchor-list buf))
+         (pos (window-point win))
+         (hit (if (> sign 0)
+                  (let loop ((l as))
+                    (cond ((null? l) #f)
+                          ((> (anchor-start (car l)) pos) (car l))
+                          (else (loop (cdr l)))))
+                  (let loop ((l as) (best #f))
+                    (cond ((null? l) best)
+                          ((< (anchor-start (car l)) pos) (loop (cdr l) (car l)))
+                          (else best))))))
+    (and hit
+         (begin
+           (window-set-point! win (anchor-start hit))
+           ;; the page scrolls to, and marks, the buffer's anchor at point
+           (buffer-goto! buf (anchor-start hit))
+           (anchor-sync! buf)
+           (message (let ((d (anchor-data hit)))
+                      (or (and (pair? d) (plist-get d 'title)) (anchor-name hit))))
+           #t))))
+
+(define (chat--scroll-target)
+  ;; the buffer this chat opened, else the window used last, else the next one
+  (or (chat-linked-window)
+      (let* ((me (active-window))
+             (here (window-buffer me))
+             (wins (window-list))
+             (win-of (lambda (buf)
+                       (let loop ((ws wins))
+                         (cond ((null? ws) #f)
+                               ((and (equal? (cadr (car ws)) buf)
+                                     (not (equal? (car (car ws)) me)))
+                                (car (car ws)))
+                               (else (loop (cdr ws))))))))
+        (let loop ((bs (get-visible-buffers)))
+          (cond ((null? bs) #f)
+                ((equal? (car bs) here) (loop (cdr bs)))
+                ((win-of (car bs)))
+                (else (loop (cdr bs))))))
+      (scroll-other-window-target)))
+
 (define (chat-scroll-linked! sign)
-  (let ((win (chat-linked-window)))
-    (if win
-        (scroll-window! win (* sign (window-page-rows win)))
-        (scroll-other-window-page! sign))))
+  (let ((win (chat--scroll-target)))
+    (cond ((not win) (message "No other window"))
+          ((chat--step-linked-anchor! win sign))
+          (else (scroll-window! win (* sign (window-page-rows win)))))))
 
 (define-command "chat-scroll-linked-up" "Scroll up the window that shows the buffer this chat opened last"
   (lambda () (chat-scroll-linked! -1))

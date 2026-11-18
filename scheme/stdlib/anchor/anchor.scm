@@ -362,9 +362,11 @@
 ;; A page drawn as blocks scrolls in the browser, and point must stay on
 ;; screen: when the part point is in leaves the view, the page reports the
 ;; first part still in it, and point goes there. The window keeps its place.
+;; An html page whose parts are anchors reports the same way; a page without
+;; anchors keeps its point.
 (define (anchor-follow-scroll! win line)
   (let ((buf (window-buffer win)))
-    (and buf (buffer-exists? buf)
+    (and buf (buffer-exists? buf) (minor-mode-on? buf "anchor-mode")
          (let ((pos (with-current-buffer buf
                       (lambda () (let ((p (line-start-position line))) (goto-char! p) p)))))
            (anchor-sync! buf)

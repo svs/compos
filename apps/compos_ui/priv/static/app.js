@@ -1335,6 +1335,7 @@
       // top, the same way follow() brings in the .pt span.
       followAnchor() {
         const name = this.el.dataset.anchor;
+        this.markAnchor(name);
         if (name === this.lastAnchor) return;
         this.lastAnchor = name;
         if (!name) return;
@@ -1345,6 +1346,50 @@
         // the frame's own scroller only: scrollIntoView would move the
         // editor around the frame too
         s.scrollTop += el.getBoundingClientRect().top;
+      },
+      // An html page whose parts are anchors: when the reader scrolls, the
+      // part whose top has reached the top of the view becomes the part at
+      // point, as on a block page. The parts are the outermost elements
+      // with an id; the source line of each is where its id is written.
+      followScroll() {
+        if (this.el.dataset.rm !== "html") return;
+        const d = this.doc();
+        if (!d) return;
+        const parts = [...d.querySelectorAll("body [id]")]
+          .filter(e => !(e.parentElement && e.parentElement.closest("[id]")));
+        if (parts.length < 2) return;
+        let pick = null;
+        for (const e of parts) {
+          if (e.getBoundingClientRect().top <= 8) pick = e; else break;
+        }
+        if (!pick) pick = parts[0];
+        if (pick.id === this.el.dataset.anchor || pick.id === this.lastAnchor) return;
+        const encoded = this.el.dataset.doc || "";
+        if (this.srcDoc !== encoded) {
+          try {
+            this.srcHtml = new TextDecoder().decode(Uint8Array.from(atob(encoded), c => c.charCodeAt(0)));
+            this.srcDoc = encoded;
+          } catch (_) { return; }
+        }
+        const i = this.srcHtml.indexOf('id="' + pick.id + '"');
+        if (i < 0) return;
+        const line = this.srcHtml.slice(0, i).split("\n").length;
+        // point follows the page here: the echo must not scroll it back
+        this.lastAnchor = pick.id;
+        this.markAnchor(pick.id);
+        this.pushEvent("block_point", { win: parseInt(this.el.dataset.win, 10), line: line });
+      },
+      // the element of the part at point carries .anchor-current, so the
+      // page's own css can show which part that is; a new document is
+      // marked again on its first apply
+      markAnchor(name) {
+        const d = this.doc();
+        if (!d) return;
+        const old = d.querySelector(".anchor-current");
+        const el = name ? d.getElementById(name) : null;
+        if (old === el) return;
+        if (old) old.classList.remove("anchor-current");
+        if (el) el.classList.add("anchor-current");
       },
       // an edit in a markdown preview lands at point, and the
       // rendered page shows point as the .pt span. When point
@@ -1614,6 +1659,7 @@
               top: Math.round(s.scrollTop)
             });
             if (window.composRemeasure) window.composRemeasure();
+            this.followScroll();
           }, 250);
         }, true);
       }

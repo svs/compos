@@ -128,6 +128,9 @@
             'perf-vm (perf--get s 'memory '())
             'perf-procs (perf--get (vm-processes perf-vm-process-rows "memory" "") 'rows '())
             'perf-ets (perf--ets-tables)
+            'perf-history (if (equal? (perf--tab buf) "history")
+                              (perf-history-rows perf-history-hours)
+                              (buffer-local-value 'perf-history buf))
             'perf-tick (+ 1 (or (buffer-local-value 'perf-tick buf) 0))))))
 
 ;;; --- the apps ----------------------------------------------------------------------
@@ -329,7 +332,7 @@
 ;; one row of tabs over every perf view: system, compos memory, then the
 ;; browsers list as all browsers and one tab per Chrome profile. ON is
 ;; system, compos, All or a profile's name
-(define (perf--tab-keys) '("system" "compos" "browsers"))
+(define (perf--tab-keys) '("system" "compos" "browsers" "history"))
 
 ;; one row of tabs over every perf view; the Chrome profiles are imenu's
 ;; tabs in the browsers list, not the header's. ON is system, compos or browsers
@@ -339,12 +342,13 @@
           'leader "SPC"
           'tabs (list (list "perf-tab-system" "system" (equal? on "system") "s")
                       (list "perf-tab-compos" "compos memory" (equal? on "compos") "c")
-                      (list "perf-tab-browsers" "browsers" (equal? on "browsers") "b")))))
+                      (list "perf-tab-browsers" "browsers" (equal? on "browsers") "b")
+                      (list "perf-tab-history" "history" (equal? on "history") "h")))))
 
 (define (perf--tabs buf) (perf--tabs-on (perf--tab buf)))
 
 ;; the tabs live in the header line, over every perf tab alike
-(define *perf-tab-order* '("system" "compos" "browsers"))
+(define *perf-tab-order* '("system" "compos" "browsers" "history"))
 
 (define (perf--header-sync! buf tab)
   (desktop-skip! buf 'header-line-blocks)
@@ -504,7 +508,7 @@
   (perf--div "perf-bar"
     (perf--txt "perf-strong" *perf-buffer*)
     (perf--txt "" "←→ tabs")
-    (perf--txt "" "g refresh") (perf--txt "" "SPC 1-3 tabs") (perf--txt "" "P pause") (perf--txt "" "q quit")
+    (perf--txt "" "g refresh") (perf--txt "" "SPC 1-4 tabs") (perf--txt "" "P pause") (perf--txt "" "q quit")
     (perf--txt "perf-spacer" "")
     (perf--txt (if (buffer-local-value 'perf-paused buf) "perf-warm" "perf-dim")
                (if (buffer-local-value 'perf-paused buf) "paused" (string-append "tick " (number->string (or (buffer-local-value 'perf-tick buf) 0)))))))
@@ -513,7 +517,7 @@
 ;; "compos", the memory of this daemon
 (define (perf--tab buf)
   (let ((t (buffer-local-value 'perf-tab buf)))
-    (if (equal? t "compos") t "system")))
+    (if (member t '("compos" "history")) t "system")))
 
 
 
@@ -525,6 +529,8 @@
                 (list (perf--vm-panel (or (buffer-local-value 'perf-vm buf) '())
                                       (or (buffer-local-value 'perf-procs buf) '())
                                       (or (buffer-local-value 'perf-ets buf) '()))))
+              ((equal? (perf--tab buf) "history")
+                (list (perf--history-panel (or (buffer-local-value 'perf-history buf) '()))))
               (else
                 (list (perf--lanes-panel (or (buffer-local-value 'perf-lanes buf) '()))
                       (perf--memory-panel buf))))
@@ -569,7 +575,7 @@
 
 ;;; --- the mode ------------------------------------------------------------------------
 
-(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-vm perf-procs perf-ets perf-apps perf-ps-busy perf-tick))
+(define *perf-runtime-locals* '(render-blocks perf-lanes perf-mem perf-vm perf-procs perf-ets perf-apps perf-ps-busy perf-tick perf-history))
 
 ; the monitor takes no text: a key perf does not bind, which would type,
 ; delete or yank into it, names perf's keys instead of "read-only"
@@ -591,9 +597,19 @@
 (define-mode "perf-mode"
   (lambda () (perf--setup! (current-buffer))))
 
+; a tab's marked letter takes it, with SPC or without, and so does its
+; place in the row, as ui/tabs keys a row in the page: 1 2 3
 (mode-keys! "perf-mode"
   '(("<right>" "perf-tab-next")
     ("<left>" "perf-tab-prev")
+    ("s" "perf-tab-system")
+    ("c" "perf-tab-compos")
+    ("b" "perf-tab-browsers")
+    ("h" "perf-tab-history")
+    ("1" "perf-tab-system")
+    ("2" "perf-tab-compos")
+    ("3" "perf-tab-browsers")
+    ("4" "perf-tab-history")
     ("g" "perf-refresh")
     ("P" "perf-pause")
     ("n" "next-line")
@@ -605,11 +621,11 @@
 ;; shows what follows it
 (define-keymap! "perf-leader-map")
 (for-each (lambda (p) (define-key "perf-leader-map" (car p) (cadr p)))
-  '(("s" "perf-tab-system") ("c" "perf-tab-compos") ("b" "perf-tab-browsers")))
+  '(("s" "perf-tab-system") ("c" "perf-tab-compos") ("b" "perf-tab-browsers") ("h" "perf-tab-history")))
 (bind-prefix! "perf-mode-map" "SPC" "perf-leader-map")
 
 (mode-doc! "perf-mode"
-  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, the perf-vm-process-rows BEAM processes that hold the most memory, and the perf-vm-ets-rows ETS tables that hold the most, each with its owner and row count. The browsers tab is the list of every Chrome window and tab with its memory. The tabs sit in the header line: <left> and <right> step them; SPC s, SPC c and SPC b take one, the letter marked in its name. g samples now, P pauses, q quits.")
+  "Lane contention, sampled every perf-tick-ms. One row per lane that ran a job in the last 30 seconds, the lane that waited longest first: its jobs, the time they took, its share of the window, the longest and the total time a job sat queued behind earlier jobs on the lane, the deepest the queue got, and its slowest job. Below it, the host memory in use and the apps holding the most of it, every process of one .app counted as one app. The compos memory tab shows the memory the BEAM allocated for this daemon, split into processes, ets, binary, code and other, the perf-vm-process-rows BEAM processes that hold the most memory, and the perf-vm-ets-rows ETS tables that hold the most, each with its owner and row count. The browsers tab is the list of every Chrome window and tab with its memory. The history tab charts the daemon memory and the leak suspects (reactor roots, agent lanes, buffers) over the last perf-history-hours, from the SQLite history perf-history-record! fills every perf-history-ms. The tabs sit in the header line: <left> and <right> step them; s, c, b and h (or SPC s, SPC c, SPC b, SPC h), the letter marked in its name, take one, and so do 1, 2, 3 and 4. A key perf does not bind names perf's keys. g samples now, P pauses, q quits.")
 
 (register-context-provider! "perf-mode"
   (lambda (buf)
@@ -633,7 +649,7 @@
 (define-command "perf-key-hint" "Name the keys perf answers, in place of typing into the monitor"
   (lambda ()
     (message (string-append (string-join (last-keys) " ")
-                            " is not a perf key · g samples · SPC s, c, b take a tab · <left> <right> step · P pauses · q quits")))
+                            " is not a perf key · s c b or 1 2 3 take a tab · <left> <right> step · g samples · P pauses · q quits")))
   'modes '(perf-mode))
 
 (define (perf--show-tab! tab)
@@ -858,6 +874,7 @@
 (define (perf--take-tab! key)
   (cond ((equal? key "system") (run-command "perf-tab-system"))
         ((equal? key "compos") (run-command "perf-tab-compos"))
+        ((equal? key "history") (run-command "perf-tab-history"))
         ((not (perf--browsers-mode!)) (message "The browsers list is not loaded (web package)"))
         (else
           (let ((buf (perf--browsers-buffer!)))
@@ -868,6 +885,7 @@
 (define (perf--take-tab! key)
   (cond ((equal? key "system") (run-command "perf-tab-system"))
         ((equal? key "compos") (run-command "perf-tab-compos"))
+        ((equal? key "history") (run-command "perf-tab-history"))
         ((not (perf--browsers-mode!)) (message "The browsers list is not loaded (web package)"))
         (else
           (let* ((buf (perf--browsers-buffer!))
@@ -1139,3 +1157,197 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
                               " or start the daemon after ulimit -n 65536")))))
 
 (debounce! 'fd-limit-check 10000 fd-limit-check! #f)
+
+;; --- memory history ----------------------------------------------------------
+;; One reading a minute goes into SQLite, so a slow leak shows as a line that
+;; keeps climbing across hours, days and restarts. The history tab of *perf*
+;; draws it. A reading costs about 8 ms: vm-sample, vm-ets and vm-roots.
+
+(domain! 'diagnostics)
+(effects! '(pure))
+
+(defcustom 'perf-history-ms 60000
+  "Milliseconds between two memory readings the history keeps. 0 stops the sampler."
+  'group 'perf 'type 'number)
+
+(defcustom 'perf-history-keep-days 30
+  "Days of memory readings the history keeps; older rows are deleted."
+  'group 'perf 'type 'number)
+
+(defcustom 'perf-history-hours 24
+  "Hours of memory history the history tab of *perf* draws."
+  'group 'perf 'type 'number)
+
+;; the columns of the samples table, in order; t is unix seconds
+(define *perf-history-columns*
+  '(t total processes ets binary code process_count
+    scheme_env_bytes scheme_env_rows buffer_view_bytes buffer_view_rows
+    reactor_roots agent_lanes buffers client_heap_mb))
+
+(define (perf--ets-of ets name)
+  (let loop ((rs ets))
+    (cond ((null? rs) '(0 0))
+          ((equal? (car (car rs)) name) (list (caddr (car rs)) (list-ref (car rs) 3)))
+          (else (loop (cdr rs))))))
+
+(define (perf--root-count roots kind)
+  (let loop ((rs roots))
+    (cond ((null? rs) 0)
+          ((equal? (car (car rs)) kind) (cadr (car rs)))
+          (else (loop (cdr rs))))))
+
+(define (perf--mb n) (quotient (or n 0) 1048576))
+
+(define (perf--rate rows key hours)
+  "the change of KEY per hour from the first row to the last"
+  (if (or (< (length rows) 2) (<= hours 0))
+      0
+      (/ (- (perf--get (car (reverse rows)) key 0) (perf--get (car rows) key 0)) hours)))
+
+(define (perf--signed n)
+  (let ((r (round n)))
+    (string-append (if (> r 0) "+" "") (number->string r))))
+
+(define (perf--history-span rows)
+  "hours between the first and the last row"
+  (if (< (length rows) 2)
+      0
+      (/ (- (perf--get (car (reverse rows)) 't 0) (perf--get (car rows) 't 0)) 3600.0)))
+
+(define (perf--history-panel rows)
+  (let* ((n (length rows))
+         (span (perf--history-span rows))
+         (last (if (null? rows) '() (car (reverse rows))))
+         (labels (map (lambda (r) (format-time-string "%H:%M" (perf--get r 't 0))) rows))
+         (mb (lambda (key) (map (lambda (r) (perf--mb (perf--get r key 0))) rows)))
+         (raw (lambda (key) (map (lambda (r) (perf--get r key 0)) rows)))
+         (rate-mb (lambda (key) (perf--signed (/ (perf--rate rows key span) 1048576))))
+         (rate (lambda (key) (perf--signed (perf--rate rows key span)))))
+    (perf--div "perf-panel"
+      (perf--div "perf-head"
+        (perf--txt "perf-strong" "Memory · history")
+        (perf--txt "perf-spacer" "")
+        (perf--txt "" (string-append (number->string n) " points over "
+                                     (number->string (/ (round (* 10 span)) 10)) " h · "
+                                     (perf-history-file))))
+      (if (< n 2)
+          (component 'ui/empty '(text "collecting: a reading lands every perf-history-ms, the chart starts at the second"))
+          (list
+            (component 'ui/stats
+              (list 'stats
+                (list (list 'label "total" 'value (string-append (number->string (perf--mb (perf--get last 'total 0))) " MB")
+                            'sub (string-append (rate-mb 'total) " MB/h"))
+                      (list 'label "scheme env" 'value (string-append (number->string (perf--mb (perf--get last 'scheme_env_bytes 0))) " MB")
+                            'sub (string-append (rate 'scheme_env_rows) " rows/h"))
+                      (list 'label "reactor roots" 'value (number->string (perf--get last 'reactor_roots 0))
+                            'sub (string-append (rate 'reactor_roots) "/h"))
+                      (list 'label "agent lanes" 'value (number->string (perf--get last 'agent_lanes 0))
+                            'sub (string-append (rate 'agent_lanes) "/h"))
+                      (list 'label "buffers" 'value (number->string (perf--get last 'buffers 0))
+                            'sub (string-append (rate 'buffers) "/h")))))
+            (component 'ui/chart
+              (list 'title "Daemon memory" 'y-label "MB" 'y-zero #t 'categories labels
+                    'series (list (list "total" (mb 'total))
+                                  (list "processes" (mb 'processes))
+                                  (list "ets" (mb 'ets))
+                                  (list "scheme env" (mb 'scheme_env_bytes))
+                                  (list "binary" (mb 'binary)))))
+            (component 'ui/chart
+              (list 'title "Leak suspects" 'y-label "count" 'y-zero #t 'categories labels
+                    'series (list (list "reactor roots" (raw 'reactor_roots))
+                                  (list "buffers" (raw 'buffers))
+                                  (list "agent lanes" (raw 'agent_lanes))))))))))
+
+(effects! '(read))
+
+(define (perf-history-file)
+  "(perf-history-file) — the SQLite file the memory history lives in"
+  (string-append (compos-state-dir) "/perf/memory.db"))
+
+(define (perf-history-sample)
+  "(perf-history-sample) — one memory reading as a plist of the history's columns"
+  (let* ((s (vm-sample))
+         (mem (perf--get s 'memory '()))
+         (ets (vm-ets 30))
+         (roots (vm-roots))
+         (env (perf--ets-of ets ":compos_scheme_env"))
+         (bv (perf--ets-of ets ":compos_buffer_view"))
+         (cs (client-memory-samples))
+         (client (if (null? cs) '() (car (reverse cs)))))
+    (list 't (current-time)
+          'total (perf--get mem 'total 0) 'processes (perf--get mem 'processes 0)
+          'ets (perf--get mem 'ets 0) 'binary (perf--get mem 'binary 0) 'code (perf--get mem 'code 0)
+          'process_count (perf--get s 'process-count 0)
+          'scheme_env_bytes (cadr env) 'scheme_env_rows (car env)
+          'buffer_view_bytes (cadr bv) 'buffer_view_rows (car bv)
+          'reactor_roots (perf--root-count roots "reactor")
+          'agent_lanes (perf--root-count roots "agent_lane")
+          'buffers (length (buffer-list))
+          'client_heap_mb (perf--get client 'heap-mb 0))))
+
+(effects! '(write))
+
+(define *perf-history-db* #f)
+
+(define (perf--history-db)
+  (or *perf-history-db*
+      (begin
+        (make-directory! (string-append (compos-state-dir) "/perf"))
+        (let ((db (sqlite-open! (perf-history-file))))
+          (db-query db (string-append "create table if not exists samples (t integer primary key, "
+                                      (string-join (map (lambda (c) (string-append (symbol->string c) " integer"))
+                                                        (cdr *perf-history-columns*))
+                                                   ", ")
+                                      ")"))
+          (set! *perf-history-db* db)
+          db))))
+
+(define (perf-history-record!)
+  "(perf-history-record!) — take one memory reading, add it to the history, and delete the rows older than perf-history-keep-days. Answer the reading"
+  (let* ((s (perf-history-sample))
+         (db (perf--history-db)))
+    (db-query db (string-append "insert or replace into samples ("
+                                (string-join (map symbol->string *perf-history-columns*) ", ")
+                                ") values ("
+                                (string-join (map (lambda (c) "?") *perf-history-columns*) ", ")
+                                ")")
+              (map (lambda (c) (perf--get s c 0)) *perf-history-columns*))
+    (db-query db "delete from samples where t < ?"
+              (list (- (perf--get s 't 0) (* 86400 perf-history-keep-days))))
+    s))
+
+(define (perf-history-rows hours &optional points)
+  "(perf-history-rows HOURS [POINTS]) — the history of the last HOURS, oldest first, averaged into at most POINTS buckets (default 240): plists of the history's columns"
+  (let* ((db (perf--history-db))
+         (points (or points 240))
+         (bucket (max 1 (quotient (* hours 3600) points)))
+         (since (- (current-time) (* hours 3600)))
+         (cols (cdr *perf-history-columns*))
+         (r (db-query db (string-append "select (t / ?) * ? as t, "
+                                        (string-join (map (lambda (c) (let ((n (symbol->string c)))
+                                                                        (string-append "cast(avg(" n ") as integer) as " n)))
+                                                          cols)
+                                                     ", ")
+                                        " from samples where t >= ? group by t / ? order by 1")
+                      (list bucket bucket since bucket))))
+    (map (lambda (row)
+           (let loop ((cs *perf-history-columns*) (vs row) (acc '()))
+             (if (null? cs) (reverse acc) (loop (cdr cs) (cdr vs) (cons (car vs) (cons (car cs) acc))))))
+         (db-rows r))))
+
+(define (perf-history--tick arg)
+  (when (> perf-history-ms 0)
+    (run-on-lane! 'perf-history
+      (lambda ()
+        ;; arm first: a failed reading must not stop the sampler
+        (debounce! 'perf-history perf-history-ms perf-history--tick #f)
+        (perf-history-record!)))))
+
+(debounce! 'perf-history 5000 perf-history--tick #f)
+
+(effects! '(read display))
+
+(define-command "perf-tab-history" "Show the daemon memory over the last hours, from the history the sampler keeps"
+  (lambda () (perf--show-tab! "history"))
+  'modes '(perf-mode perf-browsers-mode))
+

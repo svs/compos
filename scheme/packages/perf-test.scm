@@ -142,6 +142,8 @@
       (for-each (lambda (c) (check-equal! (keymap--remap buf c) "perf-key-hint" c))
                 '("self-insert-command" "preview-newline" "delete-backward-char" "yank"))
       (check-equal! (keymap--remap buf "next-line") "next-line" "motion keeps its own command")
+      (check-equal! (keymap-lookup "perf-mode-map" "c") "perf-tab-compos" "a tab's marked letter takes it")
+      (check-equal! (keymap-lookup "perf-mode-map" "3") "perf-tab-browsers" "a tab's place takes it")
       (buffer-kill! buf))))
 
 (deftest 'fd-pressure-passes-at-the-ratio

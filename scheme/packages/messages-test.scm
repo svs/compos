@@ -59,20 +59,22 @@
   "a long log draws one page, and the newest message stays on that page"
   (lambda ()
     (messages-clear!)
-    (let ((saved messages-page-size))
-      (set! messages-page-size 5)
-      (let loop ((i 0))
-        (when (< i 12)
-          (message (string-append "paged event " (number->string i)) 'info)
-          (loop (+ i 1))))
-      (run-command "view-messages")
-      (let ((text (buffer-text "*Messages*")))
-        (check-equal! (list-shown-count "*Messages*") 5 "the draw writes one page")
-        (check-true! (string-contains? text "paged event 11")
-                     "the newest message is on the page")
-        (check-false! (string-contains? text "paged event 0")
-                      "the oldest message waits for the next page"))
-      (set! messages-page-size saved))))
+    ;; a list keeps the pages you opened (list-page-limit): start from a new one
+    (when (buffer-exists? "*Messages*") (buffer-kill! "*Messages*"))
+    ;; the setting is the package's: a set! here binds the test's own name
+    (with-custom 'messages-page-size 5
+      (lambda ()
+        (let loop ((i 0))
+          (when (< i 12)
+            (message (string-append "paged event " (number->string i)) 'info)
+            (loop (+ i 1))))
+        (run-command "view-messages")
+        (let ((text (buffer-text "*Messages*")))
+          (check-equal! (list-shown-count "*Messages*") 5 "the draw writes one page")
+          (check-true! (string-contains? text "paged event 11")
+                       "the newest message is on the page")
+          (check-false! (string-contains? text "paged event 0")
+                        "the oldest message waits for the next page"))))))
 
 (deftest 'the-messages-list-wears-a-smaller-face
   "a log is read in bulk, so *Messages* sits a step below the default size"
@@ -183,7 +185,8 @@
     (check-true! (buffer-exists? "*Messages*") "the buffer is back")
     (check-equal! (buffer-local-value 'mode-name "*Messages*") "messages-mode" "in messages-mode")
     (check-true! (buffer-read-only? "*Messages*") "and read-only")
-    (list-refresh! "*Messages*")
+    ;; a hidden list waits for a window before it draws (list-render!)
+    (run-command "view-messages")
     (check-true! (string-contains? (buffer-text "*Messages*") "after the kill")
                  "with the row")))
 

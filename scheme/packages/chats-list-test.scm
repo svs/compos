@@ -143,9 +143,9 @@
       (run-command "chat-list")
       (check-equal! (buffer-local-value 'listing-preview-dismissed-row *chat-list*) #f
                     "arriving looks again at the row you left on")
-      (listing-preview! *chat-list* row)
-      (check-equal! (buffer-local-value 'listing-preview-source (float-buffer)) row
-                    "and the card is the row you left on"))
+      ;; the card went with 43542652f; its peek shows no row of another
+      ;; group, and the list stands in its own group, so nothing more to see
+      )
     (chats-test-reset!)))
 
 
@@ -261,14 +261,16 @@
     (chats-test-reset!)))
 
 (deftest 'chats-sections-by-group-or-none
-  "the grouping cycles none and group only: state and model are no sections"
+  "the grouping cycles none, group and subject (071d7ee89): state and model are no sections"
   (lambda ()
     (chats-test-open! 'none 'name)
     (define *chats-other-grouping* (ibuffer-grouping "*ibuffer*"))
     (run-command "list-cycle-grouping")
     (check-equal! (ibuffer-grouping *chat-list*) 'group "none then group")
     (run-command "list-cycle-grouping")
-    (check-equal! (ibuffer-grouping *chat-list*) 'none "group then none, and round again")
+    (check-equal! (ibuffer-grouping *chat-list*) 'subject "group then subject")
+    (run-command "list-cycle-grouping")
+    (check-equal! (ibuffer-grouping *chat-list*) 'none "subject then none, and round again")
     (check-equal! (ibuffer-grouping "*ibuffer*") *chats-other-grouping* "the *ibuffer* view keeps its own")
     (chats-test-reset!)))
 
@@ -277,7 +279,9 @@
   (lambda ()
     (chats-test-open! 'none 'name)
     (buffer-append! "*zz-chats-c*" "we settled on the zzhaystack budget in the end")
-    (run-command "list-filter")
+    ;; / picks a column tab when the list has one (1ef487adc), and this one
+    ;; has Status: the typed filter is list-filter-live!
+    (with-current-buffer *chat-list* (lambda () (list-filter-live!)))
     (minibuffer-change! "zzhaystack")
     (check-equal! (plist-get (minibuffer-state) 'input) "zzhaystack" "input is immediate")
     (check-false! (chat-list-hit "*zz-chats-c*") "no synchronous transcript scan")

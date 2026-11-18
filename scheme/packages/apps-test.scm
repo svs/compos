@@ -113,8 +113,9 @@
           (test-buffer! "*zz-app-three-detail*" "detail")
           (app-claim! "*zz-app-three-home*" "zz-app:three" 'home)
           (app-claim! "*zz-app-three-detail*" "zz-app:three" 'detail)
+          ;; the tile is the columns layout with two panes; choosing the
+          ;; layout again would fill its third from the group (panes-choose-layout!)
           (panes-tile! 'columns '("*zz-app-work-a*" "*zz-app-work-b*"))
-          (panes-choose-layout! 'columns)
           (select-window! (window-showing "*zz-app-work-b*"))
           (app-layout! "zz-app:three")
           (check-equal! (map cadr (window-list))

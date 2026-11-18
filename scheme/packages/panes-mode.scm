@@ -594,13 +594,33 @@
 
 (define (panes-place! buf kind)
   "BUF shows where panes-show-buffer says: its mode's window, else a
-   new window in the pane the user is in. A visit (KIND visit) also
-   gives that window the focus; a display leaves the focus. panes-apply!
+   new window in the pane the user is in. A visit (KIND visit) stays
+   in the user's pane (panes-visit-buffer) and gives that window the focus; a display leaves the focus. panes-apply!
    draws and stores the layout, and the window log notes KIND. Answers
    the window's handle, or #f."
   (let* ((layout (panes--ensure-layout!))
          (mode (panes--buffer-mode buf))
-         (shown (panes-show-buffer layout buf mode (panes--selected-pane layout)))
+         (pane (panes--selected-pane layout))
+         ;; a visit lands where you are, as switch-to-buffer! says: this
+         ;; window when it has BUF's mode, else this pane's window of that
+         ;; mode, else a new one at the front of this pane. A display keeps
+         ;; one window per mode across the panes.
+         (here (panes-key-of-handle layout (active-window)))
+         (shown (if (and (equal? kind 'visit) mode pane)
+                    (panes-visit-buffer layout buf mode here pane)
+                    (panes-show-buffer layout buf mode pane)))
+         ;; a display from a listing opens beside it, never over it
+         ;; (WINDOWS-SPEC O14): a row's buffer whose mode window waits in
+         ;; the listing's own pane goes to the pane beside instead
+         (beside (and (not (equal? kind 'visit)) mode pane here
+                      (equal? (panes-pane-of (car shown) (cadr shown)) pane)
+                      (not (equal? (cadr shown) here))
+                      (let ((cur (window-buffer (active-window))))
+                        (and (string? cur) (not (equal? cur buf)) (list-mode-of cur)))
+                      (panes-pane-beside layout pane)))
+         (shown (if beside
+                    (panes-visit-buffer (car beside) buf mode #f (cadr beside))
+                    shown))
          (after (if (equal? kind 'visit) (panes-focus-window (car shown) (cadr shown)) (car shown)))
          (layout (panes-apply! after)))
     (window-log-note! "panes" kind buf mode "->" (cadr shown))

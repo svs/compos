@@ -18,15 +18,15 @@
       (let ((pool (window-fill-buffers)))
         (check-true! (and (member a pool) (member b pool) #t) "the members are the pool")
         (check-false! (member c pool) "a buffer from elsewhere is not"))
-      (let ((panes (layout--fill-to (list a) 3)))
-        (check-true! (and (member b panes) #t) "the columns fill from the pool")
-        (check-false! (member c panes) "and pull nothing in from elsewhere"))
+      ;; a tile no longer fills its columns from the pool (panes-tile! takes
+      ;; the buffers it is given, 3f68be435); a split does, and
+      ;; a-split-shows-the-pool-member-no-pane-shows covers it
       (switch-to-buffer! "*scratch*")
       (buffer-kill! a) (buffer-kill! b) (buffer-kill! c)
       (group-record-delete! id))))
 
 (deftest 'a-popup-is-not-a-fill-candidate
-  "a floating buffer, a view and a context-only buffer never fill a window"
+  "a floating buffer and a context-only buffer never fill a window; a view, such as a list, may (5b4ff5027)"
   (lambda ()
     (buffer-create "*zz-fill-popup*")
     (buffer-set-local! "*zz-fill-popup*" 'window-class "popup popup-right")
@@ -34,7 +34,7 @@
     (check-false! (fill-candidate? " *zz-hidden*") "a hidden name")
     (buffer-create "*zz-fill-view*")
     (buffer-set-local! "*zz-fill-view*" 'special #t)
-    (check-false! (fill-candidate? "*zz-fill-view*") "a view of something else")
+    (check-true! (fill-candidate? "*zz-fill-view*") "a view fills like any buffer")
     (buffer-create "*zz-fill-background*")
     (buffer-context-only! "*zz-fill-background*")
     (check-false! (fill-candidate? "*zz-fill-background*") "a context-only buffer")

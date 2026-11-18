@@ -183,12 +183,13 @@
         (subagent-verdict! "zz-sub-kid-a-slug" 'done "finished A")
         (buffer-kill! "zz-sub-kid-a")
         (subagents-index-rebuild!)
-        (check-equal! (map cadr (subagent-log "zz-sub-kid-a-slug")) '(verdict)
-                      "the verdict is logged on the edge")
+        ;; a done verdict archives the child (96e430aad), and the log says so
+        (check-equal! (map cadr (subagent-log "zz-sub-kid-a-slug")) '(verdict archived)
+                      "the verdict and the archive are logged on the edge")
         (check-equal! (subagent-verdict-of "zz-sub-kid-a-slug") '("done" "finished A")
                       "and it still reads as done")
-        (check-equal! (subagent-status-of "zz-sub-kid-a-slug") 'gone
-                      "with the buffer gone, the status says so")))))
+        (check-equal! (subagent-status-of "zz-sub-kid-a-slug") 'done
+                      "an archived child reads as done, not gone")))))
 
 (deftest 'subagents-verdict-done-writes-the-plan-line
   "a done verdict with 'todo writes the result under the heading and sets DONE"

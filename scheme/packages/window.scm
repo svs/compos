@@ -1472,6 +1472,9 @@
       ;; a preview on screen goes first: q in the listing that shows
       ;; one takes the preview, then the listing
       ((preview-dismiss!) #t)
+      ;; so does the peek of this list's row
+      ((and (boundp 'peek-owner) (equal? (peek-owner) (current-buffer)))
+       (peek-dismiss! #t) #t)
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and

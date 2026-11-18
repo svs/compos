@@ -85,7 +85,7 @@
   "focus-move! toward no neighbor leaves the active window as it is"
   (lambda ()
     (let ((panes (t--wm-setup!)))
-      (check-false! (window-in-direction 'left) "nothing is left of the left pane")
+      (check-false! (panes--pane-toward (panes-layout) 'left) "nothing is left of the left pane")
       (focus-move! 'left)
       (check-equal! (active-window) (car panes) "the left pane stays active")
       (check-equal! (current-buffer) t--wm-left "its buffer stays current")

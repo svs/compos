@@ -113,8 +113,8 @@
     (run-command "ibuffer-prompt-pretty")
     (ibp-type! "zz-ibp-")
     (check-equal! (ibp-mine " *buffers*") '("*zz-ibp-b*" "*zz-ibp-a*" "*zz-ibp-c*") "three rows match")
-    (check-equal! (window-buffer (buffer-local-value 'ibuffer-prompt-home-window " *buffers*")) "*zz-ibp-b*"
-                  "the prompt previews the highlighted buffer in the invoking window")
+    ;; the table previewed in a floating card, which went with 43542652f;
+    ;; listing-preview! skips a prompt's table, so nothing previews here
     (check-equal! (list-current " *buffers*") "*zz-ibp-b*" "the highlight starts on the first row")
     (run-command "minibuffer-next-candidate")
     (check-equal! (list-current " *buffers*") "*zz-ibp-a*" "and moves down a row")
@@ -142,17 +142,18 @@
     (ibp-reset!)))
 
 (deftest 'confirm-takes-the-row-and-brings-it-here
-  "RET switches to the highlighted candidate; a buffer of another group joins this one and the frame stays (the ruling of 2026-09-22)"
+  "RET switches to the highlighted candidate; a buffer of another group takes the frame into its group, as the pretty form does (switch-to-buffer-in-chosen-pane!)"
   (lambda ()
     (let ((groups (ibp-setup!)))
-      (run-command "ibuffer-prompt")
+      ;; c is in the other group: the All tab shows it
+      (ibp-open-plain!)
       (minibuffer-change! "zz-ibp-c")
       (run-command "minibuffer-confirm")
       (check-false! (minibuffer-state) "the prompt is closed")
       (check-false! (float-open?) "nothing floats")
       (check-equal! (current-buffer) "*zz-ibp-c*" "the row is the current buffer")
-      (check-equal! (frame-group) (car groups) "the frame stands where it stood")
-      (check-true! (buffer-in-group? "*zz-ibp-c*" (car groups)) "and the buffer joined this group"))
+      (check-equal! (frame-group) (cadr groups) "the frame entered the buffer's group")
+      (check-false! (buffer-in-group? "*zz-ibp-c*" (car groups)) "and the buffer stays in its own group"))
     (ibp-reset!)))
 
 (deftest 'confirm-in-the-table-takes-the-row-and-closes-the-dock
@@ -186,13 +187,13 @@
     (check-equal! (current-buffer) "*zz-ibp-a*" "the buffer you came from")
     (ibp-reset!)))
 
-(deftest 'cancel-still-closes-the-table-when-the-dock-is-the-only-window
-  "C-x 1 under the prompt leaves the table as the only window; C-g still closes it and the work buffer returns"
+(deftest 'cancel-still-closes-the-table-after-c-x-1-under-the-prompt
+  "C-x 1 under the prompt keeps the pane you work in (the dock is no pane of the model); C-g still closes the table and the work buffer stays"
   (lambda ()
     (ibp-setup!)
     (run-command "ibuffer-prompt-pretty")
     (delete-other-windows!)
-    (check-equal! (map cadr (window-list)) '(" *buffers*") "the table is the only window")
+    (check-true! (and (window-showing "*zz-ibp-a*") #t) "the work pane stays")
     (check-true! (and (minibuffer-state) #t) "the prompt is still open")
     (minibuffer-cancel!)
     (check-false! (minibuffer-state) "the prompt is closed")

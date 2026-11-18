@@ -869,15 +869,15 @@
       (check-equal! (frame-group) taken "RET switches to the group"))
     (t--sw-done!)))
 
-(deftest 'a-freed-frame-stays-free-in-a-new-group
-  "a frame gone free stays free: a group entry does not undo it"
+(deftest 'a-new-group-takes-the-default-layout-after-a-free-frame
+  "the layout is the group's own: a new group takes window-layout-default, whatever the frame wore before"
   (lambda ()
     (t--sw-setup!)
     (let ((id (group-record-create! "zzsw-free")))
       (buffer-add-group! t--sw-first id)
       (buffer-add-group! t--sw-second id)
       (switch-to-group! id)
-      (check-false! (panes-current-layout) "the frame stays free"))
+      (check-equal! (panes-current-layout) window-layout-default "the new group wears the default layout"))
     (t--sw-done!)))
 
 

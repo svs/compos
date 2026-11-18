@@ -693,6 +693,8 @@
     (let ((w (window-showing *telemetry-buffer*)))
       (cond ((not w) (list-mode-show! "telemetry-mode"))
             ((window-quit-restore! w) #t)
+            ;; a list the panes model placed steps back in its pane, as q does
+            ((and (boundp 'panes-quit!) (panes-quit! w)) #t)
             ((pair? (cdr (window-list))) (delete-window-id! w))
             (else (message "The telemetry list is the last window"))))))
 

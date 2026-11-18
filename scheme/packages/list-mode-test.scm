@@ -41,10 +41,13 @@
     'footer (lambda (buf) '(("RET" "visit") ("q" "quit")))
     'layouts (list t--lm-narrow t--lm-wide)
     'no-marks #t
-    ;; the look goes beside the list through the shared preview slot
+    ;; every list waits for the highlight to rest before it previews
+    ;; (7f1ea5d62); this one shows at once, so the test reads the look
+    'immediate #t
+    ;; the look is a peek beside the list, as every list's (listing-preview!)
     'preview (lambda (buf row)
                (set! t--lm-previewed (cons row t--lm-previewed))
-               (preview-show row 'other))))
+               (listing-peek! buf row))))
 
 ;; every test starts from one window on *scratch* and ends there
 (define (t--lm-with thunk)
@@ -56,6 +59,7 @@
   (for-each (lambda (b) (test-buffer! b (string-append b "\n"))) t--lm-rows)
   (let ((out (thunk)))
     (when (preview-slot) (preview-end #f))
+    (when (peek-owner) (peek-dismiss!))
     (when (float-open?) (float-close!))
     (for-each (lambda (b)
                 (when (and (buffer-known? b)

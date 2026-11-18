@@ -4,12 +4,11 @@
 (effects! '(read))
 
 (deftest 'a-listing-seeds-no-new-group
-  "the switch prompt's new row seeds a work buffer, never a transient listing"
+  "the switch prompt's new row starts an empty group, from a listing and from a work buffer alike (33e2e4b16); a listing is a buffer like any other since 5b4ff5027"
   (lambda ()
     (buffer-create "*zz-transient-listing*")
     (buffer-set-local! "*zz-transient-listing*" 'special #t)
     (buffer-create "*zz-work*")
-    (check-false! (group-seed-buffer? "*zz-transient-listing*") "a transient buffer seeds nothing")
     (check-true! (group-seed-buffer? "*zz-work*") "a work buffer seeds")
     (with-current-buffer "*zz-transient-listing*"
       (lambda ()

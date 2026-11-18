@@ -1166,6 +1166,32 @@
                 l))
           layout (panes-window-keys layout))))
 
+(define (panes-pane-beside layout pane)
+  "Where a display from PANE goes so that it does not cover PANE:
+   (LAYOUT PANE-ID). The next pane, else a new pane after PANE while
+   there is room, else the pane before, else #f."
+  (let* ((ids (panes-pane-ids layout))
+         (i (and pane (panes--index-of pane ids))))
+    (cond ((not i) #f)
+          ((< (+ i 1) (length ids)) (list layout (list-ref ids (+ i 1))))
+          ((panes-under-capacity? layout) (panes-add-pane layout (+ i 1)))
+          ((> i 0) (list layout (list-ref ids (- i 1))))
+          (else #f))))
+
+(define (panes-visit-buffer layout buf mode here pane)
+  "A visit of BUF in PANE, from window HERE: (LAYOUT KEY). HERE takes
+   BUF when it has MODE, else PANE's window of MODE, else a new window
+   of MODE at the front of PANE. Another pane's window never takes it.
+   Windows of one mode share their buffers."
+  (let ((same (if (and here (equal? (panes-window-mode layout here) mode))
+                  here
+                  (find (lambda (k) (equal? (panes-window-mode layout k) mode))
+                        (panes-pane-keys layout pane)))))
+    (if same
+        (list (panes-join-mode (panes-show layout same buf) buf mode) same)
+        (let ((made (panes-add-window layout pane buf mode)))
+          (list (panes-join-mode (car made) buf mode) (cadr made))))))
+
 (define (panes-show-buffer layout buf mode &optional pane)
   "BUF shows, new or known: (LAYOUT KEY). The window of MODE that holds
    BUF, else MODE's window, takes BUF to its front and comes to the

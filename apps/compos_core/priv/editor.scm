@@ -4923,11 +4923,20 @@
 ;;; autoload-mode of the file, and any other form runs as it is, so a mode's
 ;;; auto-mode entry or a list registration exists before its file loads.
 
+;; #t when a define-command form says 'public #t among its options
+(define (autoload--public? form)
+  (let loop ((xs (cdr form)))
+    (cond ((or (null? xs) (not (pair? xs)) (null? (cdr xs))) #f)
+          ((and (equal? (car xs) ''public) (eq? (cadr xs) #t)) #t)
+          (else (loop (cdr xs))))))
+
 (define (autoload-install-form! form file)
   (cond ((and (pair? form) (eq? (car form) 'define-command)
               (pair? (cdr form)) (string? (cadr form)))
          (autoload-command (cadr form) file
-                           (and (pair? (cddr form)) (string? (caddr form)) (caddr form))))
+                           (and (pair? (cddr form)) (string? (caddr form)) (caddr form)))
+         ;; 'public #t in the form: M-x offers the stub before the file loads
+         (when (autoload--public? form) (command-public! (cadr form))))
         ((and (pair? form) (eq? (car form) 'define)
               (pair? (cdr form)) (pair? (cadr form)) (symbol? (car (cadr form))))
          (autoload (car (cadr form)) file))

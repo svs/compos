@@ -251,6 +251,8 @@
                  'file (string-append dir "/" n ".scm") 'dir dir
                  'requires '() 'required-by '() 'breaks '()
                  'git git 'prs (package-prs n)
+                 'sha (and (file-exists? (string-append dir "/.git")) (package--git dir "rev-parse --short HEAD"))
+                 'pin (let ((p (assoc n (package-lock)))) (and p (string? (caddr p)) (substring (caddr p) 0 (min 7 (string-length (caddr p))))))
                  'dev (let ((d (assoc n package-develop-directories))) (and d (cadr d))))))
        (package-installed)))
 
@@ -259,7 +261,8 @@
   (let ((g (plist-get row 'git)))
     (if (not g) (if (plist-get row 'loaded) "loaded" "")
         (let ((num (lambda (pre k) (let ((v (plist-get g k))) (if (and v (> v 0)) (string-append " " pre (number->string v)) "")))))
-          (string-append (or (plist-get g 'branch) "-") (num "+" 'ahead) (num "-" 'behind) (num "~" 'dirty))))))
+          (string-append (or (plist-get g 'branch) "-") (let ((s (plist-get row 'sha))) (if (string? s) (string-append " " s) ""))
+                         (num "+" 'ahead) (num "-" 'behind) (num "~" 'dirty))))))
 
 (define (packages--personal-rows)
   "a row per file in the user's own package folders; the first folder that has a name wins, as load does"
@@ -330,6 +333,10 @@
     (cond ((null? rs) (reverse acc))
           ((member (plist-get (car rs) 'name) seen) (loop (cdr rs) seen acc))
           (else (loop (cdr rs) (cons (plist-get (car rs) 'name) seen) (cons (car rs) acc))))))
+
+(define (packages-update? row)
+  "(packages-update? ROW) -- #t when ROW's clone is behind its remote, as the last fetch saw it"
+  (let ((g (plist-get row 'git))) (and g (number? (plist-get g 'behind)) (> (plist-get g 'behind) 0))))
 
 (define (packages-available? row)
   "(packages-available? ROW) -- #t when ROW is a package a source offers and this machine does not have"
@@ -407,7 +414,8 @@
                ", "))
 
 (define (packages--state-cell row)
-  (cond ((packages-loaded? row) (list "loaded" "success"))
+  (cond ((packages-update? row) (list "update" "warning"))
+        ((packages-loaded? row) (list "loaded" "success"))
         ((packages-available? row) (list "get" "link"))
         (else (list "-" "shadow"))))
 
@@ -508,6 +516,8 @@
          (git-part (if (not git) '()
                        (list (part "Git" "Git"
                                    (list (kv-row "branch" (or (plist-get git 'branch) "-"))
+                                         (kv-row "commit" (or (plist-get row 'sha) "-"))
+                                         (kv-row "pinned at" (or (plist-get row 'pin) "not pinned"))
                                          (kv-row "upstream" (or (plist-get git 'upstream) "-"))
                                          (kv-row "ahead" (num 'ahead))
                                          (kv-row "behind" (num 'behind))
@@ -582,7 +592,8 @@
            "Below what is here, available lists what the sources offer: packages-sources holds the GitHub orgs, users and OWNER/REPO repos to read, compos-dev by default; a adds a source of your own and R removes one. Packages init.scm or packages.lock name and this machine lacks show there too. l on an available package installs it: clones, loads, adds its use-package line to init.scm; d uninstalls an installed clone: drops that line and its pin and trashes the clone; o opens the repo on GitHub. "
            "l loads the package at point and k unloads it: its FEATURE-unload-function runs, its commands, catalog entries and names go, and the feature is forgotten. Core cannot be unloaded. "
            "Moving the point shows the package's page beside the list. RET or v visits the source, P sends a clone's changes upstream as a PR, "
-           "/ narrows the rows (state:loaded, tier:core, breaks:NAME), g scans again, q quits.")
+           "g scans again and fetches every clone: the git column shows the commit and how far it is ahead or behind, a clone behind its remote shows update, and the echo names them (M-x packages-check-updates does the same from anywhere). "
+           "/ narrows the rows (state:loaded, state:update, tier:core, breaks:NAME), q quits.")
     'buffer *packages-buffer*
     'transient #f
     'plain #t
@@ -598,7 +609,7 @@
     'section? (lambda (buf row) (packages--sep? row))
     'section-label (lambda (buf row) (plist-get row 'title))
     'markable? (lambda (buf row) #f)
-    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (if (packages-loaded? e) "loaded" "unloaded"))) "loaded or unloaded")
+    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (string-append (if (packages-loaded? e) "loaded" "unloaded") (if (packages-update? e) " update" "")))) "loaded, unloaded or update")
                    (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
                    (list "breaks:" (lambda (b e) (if (packages--sep? e) "" (packages--break-text e))) "a package it breaks the tier rules with"))
     'columns (lambda (buf) (list (list "package" 26) (list "in" 9) (list "state" 7) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
@@ -624,13 +635,18 @@
     (packages--fetch!))
   'modes '(packages-detail-mode packages-mode))
 
-(define (packages--fetch!)
-  "fetch the clones and their PRs, and what the sources offer, in tasks; the list draws them when they come"
+(define (packages--fetch! . quiet)
+  "fetch the clones and their PRs, and what the sources offer, in tasks; the list draws them when they come, and the echo names the packages with updates"
   (packages-fetch-sources!)
   (package-fetch!
     (lambda (_)
       (set! packages--scan-cache #f)
-      (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*)))))
+      (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
+      (let ((behind (map (lambda (r) (plist-get r 'name)) (filter packages-update? (packages--all)))))
+        (cond ((pair? behind)
+               (message (string-append (number->string (length behind)) (if (= (length behind) 1) " package has" " packages have")
+                                       " an update: " (string-join behind ", ") "  (/ state:update)")))
+              ((null? quiet) (message "Every installed package is up to date")))))))
 
 (effects! '(write external execute))
 
@@ -714,6 +730,14 @@
   (lambda (s) (packages-remove-source! s))
   'modes '(packages-detail-mode packages-mode))
 
+;; the check runs from anywhere, though its name puts it in the packages app
+;;;###autoload
+(app-entry! "packages-check-updates")
+;;;###autoload
+(define-command "packages-check-updates" "Fetch every installed package and name the ones with updates"
+  (lambda () (message "checking the packages for updates…") (packages--fetch!))
+  'public #t)
+
 (define-command "packages-pr" "Send the changes of the installed package at point upstream as a pull request"
   (interactive
     (lambda (k)
@@ -728,7 +752,7 @@
       (lambda (url)
         (when url
           (message (string-append "opened " url))
-          (packages--fetch!)))))
+          (packages--fetch! #t)))))
   'modes '(packages-detail-mode packages-mode))
 (effects! '(write display))
 (mode-doc! "packages-detail-mode"
@@ -823,8 +847,9 @@
   (lambda ()
     (let ((buf (list-mode-show! "packages-mode")))
       (packages-show-detail! (list-current buf))
-      (packages--fetch!)
-      buf)))
+      (packages--fetch! #t)
+      buf))
+  'public #t)
 
 (define-command "packages-source" "Visit the source of the package at point in the other window"
   (lambda () (packages-visit-source! (packages--at)))
@@ -838,6 +863,7 @@
 (effects! '(read))
 (public! 'packages-scan "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks")
 (public! 'packages-loaded? "(packages-loaded? ROW) -- #t when ROW's package is loaded now")
+(public! 'packages-update? "(packages-update? ROW) -- #t when ROW's clone is behind its remote, as the last fetch saw it")
 (public! 'packages-available? "(packages-available? ROW) -- #t when ROW is a package a source offers and this machine does not have")
 (effects! '(write execute))
 (public! 'packages-fetch-sources! "(packages-fetch-sources! [K]) -- read what every source in packages-sources offers with gh, in a task; cache it and redraw the list; K gets the rows")

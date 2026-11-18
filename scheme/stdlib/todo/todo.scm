@@ -153,6 +153,8 @@
 (public! 'todo-of-source "(todo-of-source KEY) — the task filed from the source KEY, open or closed, or #f")
 (public! 'todo-source-returned! "(todo-source-returned! ID REASON [WHO]) — the task's source came back: open it again and wake its chat")
 (public! 'todo-source-page-register! "(todo-source-page-register! PREFIX FN) — a source key starting PREFIX shows on the page (FN KEY)")
+(public! 'todo-source-opener-register! "(todo-source-opener-register! PREFIX FN) — a source key starting PREFIX opens with (FN KEY)")
+(public! 'todo-source-open! "(todo-source-open! KEY) — open the source KEY beside the task; #f when nothing opens it")
 (public! 'todo-source-rounds "(todo-source-rounds TASK) — how many times the task's source came back")
 (public! 'todo-can-move? "(todo-can-move? FROM TO) — whether a task may go from state FROM to state TO; staying put is always fine")
 
@@ -818,13 +820,35 @@
 ;; good: when the source comes back after our share closed, the same task
 ;; opens again and its chat wakes. A kind of source names the page that
 ;; shows a key, so a page's own chat can take the task.
-(define *todo-source-pages* '())
+;; a reload keeps what other packages registered
+(define *todo-source-pages* (if (boundp '*todo-source-pages*) *todo-source-pages* '()))
 
 (define (todo-source-page-register! prefix fn)
   "(todo-source-page-register! PREFIX FN) — a source key starting PREFIX shows on the page (FN KEY)"
   (set! *todo-source-pages*
         (cons (list prefix fn) (filter (lambda (e) (not (equal? (car e) prefix))) *todo-source-pages*)))
   prefix)
+
+;; A kind of source also says how to open it beside the task: (FN KEY).
+;; A key with no opener opens its page when that is up, or a URL in browse.
+(define *todo-source-openers* (if (boundp '*todo-source-openers*) *todo-source-openers* '()))
+
+(define (todo-source-opener-register! prefix fn)
+  "(todo-source-opener-register! PREFIX FN) — a source key starting PREFIX opens with (FN KEY)"
+  (set! *todo-source-openers*
+        (cons (list prefix fn) (filter (lambda (e) (not (equal? (car e) prefix))) *todo-source-openers*)))
+  prefix)
+
+(define (todo-source-open! key)
+  "(todo-source-open! KEY) — open the source KEY beside the task: its opener, else its open page, else a URL in browse; #f when nothing opens it"
+  (and (string? key) (not (todo--blank? key))
+       (let ((hit (find (lambda (e) (string-prefix? (car e) key)) *todo-source-openers*))
+             (page (todo--source-page (list 'source key))))
+         (cond (hit ((cadr hit) key) #t)
+               (page (display-buffer-other-window! page) #t)
+               ((or (string-prefix? "http://" key) (string-prefix? "https://" key))
+                (browse-other-window key) #t)
+               (else #f)))))
 
 (define (todo--source-page t)
   ;; the open page that shows T's source, or #f
@@ -988,6 +1012,7 @@
     (cond ((equal? g "group") (or (group-name (plist-get t 'group)) "no group"))
           ((equal? g "project") (plist-get t 'project))
           (else (plist-get t 'state)))))
+
 
 (define (todo--sections buf ts)
   ;; sections come in the order of their first task, so the most urgent leads
@@ -1159,7 +1184,7 @@
 (define (todo--wide-columns buf)
   ;; plain fixed columns, as ibuffer draws them; the title takes what is left
   (list (list "STATE" 7)
-        (list "P" 2)
+        (list "" 1)
         (list "TODO" #f 'left 'end)
         (list "PROJECT" 14 'left 'end)
         (list "WHO" 24 'left 'end)
@@ -1168,7 +1193,7 @@
 (define (todo--narrow-columns buf)
   ;; a narrow window keeps ibuffer's one line a task, without who and when
   (list (list "STATE" 7)
-        (list "P" 2)
+        (list "" 1)
         (list "TODO" #f 'left 'end)
         (list "PROJECT" 12 'left 'end)))
 
@@ -1187,8 +1212,7 @@
       (list "" "" (list (plist-get t 'title) "list-section-name") "" "" "")
   (let ((s (or (plist-get t 'state) "inbox")))
     (list (list s (string-append "todo-dot-" s))
-          (list (string-append (if (plist-get t 'urgent) "!" "") (or (plist-get t 'priority) ""))
-                (if (plist-get t 'urgent) "todo-overdue" "org-priority"))
+          (list (if (plist-get t 'urgent) "!" "") "todo-overdue")
           (list (plist-get t 'title) (if (member s *todo-closed*) "f-dim" "ibuffer-name"))
           (list (todo--short-project t) "f-dim")
           ;; a chat that closed leaves only its id behind, which says nothing
@@ -1501,9 +1525,10 @@
       (todo--first (lambda (x) x)
         (map (lambda (line)
                (let ((words (string-split line " ")))
-                 ;; the chat that filed or assigned the task did not work it
+                 ;; only a chat that moved the task's state worked it; filing,
+                 ;; parenting, projects and notes do not make a task a chat's
                  (and (>= (length words) 4)
-                      (not (member (list-ref words 3) '("created" "assignee" "assigned")))
+                      (equal? (list-ref words 3) "state")
                       (todo--live-chat (todo--chat-id (caddr words))))))
              (reverse (or (plist-get t 'log) '())))))))
 
@@ -1898,7 +1923,7 @@
                    (stop (component 'ui/group (list 'title title 'body body)) name first (length lines)))))
          (head (let ((n (line! (plist-get t 'title))))
                  (stop (component 'ui/title (list 'text (plist-get t 'title) 'badge state 'tone (todo--detail-tone state))) "Title" n n)))
-         (actions (component 'ui/actions (list 'actions (todo--detail-actions tab state))))
+         (actions (component 'ui/actions (list 'actions (todo--detail-actions tab state (plist-get t 'source)))))
          ;; where the task stands: what is done and what is left
          (status-part (lambda ()
                         (let ((s (plist-get t 'status)))
@@ -2015,7 +2040,7 @@
                              (equal? (car e) tab)))
            *todo-detail-tabs*))))
 
-(define (todo--detail-actions tab &optional state)
+(define (todo--detail-actions tab &optional state source)
   ;; the page's actions, each with its key. The state buttons follow the
   ;; state machine: only the moves STATE allows show, named for what they
   ;; do from there. On Children they act on the sub-task at point, whose
@@ -2041,6 +2066,9 @@
       (move "waiting" "todo-detail-wait" "Wait" "W")
       (move "cancelled" "todo-detail-cancel" "Cancel" "x" "bad")
       (move "inbox" "todo-detail-inbox" (if (equal? state "todo") "Unaccept" "To inbox") "i")
+      (if (and (not kids?) (string? source) (not (todo--blank? source)))
+          (list (list "todo-detail-source" "Source" "o"))
+          '())
       (list (list "todo-detail-agent" "Agent" "M-o")
             (list "todo-detail-visit" "File" "e")
             (list "todo-detail-dismiss" "Dismiss" "k")))))
@@ -2165,6 +2193,15 @@
             (chat (todo--show-chat! chat))
             (here (start! here))
             (else (group-read-or-create! "Start an agent in group: " start!)))))
+  'modes '(todo-detail-mode))
+
+(define-command "todo-detail-source" "Open the task's source beside it: its page, the issue, the link"
+  (lambda ()
+    (let* ((t (todo--detail-task (current-buffer)))
+           (src (and t (plist-get t 'source))))
+      (cond ((not t) (message "The task is gone"))
+            ((todo--blank? src) (message "This task has no source"))
+            ((not (todo-source-open! src)) (message (string-append "Nothing opens " src))))))
   'modes '(todo-detail-mode))
 
 (define-command "todo-detail-visit" "Open the task's file at its heading"
@@ -2315,6 +2352,7 @@
 (mode-keys! "todo-detail-mode"
   '(("M-o" "todo-detail-agent")
     ("e" "todo-detail-visit")
+    ("o" "todo-detail-source")
     ("g" "todo-detail-refresh")
     ("<right>" "todo-detail-tab-next")
     ("<left>" "todo-detail-tab-prev")
@@ -2340,7 +2378,7 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 (mode-doc! "todo-detail-mode"
-  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `x` cancels and `W` parks the task, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority and `T` marks it urgent or not, the same keys as the list; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live. A task has one chat. `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
+  "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `x` cancels and `W` parks the task, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority and `T` marks it urgent or not, the same keys as the list; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live. A task has one chat. `o` opens its source beside it (its page, the issue, the link), `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
 
 (define (todo-spawn-chat! id group)
   "(todo-spawn-chat! ID GROUP) — hand task ID to a new chat in GROUP. File the task first with todo-create: a short title, the spec in 'notes. Nothing is shown and the focus stays: the task is the marker that comes back to the user in review. Return (ID CHAT)"
@@ -2890,3 +2928,83 @@ The user and every agent share one todo list. Each project keeps its tasks in a 
 ;; a task cannot start while the boot loads this file, and a failed form
 ;; drops the whole package; so the first scan waits for the boot to end
 (debounce! 'todo-boot-rescan 0 (lambda (_) (todo--rescan!)) #f)
+;;; A task for any list item
+
+;; Any row can carry a task, the way a chat does with chat-todo. A mode
+;; says what its row at point is with todo-item-register!: a title, a
+;; source key that leads back to the row, and notes. A mode that says
+;; nothing still works: the line at point is the title, a file line is its
+;; own source, and the buffer's context provider writes the notes.
+
+(domain! 'writing)
+(effects! '(read))
+
+(define *todo-item-providers* (if (boundp '*todo-item-providers*) *todo-item-providers* '()))
+
+(define (todo--item-generic buf)
+  (let* ((at (buffer-line-at-point buf))
+         (line (and at (car at)))
+         (text (and at (string-trim (cadr at))))
+         (path (buffer-file-name buf))
+         (ctx (buffer-context buf)))
+    (and (not (todo--blank? text))
+         (list 'title (if (> (string-length text) 120) (substring text 0 120) text)
+               'source (and path line (string-append "file:" path ":" (number->string line)))
+               'notes (string-append "From " buf (if line (string-append ", line " (number->string line)) "")
+                                     (if (string? ctx) (string-append ": " ctx) ""))))))
+
+(define (todo-item-at buf)
+  "(todo-item-at BUF) — the row at point in BUF as a plist of title, source and notes: its mode's provider, else the line at point; #f on a blank line"
+  (let* ((mode (or (buffer-local-value 'mode-name buf) ""))
+         (hit (assoc mode *todo-item-providers*)))
+    (or (and hit ((cadr hit) buf))
+        (todo--item-generic buf))))
+
+(public! 'todo-item-at "(todo-item-at BUF) — the row at point in BUF as a plist of title, source and notes: its mode's provider, else the line at point; #f on a blank line")
+
+(effects! '(write))
+
+(define (todo-item-register! mode fn)
+  "(todo-item-register! MODE FN) — the row at point in MODE files as (FN BUF): a plist of title, source and notes, or #f when no row is there"
+  (set! *todo-item-providers*
+        (cons (list mode fn) (filter (lambda (e) (not (equal? (car e) mode))) *todo-item-providers*)))
+  mode)
+
+(public! 'todo-item-register! "(todo-item-register! MODE FN) — the row at point in MODE files as (FN BUF): a plist of title, source and notes, or #f when no row is there")
+
+(define-command "todo-from-item" "File a task for the row at point, with the row as its source; a row that already has an open task shows that task instead"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (item (todo-item-at buf))
+           (source (and item (plist-get item 'source)))
+           (held (and source (todo-of-source source))))
+      (cond
+        ((not item) (message "No item at point"))
+        ((and held (not (member (plist-get held 'state) *todo-closed*)))
+         (todo-show-detail! (plist-get held 'id))
+         (message (string-append "This already has " (plist-get held 'id))))
+        (else
+          (read-string "Task: "
+            (lambda (s)
+              (let* ((title (if (todo--blank? s) (plist-get item 'title) s))
+                     (notes (plist-get item 'notes))
+                     (id (todo-create title
+                           (append (list 'state "todo" 'group (todo--origin-group todo-user) 'by todo-user)
+                                   (if source (list 'source source) '())
+                                   (if (todo--blank? notes) '() (list 'notes notes))))))
+                (todo--refresh-all!)
+                (todo-show-detail! id)
+                (message (string-append "Filed " id ": " title))))
+            'initial (plist-get item 'title)))))))
+
+(todo-source-opener-register! "file:"
+  (lambda (key)
+    (let* ((rest (substring key 5 (string-length key)))
+           (i (string-rindex rest ":"))
+           (n (and i (string->number (substring rest (+ i 1) (string-length rest)))))
+           (path (if n (substring rest 0 i) rest)))
+      (with-frame-windows
+        (lambda ()
+          (let ((b (visit path)))
+            (window-set-buffer! (get-other-window) b)
+            (when n (buffer-goto-line! b n))))))))

@@ -283,3 +283,22 @@
             (lambda ()
               (set! *todo-source-pages* old)
               (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b))) (list page chat)))))))))
+
+(deftest 'todo-item-at-asks-the-mode-then-falls-back-to-the-line
+  "a mode's provider says what its row is; any other buffer files its line at point, and a file line is its own source"
+  (lambda ()
+    (let ((buf "*zz-todo-item*") (old *todo-item-providers*))
+      (buffer-create buf)
+      (buffer-append! buf "  first row  \nsecond")
+      (with-current-buffer buf (lambda () (buffer-goto-line! buf 1)))
+      (unwind-protect
+        (lambda ()
+          (let ((it (todo-item-at buf)))
+            (check-equal! (plist-get it 'title) "first row" "the line at point is the title")
+            (check-equal! (plist-get it 'source) #f "a buffer with no file has no source"))
+          (buffer-set-local! buf 'mode-name "zz-item-mode")
+          (todo-item-register! "zz-item-mode" (lambda (b) (list 'title "row" 'source "zz:1")))
+          (check-equal! (plist-get (todo-item-at buf) 'source) "zz:1" "the mode's provider wins"))
+        (lambda ()
+          (set! *todo-item-providers* old)
+          (buffer-kill! buf))))))

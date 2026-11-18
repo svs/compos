@@ -71,10 +71,28 @@
 
 ;; the walk keys are plain letters, so a writable detail (a chat) types them
 (define (index--walk! dir)
-  (if (not (buffer-read-only? (current-buffer)))
-      (run-command "self-insert-command")
-      (let ((ix (detail-owner)))
-        (if ix (index-step! ix dir) (message "This page has no list to walk")))))
+  (index--defer (if (> dir 0) "N" "P")
+    (lambda ()
+      (if (not (buffer-read-only? (current-buffer)))
+          (run-command "self-insert-command")
+          (let ((ix (detail-owner)))
+            (if ix (index-step! ix dir) (message "This page has no list to walk")))))))
+
+;; detail-mode's N, P and x sit above the page's own keys, so a page that binds
+;; one itself (a todo page: N notes, P project, x cancels) keeps it
+(define (index--page-key buf key)
+  (let ((minors (buffer-minor-maps buf)))
+    (let loop ((maps (buffer-keymaps buf)))
+      (cond ((null? maps) #f)
+            ((or (member (car maps) minors) (equal? (car maps) "global")) (loop (cdr maps)))
+            (else (let ((c (lookup-key (car maps) key)))
+                    (if (and (string? c) (not (member c '("self-insert-command" "index-hide-item" "index-next-item" "index-previous-item"))))
+                        c
+                        (loop (cdr maps)))))))))
+
+(define (index--defer key otherwise)
+  (let ((own (index--page-key (current-buffer) key)))
+    (if own (run-command own) (otherwise))))
 
 (define-command "index-next-item" "Open the next item of the list this page came from, here"
   (lambda () (index--walk! 1))
@@ -96,10 +114,12 @@
 
 (define-command "index-hide-item" "Hide this item from the list it came from, and open the next one here"
   (lambda ()
-    (if (not (buffer-read-only? (current-buffer)))
-        (run-command "self-insert-command")
-        (let ((ix (detail-owner)))
-          (if ix (index-hide! ix) (message "This page has no list")))))
+    (index--defer "x"
+      (lambda ()
+        (if (not (buffer-read-only? (current-buffer)))
+            (run-command "self-insert-command")
+            (let ((ix (detail-owner)))
+              (if ix (index-hide! ix) (message "This page has no list")))))))
   'modes '(detail-mode))
 
 (define-command "index-up" "Go to the list this page came from"

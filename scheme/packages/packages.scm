@@ -102,14 +102,11 @@
   (let ((i (string-index name "/"))) (if i (substring name 0 i) name)))
 
 (define (packages--section row)
-  "where ROW's package belongs: core (priv, scheme/core, or the core tier of PACKAGES.md), stdlib (scheme/stdlib or the standard tier) or packages"
+  "where ROW's package belongs: core (priv, scheme/core, or the core tier of PACKAGES.md), stdlib (scheme/stdlib, a release's priv/stdlib, or the standard tier) or packages"
   (let ((file (or (plist-get row 'file) "")) (name (plist-get row 'name)) (tier (plist-get row 'tier)))
-    (cond ((or (member name packages--kernel)
-               (equal? tier "core")
-               (string-contains? file "/apps/compos_core/priv/")
-               (string-contains? file "/scheme/core/"))
-           "core")
-          ((or (equal? tier "standard") (string-contains? file "/scheme/stdlib/")) "stdlib")
+    (cond ((or (member name packages--kernel) (equal? tier "core")) "core")
+          ((or (equal? tier "standard") (string-contains? file "/scheme/stdlib/") (string-contains? file "/priv/stdlib/")) "stdlib")
+          ((or (string-contains? file "/priv/") (string-contains? file "/scheme/core/")) "core")
           (else "packages"))))
 
 (define (packages--feature row) (string->symbol (packages--base (plist-get row 'name))))
@@ -169,6 +166,32 @@
                               (map (lambda (e) (plist-get e 'name)) (ls dir))))))
              (stdlib-dirs)))))
 
+;; a release has no checkout: its core is priv's own files and priv/packages,
+;; one level of subdirectories each (priv/editor/blocks/block.scm is editor/blocks/block)
+(define (packages--release-sources)
+  (let* ((priv (compos-priv-dir))
+         (scm? (lambda (f) (and (string-suffix? ".scm" f) (not (string-suffix? "-test.scm" f)) (not (equal? f "build-info.scm")))))
+         (names (lambda (e) (plist-get e 'name)))
+         (dir? (lambda (e) (equal? (plist-get e 'type) "directory")))
+         (files (lambda (dir) (if (file-directory? dir) (filter scm? (map names (filter (lambda (e) (not (dir? e))) (ls dir)))) '())))
+         (subdirs (lambda (dir) (if (file-directory? dir) (map (lambda (e) (let ((n (names e))) (substring n 0 (- (string-length n) 1)))) (filter dir? (ls dir))) '())))
+         (walk (lambda (dir prefix)
+                 (append (map (lambda (f) (list (string-append dir "/" f) (string-append prefix (substring f 0 (- (string-length f) 4))))) (files dir))
+                         (apply append (map (lambda (s) (map (lambda (f) (list (string-append dir "/" s "/" f) (string-append prefix s "/" (substring f 0 (- (string-length f) 4)))))
+                                                             (files (string-append dir "/" s))))
+                                            (subdirs dir)))))))
+    (if (not priv) '()
+        (append (map (lambda (f) (list (string-append priv "/" f) (substring f 0 (- (string-length f) 4)))) (files priv))
+                (walk (string-append priv "/editor") "editor/")
+                (walk (string-append priv "/packages") "")))))
+
+;; without PACKAGES.md, as in a release, the tier follows where the file is
+(define (packages--tier-by-place file name)
+  (cond ((member name packages--kernel) "core")
+        ((string-contains? file "/stdlib/") "standard")
+        ((string-contains? file "/priv/") "core")
+        (else "unassigned")))
+
 (define (packages-scan)
   "(packages-scan) -- every package of the checkout as a plist: name tier file requires required-by breaks"
   (let* ((root (packages--root))
@@ -178,12 +201,14 @@
                         '()))
          ;; (FILE NAME): the checkout's sources, then the standard packages' clone
          (std (packages--standard-sources))
-         (sources (append (filter (lambda (src) (not (assoc (car src) std)))
-                                  (map (lambda (rel) (list (string-append root "/" rel) (packages--name rel))) rels))
+         (sources (append (if root
+                              (filter (lambda (src) (not (assoc (car src) std)))
+                                      (map (lambda (rel) (list (string-append root "/" rel) (packages--name rel))) rels))
+                              (packages--release-sources))
                           std))
          (raw (map (lambda (src)
                      (let ((text (read-file (car src))) (name (cadr src)))
-                       (list 'name name 'file (car src) 'tier (packages--tier-of name table)
+                       (list 'name name 'file (car src) 'tier (if (null? table) (packages--tier-by-place (car src) name) (packages--tier-of name table))
                              'raw (packages--requires text) 'provides (packages--provides text))))
                    sources))
          ;; a feature is a file's base name, or what a file provides

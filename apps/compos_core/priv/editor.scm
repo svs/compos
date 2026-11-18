@@ -3004,6 +3004,8 @@
   (and (string? buf)
        (buffer-local-value 'mode-name buf)
        (not (member buf *runtime-restored*))))
+(public! 'runtime-owed? "(runtime-owed? BUF) — #t when BUF has a mode but its mode setup has not run in this daemon run")
+(catalog-meta! 'function "runtime-owed?" 'domain 'buffers 'effects '(read))
 
 (add-hook! 'buffer-renamed-hook
   (lambda (old new)

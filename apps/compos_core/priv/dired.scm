@@ -1334,6 +1334,8 @@
 (public! 'ls "(ls [DIR]) — the files in DIR as (name type bytes mtime size date perms) plists; DIR defaults to this buffer's directory")
 (catalog-meta! 'function "ls" 'domain 'files 'effects '(read))
 (catalog-meta! 'function "dired-open" 'effects '(write))
+(public! 'path-directory "(path-directory PATH) — PATH up to and including its last slash; PATH itself when it has none")
+(catalog-meta! 'function "path-directory" 'effects '(pure))
 
 (domain! 'files)
 (effects! '(write))

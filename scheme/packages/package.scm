@@ -84,6 +84,18 @@
 (define (package-lock)
   (or (package--read-first (package-lock-path)) '()))
 
+(define (package-major name)
+  ;; the :major of NAME's own recipe.scm: raised only when NAME breaks its API
+  (let ((r (package--read-first (string-append (package-directory (package--name name)) "/recipe.scm"))))
+    (or (and (pair? r) (number? (plist-get (cdr r) ':major)) (plist-get (cdr r) ':major)) 0)))
+
+(define (package-lock-release)
+  ;; packages.lock's second datum, (release VERSION): the compos release
+  ;; whose pins the lock follows
+  (let* ((path (package-lock-path))
+         (forms (and (file-exists? path) (scheme-read (read-file path)))))
+    (and (pair? forms) (pair? (cdr forms)) (pair? (cadr forms)) (cadr forms))))
+
 (define (package-installed)
   (let* ((d (package-repos-dir))
          (clones (if (file-directory? d)
@@ -104,7 +116,9 @@
 (public! 'package-lock-path "(package-lock-path) - the path of packages.lock")
 (public! 'package-directory "(package-directory NAME) - the checkout NAME loads from: its develop directory, else its clone")
 (public! 'package-recipe "(package-recipe NAME) - NAME's recipe plist: the registered one, then the clone's recipe.scm")
-(public! 'package-lock "(package-lock) - the pins of packages.lock as ((NAME URL COMMIT) ...)")
+(public! 'package-lock "(package-lock) - the pins of packages.lock as ((NAME URL COMMIT [held #t] [previous COMMIT]) ...)")
+(public! 'package-lock-release "(package-lock-release) - the release packages.lock follows, as (release VERSION), or #f")
+(public! 'package-major "(package-major NAME) - the :major of NAME's recipe.scm, raised only when NAME breaks its own API; 0 without one")
 (public! 'package-installed "(package-installed) - names of the cloned and developed packages")
 (public! 'package-list "(package-list) - names of the installed packages")
 (public! 'package-dir "(package-dir) - <compos-home>/packages, the user's own packages: the personal tier")
@@ -235,22 +249,35 @@
 (define (package--git dir args)
   (string-trim (shell-command->string (string-append "git -C " (sh-quote dir) " " args) dir)))
 
-(define (package-freeze!)
-  ;; pin every installed git checkout at its HEAD
-  (let ((rows (filter (lambda (r) (= (string-length (caddr r)) 40))
-                (map (lambda (n)
-                       (let ((dir (package-directory n)))
-                         (if (file-exists? (string-append dir "/.git"))
-                             (list n (package--git dir "config --get remote.origin.url")
-                                   (package--git dir "rev-parse HEAD"))
-                             (list n "" ""))))
-                     (package-installed)))))
+(define (package-lock-write! rows . release)
+  ;; ROWS are (NAME URL COMMIT [held #t] [previous COMMIT]); the release
+  ;; the lock follows stays unless RELEASE gives a new one
+  (let ((rel (if (pair? release) (car release) (package-lock-release))))
     (write-file! (package-lock-path)
                  (string-append ";; packages.lock --- package-freeze! writes it, package-thaw! checks it out.\n"
-                                (pp-to-string rows) "\n"))
+                                ";; A row may say held #t (updates skip it) and previous COMMIT (packages-rollback puts it back).\n"
+                                (pp-to-string rows) "\n"
+                                (if rel (string-append (pp-to-string rel) "\n") "")))
     rows))
 
-(public! 'package-freeze! "(package-freeze!) - write packages.lock: each installed package at the commit its checkout holds; answers the rows")
+(define (package-freeze!)
+  ;; pin every installed git checkout at its HEAD; a held row keeps its
+  ;; pin, and every row keeps its marks
+  (let* ((old (package-lock))
+         (rows (filter (lambda (r) (= (string-length (caddr r)) 40))
+                 (map (lambda (n)
+                        (let ((dir (package-directory n)) (o (assoc n old)))
+                          (cond ((and o (> (length o) 3) (plist-get (list-tail o 3) 'held)) o)
+                                ((file-exists? (string-append dir "/.git"))
+                                 (append (list n (package--git dir "config --get remote.origin.url")
+                                               (package--git dir "rev-parse HEAD"))
+                                         (if (and o (> (length o) 3)) (list-tail o 3) '())))
+                                (else (list n "" "")))))
+                      (package-installed)))))
+    (package-lock-write! rows)))
+
+(public! 'package-freeze! "(package-freeze!) - write packages.lock: each installed package at the commit its checkout holds, a held one at its pin, every row keeping its marks; answers the rows")
+(public! 'package-lock-write! "(package-lock-write! ROWS [RELEASE]) - write ROWS as packages.lock; the release it follows stays unless RELEASE, (release VERSION), replaces it; answers ROWS")
 (public! 'package-seed! "(package-seed! 'NAME) - make NAME's clone from the bundled copy (priv/repos) or the core pin (priv/standard.lock), at once; #t when it is there")
 (public! 'package-core-pins "(package-core-pins) - the pins core ships for the standard packages, ((NAME URL COMMIT) ...)")
 
@@ -302,7 +329,10 @@
                           (done #f))))))))))))
 
 (define (package--use n k)
-  ;; ensure, install the requires that have recipes, activate; K gets N or #f
+  ;; ensure, install the requires that have recipes, activate; K gets N or #f.
+  ;; A require is NAME or (NAME MAJOR): MAJOR is the :major of NAME's API it
+  ;; was written against, and a different one loads anyway with a warning;
+  ;; package-update files the fix (fail forward)
   (package--ensure! n
     (lambda (ok)
       (if (not ok)
@@ -311,12 +341,20 @@
             (if (null? reqs)
                 (k (report-errors (string-append "use-package " n)
                                   (lambda () (package--activate! n))))
-                (let ((r (package--name (car reqs))))
+                (let* ((q (car reqs))
+                       (r (package--name (if (pair? q) (car q) q)))
+                       (want (and (pair? q) (pair? (cdr q)) (cadr q)))
+                       (next (lambda (_)
+                               (when (and (number? want) (not (= want (package-major r))))
+                                 (message (string-append n " was written for " r " " (number->string want)
+                                                         "; " r " is " (number->string (package-major r))
+                                                         " now: M-x packages-update " r " files the fix")))
+                               (loop (cdr reqs)))))
                   (if (or (featurep (string->symbol r))
                           (not (or (assoc r package--recipes)
                                    (file-exists? (package-directory r)))))
-                      (loop (cdr reqs))
-                      (package--use r (lambda (_) (loop (cdr reqs))))))))))))
+                      (next #t)
+                      (package--use r next)))))))))
 
 ;; A package can ride with core: priv/standard.lock pins the commit this
 ;; core works with; a release bundles that clone in priv/repos, and the first

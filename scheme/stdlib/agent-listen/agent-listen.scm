@@ -102,6 +102,36 @@
           (string-append "Listener " id " listens on; (agent-unlisten! \"" id "\") stops it.")
           "That listener is closed. Decide whether this is the answer: carry on with the task, or (agent-listen! SPEC NOTE) again."))))
 
+;; One listener a key. A time listener is its chat and its at; any other
+;; listener is its chat, topic, kind and match. agent-listen! with the key of
+;; a live listener refreshes that one and answers its id, so one chat never
+;; wakes twice for one event. Another chat may watch the same channel: it is
+;; its own agent, so it keeps its own listener, and agent-listen! warns when
+;; both serve the same task.
+(define (agent-listen--key l)
+  (let ((m (plist-get l 'match)))
+    (if (plist-get l 'at)
+        (list (plist-get l 'chat) 'at (plist-get l 'at))
+        (list (plist-get l 'chat) (plist-get l 'topic) (plist-get l 'kind)
+              (if (agent-listen--blank? m) #f m)))))
+
+(define (agent-listen--twin l ls)
+  "the listener in LS with L's key, or #f"
+  (let* ((key (agent-listen--key l))
+         (hit (filter (lambda (x) (equal? (agent-listen--key x) key)) ls)))
+    (and (pair? hit) (car hit))))
+
+(define (agent-listen--peers l ls)
+  "the listeners in LS of other chats on L's channel, for L's task"
+  (let ((task (plist-get l 'task)))
+    (if (or (plist-get l 'at) (agent-listen--blank? task))
+        '()
+        (filter (lambda (x)
+                  (and (not (equal? (plist-get x 'chat) (plist-get l 'chat)))
+                       (equal? (plist-get x 'task) task)
+                       (equal? (cdr (agent-listen--key x)) (cdr (agent-listen--key l)))))
+                ls))))
+
 (effects! '(write))
 
 (define (agent-listen--save!)
@@ -271,7 +301,7 @@
     'from from))
 
 (define (agent-listen! spec &optional note)
-  "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event; answer the listener's id. SPEC is a plist: topic (required unless at; a trailing * matches a prefix), kind, match (text the event's data must hold), task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local, or unix seconds: wake then)"
+  "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event; answer the listener's id. One listener a chat, topic, kind and match (a chat and at for a time): a SPEC equal to a live listener's refreshes that one (note, task, keep, due) and answers its id. Another chat on the same channel for the same task gets its own listener and a warning. SPEC is a plist: topic (required unless at; a trailing * matches a prefix), kind, match (text the event's data must hold), task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local, or unix seconds: wake then)"
   (let ((at (agent-listen--at (plist-get spec 'at)))
         (chat (agent-listen--chat-id (plist-get spec 'chat))))
     (when (and (not at) (agent-listen--blank? (plist-get spec 'topic)))
@@ -288,11 +318,30 @@
                     'at at
                     'due (or at (plist-get spec 'due)
                              (+ (current-time) (* 86400 (or (plist-get spec 'days) agent-listen-default-days)))))))
-      (agent-listen--put! l)
-      (agent-listen--define!)
-      (agent-listen--arm! l)
-      (agent-listen--record! l 'created)
-      id)))
+      (let ((old (agent-listen--twin l *agent-listeners*)))
+        (if old
+            (let ((l (plist-put (plist-put (plist-put old 'due (plist-get l 'due))
+                                           'keep (or (plist-get l 'keep) (plist-get old 'keep)))
+                                'note (if (agent-listen--blank? note) (plist-get old 'note) note))))
+              (let ((l (if (agent-listen--blank? (plist-get spec 'task)) l
+                           (plist-put l 'task (plist-get spec 'task)))))
+                (agent-listen--put! l)
+                (agent-listen--record! l 'refreshed)
+                (plist-get l 'id)))
+            (let ((peers (agent-listen--peers l *agent-listeners*)))
+              (agent-listen--put! l)
+              (agent-listen--define!)
+              (agent-listen--arm! l)
+              (agent-listen--record! l 'created)
+              (when (pair? peers)
+                (let ((text (string-append "listener " id " on " (event-job-topic-bare topic)
+                                           " shares its channel and task with "
+                                           (string-join (map (lambda (x) (string-append (plist-get x 'id) " of " (plist-get x 'chat))) peers) ", ")
+                                           ": both chats wake on one event")))
+                  (message (string-append "agent-listen!: " text))
+                  (when (todo-get (plist-get l 'task))
+                    (todo-log (plist-get l 'task) text "watcher"))))
+              id))))))
 
 (define (agent-listen-extend! id days)
   "(agent-listen-extend! ID DAYS) — the listener ID is due DAYS from now; it listens on as it did"
@@ -334,7 +383,7 @@
   (let ((id (and chat (agent-listen--chat-id chat))))
     (filter (lambda (l) (or (not id) (equal? (plist-get l 'chat) id))) *agent-listeners*)))
 
-(public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply, or wake at a time; it gets the event as a message. SPEC: topic, kind (none: every kind except sent), match, task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local)")
+(public! 'agent-listen! "(agent-listen! SPEC [NOTE]) — make this chat's agent listen for an event, such as a WhatsApp reply, or wake at a time; it gets the event as a message; one listener a chat, topic, kind and match (chat and at for a time): the same SPEC again refreshes that listener and answers its id. SPEC: topic, kind (none: every kind except sent), match, task, keep, chat, at (\"YYYY-MM-DD HH:MM\" local)")
 (public! 'agent-unlisten! "(agent-unlisten! ID) — stop the listener ID, and say so in the log")
 (public! 'agent-listen-extend! "(agent-listen-extend! ID DAYS) — the listener ID is due DAYS from now")
 (public! 'agent-listen-due "(agent-listen-due L) — when the listener L is due, in unix seconds")

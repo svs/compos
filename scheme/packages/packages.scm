@@ -241,6 +241,16 @@
                                           rows)))))))
          rows)))
 
+(define (packages--main-branch dir)
+  "the remote's main branch of the clone in DIR, as origin/NAME: origin/HEAD when the clone knows it, else origin/main"
+  (let ((h (package--git dir "rev-parse --abbrev-ref origin/HEAD 2>/dev/null")))
+    (if (and (string-prefix? "origin/" h) (not (equal? h "origin/HEAD"))) h "origin/main")))
+
+(define (packages--main-behind dir)
+  "the commits on the remote's main branch that the clone in DIR does not have, as the last fetch saw them"
+  (let ((n (string->number (package--git dir (string-append "rev-list --count HEAD.." (packages--main-branch dir) " 2>/dev/null")))))
+    (or n 0)))
+
 (define (packages--installed-rows)
   "a row per installed package with its git state and open PRs; the id keeps it apart from a checkout file of the same name"
   (map (lambda (n)
@@ -252,6 +262,8 @@
                  'requires '() 'required-by '() 'breaks '()
                  'git git 'prs (package-prs n)
                  'sha (and (file-exists? (string-append dir "/.git")) (package--git dir "rev-parse --short HEAD"))
+                 ;; how far HEAD is behind the remote's main branch, whatever branch the clone is on
+                 'main-behind (and (file-exists? (string-append dir "/.git")) (packages--main-behind dir))
                  'pin (let ((p (assoc n (package-lock)))) (and p (string? (caddr p)) (substring (caddr p) 0 (min 7 (string-length (caddr p))))))
                  'dev (let ((d (assoc n package-develop-directories))) (and d (cadr d))))))
        (package-installed)))
@@ -335,8 +347,10 @@
           (else (loop (cdr rs) (cons (plist-get (car rs) 'name) seen) (cons (car rs) acc))))))
 
 (define (packages-update? row)
-  "(packages-update? ROW) -- #t when ROW's clone is behind its remote, as the last fetch saw it"
-  (let ((g (plist-get row 'git))) (and g (number? (plist-get g 'behind)) (> (plist-get g 'behind) 0))))
+  "(packages-update? ROW) -- #t when ROW's clone is behind its tracked branch or behind the remote's main branch, as the last fetch saw it"
+  (let ((g (plist-get row 'git)) (m (plist-get row 'main-behind)))
+    (or (and g (number? (plist-get g 'behind)) (> (plist-get g 'behind) 0))
+        (and (number? m) (> m 0)))))
 
 (define (packages-available? row)
   "(packages-available? ROW) -- #t when ROW is a package a source offers and this machine does not have"
@@ -422,10 +436,13 @@
 (define packages--checked #f)
 
 (define (packages--updates-text row)
-  "up to date, N behind, checking, or empty for a package that is no git clone"
-  (let ((g (plist-get row 'git)))
+  "up to date, N behind, N behind main (a clone on another branch), checking, or empty for a package that is no git clone"
+  (let* ((g (plist-get row 'git))
+         (behind (or (and g (plist-get g 'behind)) 0))
+         (m (or (plist-get row 'main-behind) 0)))
     (cond ((not g) "")
-          ((packages-update? row) (string-append (number->string (plist-get g 'behind)) " behind"))
+          ((> m behind) (string-append (number->string m) " behind main"))
+          ((> behind 0) (string-append (number->string behind) " behind"))
           ((not packages--checked) "checking…")
           (else "up to date"))))
 

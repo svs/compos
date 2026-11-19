@@ -942,7 +942,7 @@
     buf))
 
 (define *todo-views*
-  (list (list "open" '(state ("review" "doing" "todo" "inbox" "waiting")))
+  (list (list "open" '(state ("review" "doing" "todo" "waiting")))
         (list "inbox" '(state "inbox"))
         (list "waiting" '(state "waiting"))
         (list "closed" '(state ("done" "cancelled")))

@@ -414,16 +414,33 @@
                ", "))
 
 (define (packages--state-cell row)
-  (cond ((packages-update? row) (list "update" "warning"))
-        ((packages-loaded? row) (list "loaded" "success"))
+  (cond ((packages-loaded? row) (list "loaded" "success"))
         ((packages-available? row) (list "get" "link"))
         (else (list "-" "shadow"))))
 
+;; when the clones were last fetched; until then a clone's updates are not known
+(define packages--checked #f)
+
+(define (packages--updates-text row)
+  "up to date, N behind, checking, or empty for a package that is no git clone"
+  (let ((g (plist-get row 'git)))
+    (cond ((not g) "")
+          ((packages-update? row) (string-append (number->string (plist-get g 'behind)) " behind"))
+          ((not packages--checked) "checking…")
+          (else "up to date"))))
+
+(define (packages--updates-cell row)
+  (let ((t (packages--updates-text row)))
+    (cond ((equal? t "") "")
+          ((packages-update? row) (list t "warning"))
+          ((equal? t "up to date") (list t "success"))
+          (else (list t "shadow")))))
+
 (define (packages--cells buf row)
   (if (packages--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "" "" "")
+      (list (list (plist-get row 'title) "list-section-name") "" "" "" "" "" "" "" "" "")
       (list (plist-get row 'name) (or (plist-get row 'source) (plist-get row 'section))
-            (packages--state-cell row)
+            (packages--state-cell row) (packages--updates-cell row)
             (plist-get row 'tier)
             (packages--count (plist-get row 'requires)) (packages--count (plist-get row 'required-by))
             (packages--git-text row) (packages--count (plist-get row 'prs))
@@ -431,9 +448,9 @@
 
 (define (packages--narrow-cells buf row)
   (if (packages--sep? row)
-      (list (list (plist-get row 'title) "list-section-name") "" "")
+      (list (list (plist-get row 'title) "list-section-name") "" "" "")
       (list (plist-get row 'name)
-            (packages--state-cell row)
+            (packages--state-cell row) (packages--updates-cell row)
             (if (null? (plist-get row 'breaks)) "" (list (packages--break-text row) "warning")))))
 
 ;;; the page
@@ -515,7 +532,8 @@
          (num (lambda (k) (number->string (or (and git (plist-get git k)) 0))))
          (git-part (if (not git) '()
                        (list (part "Git" "Git"
-                                   (list (kv-row "branch" (or (plist-get git 'branch) "-"))
+                                   (list (kv-row "updates" (packages--updates-text row))
+                                         (kv-row "branch" (or (plist-get git 'branch) "-"))
                                          (kv-row "commit" (or (plist-get row 'sha) "-"))
                                          (kv-row "pinned at" (or (plist-get row 'pin) "not pinned"))
                                          (kv-row "upstream" (or (plist-get git 'upstream) "-"))
@@ -592,8 +610,8 @@
            "Below what is here, available lists what the sources offer: packages-sources holds the GitHub orgs, users and OWNER/REPO repos to read, compos-dev by default; a adds a source of your own and R removes one. Packages init.scm or packages.lock name and this machine lacks show there too. l on an available package installs it: clones, loads, adds its use-package line to init.scm; d uninstalls an installed clone: drops that line and its pin and trashes the clone; o opens the repo on GitHub. "
            "l loads the package at point and k unloads it: its FEATURE-unload-function runs, its commands, catalog entries and names go, and the feature is forgotten. Core cannot be unloaded. "
            "Moving the point shows the package's page beside the list. RET or v visits the source, P sends a clone's changes upstream as a PR, "
-           "g scans again and fetches every clone: the git column shows the commit and how far it is ahead or behind, a clone behind its remote shows update, and the echo names them (M-x packages-check-updates does the same from anywhere). "
-           "/ narrows the rows (state:loaded, state:update, tier:core, breaks:NAME), q quits.")
+           "g scans again and fetches every clone: the git column shows the commit and how far it is ahead or behind, the updates column says up to date or how many commits a clone is behind, and the echo names the ones behind (M-x packages-check-updates does the same from anywhere). "
+           "/ narrows the rows (state:loaded, state:update, state:up-to-date, tier:core, breaks:NAME), q quits.")
     'buffer *packages-buffer*
     'transient #f
     'plain #t
@@ -609,13 +627,13 @@
     'section? (lambda (buf row) (packages--sep? row))
     'section-label (lambda (buf row) (plist-get row 'title))
     'markable? (lambda (buf row) #f)
-    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (string-append (if (packages-loaded? e) "loaded" "unloaded") (if (packages-update? e) " update" "")))) "loaded, unloaded or update")
+    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (string-append (if (packages-loaded? e) "loaded" "unloaded") (if (packages-update? e) " update" (if (equal? (packages--updates-text e) "up to date") " up-to-date" ""))))) "loaded, unloaded, update or up-to-date")
                    (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
                    (list "breaks:" (lambda (b e) (if (packages--sep? e) "" (packages--break-text e))) "a package it breaks the tier rules with"))
-    'columns (lambda (buf) (list (list "package" 26) (list "in" 9) (list "state" 7) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
+    'columns (lambda (buf) (list (list "package" 26) (list "in" 9) (list "state" 7) (list "updates" 11) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
     'cells packages--cells
     'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 80)
-                         'columns (lambda (buf) (list (list "package" 24) (list "state" 7) (list "tier breaks" #f)))
+                         'columns (lambda (buf) (list (list "package" 24) (list "state" 7) (list "updates" 11) (list "tier breaks" #f)))
                          'cells packages--narrow-cells)
                    (list 'name 'wide 'default #t))
     'preview (lambda (buf row) (packages-show-detail! row))
@@ -640,6 +658,7 @@
   (packages-fetch-sources!)
   (package-fetch!
     (lambda (_)
+      (set! packages--checked (current-time))
       (set! packages--scan-cache #f)
       (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
       (let ((behind (map (lambda (r) (plist-get r 'name)) (filter packages-update? (packages--all)))))

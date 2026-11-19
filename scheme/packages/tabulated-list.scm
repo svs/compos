@@ -3438,12 +3438,13 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (effects! '(unknown))
 
 (public! 'list-own-composml "(list-own-composml BUF) - the composml renderer list BUF draws its rows with: its composml option, or the grid row renderer for a grid; #f when neither" 'ui)
+(public! 'list-mode-copies "(list-mode-copies BUF) - BUF and the copies other groups keep of it, when BUF is the buffer a list mode names" 'ui)
 
 ;; effects stamps for the names declared above without one, so
 ;; eval-scheme-read takes or refuses them by what they do
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
   '(list-format-template))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
-  '(list-source-text list-detail-off? list-view-of list-own-composml))
+  '(list-source-text list-detail-off? list-view-of list-own-composml list-mode-copies))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(list-cycle-view!))

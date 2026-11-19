@@ -50,7 +50,7 @@
           (minibuffer-read "Connector: " (connector-names)
             (lambda (cname)
               (minibuffer-read "Model (empty = connector default): "
-                (connector-models cname)
+                (chat-models-for-switch buf cname)
                 (lambda (model)
                   ;; one switch function for every path (editor.scm)
                   (chat-switch! buf cname model)

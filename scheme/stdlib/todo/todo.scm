@@ -1038,6 +1038,7 @@
   (let ((k (car f)) (v (car (cdr f))))
     (cond ((equal? k "group") (equal? (plist-get t 'group) v))
           ((equal? k "project") (equal? (plist-get t 'project) v))
+          ((equal? k "state") (equal? (plist-get t 'state) v))
           (else #t))))
 
 (define *todo-facets*
@@ -1054,10 +1055,25 @@
         (list 'label "Project" 'kind "project"
               'options (lambda (buf) (map (lambda (p) (list p p)) (todo-projects))))
         (list 'label "Status" 'kind "status"
-              'options (lambda (buf) (map (lambda (v) (list (car v) (car v)))
-                                          (alist-delete *todo-views* "all")))
-              'get (lambda (buf) (let ((v (todo--view buf))) (if (equal? v "all") #f v)))
-              'set (lambda (buf v) (list-tab-set! buf (or v "all"))))))
+              ;; the views, then every state that is not a view of its own
+              'options (lambda (buf)
+                         (let ((views (map car (alist-delete *todo-views* "all"))))
+                           (map (lambda (v) (list v v))
+                                (append views (remove (lambda (s) (member s views)) *todo-states*)))))
+              'get (lambda (buf)
+                     (let ((s (assoc "state" (list-filters buf))) (v (todo--view buf)))
+                       (cond (s (cadr s)) ((equal? v "all") #f) (else v))))
+              ;; a view takes its tab; a single state filters the all tab
+              'set (lambda (buf v)
+                     (todo--state-drop! buf)
+                     (cond ((or (not v) (assoc v *todo-views*)) (list-tab-set! buf (or v "all")))
+                           (else (list-tab-set! buf "all")
+                                 (buffer-set-local! buf 'list-filters
+                                   (cons (list "state" v) (list-filters buf)))))))))
+
+(define (todo--state-drop! buf)
+  "taking a status tab drops the single-state filter the Status facet set"
+  (buffer-set-local! buf 'list-filters (alist-delete (list-filters buf) "state")))
 
 (define (todo--due t)
   (let ((d (plist-get t 'deadline)))
@@ -2377,6 +2393,14 @@
 (tab-bars-declare! "todo-detail-mode"
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
+;; / on a task's page filters the list, as it does on the list
+(define-command "todo-detail-filter" "Filter the todo list from a task's page, as / does on the list"
+  (lambda ()
+    (let ((buf (todo--list-buffer)))
+      (if buf (list-facet-prompt! buf) (message "No todo list open"))))
+  'modes '(todo-detail-mode))
+(define-key (mode-keymap "todo-detail-mode") "/" "todo-detail-filter")
+
 (mode-doc! "todo-detail-mode"
   "One task as its own page, in three tabs: Overview (status, notes, details), Children (the sub-tasks) and Log. Left and right step the tabs, and 6, 7 and 8 take one. `t` accepts, approves or reopens, `i` sends back to the inbox, `s` starts, `d` closes, `x` cancels and `W` parks the task, `D` sets a deadline, `P` moves it to a project, `N` adds a note, `!` cycles the priority and `T` marks it urgent or not, the same keys as the list; the buttons show only the moves the task's state allows; on Children they act on the sub-task at point, `RET` opens it, and `u` goes back up to the parent; `+` files a new sub-task under this task. `M-o` goes to that chat, the one fixing the task, not the one that filed it, and starts one in the group you are in when none is live. A task has one chat. `o` opens its source beside it (its page, the issue, the link), `e` opens the task's file, `g` reads it again, `k` dismisses the task: this page and its chats close, the state stays; `q` puts it away.")
 
@@ -2665,10 +2689,12 @@
   'modes '(chat-mode))
 
 (define (todo--view-set! buf name)
+  (todo--state-drop! buf)
   (list-tab-set! buf name)
   (list-refresh! buf))
 
 (define (todo--view-step! buf step)
+  (todo--state-drop! buf)
   (list-tab-step! buf (map car *todo-views*) step "open")
   (list-refresh! buf))
 
@@ -2688,12 +2714,17 @@
 (define *todo-tab-counts* #f)
 
 (define (todo--tab-counts buf all)
-  (let* ((fs (filter (lambda (f) (member (car f) '("group" "project"))) (list-filters buf)))
-         (key (list all fs todo-user (todo--today)))
+  ;; every tab counts what it would show under the list's facets and the
+  ;; text typed after /, so the counts move as you type
+  (let* ((fs (filter (lambda (f) (member (car f) '("group" "project" "state"))) (list-filters buf)))
+         (q (list-query buf))
+         (key (list all fs q todo-user (todo--today)))
          (hit *todo-tab-counts*))
     (if (and hit (equal? (car hit) key))
         (cadr hit)
-        (let* ((scoped (filter (lambda (t) (null? (remove (lambda (f) (todo--filter buf t f)) fs))) all))
+        (let* ((scoped (filter (lambda (t) (and (null? (remove (lambda (f) (todo--filter buf t f)) fs))
+                                                (or (equal? q "") (todo--match buf t q))))
+                               all))
                (counts (map (lambda (v) (todo--tab-count all scoped v)) *todo-views*)))
           (set! *todo-tab-counts* (list key counts))
           counts))))
@@ -2870,7 +2901,7 @@
             ("g" "todo-refresh")
             ("k" "todo-dismiss")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `s` also opens its chat. `M-o` goes to its chat, or hands it to a new chat in a group, `N` adds a note. `a` opens the task's action menu: every move, and the deadline, project, priority and urgent mark, which the task's page also has as `D`, `P`, `!` and `T`. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `N` and the action menu act on the marked tasks after asking. imenu picks a status tab. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status, each led by All; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `s` also opens its chat. `M-o` goes to its chat, or hands it to a new chat in a group, `N` adds a note. `a` opens the task's action menu: every move, and the deadline, project, priority and urgent mark, which the task's page also has as `D`, `P`, `!` and `T`. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `N` and the action menu act on the marked tasks after asking. imenu picks a status tab. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status (the views, then every single state), each led by All, and the status tabs count what the filter and the typed text leave; on a task's page `/` filters the list too; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

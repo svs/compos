@@ -3442,6 +3442,6 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(pure)))
   '(list-format-template))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
-  '(list-source-text list-detail-off? list-view-of))
+  '(list-source-text list-detail-off? list-view-of list-own-composml))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(list-cycle-view!))

@@ -911,7 +911,7 @@ c-header.c-group { padding: 10px 14px; }
 ;; Semantic lists use stable row keys, never a stale DOM row number.
 (add-hook! (list 'block-click 'semantic-list)
   (lambda (buf id)
-    (if (and (list-opt buf 'composml) (string-prefix? "list:" id))
+    (if (and (or (list-opt buf 'composml) (list-grid? buf)) (string-prefix? "list:" id))
         (let ((i (list-index-of buf (list-entries buf) (substring id 5 (string-length id)))))
           (when i
             (list-goto-index! buf i)

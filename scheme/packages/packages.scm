@@ -13,6 +13,7 @@
 
 (require 'tabulated-list)
 (require 'package-manager)
+(require 'package-update)
 
 (domain! 'packages)
 (effects! '(pure))
@@ -253,9 +254,11 @@
 
 (define (packages--installed-rows)
   "a row per installed package with its git state and open PRs; the id keeps it apart from a checkout file of the same name"
+  (let ((lock (package-lock)) (pins (package-core-pins)))
   (map (lambda (n)
          (let* ((dir (package-directory n))
-                (git (package-git-status n)))
+                (git (package-git-status n))
+                (locked (assoc n lock)))
            (list 'id (string-append "installed:" n) 'name n 'tier "installed"
                  'repo (let ((u (and git (plist-get git 'url)))) (and (string? u) (package-github-repo u)))
                  'file (string-append dir "/" n ".scm") 'dir dir
@@ -264,9 +267,11 @@
                  'sha (and (file-exists? (string-append dir "/.git")) (package--git dir "rev-parse --short HEAD"))
                  ;; how far HEAD is behind the remote's main branch, whatever branch the clone is on
                  'main-behind (and (file-exists? (string-append dir "/.git")) (packages--main-behind dir))
-                 'pin (let ((p (assoc n (package-lock)))) (and p (string? (caddr p)) (substring (caddr p) 0 (min 7 (string-length (caddr p))))))
-                 'dev (let ((d (assoc n package-develop-directories))) (and d (cadr d))))))
-       (package-installed)))
+                 'pin (let ((p locked)) (and p (string? (caddr p)) (substring (caddr p) 0 (min 7 (string-length (caddr p))))))
+                 'dev (let ((d (assoc n package-develop-directories))) (and d (cadr d)))
+                 'held (and locked (> (length locked) 3) (plist-get (list-tail locked 3) 'held) #t)
+                 'release-pin (let ((p (assoc n pins))) (and p (caddr p))))))
+       (package-installed))))
 
 (define (packages--git-text row)
   "branch +ahead -behind ~dirty, ASCII; empty for a checkout file"
@@ -436,20 +441,20 @@
 (define packages--checked #f)
 
 (define (packages--updates-text row)
-  "up to date, N behind, N behind main (a clone on another branch), checking, or empty for a package that is no git clone"
-  (let* ((g (plist-get row 'git))
-         (behind (or (and g (plist-get g 'behind)) 0))
-         (m (or (plist-get row 'main-behind) 0)))
+  "held, release pin (the release vouches for another commit), N behind, up to date, checking, or empty for a package that is no git clone"
+  (let ((g (plist-get row 'git)) (pin (plist-get row 'release-pin)) (sha (plist-get row 'sha)))
     (cond ((not g) "")
-          ((> m behind) (string-append (number->string m) " behind main"))
-          ((> behind 0) (string-append (number->string behind) " behind"))
+          ((plist-get row 'held) "held")
+          ((and (string? pin) (string? sha) (not (string-prefix? sha pin))) "release pin")
+          ((packages-update? row) (string-append (number->string (plist-get g 'behind)) " behind"))
           ((not packages--checked) "checking…")
           (else "up to date"))))
 
 (define (packages--updates-cell row)
   (let ((t (packages--updates-text row)))
     (cond ((equal? t "") "")
-          ((packages-update? row) (list t "warning"))
+          ((equal? t "held") (list t "shadow"))
+          ((or (packages-update? row) (equal? t "release pin")) (list t "warning"))
           ((equal? t "up to date") (list t "success"))
           (else (list t "shadow")))))
 
@@ -530,7 +535,10 @@
                                                (list (list "packages-uninstall" "Uninstall" "d" "bad")) '())
                                            (if (plist-get row 'repo) (list (list "packages-open-repo" "GitHub ↗" "o")) '())
                                            (if (plist-get row 'file) (list (list "packages-source" "Source" "v")) '())
-                                         (if (plist-get row 'git) (list (list "packages-pr" "Send upstream" "P")) '())
+                                         (if (plist-get row 'git) (list (list "packages-update" "Update" "u" "good")
+                                                                         (list "packages-hold" (if (plist-get row 'held) "Let it update" "Hold") "h")
+                                                                         (list "packages-pr" "Send upstream" "P")) '())
+                                         (if (package-previous (plist-get row 'name)) (list (list "packages-rollback" "Roll back" "r" "bad")) '())
                                          (list (list "packages-refresh" "Scan again" "g"))))))
          (break-part (if (null? breaks) '() (list (part (count "Tier breaks" breaks) "Break" (map req-row breaks)))))
          (about (let ((n (line! "About")))
@@ -552,7 +560,8 @@
                                    (list (kv-row "updates" (packages--updates-text row))
                                          (kv-row "branch" (or (plist-get git 'branch) "-"))
                                          (kv-row "commit" (or (plist-get row 'sha) "-"))
-                                         (kv-row "pinned at" (or (plist-get row 'pin) "not pinned"))
+                                         (kv-row "pinned at" (string-append (or (plist-get row 'pin) "not pinned") (if (plist-get row 'held) ", held" "")))
+                                         (kv-row "release vouches for" (let ((c (plist-get row 'release-pin))) (if (string? c) (substring c 0 (min 7 (string-length c))) "-")))
                                          (kv-row "upstream" (or (plist-get git 'upstream) "-"))
                                          (kv-row "ahead" (num 'ahead))
                                          (kv-row "behind" (num 'behind))
@@ -628,7 +637,9 @@
            "l loads the package at point and k unloads it: its FEATURE-unload-function runs, its commands, catalog entries and names go, and the feature is forgotten. Core cannot be unloaded. "
            "Moving the point shows the package's page beside the list. RET or v visits the source, P sends a clone's changes upstream as a PR, "
            "g scans again and fetches every clone: the git column shows the commit and how far it is ahead or behind, the updates column says up to date or how many commits a clone is behind, and the echo names the ones behind (M-x packages-check-updates does the same from anywhere). "
-           "/ narrows the rows (state:loaded, state:update, state:up-to-date, tier:core, breaks:NAME), q quits.")
+           "Packages follow the compos release: u updates the package at point to the commit the release vouches for (a package of your own source to its newest), U updates every package, h holds one at its commit so updates skip it, and r rolls one back to the commit before its last update and holds it there; the updates column says held, release pin when the release vouches for another commit, N behind or up to date. "
+           "An update never stops at a break: when it drops public names or raises the package's :major, the uses in your own code become a todo with the fix plan, and a chat starts on it for your review. "
+           "/ narrows the rows (state:loaded, state:update, state:up-to-date, state:held, tier:core, breaks:NAME), q quits.")
     'buffer *packages-buffer*
     'transient #f
     'plain #t
@@ -644,7 +655,7 @@
     'section? (lambda (buf row) (packages--sep? row))
     'section-label (lambda (buf row) (plist-get row 'title))
     'markable? (lambda (buf row) #f)
-    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (string-append (if (packages-loaded? e) "loaded" "unloaded") (if (packages-update? e) " update" (if (equal? (packages--updates-text e) "up to date") " up-to-date" ""))))) "loaded, unloaded, update or up-to-date")
+    'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (string-append (if (packages-loaded? e) "loaded" "unloaded") (if (packages-update? e) " update" (if (equal? (packages--updates-text e) "up to date") " up-to-date" "")) (if (plist-get e 'held) " held" "")))) "loaded, unloaded, update, up-to-date or held")
                    (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
                    (list "breaks:" (lambda (b e) (if (packages--sep? e) "" (packages--break-text e))) "a package it breaks the tier rules with"))
     'columns (lambda (buf) (list (list "package" 26) (list "in" 9) (list "state" 7) (list "updates" 11) (list "tier" 11) (list "req" 4) (list "by" 4) (list "git" 22) (list "prs" 4) (list "tier breaks" #f)))
@@ -657,11 +668,11 @@
     'title (lambda (buf) (string-append "Packages  ·  " (number->string (length (packages-tier-breaks))) " tier breaks"))
     'total (lambda (buf) (length (filter (lambda (r) (not (packages--sep? r))) (list-entries buf))))
     'noun "package"
-    'footer (lambda (buf) '(("l" "load/install") ("k" "unload") ("d" "uninstall") ("o" "github") ("a" "add source") ("v" "source") ("P" "send upstream") ("/" "filter") ("g" "scan again") ("q" "quit")))
-    'keys '(("RET" "packages-source") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("u" "update") ("U" "update all") ("h" "hold") ("l" "load/install") ("k" "unload") ("d" "uninstall") ("o" "github") ("a" "add source") ("v" "source") ("P" "send upstream") ("/" "filter") ("g" "scan again") ("q" "quit")))
+    'keys '(("RET" "packages-source") ("u" "packages-update") ("U" "packages-update-all") ("h" "packages-hold") ("r" "packages-rollback") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
 
 (define-mode "packages-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-keys! "packages-detail-mode" '(("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
+(mode-keys! "packages-detail-mode" '(("u" "packages-update") ("U" "packages-update-all") ("h" "packages-hold") ("r" "packages-rollback") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
 (define-command "packages-refresh" "Scan the packages again, then fetch the clones and their open PRs"
   (lambda ()
     (set! packages--scan-cache #f)
@@ -867,6 +878,39 @@
              (message (string-append "unloaded " name ", " (number->string (length names)) " names"))
              (packages--redraw! row)
              #t)))))
+
+(define-command "packages-update" "Update the package at point to the commit the release vouches for; an API break files a fix for your code"
+  (lambda ()
+    (let ((row (packages--at)))
+      (if (not row) (message "No package here")
+          (package-update! (plist-get row 'name)
+            (lambda (r)
+              (unless (eq? (cadr r) 'updated)
+                (message (string-append (car r) ": " (symbol->string (cadr r))
+                                        (if (pair? (cddr r)) (string-append ", " (caddr r)) ""))))
+              (packages--redraw! row))))))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-update-all" "Update every package that is not held to the commits the release vouches for"
+  (lambda ()
+    (message "updating the packages…")
+    (package-update-all! (lambda (rs) (set! packages--scan-cache #f)
+                           (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*)))))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-hold" "Hold the package at point at its commit, or let it update again"
+  (lambda ()
+    (let ((row (packages--at)))
+      (if (not row) (message "No package here")
+          (begin (package-hold! (plist-get row 'name)) (packages--redraw! row)))))
+  'modes '(packages-detail-mode packages-mode))
+
+(define-command "packages-rollback" "Put the package at point back at the commit before its last update, and hold it there"
+  (lambda ()
+    (let ((row (packages--at)))
+      (if (not row) (message "No package here")
+          (package-rollback! (plist-get row 'name) (lambda (c) (packages--redraw! row))))))
+  'modes '(packages-detail-mode packages-mode))
 
 (define-command "packages-load" "Load the package at point into the live session"
   (lambda () (let ((row (packages--at))) (if row (packages-load! row) (message "No package here"))))

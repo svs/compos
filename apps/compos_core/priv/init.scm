@@ -105,6 +105,10 @@
 (require 'perf)
 ;; which compos is running: rel VERSION · COMMIT, or dev · jj · git
 (require 'build-identity)
+;; packages follow the release: hold, rollback, and a fix todo when an
+;; update breaks an API your code uses. It reads build-info, so it follows
+;; build-identity
+(require 'package-update)
 (require 'profile)
 (require 'dismiss)
 

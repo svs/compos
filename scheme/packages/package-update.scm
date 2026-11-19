@@ -430,7 +430,8 @@
 (define (package-follow-release! . k)
   "(package-follow-release! [K]) -- when the running release is not the one packages.lock follows, move every pin to it (package-update-all!) and note the release; #f in a checkout or when the lock follows it already"
   (let* ((info (build-info))
-         (v (and info (plist-get info 'version)))
+         ;; a Scheme bundle moves the version without a new executable
+         (v (and info (if (boundp 'release-running-version) (release-running-version) (plist-get info 'version))))
          (rel (package-lock-release)))
     (if (or (not (string? v)) (and rel (equal? (cadr rel) v)))
         (begin (when (pair? k) ((car k) #f)) #f)

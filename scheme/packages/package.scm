@@ -362,7 +362,17 @@
 ;; clone clones it at the pin, at once. The standard library is not one: it
 ;; lives in scheme/stdlib.
 (define (package-core-pins)
-  (or (package--read-first (string-append (compos-priv-dir) "/standard.lock")) '()))
+  ;; a Scheme bundle's standard.lock in the overlay wins while the overlay
+  ;; patches the commit that runs
+  (let* ((ov (string-append (compos-state-dir) "/overlay"))
+         (m (package--read-first (string-append ov "/overlay.scm")))
+         (info (and (boundp 'build-info) (build-info)))
+         (live (and (pair? m) info (string? (plist-get (cdr m) 'base)) (string? (plist-get info 'commit))
+                    (let ((a (plist-get (cdr m) 'base)) (b (plist-get info 'commit)))
+                      (or (string-prefix? a b) (string-prefix? b a)))
+                    (file-exists? (string-append ov "/standard.lock")))))
+    (or (package--read-first (if live (string-append ov "/standard.lock") (string-append (compos-priv-dir) "/standard.lock")))
+        '())))
 
 (define (package--sh s) (string-append "'" (string-replace s "'" "'\\''") "'"))
 

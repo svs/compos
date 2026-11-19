@@ -14,7 +14,62 @@ permissions:
   contents: write
 
 jobs:
+  # The release heartbeat: every compos-dev package whose tests pass with
+  # this compos goes into priv/standard.lock at the commit that passed; one
+  # without tests goes in at its newest commit. compos-update's
+  # first boot moves the user's pins to these commits (package-update).
+  lock:
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: test
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.4.3"
+          elixir-version: "1.19.5"
+          version-type: strict
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test the packages and write standard.lock
+        run: |
+          mix local.hex --force && mix local.rebar --force
+          mix deps.get && mix compile
+          repos="$RUNNER_TEMP/repos"; mkdir -p "$repos"
+          for r in $(gh repo list compos-dev --limit 300 --no-archived --json name --jq '.[].name | select(startswith("compos-"))'); do
+            git clone --quiet "https://github.com/compos-dev/$r.git" "$repos/${r#compos-}" || true
+          done
+          lock=apps/compos_core/priv/standard.lock
+          {
+            echo ';; standard.lock --- the standard packages this core works with: CI writes it'
+            echo ';; at each release with the commit of each compos-dev package whose tests'
+            echo ';; passed with it. A release bundles each; compos-update moves the pins to them.'
+            echo '('
+          } > "$lock.new"
+          for dir in "$repos"/*; do
+            n=$(basename "$dir")
+            [ -f "$dir/$n.scm" ] || continue
+            if ls "$dir"/*-test.scm >/dev/null 2>&1; then
+              SCHEME_TESTS="$n" COMPOS_PACKAGE_REPOS="$repos" mix test --include packages apps/compos_core/test/compos/package_suite_test.exs > "$RUNNER_TEMP/$n.log" 2>&1 \
+                || { echo "::warning::$n failed its tests; the release does not vouch for it"; continue; }
+            fi
+            printf ' ("%s" "%s" "%s")\n' "$n" "https://github.com/compos-dev/compos-$n.git" "$(git -C "$dir" rev-parse HEAD)" >> "$lock.new"
+          done
+          echo ')' >> "$lock.new"
+          mv "$lock.new" "$lock"
+          cat "$lock"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: standard-lock
+          path: apps/compos_core/priv/standard.lock
+
   build:
+    needs: lock
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +88,11 @@ jobs:
       BURRITO_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: standard-lock
+          path: apps/compos_core/priv
 
       - name: Erlang and Elixir
         uses: erlef/setup-beam@v1
@@ -90,8 +150,41 @@ jobs:
     steps:
       - uses: actions/download-artifact@v7
         with:
+          pattern: compos-*
           path: dist
           merge-multiple: true
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          path: src
+      - uses: actions/download-artifact@v7
+        with:
+          name: standard-lock
+          path: src/apps/compos_core/priv
+      # Only Scheme changed since the last tag: attach those files, with the
+      # release's standard.lock, as compos-VERSION-scheme-BASE.tar.gz. A
+      # stable compos built from BASE takes it into its overlay with no new
+      # executable and no restart (compos-update, release-update-scheme!).
+      - name: Scheme-only bundle
+        working-directory: src
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          [ -n "$prev" ] || { echo "no earlier tag"; exit 0; }
+          changed=$(git diff --name-only "$prev" "$GITHUB_REF_NAME")
+          # the version bump in mix.exs rides along with every release
+          if git diff -U0 "$prev" "$GITHUB_REF_NAME" -- mix.exs | grep -E '^[-+][^-+]' | grep -qv '@version'; then
+            echo "mix.exs changed: no Scheme bundle"; exit 0
+          fi
+          changed=$(echo "$changed" | grep -vx mix.exs || true)
+          if echo "$changed" | grep -qvE '^(scheme/.*\.scm|apps/compos_core/priv/.*\.scm|docs/.*|.*\.md)$'; then
+            echo "more than Scheme changed since $prev: no Scheme bundle"; exit 0
+          fi
+          files=$(git diff --name-only --diff-filter=AMR "$prev" "$GITHUB_REF_NAME" | grep -E '\.scm$' | grep -v -- '-test\.scm$' || true)
+          files="$files apps/compos_core/priv/standard.lock"
+          base=$(git rev-parse --short "$prev^{commit}")
+          printf '(bundle base "%s" version "%s" files (%s))\n' "$base" "$ver" "$(for f in $files; do printf '"%s" ' "$f"; done)" > scheme-bundle.scm
+          tar -czf "../dist/compos-$ver-scheme-$base.tar.gz" scheme-bundle.scm $files
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

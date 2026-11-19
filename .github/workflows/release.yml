@@ -1,13 +1,12 @@
 # Builds the single-file compos executable for each target and attaches it
-# to a GitHub release. Push a tag like v0.1.0 to publish one.
+# to a GitHub release. Releases are tested and built on marilyn
+# (compos-release-watch), so this runs only by hand, for the other targets.
 # Each target builds on its own runner: the Rust and C NIFs compile natively,
 # so Burrito never cross-compiles them. On Linux Burrito ships a musl runtime,
 # so the Rust NIFs build for musl with cargo-zigbuild.
 name: release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:

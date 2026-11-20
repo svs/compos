@@ -2832,6 +2832,28 @@ the chat."
                        (connector-models connector))))
         (map (lambda (m) (list m "")) (connector-models connector)))))
 
+;; What a switch to CONNECTER offers while a thread reattaches: the models
+;; its own backend reported, live from this chat when it already runs the
+;; connector, the remembered list otherwise. A probe-capable connector that
+;; has not spoken yet offers nothing but its default — never its declared
+;; seeds, which age the day the provider ships a model the adapter has no
+;; alias for — and the probe asks it now, so the list is here the next time
+;; the prompt opens. A connector with no process of its own (the api lane)
+;; keeps its declared list: nothing will ever report for it.
+(define (chat-models-for-switch buf connector)
+  (if (member connector (llm-models-probe-connectors))
+      (let ((entries (or (and (equal? connector (buffer-local-value 'agent-connector buf))
+                              (buffer-local-value 'agent-models buf))
+                         (llm-models-remembered connector))))
+        (if (pair? entries)
+            (map car (chat-model-options buf connector))
+            (begin
+              (unless (member connector *llm-models-probed*)
+                (set! *llm-models-probed* (cons connector *llm-models-probed*))
+                (llm-models-probe! connector))
+              '())))
+      (connector-models connector)))
+
 ;; A backend's session modes are the connector's truth as well, and they
 ;; arrive on the same asynchronous event. Remembering them is what lets the
 ;; menu offer them to a chat that has not attached yet, and to one whose

@@ -280,43 +280,19 @@
            #t)
           (else #f))))
 
-;; listener id -> the events of its open burst, newest first
-(defvar '*agent-listen-bursts* '())
 
 (define (agent-listen--burst? l)
   (and (> agent-listen-burst-seconds 0)
        (not (plist-get l 'at))
        (any (lambda (p) (event-topic-match? p (plist-get l 'topic))) agent-listen-burst-topics)))
 
-(define (agent-listen--burst-key id) (string->symbol (string-append "agent-listen-burst:" id)))
 
-(define (agent-listen--flush! id)
-  ;; the channel went quiet: wake the chat once with the whole burst; a
-  ;; listener cancelled meanwhile takes nothing, a failed wake tries again
-  (let ((es (reverse (let ((p (assoc id *agent-listen-bursts*))) (if p (cdr p) '()))))
-        (l (agent-listen--find id)))
-    (set! *agent-listen-bursts* (filter (lambda (p) (not (equal? (car p) id))) *agent-listen-bursts*))
-    (when (and l (pair? es) (not (agent-listen--wake! l es)))
-      (set! *agent-listen-bursts* (cons (cons id (reverse es)) *agent-listen-bursts*))
-      (debounce! (agent-listen--burst-key id) (* 1000 agent-listen-burst-seconds)
-                 (lambda (_) (agent-listen--flush! id)) #f))))
 
-(define (agent-listen--hold! l e)
-  ;; one more message of the burst; each one starts the quiet wait again
-  (let ((id (plist-get l 'id)))
-    (set! *agent-listen-bursts*
-          (cons (cons id (cons e (let ((p (assoc id *agent-listen-bursts*))) (if p (cdr p) '()))))
-                (filter (lambda (p) (not (equal? (car p) id))) *agent-listen-bursts*)))
-    (debounce! (agent-listen--burst-key id) (* 1000 agent-listen-burst-seconds)
-               (lambda (_) (agent-listen--flush! id)) #f)
-    #t))
+
+
 
 (define (agent-listen--deliver! l e)
-  (cond ((agent-listen--burst? l)
-         (agent-listen--sent! l e)
-         (agent-listen--hold! l e))
-        ((agent-listen--wake! l e) (agent-listen--sent! l e) #t)
-        (else #f)))
+  (and (agent-listen--wake! l e) (begin (agent-listen--sent! l e) #t)))
 
 ;; the workflow's handler: every event of the batch to every listener that
 ;; takes it. A wake that failed fails the batch, and the workflow runs it
@@ -327,7 +303,7 @@
       (lambda (e)
         (for-each (lambda (l)
                     ;; a listener that fired and closed earlier in the batch is gone
-                    (when (and (agent-listen--find (plist-get l 'id)) (agent-listen--takes? l e))
+                    (when (and (not (agent-listen--burst? l)) (agent-listen--find (plist-get l 'id)) (agent-listen--takes? l e))
                       (unless (agent-listen--deliver! l e) (set! failed (+ failed 1)))))
                   *agent-listeners*))
       events)
@@ -335,19 +311,50 @@
       (error (string-append "agent-listen: " (number->string failed) " wake(s) failed; the batch runs again")))))
 
 ;; every listener's topic, once each; none when no one listens
-(define (agent-listen--topics)
-  (let loop ((ls *agent-listeners*) (acc '()))
+(define (agent-listen--topics &optional burst)
+  ;; BURST: the chat-channel listeners' topics, else the others'
+  (let loop ((ls (filter (lambda (l) (eq? (and (agent-listen--burst? l) #t) (and burst #t))) *agent-listeners*))
+             (acc '()))
     (cond ((null? ls) (reverse acc))
           ((member (plist-get (car ls) 'topic) acc) (loop (cdr ls) acc))
           (else (loop (cdr ls) (cons (plist-get (car ls) 'topic) acc))))))
 
 ;; one workflow carries every listener; FROM is where a new one starts
+(define (agent-listen--handle-burst key events)
+  ;; one conversation went quiet: each chat-channel listener that takes some of
+  ;; its events wakes once with all of them, in the order they came
+  (let ((failed 0))
+    (for-each
+      (lambda (l)
+        (when (and (agent-listen--burst? l) (agent-listen--find (plist-get l 'id)))
+          (let ((es (filter (lambda (e) (agent-listen--takes? l e)) events)))
+            (when (pair? es)
+              (if (agent-listen--wake! l es)
+                  (for-each (lambda (e) (agent-listen--sent! l e)) es)
+                  (set! failed (+ failed 1)))))))
+      *agent-listeners*)
+    (when (> failed 0)
+      (error (string-append "agent-listen: " (number->string failed) " burst wake(s) failed; the batch runs again")))))
+
+(define agent-listen--burst-workflow "agent-listen-burst")
+
 (define (agent-listen--define! &optional from)
+  ;; two workflows: one wakes at once; the chat channels' waits until a
+  ;; conversation has been quiet for agent-listen-burst-seconds, each further
+  ;; message pausing it again, and wakes at the latest after ten quiet spans
   (define-workflow! agent-listen--workflow
     'listen (agent-listen--topics)
     'handle 'agent-listen--handle
     'group-by 'agent-listen--batch-key
     'quiet 50 'max-wait 500 'max-attempts 8
+    'from from)
+  (define-workflow! agent-listen--burst-workflow
+    'listen (agent-listen--topics #t)
+    'handle 'agent-listen--handle-burst
+    'group-by 'event-topic
+    'quiet (* 1000 (max agent-listen-burst-seconds 0.05))
+    'max-wait (* 10000 (max agent-listen-burst-seconds 0.05))
+    'max-attempts 8
     'from from))
 
 (define (agent-listen! spec &optional note)

@@ -577,6 +577,12 @@ nonstandard install out of the built-in connector catalog."
 (effects! '(read))
 (public! 'connector-names
   "(connector-names) — the names of the connectors that are not hidden")
+
+;; Resolving a config can create the sanitized codex/dsh homes and turn off
+;; codex skills in the thread's cwd, so it writes.
+(effects! '(write))
+(public! 'agent-resolve-config
+  "(agent-resolve-config OPTS) — the full config a chat thread starts with: connector, model, env, MCP servers and system parts")
 (effects! '(write))
 
 (define (connector-description name)

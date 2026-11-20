@@ -8,6 +8,8 @@
 
 (require 'buffer-relations)
 (require 'transient)
+;; the chat interface every kind of chat shares: input, history, keys, follow
+(require 'chat-surface)
 
 (domain! 'chat)
 (effects! '(unknown))

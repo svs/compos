@@ -1331,15 +1331,13 @@
 
 (define (chat-view-tree buf children verbosity queued activity hidden)
   (append
-    (list (list 'tag "c-transcript" 'class (string-append "ag-scroll ag-verbosity-" verbosity)
-                'isolate #t 'follow #t 'anchor "transcript"
-                'attrs (list (list "verbosity" verbosity) (list "buffer" buf))
-                ;; the first drawn block keeps its index in the whole
-                ;; transcript; the earlier row takes the index before it
-                'index-base (max 0 (- hidden 1))
-                'children (if (> hidden 0)
-                              (cons (chat-view--earlier hidden) children)
-                              children)))
+    (list (chat-surface-transcript children
+            (list 'class (string-append "ag-verbosity-" verbosity)
+                  'attrs (list (list "verbosity" verbosity) (list "buffer" buf))
+                  ;; the first drawn block keeps its index in the whole
+                  ;; transcript; the earlier row takes the index before it
+                  'index-base (max 0 (- hidden 1))
+                  'before (if (> hidden 0) (list (chat-view--earlier hidden)) '()))))
     (map (lambda (q)
            (list 'tag "c-user" 'class "ag-user ag-queued ag-queued-row"
                  'attrs '(("state" "queued"))
@@ -1371,10 +1369,9 @@
                                              (string-append "chat-image-drop:" (number->string i))
                                              "×")))))
                            (iota (length pending)))))))
-    (list (list 'tag "c-prompt" 'class "ag-inputrow"
-                'children (list (chat-view--label "YOU")
-                                (list 'tag "c-input" 'class "ag-input" 'input #t
-                                      'hint "RET sends · C-RET sends next, or interrupts when empty"))))))
+    (list (chat-surface-prompt
+            (list 'label (chat-view--label "YOU")
+                  'hint "RET sends · C-RET sends next, or interrupts when empty")))))
 
 (effects! '(write))
 
@@ -1722,15 +1719,10 @@
 ")
 
 ;; typing answers at the bottom, so a key that types comes home
-(define (chat-view-type-follows!)
-  (let ((buf (current-buffer)))
-    (when (and (chat-rich-view? buf)
-               (member (editing--command-name) chat-view-input-commands)
-               (let ((fp (buffer-local-value 'follow-place buf))) (and (pair? fp) (car fp))))
-      (buffer-set-local! buf 'chat-view-nav #f)
-      (chat-follow-again! buf))))
 
-(add-hook! 'post-command-hook 'chat-view-type-follows!)
+;; a key that types brings a chat read away from the bottom back to it:
+;; the shared chat interface does it for every chat (chat-surface-type-follows!)
+(remove-hook! 'post-command-hook 'chat-view-type-follows!)
 
 (define (chat-view--mode-hook!) (chat-view-sync! (current-buffer)))
 

@@ -680,104 +680,34 @@
               (with-current-buffer b chat-scheme--mode-hook!)))
           (buffer-list))
 
-(define *chat-history-limit* 200)
+;; The input history is the shared chat interface's (chat-surface): one ring
+;; per chat, newest first, the messages you sent in THIS buffer. A chat is a
+;; session of its own, the way a shell window is. The agent chat injects
+;; what is its own: the ring a reload starts empty is seeded from its
+;; transcript, and an empty draft walks the queued rows before the history.
+(define chat-history chat-surface-history)
+(define chat-history-set! chat-surface-history-set!)
+(define chat-history-push! chat-surface-history-push!)
+(define chat-history-seed! chat-surface-history-seed!)
+(define chat-history-reset! chat-surface-history-reset!)
+(define chat-in-input? chat-surface-in-input?)
+(define chat-on-first-input-line? chat-surface-on-first-input-line?)
+(define chat-on-last-input-line? chat-surface-on-last-input-line?)
+(define chat-history-for chat-surface-history-for)
+(define chat-history-prefix-of chat-surface-history-prefix-of)
+(define chat-history-recall! chat-surface-history-recall!)
 
-;; One history per chat, newest first: the expressions you ran and the
-;; messages you sent in THIS buffer. A chat is a session of its own, the
-;; way a shell window is — the apropos call you made here is one
-;; up-arrow away here, and the chat next door is not full of it. It
-;; lives in memory only: a restart starts you clean, and the transcripts
-;; still hold what was said.
-(define (chat-history buf)
-  (or (buffer-local-value 'chat-history-ring buf) '()))
-
-(define (chat-history-set! buf ring)
-  (buffer-set-local! buf 'chat-history-ring
-    (chat-take ring *chat-history-limit*)))
-
-;; consecutive repeats collapse, the way a shell's history does
-(define (chat-history-push! buf text)
-  (let ((t (string-trim text))
-        (h (chat-history buf)))
-    (unless (or (equal? t "")
-                (and (pair? h) (equal? t (car h))))
-      (chat-history-set! buf (cons t h)))))
-
-;; A reload and a restart both start the ring empty, and a chat you had
+;; a reload and a restart both start the ring empty, and a chat you had
 ;; been talking in all morning would answer the first up-arrow with
-;; nothing. The first walk in such a chat seeds its ring from its own
-;; transcript, newest first.
-(define (chat-history-seed! buf)
-  (when (null? (chat-history buf))
-    (chat-history-set! buf
-      (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
-        (cond ((null? ts) (reverse acc))
-              ;; a wake is not something the user typed
-              ((and (equal? (car (car ts)) "user")
-                    (not (agent-wake-source (car (cdr (car ts))))))
-               (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
-              (else (loop (cdr ts) acc)))))))
-
-(define (chat-history-reset! buf)
-  (buffer-set-local! buf 'chat-history-pos #f)
-  (buffer-set-local! buf 'chat-history-draft #f)
-  (buffer-set-local! buf 'chat-history-prefix #f))
-
-(define (chat-in-input? buf)
-  (>= (point) (or (buffer-local-value 'agent-saved-mark buf) 0)))
-
-(define (chat-on-first-input-line? buf)
-  (let ((start (car (chat-input-region buf))))
-    (or (<= (point) start)
-        (not (string-contains?
-               (substring-bytes (buffer-text buf) start (point))
-               "\n")))))
-
-(define (chat-on-last-input-line? buf)
-  (not (string-contains?
-         (substring-bytes (buffer-text buf) (point) (buffer-size buf))
-         "\n")))
-
-; What you have already typed is the search. Up walks only the entries
-; that start with it, the way a shell's history search does, so "(load "
-; reaches the last thing you loaded and "(" reaches every expression
-; without the prose in between. An empty draft walks everything. The
-; prefix is taken once, when you step off the draft, and held for the
-; walk: recall rewrites the input, and reading it again would change the
-; ring underfoot.
-(define (chat-history-for buf prefix)
-  (let ((h (chat-history buf)))
-    (if (equal? prefix "")
-        h
-        (filter (lambda (s) (string-prefix? prefix s)) h))))
-
-(define (chat-history-prefix-of buf)
-  (or (buffer-local-value 'chat-history-prefix buf)
-      (let ((prefix (chat-input-text buf)))
-        (buffer-set-local! buf 'chat-history-prefix prefix)
-        prefix)))
-
-(define (chat-history-recall! buf dir)
-  (let* ((prefix (chat-history-prefix-of buf))
-         (h (chat-history-for buf prefix))
-         (pos (or (buffer-local-value 'chat-history-pos buf) -1))
-         (next (if (< dir 0) (+ pos 1) (- pos 1))))
-    (cond ((>= next (length h))
-           (message (if (equal? prefix "")
-                        "no earlier input"
-                        (string-append "no earlier input starting with " prefix))))
-          ((< next -1) #f)
-          (else
-            ;; hold the draft the first time you step off it
-            (when (= pos -1)
-              (buffer-set-local! buf 'chat-history-draft (chat-input-text buf)))
-            (buffer-set-local! buf 'chat-history-pos (if (= next -1) #f next))
-            ;; back on the draft, the next walk takes its prefix afresh
-            (when (= next -1) (buffer-set-local! buf 'chat-history-prefix #f))
-            (chat-replace-input! buf
-              (if (= next -1)
-                  (or (buffer-local-value 'chat-history-draft buf) "")
-                  (nth next h)))))))
+;; nothing: the first walk seeds it from the transcript, newest first
+(define (chat--surface-seed buf)
+  (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
+    (cond ((null? ts) (reverse acc))
+          ;; a wake is not something the user typed
+          ((and (equal? (car (car ts)) "user")
+                (not (agent-wake-source (car (cdr (car ts))))))
+           (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
+          (else (loop (cdr ts) acc)))))
 
 ;; the queued rows walk newest first, same direction as sent history, so
 ;; index 0 is the message closest to the input -- the one chat-unqueue
@@ -809,35 +739,25 @@
                                       (number->string (length q))
                                       " -- C-c C-d removes it, RET re-sends it")))))))
 
-(define (chat-history-move! dir)
-  (let* ((buf (current-buffer))
-         (motion (if (< dir 0) "previous-line" "next-line")))
-    (chat-history-seed! buf)
-    (cond
-      ;; already walking the queued rows: stay in that walk
-      ((buffer-local-value 'chat-queued-walk buf) (chat-queued-recall! buf dir))
-      ((or (not (buffer-local-value 'agent-saved-mark buf))
-           (not (chat-in-input? buf))
-           ;; inside a multi-line input, up and down are still motion
-           (if (< dir 0)
-               (not (chat-on-first-input-line? buf))
-               (not (chat-on-last-input-line? buf))))
-       (run-command motion))
-      ;; an empty draft, going up, with rows waiting to run: those come
-      ;; before the sent history, since they are what point is closest to
-      ((and (< dir 0)
-            (equal? (string-trim (chat-input-text buf)) "")
-            (pair? (buffer-local-value 'chat-queued buf)))
-       (chat-queued-recall! buf dir))
-      ((null? (chat-history buf)) (run-command motion))
-      (else (chat-history-recall! buf dir)))))
+;; the agent chat's own <up>/<down> walk: already walking the queued rows,
+;; stay in that walk; an empty draft going up, with rows waiting to run,
+;; takes those first, since they are what point is closest to
+(define (chat--surface-walk buf dir)
+  (cond ((buffer-local-value 'chat-queued-walk buf) (chat-queued-recall! buf dir) #t)
+        ((and (< dir 0)
+              (equal? (string-trim (chat-input-text buf)) "")
+              (pair? (buffer-local-value 'chat-queued buf)))
+         (chat-queued-recall! buf dir) #t)
+        (else #f)))
+
+(define chat-history-move! chat-surface-history-move!)
 
 (define-command "chat-history-previous" "Recall the previous thing you typed at a prompt"
-  (lambda () (chat-history-move! -1))
+  (lambda () (chat-surface-history-move! -1))
   'modes '(chat-mode))
 
 (define-command "chat-history-next" "Recall the next thing you typed at a prompt"
-  (lambda () (chat-history-move! 1))
+  (lambda () (chat-surface-history-move! 1))
   'modes '(chat-mode))
 
 (define-command "agent-interrupt-send" "Revive, cancel, or hard-reset the agent"
@@ -1203,84 +1123,46 @@
             (loop (+ n 1))
             slug)))))
 
-(define (chat-marker-guard? buf p)
-  (and (buffer-local-value 'agent-saved-mark buf)
-       (<= p (chat-input-start buf))))
+(define chat-marker-guard? chat-surface-guard?)
 
 (effects! '(write))
 
 (define-command "chat-delete-backward" "Delete backward, but never into the transcript"
-  (lambda ()
-    (if (chat-marker-guard? (current-buffer) (point))
-        (message "beginning of input")
-        (unless (delete-active-region!) (delete-char! -1))))
+  (lambda () (run-command "chat-surface-delete-backward"))
   'modes '(chat-mode))
 
 (define-command "chat-delete-forward" "Delete forward, but never the input marker"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (and (buffer-local-value 'agent-saved-mark buf)
-               (>= (point) (chat-mark buf))
-               (< (point) (chat-input-start buf)))
-          (message "this is the input marker")
-          (unless (delete-active-region!) (delete-char! 1)))))
+  (lambda () (run-command "chat-surface-delete-forward"))
   'modes '(chat-mode))
 
 (effects! '(write display))
 
 ;; Scrolled up in a long chat, a window keeps its own scroll pin and stops
-;; following point. Back to the newest message means both halves: point home
-;; in the input, and every window showing this chat off its pin again.
-(define (chat-to-bottom-target)
-  (let ((buf (current-buffer)))
-    (if (chat-buffer? buf)
-        buf
-        (let loop ((ws (window-list)))
-          (cond ((null? ws) #f)
-                ((chat-buffer? (cadr (car ws))) (cadr (car ws)))
-                (else (loop (cdr ws))))))))
+;; following point. The shared chat interface owns the reader's place
+;; ('follow-place, 'follow-seq); the agent chat injects what is its own:
+;; the bottom is the transcript window's home, so the earlier blocks a
+;; reader revealed go back behind the reveal row, and the top first
+;; reveals every block, since the transcript draws only its newest.
+(define (chat--surface-follow buf)
+  (buffer-set-local! buf 'chat-view-nav #f)
+  (when (buffer-local-value 'chat-view-reveal buf)
+    (buffer-set-local! buf 'chat-view-reveal #f)
+    (when (boundp 'chat-view-sync!) (chat-view-sync! buf))))
 
-;; The transcript scroller keeps a reader position of its own, apart from
-;; point: 'follow-place records that the reader left the bottom, and the
-;; block they left it on. Every relayout re-places
-;; the view from those, so moving point alone is invisible — the hook puts
-;; the transcript straight back on the saved block. Clearing them, and
-;; bumping the token the hook watches, is what makes a chat follow the
-;; newest message again.
-(define (chat-follow-again! buf)
-  (let ((seq (buffer-local-value 'follow-seq buf)))
-    (buffer-set-local! buf 'follow-place #f)
-    ;; the bottom is the transcript window's home: the earlier blocks a
-    ;; reader revealed go back behind the reveal row
-    (when (buffer-local-value 'chat-view-reveal buf)
-      (buffer-set-local! buf 'chat-view-reveal #f)
-      (when (boundp 'chat-view-sync!) (chat-view-sync! buf)))
-    (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))
+(define (chat--surface-top buf)
+  (buffer-set-local! buf 'chat-view-reveal (length (agent-blocks buf)))
+  (when (boundp 'chat-view-sync!) (chat-view-sync! buf)))
+
+(define (chat-follow-again! buf) (chat-surface-follow! buf))
+
+(define (chat-to-bottom-target) (chat-surface-target))
 
 (define-command "chat-to-bottom" "Scroll this chat to the newest message"
-  (lambda ()
-    (let ((buf (chat-to-bottom-target)))
-      (if (not buf)
-          (message "no chat here")
-          (begin
-            (with-current-buffer buf (lambda () (end-of-buffer!)))
-            (chat-follow-again! buf)
-            (buffer-windows-follow-point! buf)))))
+  (lambda () (run-command "chat-surface-to-bottom"))
   'modes '(chat-mode))
-;; The other end: the first message. The transcript draws only its newest
-;; blocks, so the top first reveals every earlier one; then the reader's
-;; place is the very top, and the bumped token makes the page take it.
+
 (define-command "chat-to-top" "Scroll this chat to its first message"
-  (lambda ()
-    (let ((buf (chat-to-bottom-target)))
-      (if (not buf)
-          (message "no chat here")
-          (let ((seq (buffer-local-value 'follow-seq buf)))
-            (with-current-buffer buf (lambda () (beginning-of-buffer!)))
-            (buffer-set-local! buf 'chat-view-reveal (length (agent-blocks buf)))
-            (when (boundp 'chat-view-sync!) (chat-view-sync! buf))
-            (buffer-set-local! buf 'follow-place '(#t 0 #f 0))
-            (buffer-set-local! buf 'follow-seq (+ 1 (if (number? seq) seq 0)))))))
+  (lambda () (run-command "chat-surface-to-top"))
   'modes '(chat-mode))
 
 ;; A chat comes back at its newest message. A browser that attaches a
@@ -1308,6 +1190,7 @@
 ;; change under them, so the rich view does not sync after them
 (define chat-view-input-commands
   '("self-insert-command" "chat-delete-backward" "chat-delete-forward"
+    "chat-surface-delete-backward" "chat-surface-delete-forward"
     "delete-backward-char" "delete-char"))
 
 (define (chat-input-post-command!)
@@ -1320,6 +1203,21 @@
 (add-hook! 'pre-command-hook 'chat-snap-to-input!)
 (add-hook! 'post-command-hook 'chat-input-post-command!)
 
+(define (chat--surface-step buf delta)
+  (and (boundp 'chat-rich-view?) (chat-rich-view? buf) (begin (chat-view-step! buf delta) #t)))
+
+(define (chat-surface-spec-agent)
+  "what the agent chat injects into the shared chat interface: its input mark, the marker bytes an old chat still holds, and its own seed, queue walk, follow, top and step; RET stays agent-send, which queues and interrupts"
+  (list 'mark 'agent-saved-mark
+        'input-skip (lambda (buf) (or (buffer-local-value 'agent-marker-bytes buf) 0))
+        ;; by name, so a reload reaches the chats already open
+        'seed (lambda (buf) (chat--surface-seed buf))
+        'walk (lambda (buf dir) (chat--surface-walk buf dir))
+        'follow (lambda (buf) (chat--surface-follow buf))
+        'top (lambda (buf) (chat--surface-top buf))
+        'step (lambda (buf delta) (chat--surface-step buf delta))
+        'send (lambda (buf text) (with-current-buffer buf (lambda () (run-command "agent-send"))))))
+
 (define (agent-install-keys! buf)
   ;; the mark is a marker: the buffer keeps the position current through
   ;; every edit. Declared here because every chat passes through this fn,
@@ -1328,10 +1226,11 @@
   ;; after it, in the input. The agent's own appends go through
   ;; buffer-insert-at-local!, which advances a stay marker itself.
   (buffer-marker-local! buf 'agent-saved-mark 'stay)
-  
-  
-  
-  )
+  ;; the chat interface every chat shares; the agent chat is one kind
+  (chat-surface-attach! buf (chat-surface-spec-agent)))
+
+;; every chat-mode buffer is that kind, before its keys are installed too
+(chat-surface-kind! "chat-mode" (chat-surface-spec-agent))
 
 ;; C-g and ESC stop the reply in flight; with none, the plain quit
 (mode-quit! "chat-mode"

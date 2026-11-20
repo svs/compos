@@ -502,9 +502,11 @@
   (let* ((without-fragment (car (string-split href "#")))
          (without-query (car (string-split without-fragment "?")))
          (decoded (url-decode without-query)))
-    (if (string-prefix? "file://" decoded)
-        (substring decoded 7 (string-length decoded))
-        decoded)))
+    (cond ((string-prefix? "file://localhost/" decoded)
+           (substring decoded 16 (string-length decoded)))
+          ((string-prefix? "file://" decoded)
+           (substring decoded 7 (string-length decoded)))
+          (else decoded))))
 
 (define (preview--file-target source href)
   (let ((target (preview--file-href href)))
@@ -543,7 +545,8 @@
 
 ;; "path?line=12" -> 12; a link with no line -> #f
 (define (preview--line-param href)
-  (let ((g (re-groups "[?&]line=([0-9]+)" href 0)))
+  (let ((g (or (re-groups "[?&]line=([0-9]+)" href 0)
+               (re-groups "#L([0-9]+)(?:-L?[0-9]+)?$" href 0))))
     (and g
          (let ((n (string->number (substring-bytes href (car (nth 1 g)) (cadr (nth 1 g))))))
            (and (number? n) (> n 0) n)))))
@@ -581,7 +584,8 @@
 (define (link-follow-to-group win href)
   (mouse-select-window! win)
   (let ((source (current-buffer)))
-    (if (re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)
+    (if (and (re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)
+             (not (string-prefix? "file://" href)))
         (message "Only document links can follow to a group")
         (if (not (boundp 'group-read-or-create!))
             (message "Groups are not available")
@@ -619,6 +623,8 @@
                 (string-prefix? "https://" href))
             (boundp 'browse))
        (browse href))
+      ((string-prefix? "file://" href)
+       (preview--follow-document! source href (frame-group)))
       ((re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)
        (message (string-append "No handler for " href)))
       (else

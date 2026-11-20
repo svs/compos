@@ -348,3 +348,19 @@
       (disable-minor-mode! buf "preview-mode")
       (check-equal! (buffer-local-value 'preview-csv-files buf) #f "the page is gone, so is the list")
       (buffer-kill! buf))))
+
+(deftest 'file-url-href-and-line-fragments
+  "file:// URLs decode to local paths and #L line fragments resolve like ?line="
+  (lambda ()
+    (check-equal! (preview--file-href "file:///tmp/notes.md#L12-L20") "/tmp/notes.md"
+                  "file:/// strips scheme and fragment")
+    (check-equal! (preview--file-href "file://localhost/tmp/linked%20note.md") "/tmp/linked note.md"
+                  "file://localhost/ strips host and decodes path")
+    (check-equal! (preview--line-param "file:///tmp/notes.md#L42") 42
+                  "#L42 resolves to line 42")
+    (check-equal! (preview--line-param "file:///tmp/notes.md#L10-L20") 10
+                  "#L10-L20 resolves to start line 10")
+    (check-equal! (preview--line-param "file:///tmp/notes.md#details") #f
+                  "a heading fragment is not a line number")
+    (check-equal! (preview--line-param "/tmp/notes.md?line=7") 7
+                  "?line=7 still resolves to line 7")))

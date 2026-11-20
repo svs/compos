@@ -10,6 +10,12 @@ defmodule Compos.Ui.PreviewLinkTest do
 
   alias Compos.Core.{Buffer, Editor, Session}
 
+  defp mount_frame!(conn) do
+    {:ok, raw} = Session.eval("(selected-frame)")
+    frame = Jason.decode!(raw)
+    conn |> put_connect_params(%{"frame" => frame}) |> live("/")
+  end
+
   setup do
     Editor.minibuffer_close()
     Editor.set_total_rows(40)
@@ -33,7 +39,7 @@ defmodule Compos.Ui.PreviewLinkTest do
 
     {:ok, ^source} = Compos.Core.open_file(source)
     Editor.set_window_buffer(source)
-    assert {:ok, _} = Session.eval(~s{(run-command "writing-mode")})
+    assert {:ok, _} = Session.eval(~s{(enable-minor-mode! "#{source}" "preview-mode")})
 
     group = "preview-link-#{System.unique_integer([:positive])}"
 
@@ -64,14 +70,14 @@ defmodule Compos.Ui.PreviewLinkTest do
     target: target,
     group: group
   } do
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = mount_frame!(conn)
 
     # mounting is a new frame, and a frame's current group is its own. The
     # reader is in the group when they click, so put this frame there.
     assert {:ok, _} =
              Session.eval(~s{(begin
-               (switch-to-buffer! "#{source}")
-               (switch-to-group! (group-resolve-id "#{group}")))})
+               (switch-to-group! (group-resolve-id "#{group}"))
+               (switch-to-buffer! "#{source}"))})
 
     win = Editor.render_state().tree.id
 
@@ -88,7 +94,7 @@ defmodule Compos.Ui.PreviewLinkTest do
     conn: conn,
     target: target
   } do
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = mount_frame!(conn)
     win = Editor.render_state().tree.id
 
     view
@@ -115,7 +121,7 @@ defmodule Compos.Ui.PreviewLinkTest do
     conn: conn,
     group: group
   } do
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = mount_frame!(conn)
     win = Editor.render_state().tree.id
 
     view
@@ -129,5 +135,31 @@ defmodule Compos.Ui.PreviewLinkTest do
              Session.eval(~s{(chat-input-text (group-chat "#{group}"))})
 
     assert {:ok, "0"} = Session.eval(~s{(chat-turn-count (group-chat "#{group}"))})
+  end
+
+  test "a file:// URL link opens the target buffer at its #L line", %{
+    conn: conn,
+    source: source,
+    target: target,
+    group: group
+  } do
+    {:ok, view, _html} = mount_frame!(conn)
+
+    assert {:ok, _} =
+             Session.eval(~s{(begin
+               (switch-to-group! (group-resolve-id "#{group}"))
+               (switch-to-buffer! "#{source}"))})
+
+    win = Editor.render_state().tree.id
+    encoded = URI.encode(target)
+
+    view
+    |> element("#editor")
+    |> render_hook("preview_link", %{"win" => win, "href" => "file://#{encoded}#L3"})
+
+    assert Editor.current_buffer() == target
+    assert Buffer.text(target) == "# Details\n\nOpened.\n"
+    assert {:ok, "3"} = Session.eval(~s{(with-current-buffer "#{target}" (lambda () (line-number-at-pos (point))))})
+    assert {:ok, "#t"} = Session.eval(~s{(buffer-in-group? "#{target}" "#{group}")})
   end
 end

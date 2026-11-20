@@ -40,6 +40,12 @@
 (defcustom 'agent-listen-default-days 3
   "How long a listener waits before it is due, when its SPEC names no due or days. M-x watchers-sweep looks again at the ones past due.")
 
+(defcustom 'agent-listen-burst-topics '("whatsapp:*" "telegram:*" "signal:*" "slack:*" "sms:*" "imessage:*")
+  "Chat channels where a person types in bursts. A listener on one of these topics waits until the channel has been quiet for agent-listen-burst-seconds, then wakes its chat once with every message of the burst.")
+
+(defcustom 'agent-listen-burst-seconds 30
+  "How long a chat channel must be quiet before its listener wakes the chat with the burst. 0 wakes on every message.")
+
 ;; (id ID chat CHAT-ID topic T kind K match M note N task ID keep B since SEQ created SECS due SECS)
 (defvar '*agent-listeners* '())
 
@@ -90,14 +96,20 @@
 
 ;; what the agent reads when its event lands
 (define (agent-listen--brief l e)
-  (let ((id (plist-get l 'id)) (who (agent-listen--who e)))
+  ;; E is one event, or the list of a burst's events in the order they came
+  (let* ((es (if (event? e) (list e) e))
+         (e (car (reverse es)))
+         (id (plist-get l 'id)) (who (agent-listen--who e)))
     (string-append
       "[event] What you were listening for arrived: "
       (if (agent-listen--blank? (plist-get l 'note)) (event-job-topic-bare (plist-get l 'topic)) (plist-get l 'note))
       (if (agent-listen--blank? (plist-get l 'task)) "" (string-append " (task " (plist-get l 'task) ")"))
       "\n" (event-job-topic-bare (plist-get e 'topic)) " " (format "~a" (plist-get e 'kind))
       (if who (string-append " from " who) "")
-      "\n\n" (event-text e) "\n\n"
+      (if (pair? (cdr es))
+          (string-append ", " (number->string (length es)) " messages in one burst")
+          "")
+      "\n\n" (string-join (map event-text es) "\n") "\n\n"
       (if (plist-get l 'keep)
           (string-append "Listener " id " listens on; (agent-unlisten! \"" id "\") stops it.")
           "That listener is closed. Decide whether this is the answer: carry on with the task, or (agent-listen! SPEC NOTE) again."))))
@@ -254,19 +266,57 @@
 (define (agent-listen--sent! l e)
   (set! *agent-listen-sent* (take (cons (agent-listen--sent-key l e) *agent-listen-sent*) 500)))
 
-(define (agent-listen--deliver! l e)
-  (let ((buf (agent-listen--wake-chat l)))
+(define (agent-listen--wake! l e)
+  ;; E is one event or a burst's list; the record names the last one
+  (let ((buf (agent-listen--wake-chat l))
+        (last (if (event? e) e (car (reverse e)))))
     (cond ((not buf)
            ;; no chat and no archive: a retry finds nothing either
-           (agent-listen--sent! l e)
-           (agent-listen--record! l 'undelivered e)
+           (agent-listen--record! l 'undelivered last)
            #t)
           ((report-errors "agent-listen: wake the chat" (lambda () (agent-wake! buf 'event (agent-listen--brief l e)) #t))
-           (agent-listen--sent! l e)
-           (agent-listen--record! l 'fired e)
+           (agent-listen--record! l 'fired last)
            (unless (plist-get l 'keep) (agent-listen--drop! (plist-get l 'id)))
            #t)
           (else #f))))
+
+;; listener id -> the events of its open burst, newest first
+(defvar '*agent-listen-bursts* '())
+
+(define (agent-listen--burst? l)
+  (and (> agent-listen-burst-seconds 0)
+       (not (plist-get l 'at))
+       (any (lambda (p) (event-topic-match? p (plist-get l 'topic))) agent-listen-burst-topics)))
+
+(define (agent-listen--burst-key id) (string->symbol (string-append "agent-listen-burst:" id)))
+
+(define (agent-listen--flush! id)
+  ;; the channel went quiet: wake the chat once with the whole burst; a
+  ;; listener cancelled meanwhile takes nothing, a failed wake tries again
+  (let ((es (reverse (let ((p (assoc id *agent-listen-bursts*))) (if p (cdr p) '()))))
+        (l (agent-listen--find id)))
+    (set! *agent-listen-bursts* (filter (lambda (p) (not (equal? (car p) id))) *agent-listen-bursts*))
+    (when (and l (pair? es) (not (agent-listen--wake! l es)))
+      (set! *agent-listen-bursts* (cons (cons id (reverse es)) *agent-listen-bursts*))
+      (debounce! (agent-listen--burst-key id) (* 1000 agent-listen-burst-seconds)
+                 (lambda (_) (agent-listen--flush! id)) #f))))
+
+(define (agent-listen--hold! l e)
+  ;; one more message of the burst; each one starts the quiet wait again
+  (let ((id (plist-get l 'id)))
+    (set! *agent-listen-bursts*
+          (cons (cons id (cons e (let ((p (assoc id *agent-listen-bursts*))) (if p (cdr p) '()))))
+                (filter (lambda (p) (not (equal? (car p) id))) *agent-listen-bursts*)))
+    (debounce! (agent-listen--burst-key id) (* 1000 agent-listen-burst-seconds)
+               (lambda (_) (agent-listen--flush! id)) #f)
+    #t))
+
+(define (agent-listen--deliver! l e)
+  (cond ((agent-listen--burst? l)
+         (agent-listen--sent! l e)
+         (agent-listen--hold! l e))
+        ((agent-listen--wake! l e) (agent-listen--sent! l e) #t)
+        (else #f)))
 
 ;; the workflow's handler: every event of the batch to every listener that
 ;; takes it. A wake that failed fails the batch, and the workflow runs it

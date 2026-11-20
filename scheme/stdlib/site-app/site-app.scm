@@ -1298,7 +1298,6 @@
 
 ;; what an open card adds below its own lines: each read under its label,
 ;; asked for the first time the card is drawn open
-(define *site-app-indexing* #f)
 
 (define (site-app-card-more node title)
   (let ((buf *site-app-folding*))
@@ -1307,8 +1306,7 @@
              (let* ((hit (site-app-find (lambda (e) (and (equal? (car e) title) (equal? (cadr e) (car detail))))
                                         (or (site-app-get buf 'card-more) '())))
                     (got (and hit (caddr hit))))
-               ;; imenu reading a tab aside fetches nothing
-               (unless (or hit *site-app-indexing*) (site-app-card-fetch! buf title detail))
+               (unless hit (site-app-card-fetch! buf title detail))
                (cons (list 'tag "c-heading" 'text (car detail))
                      (cond ((pair? got) got)
                            ((equal? got 'failed) (list (list 'tag "c-field" 'text "The site did not answer. g reads the page again.")))
@@ -1698,10 +1696,10 @@
                               'tab-line (and tabs (plist-get tabs 'lines) (car (plist-get tabs 'lines)))))
     (append head body)))
 
-;; imenu of a page: its head, then each of its tabs with the parts in it, the
-;; tab showing as drawn and every other from the section the page keeps for
-;; it, so a part of any tab is one pick away. A part of another tab takes that
-;; tab, then goes to the part. The spec's 'imenu-names ((REGEX REPLACEMENT) ...)
+;; imenu of a page: its head, then one entry for each tab, and under the tab
+;; showing the parts in it. An entry of another tab takes that tab; imenu
+;; opened again then lists its parts. Every part in the list is on the page,
+;; so every line is a real line. The spec's 'imenu-names ((REGEX REPLACEMENT) ...)
 ;; say a name shorter in imenu, and its 'imenu-depths ((TAB LEVELS) ...) how
 ;; deep a tab's entries go: a history is one entry an event.
 (define (site-app-imenu-rename spec)
@@ -1709,23 +1707,6 @@
     (lambda (name)
       (let loop ((rs rules) (n name))
         (if (null? rs) n (loop (cdr rs) (re-replace (car (car rs)) n (cadr (car rs)))))))))
-
-(define (site-app-tab-blocks buf id)
-  ;; the parts tab ID would draw, built aside with their own text: (BLOCKS TEXT), or #f
-  (let ((spec (site-app-spec (site-app-get buf 'name)))
-        (data (site-app-get buf 'data)))
-    (and data (not (site-app-composed-draw buf id))
-         (let ((section (site-app-detail-section buf id)))
-           (and (pair? section) (pair? (site-app-real section))
-                (let ((b (site-app-builder)) (folding *site-app-folding*))
-                  (set! *site-app-folding* buf)
-                  (set! *site-app-indexing* #t)
-                  (unwind-protect
-                    (lambda ()
-                      (let ((blocks (site-app-summary (site-app-node-blocks b (site-app-drop-repeats (site-app-drop-teasers (site-app-moved spec id section)) spec data)
-                                                                            (and spec (plist-get spec 'tones))))))
-                        (list blocks (b 'text #f #f))))
-                    (lambda () (set! *site-app-indexing* #f) (set! *site-app-folding* folding)))))))))
 
 (define (site-app-imenu-goto! buf path)
   ;; after a tab is taken: point to its part at PATH
@@ -1816,12 +1797,7 @@
                        (if here?
                            (anchor-entry-rows buf (site-app-imenu-cut spec id (anchor-block-entries (or (site-app-get buf 'index-body) '())))
                                               (list 'rename rename 'depth 1 'where label 'target go))
-                           (let ((built (site-app-tab-blocks buf id)))
-                             (if (not built)
-                                 '()
-                                 (anchor-entry-rows buf (site-app-imenu-cut spec id (anchor-block-entries (car built)))
-                                   (list 'rename rename 'depth 1 'where label 'text (cadr built) 'line tab-line
-                                         'target go))))))))
+                           '()))))
              tabs))))))
 
 (define (site-app-draw! buf)

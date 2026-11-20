@@ -103,6 +103,55 @@ nonstandard install out of the built-in connector catalog."
     accepts "^opencode-go/"
     signin "opencode auth login"))
 
+(define-connector! "antigravity"
+  ;; Antigravity CLI (`agy`) ships its own ACP server. The session reports
+  ;; Model and Thinking level as config options, so the model rides in
+  ;; protocol config. --process-per-session is what lets it reach the
+  ;; editor's HTTP MCP server. It offers third-party (Claude) models only
+  ;; to the clients it names, so this lane serves Gemini.
+  ;; The editor names every tool through MCP and writes the whole prompt:
+  ;; --agent compos runs ~/.gemini/config/agents/compos.md, whose frontmatter
+  ;; grants no built-in tool (tools: [], commandExecutionPolicy: off) and
+  ;; whose body replaces Antigravity's system prompt with one line pointing
+  ;; at ours. --include-default-customizations=false drops the default
+  ;; skills and rules.
+  '(cmd "agy acp --process-per-session --agent compos --include-default-customizations=false"
+    title "Antigravity"
+    description "Antigravity CLI — Gemini models on your Google AI plan"
+    model-config #t
+    model "gemini-4-neon-medium"
+    ;; whether agy reads _meta.systemPrompt is unknown: our sections ride
+    ;; the first turn
+    system-in-prompt #t
+    install (("agy" "curl -fsSL https://antigravity.google/cli/install.sh | bash"))
+    signin "agy"))
+
+;; The agent the antigravity lane runs. Written when missing, so a fresh
+;; machine gets it; an edited copy stays the user's.
+(define antigravity-agent-file
+  (string-append (getenv "HOME") "/.gemini/config/agents/compos.md"))
+
+(define antigravity-agent-text
+  "---
+name: compos
+description: The compos editor's agent. Every tool comes from the editor's MCP server; the editor writes the instructions.
+tools: []
+mainAgent: true
+subagent: false
+commandExecutionPolicy: off
+---
+
+# System Prompt
+You are the assistant inside the compos editor. The editor's instructions arrive at the head of the first message; follow them. Act only through the tools the editor's MCP server gives you.
+")
+
+(define (antigravity-agent-ensure!)
+  (unless (file-exists? antigravity-agent-file)
+    (make-directory! (string-append (getenv "HOME") "/.gemini/config/agents"))
+    (write-file! antigravity-agent-file antigravity-agent-text)))
+
+(antigravity-agent-ensure!)
+
 (define-connector! "deepseek"
   ;; DeepSeek Harness over ACP. The direct API lane bills every request for
   ;; the whole prefix; the harness keeps one session, so DeepSeek's context
@@ -577,6 +626,8 @@ nonstandard install out of the built-in connector catalog."
 (effects! '(read))
 (public! 'connector-names
   "(connector-names) — the names of the connectors that are not hidden")
+(public! 'connector-config
+  "(connector-config NAME) — the config plist of connector NAME, with its command override")
 
 ;; Resolving a config can create the sanitized codex/dsh homes and turn off
 ;; codex skills in the thread's cwd, so it writes.

@@ -8,6 +8,17 @@ defmodule Compos.HotloadTest.NoBackend do
   def subscribe(_pid), do: :ok
 end
 
+defmodule Compos.HotloadTest.IgnoringBackend do
+  @moduledoc """
+  A backend whose watcher cannot start: `file_system` answers `:ignore`
+  when its worker refuses to boot, the way fs_inotify does on a Linux with
+  no inotifywait. Hotload must drop the root and come up anyway.
+  """
+
+  def start_link(_opts), do: :ignore
+  def subscribe(_pid), do: :ok
+end
+
 defmodule Compos.HotloadTest.Recompiler do
   @moduledoc "The recompiler seam: it reports to the test instead of compiling."
 
@@ -124,6 +135,20 @@ defmodule Compos.HotloadTest do
       # alternation, then "unbound variable: atx_heading" for a node name.
       refute Hotload.source?("/home/u/.compos/grammars/markdown-highlights.scm")
       refute Hotload.source?("/home/u/.compos/grammars/src/markdown/queries/highlights.scm")
+    end
+  end
+
+  describe "the watcher roots" do
+    test "a backend that ignores instead of erroring drops the root, and Hotload still starts" do
+      # file_system answers :ignore when its worker refuses to boot — the
+      # fs_inotify backend does on a Linux with no inotifywait — and before
+      # this case matched, that CaseClauseError took the whole daemon down
+      Application.put_env(:compos_core, :fs_backend, Compos.HotloadTest.IgnoringBackend)
+
+      name = :"hotload_ignore_#{System.unique_integer([:positive])}"
+      server = start_supervised!(%{id: name, start: {Hotload, :start_link, [[name: name, roots: [tmp()]]]}})
+
+      assert GenServer.call(server, :roots) == []
     end
   end
 

@@ -123,6 +123,10 @@ nonstandard install out of the built-in connector catalog."
     ;; whether agy reads _meta.systemPrompt is unknown: our sections ride
     ;; the first turn
     system-in-prompt #t
+    ;; agy hands Gemini a numeric enum as empty strings (Fireflies'
+    ;; expiryDays: 7, 14, 30) and Gemini refuses the whole request, so this
+    ;; lane holds the editor's server alone; the rest stay one mcp-find away
+    mcp-presets (compos)
     install (("agy" "curl -fsSL https://antigravity.google/cli/install.sh | bash"))
     signin "agy"))
 
@@ -391,7 +395,9 @@ You are the assistant inside the compos editor. The editor's instructions arrive
     ;; ACP threads get exactly the servers their presets name. The editor's
     ;; own tools are the `compos` preset, not an implicit exception. The
     ;; direct lane needs no server config: it reads the same preset surface
-    ;; fresh at every send.
+    ;; fresh at every send. A connector that declares 'mcp-presets gets those
+    ;; presets whatever the chat's are: an adapter that chokes on some
+    ;; server's schemas holds only the servers it can take.
     (if (or (equal? (plist-get conf 'backend) "req-llm")
             (plist-get conf 'mcp-servers)
             (not (boundp (quote presets-acp-servers))))
@@ -399,7 +405,9 @@ You are the assistant inside the compos editor. The editor's instructions arrive
         (agent-config-with-system-parts
           (append conf
             (list 'mcp-servers
-                  (presets-acp-servers (or (plist-get conf 'presets) '()))))))))
+                  (presets-acp-servers (or (plist-get conf 'mcp-presets)
+                                           (plist-get conf 'presets)
+                                           '()))))))))
 
 (define (agent-system-text had text)
   (if (equal? had "") text (string-append had "\n\n" text)))

@@ -5877,6 +5877,10 @@
          (release (and (boundp 'window-records-release!) (window-records-release! name))))
     ;; the buffer's process (a tail, a shell) dies with it, as in Emacs
     (when (process-running? name) (process-kill! name))
+    ;; its change handlers go with it, before the name stops resolving: a
+    ;; rule on a dead buffer never fires again, and its rooted callback
+    ;; kept every frame it captured for the daemon's life
+    (when (boundp 'remove-buffer-on-change!) (remove-buffer-on-change! name))
     (buffer-kill-raw! name)
     (keymap--forget-buffer! name)
     (hook--forget-buffer! name)
@@ -8063,7 +8067,8 @@
     event-log-position-set! finish-command! fs-on-change!
     function-interpose! jit-lock-enable! job-local-set! listener-restart!
     message-emit meta-db-groups! meta-db-labels! model-rules-install!
-    mru-note-group! on-change! remove-on-change! preview-run-langs!
+    mru-note-group! on-change! remove-on-change! remove-buffer-on-change!
+    preview-run-langs!
     profile-start! profile-cancel! refresh-primitives! set-symbol-value!
     telemetry-reattach! unbind-global! undefine-command workflow-define!
     workflow-emit! workflow-once-record! workflow-pause! workflow-resume!

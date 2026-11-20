@@ -199,4 +199,21 @@ defmodule Compos.OnChangeTest do
     Process.sleep(150)
     assert Buffer.text(sink) == "now"
   end
+
+  test "killing a buffer drops its rules and releases their callbacks" do
+    src = uniq("killed")
+    {:ok, _} = Core.create_buffer(src)
+
+    {:ok, a} = Session.eval(~s{(on-change! "#{src}" (lambda (p i d s) #t))})
+    {:ok, b} = Session.eval(~s{(on-change! "#{src}" (lambda (p i d s) #t) 'eager)})
+    ids = [String.to_integer(a), String.to_integer(b)]
+
+    assert Enum.all?(ids, &Compos.Core.Roots.get({:reactor, &1}))
+
+    {:ok, _} = Session.eval(~s{(buffer-kill! "#{src}")})
+
+    live = Compos.Core.Reactor.rules() |> Enum.map(& &1.id)
+    assert Enum.all?(ids, &(&1 not in live))
+    assert Enum.all?(ids, &(Compos.Core.Roots.get({:reactor, &1}) == nil))
+  end
 end

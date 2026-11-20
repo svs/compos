@@ -2058,6 +2058,9 @@ defmodule Compos.Core.Session do
         Roots.drop({:reactor, id})
         :void
       end,
+      {"remove-buffer-on-change!",
+       "(remove-buffer-on-change! BUF) — remove every change handler on BUF and release its callback; answer how many went. A kill calls it."} =>
+        fn [buf] -> Compos.Core.Reactor.remove_buffer(to_string(buf)) end,
 
       # Emacs' with-minibuffer-selected-window: run a thunk with
       # current-buffer pointing at the WINDOW's buffer even though a prompt

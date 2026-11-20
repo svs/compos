@@ -48,6 +48,18 @@ defmodule Compos.Core.Reactor do
   end
 
   def remove(rule_id), do: GenServer.call(__MODULE__, {:remove, rule_id})
+
+  @doc """
+  Drop every rule on BUFFER, a name or a ref, and answer how many went.
+  A kill calls it before the buffer goes: a rule whose buffer never changes
+  again would otherwise live, and root its callback, for the daemon's life.
+  """
+  def remove_buffer(buffer) do
+    case if(is_binary(buffer), do: Buffer.ref(buffer), else: buffer) do
+      nil -> 0
+      ref -> GenServer.call(__MODULE__, {:remove_buffer, ref})
+    end
+  end
   def rules, do: GenServer.call(__MODULE__, :rules)
 
   # --- server ----------------------------------------------------------------
@@ -94,6 +106,20 @@ defmodule Compos.Core.Reactor do
   def handle_call({:remove, id}, _from, state) do
     rule = state.rules[id]
     {:reply, :ok, if(rule, do: drop_rule(state, id, rule), else: state)}
+  end
+
+  def handle_call({:remove_buffer, ref}, _from, state) do
+    ids = state.by_buffer |> Map.get(ref, MapSet.new()) |> MapSet.to_list()
+
+    state =
+      Enum.reduce(ids, state, fn id, acc ->
+        case acc.rules[id] do
+          nil -> acc
+          rule -> drop_rule(acc, id, rule)
+        end
+      end)
+
+    {:reply, length(ids), state}
   end
 
   def handle_call(:rules, _from, state), do: {:reply, Map.values(state.rules), state}
@@ -150,7 +176,12 @@ defmodule Compos.Core.Reactor do
     end
   end
 
+  # the Session rooted the rule's Scheme callback under {:reactor, id}; a rule
+  # that goes without remove-on-change! (its buffer died, it failed three
+  # times, its buffer was killed) must release it too, or the callback and
+  # every frame it captured stay for the daemon's life
   defp drop_rule(state, id, rule) do
+    Compos.Core.Roots.drop({:reactor, id})
     if rule.timer, do: Process.cancel_timer(rule.timer)
     if rule.in_flight, do: Process.demonitor(rule.in_flight.monitor, [:flush])
 

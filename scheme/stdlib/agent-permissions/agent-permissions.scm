@@ -157,6 +157,7 @@
 ;; line, or the shell calls inside an eval-scheme payload. A word in a
 ;; search, a query or a string is not an act, so nothing else reads it.
 (define *permission-eval-tools* '("eval-scheme" "mcp__compos__eval-scheme"))
+(define *permission-read-eval-tools* '("eval-scheme-read" "mcp__compos__eval-scheme-read"))
 
 ;; the Scheme an eval-scheme call carries: its code, or the code inside
 ;; the JSON arguments of the MCP proxy
@@ -198,7 +199,9 @@
 
 (define (permission-may-send? title kind raw)
   "#t when the call can send, spend or destroy: a shell line, an eval-scheme payload that runs a shell command, calls a function with such an effect or does not read, a tool or command with such an effect or none on record"
-  (cond ((member title *permission-eval-tools*)
+  (cond ;; eval-scheme-read refuses any code that writes, so it never sends
+        ((member title *permission-read-eval-tools*) #f)
+        ((member title *permission-eval-tools*)
          (let* ((code (permission-eval-code raw))
                 (forms (and code (ignore-errors (lambda () (scheme-read code))))))
            (or (not (pair? forms))

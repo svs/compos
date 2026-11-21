@@ -2880,3 +2880,5 @@
   "(site-app-gen NAME) — the current render generation of a website app, or #f")
 (public! 'site-app-rows
   "(site-app-rows BUF) — the rows a website app's list BUF shows: its rows narrowed by the list's own filters")
+(public! 'site-app-spec
+  "(site-app-spec NAME) — the registered spec plist of website app NAME, or #f")

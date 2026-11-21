@@ -60,6 +60,8 @@
 (occur :requires (tabulated-list) :api 1)
 (pane-menu :requires (panes-mode emacs-names) :api 1)
 (pane-overview :requires (panes-mode) :api 1)
+(image-view :requires (file-view) :api 1)
+(gallery :requires (tabulated-list) :api 1)
 (panes-board :requires (panes-mode tabulated-list) :api 1)
 (paredit :requires () :api 1)
 (peek :requires (panes-mode) :api 1)

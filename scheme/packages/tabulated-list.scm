@@ -138,17 +138,21 @@
 ;; Select one responsive profile per draw. Every option read then uses it.
 (define (list-active-layout buf)
   ;; the cache answers first: working the profile out again means reading
-  ;; the mode table and its layouts before finding out nothing changed
-  (let ((width (list-view-width buf))
-        (cache (buffer-local-value 'list-layout-cache buf)))
-    (if (and (pair? cache) (equal? (car cache) width))
-        (cadr cache)
-        (let* ((opts (list-mode-opts (list-mode-of buf)))
-               (layouts (or (plist-get opts 'layouts) '()))
-               (profile (list-select-layout buf layouts width)))
-          (when (buffer-exists? buf)
-            (buffer-set-local! buf 'list-layout-cache (list width profile)))
-          profile))))
+  ;; the mode table and its layouts before finding out nothing changed.
+  ;; A buffer's own 'list-view-opts go over the profile: a minor mode
+  ;; draws the same rows another way (gallery-mode's tiles in Dired).
+  (let* ((width (list-view-width buf))
+         (cache (buffer-local-value 'list-layout-cache buf))
+         (own (buffer-local-value 'list-view-opts buf))
+         (profile (if (and (pair? cache) (equal? (car cache) width))
+                      (cadr cache)
+                      (let* ((opts (list-mode-opts (list-mode-of buf)))
+                             (layouts (or (plist-get opts 'layouts) '()))
+                             (p (list-select-layout buf layouts width)))
+                        (when (buffer-exists? buf)
+                          (buffer-set-local! buf 'list-layout-cache (list width p)))
+                        p))))
+    (if (pair? own) (append own (or profile '())) profile)))
 
 (define (list-opt buf key)
   (let* ((e (list-draw--entry buf))
@@ -1331,10 +1335,21 @@
              (shared (keys--expand "list-mode-map" "" '()))
              (seen (map car own))
              (rest (filter (lambda (e) (not (member (car e) seen))) shared))
-             (row (lambda (e) (list (car e) (cadr e)))))
+             (row (lambda (e)
+                    (list (car e) (or (and (boundp 'command-label) (command-label (cadr e))) (cadr e))))))
         (append
           (if (pair? own) (list (list (dashboard--mode-name mode) (map row own))) '())
           (if (pair? rest) (list (list "list" (map row rest))) '())))))
+
+;; What the shared list keys do, for the key panels.
+(for-each (lambda (p) (command-label! (car p) (cadr p)))
+  '(("list-toggle-mark" "mark") ("list-mark" "mark") ("list-unmark" "unmark")
+    ("list-unmark-all" "unmark all") ("list-mark-all" "mark all shown")
+    ("list-flag-D" "flag to delete") ("list-execute" "do the flagged")
+    ("list-cycle-sorting" "next sort") ("list-cycle-grouping" "next grouping")
+    ("list-filter" "filter") ("list-filter-pop" "drop last filter")
+    ("list-next" "next row") ("list-keys-toggle" "all keys")
+    ("list-cycle-view" "table or text")))
 
 ;; the card as blocks: #f when the mode declared no footer
 (define (list-keys-bar-blocks buf)

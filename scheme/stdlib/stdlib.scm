@@ -50,6 +50,10 @@
     (index)
     (preview)
     (file-view)
+    ;; images open fitted to the window; 1 shows them at their own size
+    (image-view)
+    ;; the images of a directory as a grid of thumbnails
+    (gallery)
     (agent-machine)
     (agent)
     (bookmark)

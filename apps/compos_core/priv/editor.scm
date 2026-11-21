@@ -388,6 +388,8 @@
          ;; 'show PROC: run from M-x, the command hands the function's
          ;; answer to PROC, the echo a code caller does not want
          (show (let ((m (memq 'show opts))) (and m (pair? (cdr m)) (cadr m))))
+         ;; 'label TEXT: the display name key panels show
+         (label (let ((m (memq 'label opts))) (and m (pair? (cdr m)) (cadr m))))
          (spec (or spec0 (and show '(interactive))))
          (interactive-fn (if show (lambda (&rest args) (show (apply fn args))) fn))
          ;; A command with no spec is its own function: run-command calls
@@ -408,6 +410,7 @@
     (when modes
       (set! *command-modes*
             (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
+    (when label (command-label! name label))
     (when (and public (not (member name *command-public*)))
       (set! *command-public* (cons name *command-public*)))
     (set! *command-generation* (+ *command-generation* 1))
@@ -1107,6 +1110,17 @@
 (define (registry-list table) (registry--entries table))
 
 (define (registry-names table) (map car (registry--entries table)))
+
+;; A command's display name: what a key panel says the key does. M-x,
+;; docs and logs keep the real name.
+(define (command-label! name label)
+  (registry-register! 'command-labels (if (symbol? name) (symbol->string name) name) label))
+(define (command-label name)
+  (and (string? name) (registry-lookup 'command-labels name #f)))
+(public! 'command-label!
+  "(command-label! NAME LABEL) — the display name key panels show for command NAME, e.g. (command-label! \"ibuffer-filter-by-name\" \"name (regex)\"); M-x keeps NAME")
+(public! 'command-label
+  "(command-label NAME) — command NAME's display name, or #f")
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
 ;;; A hook is a name and a list of functions. add-hook! puts a function on
@@ -2466,7 +2480,7 @@
          (labels (and buf (buffer-local-value 'which-key-labels buf)))
          (seq (string-append (if (string? pending) pending (string-join pending " ")) " " (car row)))
          (hit (and (pair? labels) (assoc seq labels))))
-    (list (car row) (if hit (cadr hit) (cadr row)))))
+    (list (car row) (if hit (cadr hit) (or (command-label (cadr row)) (cadr row))))))
 
 (define (which-key-groups pending)
   "(COUNT GROUPS) for PENDING: the which-key-rows in runs of one modifier set, each group (LABEL MODIFIERS ((KEY COMMAND) ...)); #f when there are none. COMMAND is the buffer's 'which-key-labels text for the sequence when it has one"

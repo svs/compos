@@ -2288,21 +2288,22 @@
     ("!" "ibuffer-negate-filter") ("|" "ibuffer-or-filter")
     ("p" "ibuffer-pop-filter") ("/" "ibuffer-filter-disable")))
 
-;; The / panel names what each filter keeps, not the command behind it.
-(define *ibuffer-filter-labels*
-  '(("/ n" "name (regex)") ("/ c" "contents (regex)")
-    ("/ m" "mode") ("/ M" "mode, derived too")
-    ("/ f" "file path") ("/ F" "directory") ("/ ." "extension")
-    ("/ *" "*special* names") ("/ v" "files only") ("/ i" "unsaved")
-    ("/ !" "negate last") ("/ |" "or last two")
-    ("/ p" "drop last") ("/ /" "clear all")))
-
-(define (ibuffer-filter-labels!)
-  (let ((buf (current-buffer)))
-    (when (member (buffer-local-value 'mode-name buf) '("ibuffer-mode" "ibuffer-pretty-mode"))
-      (buffer-set-local! buf 'which-key-labels *ibuffer-filter-labels*))))
-
-(add-hook! 'after-change-major-mode-hook 'ibuffer-filter-labels!)
+;; Key panels name what each filter keeps, not the command behind it.
+(for-each (lambda (p) (command-label! (car p) (cadr p)))
+  '(("ibuffer-filter-by-name" "name (regex)") ("ibuffer-filter-by-content" "contents (regex)")
+    ("ibuffer-filter-by-mode" "mode") ("ibuffer-filter-by-derived-mode" "mode, derived too")
+    ("ibuffer-filter-by-filename" "file path") ("ibuffer-filter-by-directory" "directory")
+    ("ibuffer-filter-by-file-extension" "extension") ("ibuffer-filter-by-starred-name" "*special* names")
+    ("ibuffer-filter-by-visiting-file" "files only") ("ibuffer-filter-by-modified" "unsaved")
+    ("ibuffer-negate-filter" "negate last") ("ibuffer-or-filter" "or last two")
+    ("ibuffer-pop-filter" "drop last") ("ibuffer-filter-disable" "clear all")))
+(for-each (lambda (p) (command-label! (car p) (cadr p)))
+  '(("ibuffer-visit" "visit") ("ibuffer-kill" "kill buffer") ("ibuffer-group-kill" "kill group")
+    ("ibuffer-quit" "quit") ("ibuffer-refresh" "refresh") ("ibuffer-toggle-preview" "preview")
+    ("ibuffer-toggle-filter-group" "fold section") ("ibuffer-toggle-all-filter-groups" "fold all")
+    ("ibuffer-next-group" "next section") ("ibuffer-previous-group" "previous section")
+    ("ibuffer-tab-next" "next tab") ("ibuffer-tab-prev" "previous tab")
+    ("ibuffer-toggle-pretty" "pretty view") ("ibuffer-toggle-info" "info column")))
 
 (define-command "ibuffer-filter-by-mode" "Keep the buffers in one major mode"
   (lambda () (ibuffer-read-mode! (lambda (buf m) (ibuffer-filter-add! buf (list "mode" m))))))

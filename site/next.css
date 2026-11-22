@@ -210,6 +210,8 @@ h1 { margin: 26px 0 0; font-weight: 300; font-size: clamp(36px, 4vw, 60px); line
 .slide-nav { position: absolute; inset: 0 0 auto; aspect-ratio: 2560 / 1294; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; pointer-events: none; z-index: 1; }
 .slide-nav button { all: unset; pointer-events: auto; cursor: pointer; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: rgba(253, 243, 220, .9); color: var(--ink); font-family: var(--mono); font-size: 22px; line-height: 1; box-shadow: 0 8px 24px -10px rgba(0, 0, 0, .6); transition: transform .2s; }
 .slide-nav button:hover { transform: scale(1.08); }
+.slide-nav button.hold { position: absolute; right: 16px; bottom: 16px; width: auto; height: 32px; padding: 0 14px; border-radius: 16px; font-size: 13px; }
+.hero .slide-nav button.hold { right: 8px; bottom: 8px; }
 .slide-nav button:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
 .js .slides .plate.before:not(.on) { transform: translateX(-100%); }
 .gal .plate + .plate { margin-top: 56px; }

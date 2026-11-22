@@ -28,7 +28,7 @@
     if (cleanupGallery) { cleanupGallery(); cleanupGallery = null; }
     currentGallery = nextGallery;
     if (!nextGallery) return;
-  // The app screenshots turn every 6 s, whatever the pointer does.
+  // The app screenshots turn every 6 s until the pause button holds them.
   var tabs = Array.prototype.slice.call(document.querySelectorAll('.gal-tabs [role=tab]'));
   var gallery = nextGallery;
   var galleryTimer = null, galleryVisible = false;
@@ -92,6 +92,18 @@
       btn.addEventListener('click', function () { step(b[1]); });
       nav.appendChild(btn);
     });
+    // pause holds the current app until play is pressed
+    var hold = document.createElement('button');
+    hold.type = 'button';
+    hold.className = 'hold';
+    function showHold() {
+      hold.textContent = galleryPaused ? 'play' : 'pause';
+      hold.setAttribute('aria-pressed', galleryPaused ? 'true' : 'false');
+      hold.setAttribute('aria-label', galleryPaused ? 'play the apps' : 'pause the apps');
+    }
+    hold.addEventListener('click', function () { galleryPaused = !galleryPaused; showHold(); scheduleGallery(); });
+    showHold();
+    nav.appendChild(hold);
     slides.appendChild(nav);
     var downX = null;
     slides.addEventListener('pointerdown', function (e) { downX = e.clientX; });

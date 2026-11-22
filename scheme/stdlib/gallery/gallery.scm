@@ -26,6 +26,24 @@
             ((string-suffix? (car es) n) #t)
             (else (loop (cdr es)))))))
 
+(defcustom 'gallery-audio-extensions
+  '(".mp3" ".wav" ".ogg" ".oga" ".opus" ".weba" ".m4a" ".aac" ".flac")
+  "File suffixes gallery-mode draws with a sound player."
+  'group 'gallery 'type 'list)
+
+(defcustom 'gallery-video-extensions
+  '(".mp4" ".webm" ".ogv" ".mov" ".m4v")
+  "File suffixes gallery-mode draws as a video that plays in its tile."
+  'group 'gallery 'type 'list)
+
+(define (gallery--media name)
+  "audio or video when NAME plays in its tile, else #f"
+  (let ((n (string-downcase name)))
+    (cond ((string-suffix? "/" n) #f)
+          ((any (lambda (e) (string-suffix? e n)) gallery-video-extensions) 'video)
+          ((any (lambda (e) (string-suffix? e n)) gallery-audio-extensions) 'audio)
+          (else #f))))
+
 (define (gallery--kind name)
   "what a tile without a picture says it is: folder, up, or the extension"
   (cond ((equal? name "..") "up")
@@ -44,20 +62,32 @@
          (path (string-append dir "/" entry))
          (mark (assoc entry (list-marks buf)))
          (image? (and (not (string-suffix? "/" entry)) (gallery-image? entry)))
+         (media (gallery--media entry))
          (label (if (string-suffix? "/" entry) (substring entry 0 (- (string-length entry) 1)) entry)))
-    (list 'tag "file" 'class (string-append "gallery-tile" (if image? "" " gallery-other"))
+    (list 'tag "file" 'class (string-append "gallery-tile" (if (or image? media) "" " gallery-other"))
           'attrs (append (list (list "path" path) (list "name" entry))
                          (if mark (list (list "marked" "true")) '()))
           'children
           (append
             (if mark (list (list 'tag "span" 'class "gallery-mark" 'text (cadr mark))) '())
-            (list (if image?
+            (list (cond
+                    ((equal? media 'video)
+                     (list 'tag "video" 'class "gallery-thumb gallery-video" 'file path
+                           'attrs (list (list "controls" "") (list "preload" "metadata") (list "playsinline" ""))))
+                    ((equal? media 'audio)
+                     (list 'tag "div" 'class "gallery-thumb gallery-kind gallery-sound"
+                           'children (list (list 'tag "span" 'class "gallery-icon" 'text (gallery--icon entry))
+                                           (list 'tag "span" 'class "gallery-kind-label" 'text (gallery--kind entry))
+                                           (list 'tag "audio" 'class "gallery-audio" 'file path
+                                                 'attrs (list (list "controls" "") (list "preload" "none"))))))
+                    (image?
                       (list 'tag "img" 'class "gallery-thumb" 'file path
-                            'attrs (list (list "alt" entry) (list "loading" "lazy") (list "decoding" "async")))
+                            'attrs (list (list "alt" entry) (list "loading" "lazy") (list "decoding" "async"))))
+                    (else
                       (list 'tag "div" 'class (string-append "gallery-thumb gallery-kind"
                                                          (if (or (equal? entry "..") (string-suffix? "/" entry)) " gallery-dir" ""))
                             'children (list (list 'tag "span" 'class "gallery-icon" 'text (gallery--icon entry))
-                                            (list 'tag "span" 'class "gallery-kind-label" 'text (gallery--kind entry)))))
+                                            (list 'tag "span" 'class "gallery-kind-label" 'text (gallery--kind entry))))))
                   (list 'tag "div" 'class "gallery-name" 'text label))))))
 
 (define (gallery--head buf head)
@@ -84,6 +114,9 @@
 .gallery-icon { font-family: var(--font-icons); font-size: 2.6rem; line-height: 1; }
 .gallery-dir .gallery-icon { color: var(--accent-fg); }
 .gallery-kind-label { font: 600 .66rem var(--font-sans); letter-spacing: .08em; text-transform: uppercase; }
+.gallery-video { object-fit: contain; background: #000; }
+.gallery-sound { padding: 0 .4rem; }
+.gallery-audio { display: block; width: 100%; height: 2rem; }
 .gallery-name { display: block; font-family: var(--font-sans); font-size: .78rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 .15rem; }
 .gallery-head { display: block; padding: .7rem .9rem .3rem; font-family: var(--font-sans); }
 .gallery-head-line { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -91,8 +124,11 @@
 .gallery-head-line + .gallery-head-line { font-size: .75rem; color: var(--dim-fg); margin-top: .1rem; }
 ")
 
+;; the drawing goes through the names, so a reload of this file reaches a
+;; Dired that is already a grid
 (define *gallery-view-opts*
-  (list 'composml gallery--tile 'composml-head gallery--head))
+  (list 'composml (lambda (buf entry) (gallery--tile buf entry))
+        'composml-head (lambda (buf head) (gallery--head buf head))))
 
 (effects! '(write display))
 

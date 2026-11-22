@@ -125,6 +125,23 @@
   "(browser-file-path? PATH) — return #t when PATH uses the browser file viewer")
 (catalog-meta! 'function "browser-file-path?" 'domain 'files 'effects '(pure))
 
+;; What a video or sound file holds: its streams, size and length, as
+;; ffprobe tells it. An agent asks this instead of running ffprobe in a
+;; shell, which the shell gate refuses as a read.
+(effects! '(read execute))
+(define (media-info path)
+  (let* ((cmd (string-append "ffprobe -v error -of json"
+                " -show_entries format=duration,size,bit_rate,format_name"
+                ":stream=codec_type,codec_name,profile,width,height,pix_fmt,r_frame_rate,bit_rate,sample_rate,channels "
+                (sh-quote (expand-file-name path))))
+         (out (%shell-command->string-builtin cmd "/tmp"))
+         (info (json-parse out)))
+    (or info (list 'error out))))
+
+(public! 'media-info
+  "(media-info PATH) — the streams, codecs, resolution, frame rate, bitrate and length of a video or sound file, from ffprobe; (error TEXT) when it cannot read it")
+(catalog-meta! 'function "media-info" 'domain 'files 'effects '(read execute))
+
 ;;; A visited file can open read-only. It is the reader's choice: #f opens
 ;;; every file writable, #t opens every file read-only, and a list of mode
 ;;; names opens a file read-only when its major mode is one of them or

@@ -166,7 +166,7 @@
                   'class "wizard-tools")))
     (setup-model-cards)
     (list (component 'wizard/nav
-            (list 'next (list "wizard:next" "Next →"))))))
+            (list 'next (list "wizard:next" "Next →" "n"))))))
 
 ;; The local embedding backend: Ollama on this machine. Its state is
 ;; absent, stopped, no-model or ready. A card draw asks the server off the
@@ -265,8 +265,8 @@
         (list 'tag "div" 'class "wizard-grid"
               'children (map setup-wizard--embed-card (map car *apropos-embedding-backend-specs*)))
         (component 'wizard/nav
-          (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:next" "Next →")))))
+          (list 'back (list "wizard:back" "← Back" "p")
+                'next (list "wizard:next" "Next →" "n")))))
 
 ;; the decision model: decide asks the first backend that is ready
 (define (setup-wizard--decide-ready? b)
@@ -323,8 +323,8 @@
               ;; where a card stands
               'children (map setup-wizard--decide-card '(jev laya)))
         (component 'wizard/nav
-          (list 'back (list "wizard:back" "← Back")
-                'next (list "wizard:next" "Next →")))))
+          (list 'back (list "wizard:back" "← Back" "p")
+                'next (list "wizard:next" "Next →" "n")))))
 
 (define (setup-wizard-install-laya!)
   "Install laya with pip in a terminal in the other column; Scan again then
@@ -393,8 +393,8 @@
                                                         (abbreviate-file-name (string-append (compos-home) "/chrome-extension"))
                                                         ". Cmd-Shift-G takes a path; Cmd-Shift-. shows hidden folders.")))))
           (component 'wizard/nav
-            (list 'back (list "wizard:back" "← Back")
-                  'next (list "wizard:learn" "Start the tutorial →"))))))
+            (list 'back (list "wizard:back" "← Back" "p")
+                  'next (list "wizard:learn" "Start the tutorial →" "l"))))))
 
 ;; The step DELTA places from BUF's step, held to the first and the last.
 (define (setup-wizard--step-after buf delta)
@@ -418,10 +418,90 @@
                         ((equal? step "search") (setup-wizard--search-blocks))
                         (else (setup-wizard--model-blocks))))))))
 
+(define (setup-wizard--put node key val)
+  ;; NODE with KEY set to VAL
+  (let loop ((p node) (out '()))
+    (cond ((or (null? p) (null? (cdr p))) (append (reverse out) (list key val)))
+          ((eq? (car p) key) (append (reverse out) (list key val) (cddr p)))
+          (else (loop (cddr p) (cons (cadr p) (cons (car p) out)))))))
+
+(define (setup-wizard--node? n) (and (pair? n) (symbol? (car n))))
+
+(define (setup-wizard--choice? n)
+  (let ((c (and (setup-wizard--node? n) (plist-get n 'class))))
+    (and (string? c) (or (equal? c "wizard-choice") (string-prefix? "wizard-choice " c)))))
+
+(define (setup-wizard--walk f n)
+  ;; N with F applied to it and to every node under it, children first and
+  ;; left to right, so a counter in F numbers them in reading order
+  (if (not (setup-wizard--node? n))
+      n
+      (let* ((kids (plist-get n 'children))
+             (n (if (pair? kids)
+                    (setup-wizard--put n 'children
+                      (let loop ((ks kids) (out '()))
+                        (if (null? ks) (reverse out)
+                            (loop (cdr ks) (cons (setup-wizard--walk f (car ks)) out)))))
+                    n)))
+        (f n))))
+
+(define (setup-wizard--clicks n)
+  ;; the action ids of a row, in order
+  (let ((out '()))
+    (setup-wizard--walk (lambda (x)
+                          (when (equal? (plist-get x 'tag) "c-action")
+                            (set! out (cons (plist-get x 'click) out)))
+                          x)
+                        n)
+    (reverse out)))
+
+(define (setup-wizard--keyed row)
+  ;; the cursor row: its actions show their keys, RET for the first and
+  ;; 2 to 9 for the rest
+  (let ((i 0))
+    (setup-wizard--walk
+      (lambda (x)
+        (if (equal? (plist-get x 'tag) "c-action")
+            (begin
+              (set! i (+ i 1))
+              (if (> i 9) x
+                  (setup-wizard--put x 'segs
+                    (cons (list "c-action-key" (if (= i 1) "⏎" (number->string i)))
+                          (plist-get x 'segs)))))
+            x))
+      (setup-wizard--put row 'class (string-append (plist-get row 'class) " wizard-cursor")))))
+
+(define (setup-wizard--with-cursor buf blocks)
+  ;; the rows of the step's tables, the cursor's row marked; the rows'
+  ;; action ids go in the buffer for the keys
+  (let* ((rows '())
+         (marked (map (lambda (blk)
+                        (setup-wizard--walk
+                          (lambda (x)
+                            (if (setup-wizard--choice? x)
+                                (begin (set! rows (cons x rows)) x)
+                                x))
+                          blk))
+                      blocks))
+         (rows (reverse rows))
+         (n (length rows))
+         (cur (max 0 (min (- n 1) (or (buffer-local-value 'setup-wizard-row buf) 0))))
+         (k -1))
+    (buffer-set-local! buf 'setup-wizard-row cur)
+    (buffer-set-local! buf 'setup-wizard-rows (map setup-wizard--clicks rows))
+    (map (lambda (blk)
+           (setup-wizard--walk
+             (lambda (x)
+               (if (setup-wizard--choice? x)
+                   (begin (set! k (+ k 1)) (if (= k cur) (setup-wizard--keyed x) x))
+                   x))
+             blk))
+         marked)))
+
 (define (setup-wizard-redraw! buf)
   (desktop-skip! buf 'render-blocks)
   (buffer-set-local! buf 'render-mode "blocks")
-  (buffer-set-local! buf 'render-blocks (setup-wizard-blocks buf)))
+  (buffer-set-local! buf 'render-blocks (setup-wizard--with-cursor buf (setup-wizard-blocks buf))))
 
 (mode-icon! "setup-wizard-mode" "")
 
@@ -432,7 +512,7 @@
       (setup-wizard-redraw! buf))))
 
 (mode-doc! "setup-wizard-mode"
-  "First-run setup in four steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three sets up the decision model that decide asks: start laya or add a key, and t tests it. Step four connects the Chrome extension, and its button starts the tutorial. The steps are tabs: click one, or press left and right, to look over the steps; a tab chooses nothing. Next asks for a model when none is chosen.")
+  "First-run setup in four steps. Step one chooses the model that new chats use: click a card's button to use, install, or add a key. Step two chooses the embedding service, OpenRouter or OpenAI, that lets apropos search by meaning. Step three sets up the decision model that decide asks: start laya or add a key, and t tests it. Step four connects the Chrome extension, and its button starts the tutorial. The steps are tabs: click one, or press left and right, to look over the steps; a tab chooses nothing. Up and down (or C-n, C-p, j, k) move the cursor over the rows of a step's table; RET runs the row's first action and 2 to 9 its others, as the row shows. n and p go to the next and the previous step, l starts the tutorial. Next asks for a model when none is chosen.")
 
 ;;; --- actions -------------------------------------------------------------------
 
@@ -459,6 +539,7 @@
   ;; a tab shows its step and asks nothing: the user looks over the steps
   (when (assoc step *setup-wizard-steps*)
     (buffer-set-local! buf 'setup-wizard-step step)
+    (buffer-set-local! buf 'setup-wizard-row 0)
     (setup-wizard-redraw! buf)))
 
 (define (setup-wizard-go! buf step)
@@ -466,6 +547,7 @@
   ;; chosen for the user, and Choose later goes on with no choice saved
   (let ((go (lambda ()
               (buffer-set-local! buf 'setup-wizard-step step)
+              (buffer-set-local! buf 'setup-wizard-row 0)
               (setup-wizard-redraw! buf)))
         (later "Choose later"))
     (if (and (equal? (setup-wizard-step buf) "model")
@@ -898,6 +980,46 @@
   (lambda () (setup-wizard-view! (current-buffer) (setup-wizard--step-after (current-buffer) -1)))
   'modes '(setup-wizard-mode))
 
+(define (setup-wizard-row-move! buf delta)
+  (let ((n (length (or (buffer-local-value 'setup-wizard-rows buf) '())))
+        (cur (or (buffer-local-value 'setup-wizard-row buf) 0)))
+    (when (> n 0)
+      (buffer-set-local! buf 'setup-wizard-row (max 0 (min (- n 1) (+ cur delta))))
+      (setup-wizard-redraw! buf))))
+
+(define (setup-wizard-row-act! buf i)
+  ;; the Ith action of the cursor's row, 0 the first
+  (let* ((rows (or (buffer-local-value 'setup-wizard-rows buf) '()))
+         (cur (or (buffer-local-value 'setup-wizard-row buf) 0))
+         (acts (if (< cur (length rows)) (list-ref rows cur) '())))
+    (if (< i (length acts))
+        (setup-wizard-click buf (list-ref acts i))
+        (message (if (null? acts) "Setup: this row has nothing to do" "Setup: this row has no such action")))))
+
+(define-command "setup-wizard-row-next" "Move to the next row of the setup table"
+  (lambda () (setup-wizard-row-move! (current-buffer) 1))
+  'modes '(setup-wizard-mode))
+
+(define-command "setup-wizard-row-prev" "Move to the previous row of the setup table"
+  (lambda () (setup-wizard-row-move! (current-buffer) -1))
+  'modes '(setup-wizard-mode))
+
+(define-command "setup-wizard-row-do" "Run the first action of the row the cursor is on"
+  (lambda () (setup-wizard-row-act! (current-buffer) 0))
+  'modes '(setup-wizard-mode))
+
+(for-each
+  (lambda (n)
+    (define-command (string-append "setup-wizard-row-action-" (number->string n))
+      (string-append "Run action " (number->string n) " of the row the cursor is on")
+      (lambda () (setup-wizard-row-act! (current-buffer) (- n 1)))
+      'modes '(setup-wizard-mode)))
+  '(2 3 4 5 6 7 8 9))
+
+(define-command "setup-wizard-learn" "Start the tutorial from setup"
+  (lambda () (setup-open-learning-space!))
+  'modes '(setup-wizard-mode))
+
 (mode-keys! "setup-wizard-mode"
   '(("n" "setup-wizard-next")
     ("p" "setup-wizard-back")
@@ -906,6 +1028,18 @@
     ("t" "setup-wizard-decide-test")
     ("<right>" "setup-wizard-tab-next")
     ("<left>" "setup-wizard-tab-prev")
+    ("<down>" "setup-wizard-row-next")
+    ("<up>" "setup-wizard-row-prev")
+    ("C-n" "setup-wizard-row-next")
+    ("C-p" "setup-wizard-row-prev")
+    ("j" "setup-wizard-row-next")
+    ("k" "setup-wizard-row-prev")
+    ("RET" "setup-wizard-row-do")
+    ("2" "setup-wizard-row-action-2") ("3" "setup-wizard-row-action-3")
+    ("4" "setup-wizard-row-action-4") ("5" "setup-wizard-row-action-5")
+    ("6" "setup-wizard-row-action-6") ("7" "setup-wizard-row-action-7")
+    ("8" "setup-wizard-row-action-8") ("9" "setup-wizard-row-action-9")
+    ("l" "setup-wizard-learn")
     ("q" "quit-window")))
 
 (define-style! 'setup-wizard "
@@ -929,6 +1063,8 @@
   padding: 7px 0 7px 10px; border-top: 1px solid var(--border-bg, #cbc4b1); }
 .wizard-choice:last-child { border-bottom: 1px solid var(--border-bg, #cbc4b1); }
 .wizard-choice.wizard-selected { box-shadow: inset 2px 0 0 var(--accent-fg, #26356b); }
+.wizard-choice.wizard-cursor { background: var(--hl-line-bg, rgba(38,53,107,0.08)); }
+.wizard .c-action-key { color: var(--dim-fg, #8a857a); margin-right: 4px; }
 .wizard-choice-title { white-space: nowrap; font-weight: 600; }
 .wizard-choice-detail, .wizard-choice-status { color: var(--dim-fg, #8a857a); }
 .wizard-choice-detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

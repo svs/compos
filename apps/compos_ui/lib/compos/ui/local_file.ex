@@ -34,7 +34,10 @@ defmodule Compos.Ui.LocalFile do
       conn
       |> put_resp_content_type(mime)
       |> put_resp_header("cache-control", "no-store")
-      |> put_resp_header("content-security-policy", "default-src 'none'; sandbox")
+      # A browser plays a video it was sent as a page by fetching it again,
+      # from inside that page, so the page must allow media from here.
+      # Nothing else loads, and the page still runs no script.
+      |> put_resp_header("content-security-policy", "default-src 'none'; media-src 'self'; sandbox")
       |> put_resp_header("x-content-type-options", "nosniff")
       |> put_resp_header("accept-ranges", "bytes")
       |> send_range(path, size)
@@ -52,7 +55,8 @@ defmodule Compos.Ui.LocalFile do
   # WebKit will not play a file at all from a server that answers a range
   # request with the whole file, so a range is answered with 206 and the
   # span that was asked for.
-  defp send_range(conn, path, size) do
+  @doc "Send PATH, or the byte range the request asks for, as a player needs."
+  def send_range(conn, path, size) do
     case requested_range(conn, size) do
       nil ->
         send_file(conn, 200, path)
@@ -116,7 +120,8 @@ defmodule Compos.Ui.LocalFile do
   # Chrome will not play video/quicktime, the type MIME gives a .mov. A
   # .mov is almost always H.264 or HEVC in an MP4-style container, and
   # Chrome and WebKit both play it when it is served as video/mp4.
-  defp browser_mime(path) do
+  @doc "The type a browser plays PATH as, or nil."
+  def browser_mime(path) do
     case MIME.from_path(path) do
       "video/quicktime" ->
         "video/mp4"

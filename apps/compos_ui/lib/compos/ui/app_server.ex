@@ -92,7 +92,7 @@ defmodule Compos.Ui.AppServer do
   defp serve(conn, buffer, rest) do
     with true <- app_buffer?(buffer),
          path when is_binary(path) <- safe_path(buffer, rest) do
-      respond(conn, MIME.from_path(path), file_text(path))
+      media(conn, path) || respond(conn, MIME.from_path(path), file_text(path))
     else
       _ -> send_resp(conn, 404, "no such file")
     end
@@ -101,6 +101,20 @@ defmodule Compos.Ui.AppServer do
   # Only a buffer the editor is showing as an app answers here. Preview is
   # the grant: this port serves nothing you did not open with `app-preview`.
   defp app_text(buffer), do: if(app_buffer?(buffer), do: Buffer.text(buffer))
+
+  # A sound or a video beside the app is read the way a player reads it:
+  # from the disk, a byte range at a time, never whole into memory.
+  defp media(conn, path) do
+    mime = Compos.Ui.LocalFile.browser_mime(path)
+
+    if is_binary(mime) and (String.starts_with?(mime, "video/") or String.starts_with?(mime, "audio/")) do
+      conn
+      |> put_resp_content_type(mime, nil)
+      |> put_resp_header("accept-ranges", "bytes")
+      |> put_resp_header("cache-control", "no-store")
+      |> Compos.Ui.LocalFile.send_range(path, File.stat!(path).size)
+    end
+  end
 
   defp app_buffer?(buffer) do
     Buffer.exists?(buffer) and Buffer.locals(buffer)["render-mode"] == "app"

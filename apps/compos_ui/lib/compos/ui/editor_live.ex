@@ -2072,6 +2072,7 @@ defmodule Compos.Ui.EditorLive do
           data-ctop={@node.ctop}
           data-app-message={@node.app_message}
           sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+          allow="autoplay; fullscreen; microphone"
           src={@node.app_url}
           title={@node.buffer}
         >
@@ -2572,12 +2573,13 @@ defmodule Compos.Ui.EditorLive do
   # Nothing that loads a resource, runs a script, or submits a form. A tag
   # outside the list draws as a div, an attribute outside it is dropped.
   @block_tags Compos.Ui.ComposML.domain_elements() ++ Compos.Ui.ComposML.elements() ++ ~w(div span pre kbd p h1 h2 h3 h4 table thead tbody tr th td ul ol li details summary button
-                 svg g path rect circle ellipse line polyline polygon text tspan title img)
+                 svg g path rect circle ellipse line polyline polygon text tspan title img audio video)
   @block_attrs ~w(component path bytes mtime permissions mark mode source profile field record-id query unread marked message-id content-type part-id name face state level role aria-level modified folded value max unit kind target glyph style d viewBox preserveAspectRatio fill stroke stroke-width
                   stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin
                   stroke-opacity fill-opacity fill-rule opacity x y x1 y1 x2 y2 cx cy r rx ry
                   width height points transform vector-effect text-anchor font-size
                   dominant-baseline shape-rendering title colspan rowspan src alt
+                  controls preload playsinline
                   author call verbosity aria-label aria-hidden rows-click)
 
   defp semantic_line(%{fields: []} = assigns) do
@@ -2819,8 +2821,17 @@ defmodule Compos.Ui.EditorLive do
 
   defp block_fill(view, _text), do: block_file(view)
 
-  defp block_file(%{file: path} = view) when is_binary(path),
-    do: %{view | attrs: view.attrs ++ [{"src", LocalImage.url(path)}]}
+  # A picture comes from the image route, which a browser may cache; a sound
+  # or a video from the file route, which answers the byte ranges a player
+  # asks for.
+  defp block_file(%{file: path} = view) when is_binary(path) do
+    url =
+      if String.starts_with?(MIME.from_path(path), "image/"),
+        do: LocalImage.url(path),
+        else: LocalFile.url(path)
+
+    %{view | attrs: view.attrs ++ [{"src", url}]}
+  end
 
   defp block_file(view), do: view
 
@@ -3010,18 +3021,24 @@ defmodule Compos.Ui.EditorLive do
   # The preview writes the page into a frame of the editor's own origin, so a
   # relative image would resolve against the editor. Point each one that names
   # a file beside the page at a signed LocalFile URL instead.
-  @local_image ~r/(\s(?:src|href)=["'])([^"'#?:]+?\.(?:png|jpe?g|gif|webp|avif|svg|ico))(["'])/i
+  @local_image ~r/(\s(?:src|href|poster)=["'])([^"'#?:]+?\.(?:png|jpe?g|gif|webp|avif|svg|ico|wav|mp3|m4a|aac|flac|ogg|oga|opus|weba|mp4|m4v|mov|webm))(["'])/i
 
-  defp local_images(html, path) when is_binary(path) do
-    dir = Path.dirname(path)
+  # A page that is no file, such as a page a mode draws, still names files
+  # by their full path; only a relative name needs the page's own place.
+  defp local_images(html, path) do
+    dir = if is_binary(path), do: Path.dirname(path)
 
     Regex.replace(@local_image, html, fn whole, open, rel, close ->
-      file = Path.expand(rel, dir)
-      if File.regular?(file), do: open <> LocalFile.url(file) <> close, else: whole
+      file =
+        cond do
+          Path.type(rel) == :absolute -> rel
+          dir -> Path.expand(rel, dir)
+          true -> nil
+        end
+
+      if file && File.regular?(file), do: open <> LocalFile.url(file) <> close, else: whole
     end)
   end
-
-  defp local_images(html, _path), do: html
 
   # What only the web client knows: how a local path becomes a URL the
   # page can load, and how an X post becomes a card.

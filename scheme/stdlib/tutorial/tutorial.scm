@@ -1396,6 +1396,8 @@ c-text.f-key, code.key { display: inline-block; text-indent: 0; font-family: var
 (tutorial-step-event! "groups" "Then come back" "tutorial-group-entered")
 (tutorial-step-event! "groups" "to come back" "tutorial-group-entered")
 (tutorial-step-event! "agents" "press `RET` to send it" "agent-send")
+;; the packages list binds l to packages-load, which installs an available row
+(tutorial-step-event! "packages" "type `l` to install it" "packages-load")
 
 ;; the prefix step of the kept Key notation lesson finishes when the prefix is cancelled
 (tutorial-step-event! "key-notation" "Press `ESC` to cancel" "prefix-cancelled")

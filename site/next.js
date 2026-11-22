@@ -100,6 +100,8 @@
       hold.textContent = galleryPaused ? 'play' : 'pause';
       hold.setAttribute('aria-pressed', galleryPaused ? 'true' : 'false');
       hold.setAttribute('aria-label', galleryPaused ? 'play the apps' : 'pause the apps');
+      // the headline holds too, on its last word
+      document.documentElement.classList.toggle('gal-held', galleryPaused);
     }
     hold.addEventListener('click', function () { galleryPaused = !galleryPaused; showHold(); scheduleGallery(); });
     showHold();

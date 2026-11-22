@@ -447,3 +447,4 @@ footer { border-top: 1px solid var(--rule); }
   100%      { transform: translateY(-3.45em); }
 }
 @media (prefers-reduced-motion: reduce) { .roll-in { animation: none; } }
+.gal-held .roll-in { animation: none; transform: translateY(-2.3em); }

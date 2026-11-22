@@ -101,7 +101,12 @@
   (list-refresh! buf))
 
 (define (gallery--off! buf)
+  ;; the grid drew its own blocks; a table is its text and records, as
+  ;; list-mode setup leaves it, so the blocks go or the tiles would stay
   (buffer-set-local! buf 'list-view-opts #f)
+  (buffer-set-local! buf 'render-mode #f)
+  (buffer-set-local! buf 'render-blocks #f)
+  (buffer-set-local! buf 'render-root #f)
   (list-refresh! buf))
 
 (register-minor-mode! "gallery-mode"

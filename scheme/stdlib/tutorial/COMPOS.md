@@ -213,6 +213,43 @@ The setup wizard chose the model that new chats use. You can change that choice 
 
 > Type `M-x group-llm` and read the presets. Press `ESC` to keep the group as it is.
 
+## Packages
+
+### Open the package list
+
+Compos ships small. The rest comes as **packages**: mail, the web, calendars, slides and more. A package is Scheme code in a git repo. When you install one, Compos clones it, loads it, and adds a `use-package` line to `~/.compos/init.scm`, so it loads again at the next start.
+
+| Key | What it does |
+| --- | --- |
+| `M-x packages` | List the packages: what is here, and what you can install |
+| `l` | Install the package at point, or load it |
+| `d` | Uninstall the package at point |
+| `u` | Update the package at point |
+| `/` | Narrow the rows |
+
+The list shows the packages that are here first. Below them, **available** shows the packages that you can install. Move point to a row, and the page of the package shows beside the list.
+
+> Type `M-x packages` and read the list.
+
+### Install a package
+
+We recommend these packages to start:
+
+| Package | What it gives you |
+| --- | --- |
+| `web` | Read web pages in a buffer |
+| `notmuch` | Read and write email |
+| `calendar` | Your Mac calendar, and an agent that reads it |
+| `feeds` | RSS and Atom feeds as a list |
+| `org` | Org-mode notes, todos and agenda |
+| `writing` | A workspace for long prose |
+| `slides` | Show a Markdown buffer as slides |
+| `screenshot` | Mark parts of the editor and save a PNG |
+
+You can uninstall a package at any time with `d`. A chat can also install packages for you: ask it.
+
+> Move point to one of the recommended packages under available, and type `l` to install it. Then type `q` to close the list.
+
 # Kept lessons
 
 The tutorial stops at the heading above. The lessons below are kept for later: the index and the slides do not show them.

@@ -113,8 +113,14 @@ defmodule Compos.Ui.LocalFile do
 
   defp secret, do: Compos.Ui.Endpoint.config(:secret_key_base)
 
+  # Chrome will not play video/quicktime, the type MIME gives a .mov. A
+  # .mov is almost always H.264 or HEVC in an MP4-style container, and
+  # Chrome and WebKit both play it when it is served as video/mp4.
   defp browser_mime(path) do
     case MIME.from_path(path) do
+      "video/quicktime" ->
+        "video/mp4"
+
       "application/octet-stream" ->
         Map.get(@fallback_mimes, path |> Path.extname() |> String.downcase())
 

@@ -521,7 +521,9 @@
         m.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); act("select-range", { src, t: g.a, b: g.b }); });
       }
       const sp = el("span", "w" + (c ? " " + c.state : "") + (dubAt(src, (w[0] + w[1]) / 2) ? " dubbed" : "") + ((S.sources[src].mutes || []).some((x) => (w[0] + w[1]) / 2 >= x.a && (w[0] + w[1]) / 2 < x.b) ? " muted" : ""), line, w[2] + " ");
-      sp.dataset.n = n;
+      sp.dataset.n = n; sp.dataset.a = w[0]; sp.dataset.b = w[1];
+      // inside what Scheme chose: the words the keys act on
+      if (selRange && selRange.src === src && w[0] >= selRange.a - 0.02 && w[1] <= selRange.b + 0.02) sp.classList.add("sel");
       if (n === caret) sp.classList.add("caret");
       last = w;
     });
@@ -568,7 +570,7 @@
     const n = e.target.dataset && e.target.dataset.n;
     if (n == null) return;
     e.preventDefault();
-    if (e.shiftKey && wordA != null) { wordB = Number(n); marksFromWords(); return; }
+    if (e.shiftKey && wordA != null) { wordB = Number(n); marksFromWords(); chooseWords(); return; }
     dragFrom = Number(n); dragMoved = false; dragging = true;
     if (selTok) { selTok = null; }
   });
@@ -577,8 +579,11 @@
     if (dragging && n != null && Number(n) !== dragFrom) { dragMoved = true; wordA = dragFrom; wordB = Number(n); marksFromWords(); }
   });
   addEventListener("mouseup", (e) => {
+    // a drag over words: the run is chosen, for h, m, r and ⌫
+    if (dragging && dragMoved) chooseWords();
     if (dragging && !dragMoved && dragFrom != null) {
-      // a click: the playhead goes to the start of the word, the selection goes
+      // a click: the playhead goes to the start of the word, the selection goes; ⇧-click runs from here
+      wordA = dragFrom; wordB = null;
       pause();
       act("caret", { src, t: S.sources[src].words[dragFrom][0], b: dragFrom });
       status.textContent = "At “" + S.sources[src].words[dragFrom][2] + "” · c cuts before it · drag over words, then ⌫ removes them";
@@ -589,11 +594,18 @@
     const n = e.target.dataset && e.target.dataset.n;
     if (n != null) { loadSource(src, S.sources[src].words[Number(n)][0]); cur = segAt(src, video.currentTime); }
   });
+  // the run of words from wordA to wordB, its times read off the spans
   function marksFromWords() {
-    const ws = S.sources[src].words;
     const a = Math.min(wordA, wordB), b = Math.max(wordA, wordB);
-    mIn = ws[a][0]; mOut = ws[b][1];
+    mIn = Number(wordSpan(a).dataset.a); mOut = Number(wordSpan(b).dataset.b);
     for (const sp of tx.querySelectorAll(".w")) sp.classList.toggle("sel", Number(sp.dataset.n) >= a && Number(sp.dataset.n) <= b);
+  }
+
+  // the run goes to Scheme as the chosen range; its answer draws it from then on
+  function chooseWords() {
+    const t = mIn, b = mOut;
+    mIn = mOut = null;
+    act("select-range", { src, t, b });
   }
 
   // ---- the cursor: a word, moved like a text cursor; the playhead follows it

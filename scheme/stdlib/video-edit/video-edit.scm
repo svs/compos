@@ -1265,7 +1265,7 @@
       ((equal? name "select-range")
        (let ((b (or (cadddr ctx) t)))
          (video-edit--tl-set-sel! tl (list 'range i t b))
-         (list 'status (string-append "Chosen " (video-edit-format-time t) " → " (video-edit-format-time b) " · h hide · m mute"))))
+         (list 'status (string-append "Chosen " (video-edit-format-time t) " → " (video-edit-format-time b) " · h hide · m mute · r re-record"))))
       ((equal? name "select-dub")
        (video-edit--tl-set-sel! tl (list 'dub i t))
        (list 'status (string-append "Take at " (video-edit-format-time t) " · ⌫ takes it out, the original sound comes back")))

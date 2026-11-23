@@ -103,6 +103,20 @@ nonstandard install out of the built-in connector catalog."
     accepts "^opencode-go/"
     signin "opencode auth login"))
 
+;; Hermes Agent — the local agent harness. `hermes-acp` ships with it and
+;; speaks ACP, so the editor drives it like any other agent: the Setup card
+;; tests it with one turn, and its session reports model and reasoning
+;; effort as config options. `hermes login` outside the editor is the whole
+;; auth story; its models (today the zai family, by probe) arrive from the
+;; session, not from here — so no accepts: a harness that serves several
+;; providers serves everything its session lists.
+(define-connector! "hermes"
+  '(cmd "hermes-acp"
+    title "Hermes Agent"
+    description "Hermes Agent — the local agent harness, over ACP"
+    model-config #t
+    signin "hermes login"))
+
 (define-connector! "antigravity"
   ;; Antigravity CLI (`agy`) ships its own ACP server. The session reports
   ;; Model and Thinking level as config options, so the model rides in

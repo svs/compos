@@ -226,3 +226,31 @@ a hang, and the user never learns there was anything to answer."
                     "a mode this backend does not have is dropped")
       (check-false! (buffer-local-value 'agent-mode-wanted buf) "and not kept forever")
       (buffer-kill! buf))))
+
+(deftest 'a-switch-offers-what-the-backend-reported
+  "M-x agent-switch never offers a probe-capable connector's stale seeds"
+  (lambda ()
+    (let ((saved-models *llm-connector-models*)
+          (saved-probed *llm-models-probed*)
+          (buf (test-buffer! "zz-switch-models" "")))
+      (set! *llm-connector-models* '())
+      ;; the probe already ran for zz-acp, so the empty case opens no session
+      (set! *llm-models-probed* '("zz-acp"))
+      (define-connector! "zz-acp" '(cmd "zz-fake-agent" models ("seed-1" "seed-2")))
+      (define-connector! "zz-declared" '(models ("decl-1" "decl-2")))
+      (check-equal! (chat-models-for-switch buf "zz-acp") '()
+                    "nothing reported yet: only the connector default, never the seeds")
+      (llm-models-seen! "zz-acp" '(("live-1" "Live One")))
+      (check-equal! (chat-models-for-switch buf "zz-acp") '("live-1")
+                    "reported: the backend's own list")
+      (buffer-set-local! buf 'agent-connector "zz-acp")
+      (buffer-set-local! buf 'agent-models '(("live-2" "Live Two")))
+      (check-equal! (chat-models-for-switch buf "zz-acp") '("live-2" "live-1")
+                    "this chat already runs it: the live list first, the remembered one after")
+      (check-equal! (chat-models-for-switch buf "zz-declared") '("decl-1" "decl-2")
+                    "a connector with no process keeps its declared list")
+      (set! *agent-connectors*
+            (filter (lambda (c) (not (member (car c) '("zz-acp" "zz-declared")))) *agent-connectors*))
+      (set! *llm-connector-models* saved-models)
+      (set! *llm-models-probed* saved-probed)
+      (buffer-kill! buf))))

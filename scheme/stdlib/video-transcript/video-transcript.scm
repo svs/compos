@@ -90,6 +90,14 @@
                    " | awk '/silence_start/ {s=$NF} /silence_end/ {print s, $5}' > " (sh-quote (video-transcript--silence-file path))
                    "; rm -f " (sh-quote wav) "; echo OK")))
 
+(define (video-transcript-ensure! path k)
+  "(video-transcript-ensure! PATH K) -- write PATH's transcript when it is missing, in a task; K gets its words, or #f when whisper heard no speech"
+  (let ((have (video-transcript-words path)))
+    (if have
+        (k have)
+        (shell-command->string (video-transcript--command path) "/tmp"
+          (lambda (o) (k (video-transcript-words path)))))))
+
 ;; ---- the page of words
 
 (define (video-transcript--name edit) (string-append "*transcript " (file-name-nondirectory (or (buffer-path edit) edit)) "*"))
@@ -361,5 +369,8 @@
 (effects! '(write display execute))
 (public! 'video-transcript-open! "(video-transcript-open! EDIT) — write the transcripts EDIT's sources lack and show the transcript in the other window")
 (catalog-meta! 'function "video-transcript-open!" 'domain 'files 'effects '(write display execute))
+(effects! '(write execute))
+(public! 'video-transcript-ensure! "(video-transcript-ensure! PATH K) — write PATH's transcript when it is missing, in a task; K gets its words, or #f when there was no speech")
+(catalog-meta! 'function "video-transcript-ensure!" 'domain 'files 'effects '(write execute))
 
 (provide 'video-transcript)

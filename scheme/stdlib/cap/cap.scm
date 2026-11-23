@@ -83,11 +83,12 @@
       "table{border-collapse:collapse;margin-top:14px}td{padding:3px 14px 3px 0}td.k{font-family:ui-monospace,monospace;font-weight:600}"
       ".s{margin-top:12px;opacity:.75}"
       "</style></head><body>"
-      "<h1>" (html-escape (cap--name dir)) "</h1>"
+      "<h1>" (html-escape (or (buffer-local-value 'cap-title buf) (cap--name dir))) "</h1>"
       "<div class=\"m\">" (html-escape (file-name-nondirectory dir))
       " · " (number->string (length segs)) (if (= (length segs) 1) " segment" " segments")
       (if (file-exists? out) (string-append " · exported: " (html-escape (file-name-nondirectory out))) "")
       "</div>"
+      (if (buffer-local-value 'cap-description buf) (string-append "<div class=\"m\">" (html-escape (buffer-local-value 'cap-description buf)) "</div>") "")
       (apply string-append
         (let loop ((ss segs) (i 1) (acc '()))
           (if (null? ss) (reverse acc)
@@ -118,6 +119,9 @@
       "<tr><td class=\"k\">o</td><td>Open the recording in Cap</td></tr>"
       "<tr><td class=\"k\">d</td><td>List the folder's files in Dired</td></tr>"
       "<tr><td class=\"k\">g</td><td>Draw again</td></tr></table>"
+      (if (buffer-local-value 'cap-transcript buf)
+          (string-append "<h2>Transcript</h2><div class=\"m\" style=\"white-space:pre-wrap;max-height:220px;overflow:auto\">" (html-escape (buffer-local-value 'cap-transcript buf)) "</div>")
+          "")
       (if (string? status) (string-append "<div class=\"s\">" (html-escape status) "</div>") "")
       "</body></html>")))
 

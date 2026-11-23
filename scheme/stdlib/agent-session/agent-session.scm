@@ -856,7 +856,7 @@
   (let ((w (with-frame-windows (lambda () (active-window)))))
     (and w (equal? (window-buffer w) buf))))
 
-(define (chat-finish--blockers buf slug ok? stop-reason)
+(define (chat-finish--blockers buf slug ok? stop-reason &optional asked?)
   (let ((info (and slug (agent-info slug)))
         (work (report-errors "chat-finish: read the work state" (lambda () (chat-work-state buf)))))
     (append
@@ -864,7 +864,8 @@
          '()
          (list (string-append "the run ended: " (if (string? stop-reason) stop-reason "error"))))
      (if (and (pair? info) (plist-get info 'permission)) (list "a permission request waits") '())
-     (if (chat-user-focused? buf) (list "the user is on it") '())
+     ;; looking at a chat keeps it open, unless the user dismissed it or the agent said done
+     (if (and (not asked?) (chat-user-focused? buf)) (list "the user is on it") '())
      (if (and (pair? work) (eq? (plist-get work 'verdict) 'unsaved)) (list "it has unsaved edits") '())
      (map (lambda (t) (string-append "todo " (plist-get t 'id) " is " (plist-get t 'state)))
           (chat-finish--open-todos buf)))))
@@ -875,7 +876,10 @@
          (summary (if (pair? fin) (cadr fin) ""))
          (title (chats-title buf))
          (reap? (buffer-local-value 'chat-reap buf))
-         (blockers (chat-finish--blockers buf slug ok? stop-reason)))
+         (dismissed? (buffer-local-value 'chat-dismiss-pending buf))
+         ;; a dismissed chat whose turn ended cleanly is done: the user asked it to go
+         (outcome (or outcome (and dismissed? ok? (not (equal? stop-reason "cancelled")) 'done)))
+         (blockers (chat-finish--blockers buf slug ok? stop-reason (or dismissed? (eq? outcome 'done)))))
     (buffer-set-local! buf 'chat-dismiss-pending #f)
     (buffer-set-local! buf 'chat-finish-asked #f)
     (buffer-set-local! buf 'chat-finish #f)

@@ -93,6 +93,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); f
 .transcript .tok { display: inline-block; margin: 0 4px 0 0; padding: 0 4px; border-radius: 3px; font-size: 11px; cursor: pointer; vertical-align: 1px; }
 .transcript .cutmark { color: #222; background: #f5c400; font-weight: 600; }
 .transcript .gap { color: var(--dim); background: color-mix(in srgb, var(--dim) 18%, transparent); }
+.transcript .gap.retake { color: #f5c400; background: color-mix(in srgb, #f5c400 16%, transparent); }
 .transcript .tok.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ---- the editor look: dark lanes, rounded pieces, a ruler, grips */

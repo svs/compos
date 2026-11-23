@@ -18,6 +18,10 @@
   "The shortest pause pause removal cuts, in seconds."
   'group 'video-edit 'type 'number)
 
+(defcustom 'video-edit-retake-words '("redo" "snip")
+  "Words you say by a pause to mark a retake: the take before it is cut, and the word too."
+  'group 'video-edit 'type 'list)
+
 (defcustom 'video-edit-pause-padding 0.15
   "How much of a pause stays on each side of a cut, in seconds."
   'group 'video-edit 'type 'number)
@@ -1033,6 +1037,7 @@
                          'dubs (map (lambda (d) (list 'a (car d) 'b (cadr d) 'url (video-edit--take-url edit (caddr d)))) (cadddr s))
                          'mutes (map (lambda (m) (list 'a (car m) 'b (cadr m))) (list-ref s 4))
                          'okpauses (video-edit--ok-pauses edit path)
+                         'retakes (let ((i (index path))) (filter pair? (map (lambda (p) (and (cadddr p) (list 'p (car p) 'a (car (cadddr p)) 'b (cadr (cadddr p)) 'words (caddr (cadddr p))))) (video-edit--pauses edit i))))
                          'words (if (pair? words) words '()))))
                st))))
 
@@ -1199,19 +1204,79 @@
   (let ((data (video-edit-read buf)))
     (video-edit-write! buf (list (append (car data) (list (list 'ok-pause (abbreviate-file-name path) (video-edit--round a)))) (cadr data)))))
 
+(define (video-edit--word-key w)
+  "a word as it compares: lower case, letters only"
+  (list->string (filter char-alphabetic? (string->list (string-downcase w)))))
+
+(define (video-edit--retake ws k)
+  "the retake around the pause after word K of the vector WS: (A B FIRST-WORDS), A the first take's start and B where the speaker starts again; or #f.
+A take said again after the pause is a retake: its first words match words just before the pause. A word of video-edit-retake-words by the pause says so for sure, and goes too."
+  (let* ((n (vector-length ws)) (key (lambda (j) (video-edit--word-key (caddr (vector-ref ws j)))))
+         (trigger? (lambda (j) (and (>= j 0) (< j n) (member (key j) video-edit-retake-words))))
+         (tb (trigger? k)) (ta (trigger? (+ k 1)))
+         (r (if ta (+ k 2) (+ k 1))) (e (if tb (- k 1) k))
+         ;; a word that ends a sentence: a take that ends so was finished
+         (ended? (lambda (j) (let ((t (caddr (vector-ref ws j)))) (and (> (string-length t) 0) (memv (string-ref t (- (string-length t) 1)) '(#\. #\? #\!)) #t)))))
+    (and (< r n) (>= e 0)
+         (let* ((run (lambda (s) (let go ((j 0)) (if (and (<= (+ s j) e) (< (+ r j) n) (> (string-length (key (+ s j))) 0) (equal? (key (+ s j)) (key (+ r j)))) (go (+ j 1)) j))))
+                (lo (max 0 (- e 40)))
+                (s (let find ((s e)) (cond ((< s lo) #f)
+                                            ((< (car (vector-ref ws s)) (- (cadr (vector-ref ws e)) 30)) #f)
+                                            ((let ((m (run s))) (or (>= m 3) (and (>= m 2) (<= (- e s) 15) (not (ended? e))) (and (>= m 1) (or tb ta)))) s)
+                                            (else (find (- s 1))))))
+                ;; a trigger with no words said again: the sentence before it goes
+                (s (or s (and (or tb ta)
+                              (let back ((s e) (c 0))
+                                (if (or (= s 0) (>= c 25) (let ((t (caddr (vector-ref ws (- s 1))))) (and (> (string-length t) 0) (memv (string-ref t (- (string-length t) 1)) '(#\. #\? #\!))))
+                                        (> (- (car (vector-ref ws s)) (cadr (vector-ref ws (- s 1)))) 0.7))
+                                    s (back (- s 1) (+ c 1))))))))
+           (and s (list (car (vector-ref ws s)) (car (vector-ref ws r))
+                        (string-join (map caddr (list-head (list-tail (vector->list ws) s) (min 6 (+ 1 (- e s))))) " ")))))))
+
 (define (video-edit--pauses edit i)
-  "the pauses of source I: gaps of video-edit-pause-min seconds or more between two words, (START END NEXT-WORD); accepted ones are left out"
+  "the pauses of source I: gaps of video-edit-pause-min seconds or more between two words, (START END NEXT-WORD RETAKE); RETAKE is (A B FIRST-WORDS) or #f; accepted ones are left out"
   (let* ((path (video-edit--src-path edit i)) (ws (video-edit-words edit path)) (ok (video-edit--ok-pauses edit path))
+         (src (assoc path (cadr (video-edit-read edit))))
+         ;; a pause already cut out is done with: it does not come up again
+         (cut? (lambda (a b) (let ((c (and src (video-edit--state-at (cadr src) (/ (+ a b) 2))))) (and c (cadr c)))))
          (ok? (lambda (a) (let near ((o ok)) (and (pair? o) (or (< (abs (- (car o) a)) 0.05) (near (cdr o))))))))
     (if (not (pair? ws)) '()
-        (let loop ((w ws) (acc '()))
-          (if (or (null? w) (null? (cdr w))) (reverse acc)
-              (let ((a (cadr (car w))) (b (car (cadr w))))
-                (loop (cdr w) (if (and (>= (- b a) video-edit-pause-min) (not (ok? a))) (cons (list a b (caddr (cadr w))) acc) acc))))))))
+        (let ((wv (list->vector ws)))
+          (let loop ((w ws) (k 0) (acc '()))
+            (if (or (null? w) (null? (cdr w))) (reverse acc)
+                (let ((a (cadr (car w))) (b (car (cadr w))))
+                  (loop (cdr w) (+ k 1)
+                        (if (and (>= (- b a) video-edit-pause-min) (not (ok? a)) (not (cut? a b)))
+                            (cons (list a b (caddr (cadr w)) (video-edit--retake wv k)) acc)
+                            acc)))))))))
 
 (define (video-edit--pause-at edit i a)
-  "the pause of source I that starts at A, or #f"
-  (let find ((ps (video-edit--pauses edit i))) (cond ((null? ps) #f) ((< (abs (- (car (car ps)) a)) 0.02) (car ps)) (else (find (cdr ps))))))
+  "the pause of source I chosen at A: it starts at A, or its retake does; or #f"
+  (let find ((ps (video-edit--pauses edit i)))
+    (cond ((null? ps) #f)
+          ((or (< (abs (- (car (car ps)) a)) 0.02) (and (cadddr (car ps)) (< (abs (- (car (cadddr (car ps))) a)) 0.02))) (car ps))
+          (else (find (cdr ps))))))
+
+(define (video-edit-fix-pauses! buf)
+  "(video-edit-fix-pauses! BUF) -- cut every retake's first take, then trim every other pause to a breath at each end; kept pauses stay; one undo step; answers (RETAKES PAUSES)"
+  (video-edit--one-step buf
+    (lambda ()
+      (let ((pad video-edit-pause-padding) (nr 0) (np 0))
+        (let loop ((i 0) (ss (video-edit-structure buf)))
+          (unless (null? ss)
+            (let* ((path (car (car ss))) (ps (video-edit--pauses buf i))
+                   (open? (lambda (p) (not (video-edit--hidden-at? buf path (/ (+ (car p) (cadr p)) 2))))))
+              (for-each (lambda (p) (let ((rt (cadddr p)))
+                                      (when (and rt (open? p))
+                                        (video-edit--set-flag! buf path (car rt) (- (cadr rt) 0.05) 'hidden #t "retake")
+                                        (set! nr (+ nr 1)))))
+                        ps)
+              (for-each (lambda (p) (when (and (not (cadddr p)) (open? p))
+                                      (video-edit--set-flag! buf path (+ (car p) pad) (- (cadr p) pad) 'hidden #t "pause")
+                                      (set! np (+ np 1))))
+                        ps)
+              (loop (+ i 1) (cdr ss)))))
+        (list nr np)))))
 
 (define (video-edit--act! edit tl name ctx)
   "do the timeline action NAME; CTX is the page's playhead (SRC T PLAYING); answers what the page should show"
@@ -1220,14 +1285,24 @@
     (cond
       ((and (member name '("cut" "accept-pause")) (pair? sel) (equal? (car sel) 'range) (video-edit--pause-at edit (cadr sel) (caddr sel)))
        ;; a chosen pause: a keeps it as meant, c cuts it out, a breath left at each end
-       (let* ((k (cadr sel)) (a (caddr sel)) (b (cadddr sel)) (path (video-edit--src-path edit k)) (pad video-edit-pause-padding))
+       (let* ((k (cadr sel)) (p (video-edit--pause-at edit k (caddr sel))) (a (car p)) (b (cadr p)) (rt (cadddr p))
+              (path (video-edit--src-path edit k)) (pad video-edit-pause-padding))
          (video-edit--tl-set-sel! tl #f)
          (video-edit--tl! tl "picked" #f)
-         (if (equal? name "accept-pause")
-             (begin (video-edit-accept-pause! edit path a)
-                    (list 'status (string-append "Pause at " (video-edit-format-time a) " kept · it won't come up again · undo takes that back")))
-             (begin (video-edit--set-flag! edit path (+ a pad) (- b pad) 'hidden #t "pause")
-                    (list 'status (string-append "Pause cut out " (video-edit-format-time (+ a pad)) " → " (video-edit-format-time (- b pad)) " · undo brings it back"))))))
+         (cond
+           ((equal? name "accept-pause")
+             (video-edit-accept-pause! edit path a)
+             (list 'status (string-append "Pause at " (video-edit-format-time a) " kept · it won't come up again · undo takes that back")))
+           ((and rt (< (abs (- (car rt) (caddr sel))) 0.02))
+             (video-edit--set-flag! edit path (car rt) (- (cadr rt) 0.05) 'hidden #t "retake")
+             (list 'status (string-append "First take cut out: “" (caddr rt) "…” · undo brings it back")))
+           (else
+             (video-edit--set-flag! edit path (+ a pad) (- b pad) 'hidden #t "pause")
+             (list 'status (string-append "Pause cut out " (video-edit-format-time (+ a pad)) " → " (video-edit-format-time (- b pad)) " · undo brings it back"))))))
+      ((equal? name "fix-all")
+       (video-edit--tl-set-sel! tl #f)
+       (let ((n (video-edit-fix-pauses! edit)))
+         (list 'status (string-append "Fixed: " (number->string (car n)) " retakes cut, " (number->string (cadr n)) " pauses trimmed · undo brings it all back"))))
       ((equal? name "accept-pause") (list 'status "Choose a pause first: ⌥← ⌥→, or click its ⏸"))
       ((and (equal? name "cut") (pair? sel) (equal? sel (video-edit--tl tl "picked" #f)))
        ;; a stretch picked with the mouse: c cuts it out of the edit
@@ -1246,7 +1321,7 @@
                            (let ((cuts (caddr (car ss))))
                              (loop (cdr ss) (+ k 1)
                                    (append (reverse (sort (append (map (lambda (c) (list k c)) (if (and (pair? cuts) (< (car cuts) 0.02)) cuts (cons 0 cuts)))
-                                                                  (map (lambda (p) (list k (car p) (cadr p))) (video-edit--pauses edit k)))))
+                                                                  (map (lambda (p) (let ((rt (cadddr p))) (if rt (list k (car rt) (cadr rt) (caddr rt)) (list k (car p) (cadr p))))) (video-edit--pauses edit k)))))
                                            acc))))))
               ;; step from what is chosen, not from the frame the video settled on
               (i (cond (on-cut (cadr on-cut)) ((and (pair? sel) (equal? (car sel) 'range)) (cadr sel)) (else i)))
@@ -1261,7 +1336,9 @@
                 (video-edit--tl! tl "shown" (car s))
                 (video-edit--tl-set-sel! tl (list 'range (car s) (cadr s) (caddr s)))
                 (list 'seek (list 'src (car s) 't (cadr s))
-                      'status (string-append "Pause " (number->string (video-edit--round (- (caddr s) (cadr s)))) " s at " (video-edit-format-time (cadr s)) " · a keeps it · c cuts it out · h hides · m mutes")))
+                      'status (if (pair? (cdddr s))
+                                   (string-append "Retake: “" (cadddr s) "…” said again after a pause · c cuts the first take · a keeps it · o menu")
+                                   (string-append "Pause " (number->string (video-edit--round (- (caddr s) (cadr s)))) " s at " (video-edit-format-time (cadr s)) " · o menu · a keeps it · c cuts it out · h hides · m mutes"))))
                ((member (cadr s) (video-edit--src-cuts edit (car s))) (video-edit--choose-cut edit tl (car s) (cadr s) ""))
                (else
                 ;; a clip's start: its first segment is chosen
@@ -1347,6 +1424,14 @@
          (when n (video-edit--tl! tl "caret" n) (video-edit--tl-set-sel! tl #f))
          (let* ((ws (and n (video-edit-words edit (video-edit--src-path edit (video-edit--tl tl "shown" i))))) (w (and (pair? ws) (< n (length ws)) (list-ref ws n))))
            (if w (list 'seek (list 'src (video-edit--tl tl "shown" i) 't (car w))) (list)))))
+      ((equal? name "go-to-cursor")
+       ;; the playhead to the cursor's word, and the transcript centred on it; playing stops there
+       (video-edit--tl! tl "playing" #f)
+       (video-edit--tl-set-sel! tl #f)
+       (let* ((shown (video-edit--tl tl "shown" i)) (n (video-edit--tl tl "caret" #f))
+              (ws (and n (video-edit-words edit (video-edit--src-path edit shown)))) (w (and (pair? ws) (< n (length ws)) (list-ref ws n))))
+         (if w (list 'seek (list 'src shown 't (car w)) 'center #t 'status (string-append "At the cursor: “" (caddr w) "” · " (video-edit-format-time (car w))))
+             (list 'status "No cursor yet · click a word or ↑ ↓ to place it"))))
       ((equal? name "play-here")
        (video-edit--tl! tl "playing" #t)
        (let* ((shown (video-edit--tl tl "shown" i)) (n (video-edit--tl tl "caret" #f))
@@ -1375,6 +1460,8 @@
          (begin
            (let* ((o (if (equal? method "POST") (or (json-parse body) '()) '()))
                   (_ (when (equal? (plist-get o 'op) "at") (video-edit--tl! buf "playing" #f)))
+                  ;; the page's cursor is the cursor: playing moves it there, so each action brings it
+                  (_ (when (number? (plist-get o 'caret)) (video-edit--tl! buf "caret" (inexact->exact (round (plist-get o 'caret))))))
                   (act (and (equal? (plist-get o 'op) "act")
                             (video-edit--act! edit buf (plist-get o 'name) (list (or (plist-get o 'src) 0) (or (plist-get o 't) 0) (plist-get o 'playing) (plist-get o 'b))))))
              (when (and (equal? method "POST") (not act)) (video-edit--timeline-op! edit o))
@@ -1441,6 +1528,7 @@
   ;; (KEY ACTION DOC): each key names an action; the page plays and draws, Scheme decides
   '(("SPC" "play" "Play or pause")
     ("RET" "play-here" "Play from the cursor")
+    ("g" "go-to-cursor" "Move the playhead to the cursor and centre the transcript on it, without playing")
     ("<left>" "scrub-back" "Scrub a second back")
     ("<right>" "scrub-on" "Scrub a second on")
     ("," "frame-back" "Step a frame back")
@@ -1459,6 +1547,8 @@
     ("S-<down>" "select-down" "Move the chosen cut a line down")
     ("c" "cut" "Cut at the playhead, or cut out the chosen pause")
     ("a" "accept-pause" "Keep the chosen pause: it is meant, never shown again")
+    ("o" "menu" "Open the menu of the chosen pause or cut")
+    ("F" "fix-all" "Fix every pause: cut each retake's first take, trim the rest to a breath")
     ("h" "hide" "Hide or show the segment")
     ("m" "mute" "Mute or unmute the segment")
     ("r" "record" "Re-record the segment")
@@ -1493,6 +1583,13 @@
 
 (mode-keys! "video-edit-timeline-mode"
   (map (lambda (row) (list (car row) (string-append "video-edit-timeline-" (cadr row)))) video-edit--timeline-keys))
+
+;; ESC lets go of the selection; it never closes the timeline
+(mode-quit! "video-edit-timeline-mode"
+  (lambda (buf) (with-current-buffer buf (lambda () (run-command "video-edit-timeline-clear"))) #t))
+
+(define-command "video-edit-go-to-cursor" "Move the timeline's playhead to the cursor's word and centre the transcript on it, without playing"
+  (lambda () (app-post! (video-edit--timeline-name (video-edit--edit-buffer)) (list 'act "go-to-cursor"))))
 
 (define-command "video-edit-timeline" "Show the edit's timeline: play it live, skipping hidden clips, and mark clips"
   (lambda ()
@@ -1541,11 +1638,11 @@
 (catalog-meta! 'function "video-edit-remove-pauses!" 'domain 'files 'effects '(write execute))
 (public! 'video-edit-accept-pause! "(video-edit-accept-pause! BUF PATH A) — PATH's pause at A is meant: it never comes up again; undo takes it back")
 (catalog-meta! 'function "video-edit-accept-pause!" 'domain 'files 'effects '(write))
+(public! 'video-edit-fix-pauses! "(video-edit-fix-pauses! BUF) — cut every retake's first take and trim every other pause, kept pauses left; one undo step")
+(catalog-meta! 'function "video-edit-fix-pauses!" 'domain 'files 'effects '(write))
 (public! 'video-edit-export-command "(video-edit-export-command BUF OUT HEIGHT PREVIEW?) — the ffmpeg command that writes BUF's edit to OUT")
 (catalog-meta! 'function "video-edit-export-command" 'domain 'files 'effects '(write execute))
 (effects! '(write))
-(public! 'video-edit-accept-pause! "(video-edit-accept-pause! BUF PATH A) -- PATH's pause at A is meant to be there: no list, key or mark brings it up again; undo takes it back")
-(catalog-meta! 'function "video-edit-accept-pause!" 'domain 'files 'effects '(write))
 
 (provide 'video-edit)
 

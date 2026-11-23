@@ -501,6 +501,8 @@
   }
 
   function drawTranscript() {
+    // the words are drawn anew: the next frame marks the playhead's word again
+    lastWord = null;
     tx.textContent = "";
     const s = S && S.sources[src];
     if (!s) return;
@@ -534,10 +536,13 @@
       }
       // a silence before this word: a mark you can hide
       if (last && w[0] - last[1] >= 1.0 && !(s.okpauses || []).some((o) => Math.abs(o - last[1]) < 0.05)) {
-        const g = { kind: "gap", a: last[1], b: w[0] };
-        const m = el("span", "tok gap" + (selRange && selRange.src === src && Math.abs(selRange.a - g.a) < 0.02 && Math.abs(selRange.b - g.b) < 0.02 ? " sel" : ""), line, "⏸ " + (w[0] - last[1]).toFixed(1) + "s");
-        m.title = "silence · click or ⌥← ⌥→ for its menu: a keeps it, c cuts it out";
-        m.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); pauseMenuFor = null; act("select-range", { src, t: g.a, b: g.b }); });
+        const rt = (s.retakes || []).find((r) => Math.abs(r.p - last[1]) < 0.05);
+        const g = rt ? { kind: "gap", a: rt.a, b: rt.b } : { kind: "gap", a: last[1], b: w[0] };
+        const on = selRange && selRange.src === src && Math.abs(selRange.b - g.b) < 0.02 && (Math.abs(selRange.a - g.a) < 0.02 || Math.abs(selRange.a - last[1]) < 0.02);
+        const m = el("span", "tok gap" + (rt ? " retake" : "") + (on ? " sel" : ""), line, "⏸ " + (w[0] - last[1]).toFixed(1) + "s" + (rt ? " ↺" : ""));
+        if (rt) m.dataset.retake = rt.words;
+        m.title = "silence · click, or o when chosen, for its menu: a keeps it, c cuts it out";
+        m.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); act("select-range", { src, t: g.a, b: g.b }).then(() => openMenu()); });
       }
       const sp = el("span", "w" + (c ? " " + c.state : "") + (dubAt(src, (w[0] + w[1]) / 2) ? " dubbed" : "") + ((S.sources[src].mutes || []).some((x) => (w[0] + w[1]) / 2 >= x.a && (w[0] + w[1]) / 2 < x.b) ? " muted" : ""), line, w[2] + " ");
       sp.dataset.n = n; sp.dataset.a = w[0]; sp.dataset.b = w[1];
@@ -570,17 +575,30 @@
     ];
     showMenu(anchor, "✂ Cut at " + fmt(t), items);
   }
-  // ---- a pause's menu: it opens by itself when a pause is chosen, by key or click
-  let pauseMenuFor = null;
+  // ---- the menu of what is chosen, a pause or a cut: o or a click opens it
+  function openMenu() {
+    const g = tx.querySelector(".tok.gap.sel");
+    if (g) return openPauseMenu(g);
+    const c = tx.querySelector(".cutmark.sel") || srcBar.querySelector(".cut.sel");
+    if (selTok && selTok.kind === "cut" && c) return openCutMenu(c);
+    status.textContent = "Nothing chosen · ⌥← ⌥→ goes to a pause or a cut, o opens its menu";
+  }
   function openPauseMenu(anchor) {
     closeCutMenu();
     if (!selRange) return;
-    const a = selRange.a, b = selRange.b;
+    const a = selRange.a, b = selRange.b, rt = anchor.dataset.retake;
+    if (rt) return showMenu(anchor, "↺ Retake · “" + rt + "…” said again", [
+      ["Cut the first take out", "c", () => runAct("cut")],
+      ["Keep both: it is meant", "a", () => runAct("accept-pause")],
+      ["Fix every pause and retake", "F", () => runAct("fix-all")],
+      ["Next pause or cut", "⌥→", () => runAct("next-point")],
+    ]);
     showMenu(anchor, "⏸ Pause " + (b - a).toFixed(1) + "s at " + fmt(a), [
       ["Keep it: it is meant, don't show it again", "a", () => runAct("accept-pause")],
       ["Cut it out, a breath left at each end", "c", () => runAct("cut")],
       ["Hide or show all of it", "h", () => runAct("hide")],
       ["Mute or unmute it", "m", () => runAct("mute")],
+      ["Fix every pause and retake", "F", () => runAct("fix-all")],
       ["Next pause or cut", "⌥→", () => runAct("next-point")],
     ]);
   }
@@ -656,7 +674,8 @@
 
   // each frame: only what moved. The clock and the lit piece change when they change,
   // the word at the playhead is found by halving, and nothing is searched for twice.
-  let lastWord = null, lastClock = "", lastOn = -2;
+  // var: drawTranscript, defined above, resets lastWord before this line has run
+  var lastWord = null, lastClock = "", lastOn = -2;
   function wordAt(ws, t) {
     let lo = 0, hi = ws.length - 1, n = -1;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (ws[mid][0] <= t) { n = mid; lo = mid + 1; } else hi = mid - 1; }
@@ -727,7 +746,7 @@
 
   // the few things that are the page's own: the media element and the file buttons
   const LOCAL = {
-    "export-key": () => op({ op: "export" }), "import-key": () => op({ op: "import" }), "project-file": () => op({ op: "show-edit" }),
+    "export-key": () => op({ op: "export" }), "import-key": () => op({ op: "import" }), "project-file": () => op({ op: "show-edit" }), "menu": () => openMenu(),
     "source-earlier": () => op({ op: "move-source", src, dir: -1 }), "source-later": () => op({ op: "move-source", src, dir: 1 }),
     "drop-source": () => { if (confirm("Take " + S.sources[src].name + " out of the edit?")) op({ op: "remove-source", src }); },
   };
@@ -740,7 +759,7 @@
   // every action goes to Scheme with the playhead; the answer is the whole view
   function act(name, at) {
     const i = at ? at.src : Number(video.dataset.src), t = at ? at.t : video.currentTime;
-    return fetch(API, { method: "POST", body: JSON.stringify({ op: "act", name, src: i, t, b: at && at.b, playing }) })
+    return fetch(API, { method: "POST", body: JSON.stringify({ op: "act", name, src: i, t, b: at && at.b, playing, caret }) })
       .then((r) => r.json()).then((s) => { setState(s); applyView(s.view || {}); });
   }
   // the page draws Scheme's view: what is chosen, which video, the zoom, whole mode,
@@ -757,15 +776,13 @@
     zoom = v.zoom ? { a: v.zoom.a, b: v.zoom.b } : null;
     if (v.seek) { loadSource(v.seek.src, v.seek.t); cur = segAt(v.seek.src, v.seek.t); }
     drawEditBar(); drawSourceBar(); drawTranscript(); drawSelection();
-    // a pause newly chosen opens its menu; one let go of closes it
-    const gapSel = tx.querySelector(".tok.gap.sel");
-    const pauseKey = gapSel && selRange ? selRange.src + ":" + selRange.a : null;
-    if (pauseKey && pauseKey !== pauseMenuFor) openPauseMenu(gapSel);
-    else if (!pauseKey && pauseMenuFor) closeCutMenu();
-    pauseMenuFor = pauseKey;
+    // a menu on what is let go of closes
+    if (cutMenu && !tx.querySelector(".tok.gap.sel, .cutmark.sel")) closeCutMenu();
     // what was chosen comes into view in the transcript: a cut, a pause, else the first word of the segment
     const chosen = tx.querySelector(".cutmark.sel, .tok.gap.sel") || (selRange && selRange.src === src && (() => { const ws = S.sources[src].words || []; const n = ws.findIndex((w) => w[0] >= selRange.a - 0.05); return n >= 0 ? tx.querySelector('.w[data-n="' + n + '"]') : null; })());
     if (chosen && (v.seek || v.sel)) chosen.scrollIntoView({ block: "center" });
+    // go to the cursor: its word comes to the middle, as C-l does
+    if (v.center && caret != null) { const cw = wordSpan(caret); if (cw) cw.scrollIntoView({ block: "center" }); }
     if (v.status != null) status.textContent = v.status;
     if (v.playing && !playing) play(); else if (v.playing === false && playing) pause();
     if (v.record) startRecord(v.record);

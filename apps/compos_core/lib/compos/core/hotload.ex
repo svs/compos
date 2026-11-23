@@ -168,9 +168,18 @@ defmodule Compos.Core.Hotload do
 
       {:error, reason} ->
         Logger.warning("Compos.Core.Hotload: cannot watch #{root}: #{inspect(reason)}")
-        %{state | roots: state.roots -- [root]}
+        drop_root(state, root)
+
+      :ignore ->
+        # a backend whose watcher cannot start (no inotifywait on this
+        # Linux, say) ignores instead of erroring; hot reload is a
+        # convenience, so the daemon boots without it
+        Logger.warning("Compos.Core.Hotload: cannot watch #{root}: the backend ignored it")
+        drop_root(state, root)
     end
   end
+
+  defp drop_root(state, root), do: %{state | roots: state.roots -- [root]}
 
   # --- the filter ------------------------------------------------------------
 

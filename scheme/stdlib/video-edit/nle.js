@@ -427,12 +427,31 @@
     for (const d of srcBar.querySelectorAll(".dub")) { const a = Number(d.dataset.a), b = Number(d.dataset.b); d.style.left = at(s, a) + "%"; d.style.width = ((b - a) / span) * 100 + "%"; }
     drawSourceSel();
   }
+  // a click on the source bar picks the segment there; a drag picks the stretch, for c to cut out
   srcBar.addEventListener("mousedown", (e) => {
     const s = S.sources[src];
     const r = srcBar.getBoundingClientRect(), w = win(s);
-    loadSource(src, w.a + ((e.clientX - r.left) / r.width) * (w.b - w.a));
+    const toT = (x) => Math.max(0, Math.min(s.dur, w.a + ((x - r.left) / r.width) * (w.b - w.a)));
+    const x0 = e.clientX, t0 = toT(x0);
+    let moved = false;
+    e.preventDefault();
+    loadSource(src, t0);
     cur = segAt(src, video.currentTime);
-    act("select-segment", { src, t: video.currentTime });
+    const move = (ev) => {
+      if (Math.abs(ev.clientX - x0) > 3) moved = true;
+      if (!moved) return;
+      const t1 = toT(ev.clientX);
+      mIn = Math.min(t0, t1); mOut = Math.max(t0, t1);
+      status.textContent = "Selecting " + fmt(mIn) + " → " + fmt(mOut) + " · " + fmt(mOut - mIn);
+    };
+    const up = (ev) => {
+      removeEventListener("mousemove", move); removeEventListener("mouseup", up);
+      if (!moved) { act("select-segment", { src, t: t0 }); return; }
+      const t1 = toT(ev.clientX), a = Math.min(t0, t1), b = Math.max(t0, t1);
+      mIn = mOut = null;
+      act("select-range", { src, t: a, b });
+    };
+    addEventListener("mousemove", move); addEventListener("mouseup", up);
   });
 
   let wheelZoom = 0, wheelPan = 0, wheelAt = null, wheelQueued = false;
@@ -523,7 +542,7 @@
       const sp = el("span", "w" + (c ? " " + c.state : "") + (dubAt(src, (w[0] + w[1]) / 2) ? " dubbed" : "") + ((S.sources[src].mutes || []).some((x) => (w[0] + w[1]) / 2 >= x.a && (w[0] + w[1]) / 2 < x.b) ? " muted" : ""), line, w[2] + " ");
       sp.dataset.n = n; sp.dataset.a = w[0]; sp.dataset.b = w[1];
       // inside what Scheme chose: the words the keys act on
-      if (selRange && selRange.src === src && w[0] >= selRange.a - 0.02 && w[1] <= selRange.b + 0.02) sp.classList.add("sel");
+      if (!selTok && selRange && selRange.src === src && w[0] >= selRange.a - 0.02 && w[1] <= selRange.b + 0.02) sp.classList.add("sel");
       if (n === caret) sp.classList.add("caret");
       last = w;
     });

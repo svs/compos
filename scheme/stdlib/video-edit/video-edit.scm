@@ -1201,6 +1201,12 @@
   (let* ((sel (video-edit--tl-sel tl)) (i (car ctx)) (t (cadr ctx))
          (on-cut (and (pair? sel) (equal? (car sel) 'cut) sel)))
     (cond
+      ((and (equal? name "cut") (pair? sel) (equal? sel (video-edit--tl tl "picked" #f)))
+       ;; a stretch picked with the mouse: c cuts it out of the edit
+       (video-edit--set-flag! edit (video-edit--src-path edit (cadr sel)) (caddr sel) (cadddr sel) 'hidden #t #f)
+       (video-edit--tl-set-sel! tl #f)
+       (video-edit--tl! tl "picked" #f)
+       (list 'status (string-append "Cut out " (video-edit-format-time (caddr sel)) " → " (video-edit-format-time (cadddr sel)) " · undo brings it back")))
       ((equal? name "cut")
        (let ((path (video-edit--src-path edit i)))
          (video-edit-add-cut! edit path t)
@@ -1265,7 +1271,8 @@
       ((equal? name "select-range")
        (let ((b (or (cadddr ctx) t)))
          (video-edit--tl-set-sel! tl (list 'range i t b))
-         (list 'status (string-append "Chosen " (video-edit-format-time t) " → " (video-edit-format-time b) " · h hide · m mute · r re-record"))))
+         (video-edit--tl! tl "picked" (list 'range i t b))
+         (list 'status (string-append "Chosen " (video-edit-format-time t) " → " (video-edit-format-time b) " · c cuts it out · h hide · m mute · r re-record"))))
       ((equal? name "select-dub")
        (video-edit--tl-set-sel! tl (list 'dub i t))
        (list 'status (string-append "Take at " (video-edit-format-time t) " · ⌫ takes it out, the original sound comes back")))
@@ -1927,3 +1934,13 @@
   (lambda (buf n)
     (let ((edit (buffer-local-value 'video-edit-timeline-of buf)))
       (when (and edit (buffer-known? edit)) (video-edit--timeline-push! edit)))))
+
+;; the timeline's text is its page: an undo that reaches it would blank the
+;; frame, so the page goes straight back
+(advice-add! 'undo! 'after 'video-edit-timeline-keep-page
+  (lambda args
+    (let ((buf (current-buffer)))
+      (when (and (buffer-known? buf) (buffer-derived-mode? buf "video-edit-timeline-mode")
+                 (not (equal? (buffer-text buf) video-edit--timeline-html)))
+        (video-edit--timeline-fill! buf)
+        (app-reload! buf)))))

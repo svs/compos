@@ -89,6 +89,10 @@
     (morg-kinds "morg/morg-kinds.scm")
     (morg)
     (markdown-mode)
+    ;; the writing surface: a centered measure, the font and line height of prose
+    (writing)
+    ;; ship a group to another daemon: M-x group-export, group-import, group-send
+    (group-transfer)
     (cua)
     (vscode)
     (app-watch)

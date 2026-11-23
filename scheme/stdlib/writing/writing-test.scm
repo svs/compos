@@ -1,0 +1,444 @@
+;;; writing-test.scm --- the writing workspace.
+;;;
+;;; writing-mode is a look and a set of buffer-locals; write is the
+;;; workspace that opens around a document. Both are Scheme, and every
+;;; assertion here reads a Scheme value.
+;;;
+;;; Nothing here presses a key. Every behaviour is a named command, and a
+;;; binding is a fact about a keymap — asserted as data, once, from the
+;;; map itself.
+
+(domain! 'testing)
+(effects! '(read))
+
+(deftest 'pasted-image-markdown-uses-angle-brackets-for-spaces
+  "Markdown image destinations with spaces use angle brackets"
+  (lambda ()
+    (check-equal! (clipboard-image-destination "images/my sketch.png")
+                  "<images/my sketch.png>"
+                  "the destination is valid Markdown")))
+
+(deftest 'a-pasted-images-link-is-relative-to-the-document
+  "an absolute path names this disk only, and no other reader has it"
+  (lambda ()
+    ;; a project of its own: the suite's directory need not be a repository
+    ;; the paths are git-root's own: on macOS /tmp is /private/tmp
+    (let* ((made (string-append (compos-cache-dir) "/zz-writing-repo"))
+           (_ (begin (make-directory! (string-append made "/docs"))
+                     (shell-command->string "git init -q ." made)))
+           (root (git-root made))
+           (doc (string-append root "/docs/zz-notes.md")))
+      (check-equal! (clipboard-image-link doc (string-append root "/docs/pics/a.png"))
+                    "pics/a.png"
+                    "a picture beside the document")
+      (check-equal! (clipboard-image-link doc (string-append root "/pics/a.png"))
+                    "../pics/a.png"
+                    "and one elsewhere in the project, reached from the document")
+      (check-equal! (clipboard-image-link doc "/tmp/zz-a.png")
+                    "/tmp/zz-a.png"
+                    "a picture outside the project keeps its absolute path")
+      (check-equal! (clipboard-image-link #f "/tmp/zz-a.png")
+                    "/tmp/zz-a.png"
+                    "and so does one pasted into a document with no file")
+      (shell-command->string (string-append "rm -rf '" made "'")))))
+
+(deftest 'pasted-image-extension-follows-the-clipboard-mime-type
+  "The default image name follows the clipboard type"
+  (lambda ()
+    (check-equal! (clipboard-image-extension "image/jpeg") ".jpg"
+                  "JPEG uses a JPG suffix")
+    (check-equal! (clipboard-image-extension "image/png") ".png"
+                  "PNG uses a PNG suffix")))
+
+(deftest 'user-paste-hooks-run-before-writing-defaults-and-can-consume
+  "a named userland handler can replace writing-mode paste policy"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-paste-hook.md" "")))
+      (enable-minor-mode! buf "writing-mode")
+      (add-paste-hook! "writing-mode" 'zz-user-paste
+        (lambda (kind data mime)
+          (if (equal? kind "image")
+              (begin
+                (insert! (string-append "[" mime ":" data "]"))
+                #t)
+              #f)))
+      (with-current-buffer buf
+        (lambda () (clipboard-image-paste! "bytes" "image/png")))
+      (check-equal! (buffer-text buf) "[image/png:bytes]"
+                    "the user handler consumed the image without prompting")
+      ;; Re-evaluating the same init entry replaces it instead of stacking it.
+      (add-paste-hook! 'writing-mode 'zz-user-paste
+        (lambda (kind data mime) #f))
+      (check-equal!
+        (length
+          (filter
+            (lambda (entry)
+              (and (equal? (car entry) "writing-mode")
+                   (equal? (cadr entry) 'zz-user-paste)))
+            *paste-hooks*))
+        1
+        "named registration is idempotent")
+      (remove-paste-hook! "writing-mode" 'zz-user-paste)
+      (disable-minor-mode! buf "writing-mode")
+      (buffer-kill! buf))))
+
+(deftest 'writing-paste-hooks-may-pass-text-through
+  "returning #f preserves ordinary clipboard paste"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-text-paste.md" "")))
+      (enable-minor-mode! buf "writing-mode")
+      (add-paste-hook! "writing-mode" 'zz-observe-text
+        (lambda (kind data mime) #f))
+      (with-current-buffer buf
+        (lambda () (clipboard-paste! "ordinary text")))
+      (check-equal! (buffer-text buf) "ordinary text"
+                    "unconsumed text uses the normal paste path")
+      (remove-paste-hook! "writing-mode" 'zz-observe-text)
+      (disable-minor-mode! buf "writing-mode")
+      (buffer-kill! buf))))
+
+(define (t--wr-locals buf)
+  (map (lambda (k) (list k (buffer-local-value k buf)))
+       '(window-class modeline-info line-numbers render-mode preview-renderer
+         visual-line-mode writing-saved)))
+
+(effects! '(write))
+
+(deftest 'count-words-counts-whitespace-separated-words
+  "runs of whitespace are one separator, and a newline is whitespace"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-count" "a b  c\nd\n")))
+      (check-equal! (count-words buf) 4 "four words")
+      (buffer-kill! buf))))
+
+(deftest 'a-modes-layout-declaration-is-what-the-engine-applies
+  "the layout is data, so the engine has nothing to interpret"
+  (lambda ()
+    (check-equal! (mode-layout "writing-layout")
+                  (list 'h *window-third* 'self 'scratch-buffer 'writing-chat-buffer)
+                  "the document, its scratch, and its chat")))
+
+;;; --- a chat is not a document ---------------------------------------------------
+
+(deftest 'a-chat-buffer-refuses-writing-mode-and-keeps-its-transcript-view
+  "the transcript is a rendering, not prose to centre"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-wr-chat*" "")))
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (buffer-set-local! buf 'render-mode "agent")
+      (with-current-buffer buf (lambda () (run-command "writing-mode")))
+      (check-false! (member "writing-mode" (or (buffer-local-value 'minor-modes buf) '()))
+                    "the mode is refused")
+      (check-equal! (buffer-local-value 'render-mode buf) "agent" "and the view is untouched")
+      (buffer-kill! buf))))
+
+(deftest 'restore-heals-a-chat-that-carries-a-stale-writing-mode-entry
+  "a desktop written before the guard has writing-mode already applied"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-wr-chat-stale*" "")))
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (buffer-set-local! buf 'minor-modes '("writing-mode"))
+      (buffer-set-local! buf 'render-mode "markdown")
+      (buffer-set-local! buf 'writing-saved
+        '((face-remap ()) (style #f) (line-numbers #f)
+          (render-mode "agent") (preview-renderer #f) (visual-line-mode #f)))
+
+      (restore-minor-modes! buf)
+      (check-false! (member "writing-mode" (or (buffer-local-value 'minor-modes buf) '()))
+                    "the stale entry is gone")
+      (check-equal! (buffer-local-value 'render-mode buf) "agent" "the saved view came back")
+      (check-false! (buffer-local-value 'writing-saved buf) "and nothing is left to restore")
+      (buffer-kill! buf))))
+
+(deftest 'write-from-a-chat-without-a-group-document-stops-with-a-message
+  "there is nothing to write, and it says so rather than opening an empty workspace"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-wr-chat-nodoc*" "")))
+      (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
+      (buffer-set-local! buf 'render-mode "agent")
+      (let ((mark (string-length (messages-text))))
+        (with-current-buffer buf (lambda () (run-command "write")))
+        (let ((said (messages-text)))
+          (check-contains! (substring said mark (string-length said)) "no document"
+                           "it says why")))
+      (check-false! (member "writing-mode" (or (buffer-local-value 'minor-modes buf) '()))
+                    "and enters nothing")
+      (check-equal! (buffer-local-value 'render-mode buf) "agent" "leaving the view alone")
+      (buffer-kill! buf))))
+
+;;; --- from here down, the tests enter the workspace -------------------------------
+;;; write applies the writing layout, which splits a live frame into three
+;;; panes and opens a chat in one of them.
+
+(tests-need-a-disposable-editor!
+  "runs M-x write, which splits the frame into the writing layout and opens a chat")
+
+(define (t--wr-write! name text)
+  (let ((buf (test-buffer! name text)))
+    ;; one window, showing this buffer: write reads the frame, and
+    ;; on-change! only fires while a buffer is visible
+    (delete-other-windows!)
+    (switch-to-buffer! buf)
+    (run-command "write")
+    buf))
+
+(define (t--wr-done! &rest bufs)
+  (for-each
+    (lambda (b)
+      (when (minor-mode-on? b "writing-mode") (disable-minor-mode! b "writing-mode")))
+    (buffer-list))
+  ;; write founds a group for the document; take the record with it
+  (for-each
+    (lambda (b)
+      (when (buffer-known? b)
+        (let ((id (buffer-group b)))
+          (when (and id (group-record-by-id id)) (group-record-delete! id)))
+        (buffer-kill! b)))
+    bufs))
+
+(deftest 'disabling-writing-mode-restores-the-previous-look
+  "it composes with a major mode: org's look comes back exactly"
+  (lambda ()
+    ;; org is a package of its own now; the suite has its clone on load-path
+    (require 'org)
+    (let ((buf (test-buffer! "zz-writing.org" "* head\nbody\n")))
+      (with-current-buffer buf (lambda () (set-mode! "org-mode")))
+      (let ((org-style (buffer-local-value 'style buf)))
+        (check-contains! org-style "--default-family:Spectral" "org's own family")
+        (check-false! (string-contains? org-style "--default-size")
+                      "org names no size: it reads at the default face's")
+
+        ;; writing-mode toggles the look; write only ever enters the workspace
+        (with-current-buffer buf (lambda () (run-command "writing-mode")))
+        ;; writing draws the page, and the page's type is the preview's
+        (check-contains! (buffer-local-value 'style buf) (string-append "--default-family:" preview-font-family) "the page's type")
+
+        (with-current-buffer buf (lambda () (run-command "writing-mode")))
+        (check-equal! (buffer-local-value 'style buf) org-style "org's look is back")
+        (check-equal! (buffer-local-value 'minor-modes buf) '() "and no minor mode is left")
+        (check-equal! (t--wr-locals buf)
+                      '((window-class #f) (modeline-info #f) (line-numbers #f)
+                        (render-mode #f) (preview-renderer #f)
+                        (visual-line-mode #f) (writing-saved #f))
+                      "nor any local it set"))
+      (t--wr-done! buf))))
+
+(deftest 'writing-llm-configuration-lands-on-the-scratch-only
+  "the document is prose; the scratch is where a model is asked"
+  (lambda ()
+    (let* ((saved writing-model)
+           (buf (begin (customize-set! 'writing-model "openai:test-writer")
+                       (t--wr-write! "zz-writing-config.md" "Draft.\n")))
+           (scratch (string-append "*scratch:" buf "*")))
+      (check-equal! (buffer-local-value 'writing-model buf) "openai:test-writer"
+                    "the document carries the setting")
+      (check-contains! (buffer-local-value 'writing-instructions buf) "Preserve their voice"
+                       "and the instructions")
+      (check-false! (member "llm-mode" (or (buffer-local-value 'minor-modes buf) '()))
+                    "but llm-mode is not on the document")
+
+      (check-equal! (buffer-local-value 'llm-model scratch) "openai:test-writer"
+                    "the scratch holds the model")
+      (check-contains! (buffer-local-value 'writing-instructions scratch) "Preserve their voice"
+                       "and the instructions")
+      (check-true! (member "llm-mode" (buffer-local-value 'minor-modes scratch))
+                   "and llm-mode is on it")
+
+      (customize-set! 'writing-model saved)
+      (t--wr-done! buf scratch))))
+
+(deftest 'writing-presets-are-applied-and-existing-presets-are-restored
+  "a preset removed from the setting must not linger on the scratch"
+  (lambda ()
+    (let ((saved writing-presets)
+          (buf "zz-writing-presets.md"))
+      (test-buffer! buf "Draft.\n")
+      (buffer-set-local! buf 'chat-presets '(project compos))
+      (set! writing-presets '(compos web))
+      (switch-to-buffer! buf)
+      (run-command "write")
+
+      (let ((scratch (string-append "*scratch:" buf "*")))
+        (check-equal! (buffer-local-value 'chat-presets scratch) '(compos web project)
+                      "the writing presets ride over the document's own")
+
+        ;; a live customization is rebuilt from the ORIGINAL document value,
+        ;; so a preset removed from the setting does not linger
+        (customize-set! 'writing-presets '(research))
+        (check-equal! (buffer-local-value 'chat-presets scratch) '(compos research project)
+                      "the removed preset is gone")
+
+        (run-command "write")
+        (check-equal! (buffer-local-value 'chat-presets buf) '(project compos)
+                      "and the document keeps its own")
+        (set! writing-presets saved)
+        (t--wr-done! buf scratch)))))
+
+(deftest 'customizing-the-measure-repaints-live-writing-buffers
+  "the setting is not read once at entry"
+  (lambda ()
+    (let ((buf (t--wr-write! "zz-writing-measure" "words here\n")))
+      (check-contains! (buffer-local-value 'style buf) "--writing-measure:120ch;" "the default measure")
+      (customize-set! 'writing-measure "44ch")
+      (check-contains! (buffer-local-value 'style buf) "--writing-measure:44ch;" "the new one, live")
+      (customize-set! 'writing-measure "120ch")
+      (t--wr-done! buf))))
+
+(deftest 'the-word-count-is-recomputed-from-the-buffer
+  "the counter and its label are Scheme; the delivery is the one exception"
+  (lambda ()
+    (let ((buf (t--wr-write! "zz-writing-live.md" "")))
+      (check-equal! (buffer-local-value 'modeline-info buf) "0 words" "an empty document")
+
+      ;; the hook that will call it is registered
+      (check-equal! (length (filter (lambda (h) (equal? (car h) buf)) *writing-hooks*)) 1
+                    "one change hook watches the document")
+
+      ;; and the counter it calls. This test cannot watch the hook FIRE:
+      ;; write registered that closure during THIS eval, and a closure only
+      ;; reaches shared state when the eval exits (see Env's two-tier
+      ;; store), so a cross-process call to it now sees an unflushed frame.
+      ;; One eval per test means one eval cannot both register a hook and
+      ;; wait for it. writing_test.exs holds that one delivery test.
+      (buffer-insert! buf 0 "hello brave new world")
+      (writing--update-count! buf)
+      (check-equal! (buffer-local-value 'modeline-info buf) "4 words · 1 min"
+                    "the count and the read time")
+      (t--wr-done! buf))))
+
+(deftest 'visual-line-mode-toggles-visual-row-motion-for-any-buffer
+  "it is a minor mode like any other, on any buffer"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-visual" "one long line\n")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (run-command "visual-line-mode")
+      (check-true! (buffer-local-value 'visual-line-mode buf) "the local is on")
+      (check-true! (member "visual-line-mode" (buffer-local-value 'minor-modes buf)) "and the mode")
+
+      (run-command "visual-line-mode")
+      (check-false! (buffer-local-value 'visual-line-mode buf) "off again")
+      (check-false! (member "visual-line-mode" (or (buffer-local-value 'minor-modes buf) '()))
+                    "and the mode is gone")
+      (t--wr-done! buf))))
+
+
+(deftest 'the-writing-selection-commands-extend-the-region
+  "point moves and the mark stays where the selection started"
+  (lambda ()
+    (let ((buf (t--wr-write! "zz-writing-select.md" "one two three")))
+      (with-current-buffer buf
+        (lambda ()
+          (end-of-buffer!)
+          (run-command "cua-select-backward")
+          (run-command "cua-select-backward")
+          (check-equal! (buffer-point buf) 11 "two characters back")
+          (check-equal! (mark) 13 "and the mark held")
+
+          (run-command "cua-select-forward")
+          (check-equal! (buffer-point buf) 12 "forward again")
+          (check-equal! (mark) 13 "with the same mark")))
+      (t--wr-done! buf))))
+
+(deftest 'the-writing-word-and-line-selections-reach-their-boundaries
+  "a word, a line and the whole document, each from one command"
+  (lambda ()
+    (let ((buf (t--wr-write! "zz-writing-select2.md" "one two three")))
+      (with-current-buffer buf
+        (lambda ()
+          (end-of-buffer!)
+          (run-command "cua-select-backward-word")
+          (check-equal! (buffer-point buf) 8 "back one word")
+
+          (goto-char! 4)
+          (run-command "cua-select-line-end")
+          (check-equal! (buffer-point buf) 13 "to the end of the line")
+
+          (goto-char! 4)
+          (run-command "cua-select-buffer-start")
+          (check-equal! (buffer-point buf) 0 "and to the start of the document")))
+      (t--wr-done! buf))))
+
+(deftest 'write-opens-a-grouped-plain-scratch-beside-the-document
+  "three panes: the document, its scratch, its chat"
+  (lambda ()
+    (let* ((buf (t--wr-write! "zz-writing-scratch.md" "# Draft\n\nMain text.\n"))
+           (scratch (string-append "*scratch:" buf "*"))
+           (names (map cadr (window-list))))
+      (check-equal! (current-buffer) buf "the document has the focus")
+      (check-equal! (length names) 3 "three panes")
+      (check-true! (member buf names) "the document is one")
+      (check-true! (member scratch names) "and its scratch another")
+
+      (check-equal! (buffer-local-value 'scratch-buffer buf) scratch "the document names its scratch")
+      (check-false! (buffer-local-value 'scratch-owner scratch) "the document does not own it")
+      (check-equal! (buffer-group-role scratch (buffer-group buf)) "scratch"
+                    "the group membership owns the scratch")
+      (check-equal! (buffer-local-value 'scratch-from scratch) buf
+                    "navigation still returns to the document")
+      ;; the ExUnit original read the LEGACY 'group local, which a group id
+      ;; replaced; it has been asserting #f == buf ever since. What the
+      ;; workspace means is that both sit in one group.
+      (check-true! (buffer-group buf) "the document founds a group")
+      (check-equal! (buffer-group scratch) (buffer-group buf) "and the scratch joins it")
+      (check-equal! (buffer-group-summary buf) buf "which is named for the document")
+      (t--wr-done! buf scratch))))
+
+(deftest 'write-reduces-a-three-window-frame-to-the-writing-layout
+  "whatever was on screen, the workspace is the same three panes"
+  (lambda ()
+    (let ((buf "zz-writing-layout.md")
+          (other "zz-writing-other"))
+      (test-buffer! buf "# Draft\n\nMain text.\n")
+      (test-buffer! other "")
+      ;; three windows: the document, and two of other work
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (split-window! 'h 0.5)
+      (split-window! 'v 0.5)
+      (other-window!)
+      (switch-to-buffer! other)
+      (select-window! (window-showing buf))
+      ;; with panes off the selection stays with the last window: write
+      ;; acts on the current buffer, so make it the document
+      (switch-to-buffer! buf)
+      (check-equal! (length (window-list)) 3 "three windows before")
+
+      (run-command "write")
+      (let ((names (map cadr (window-list))))
+        (check-equal! (length names) 3 "three panes after")
+        (check-true! (member buf names) "the document")
+        (check-true! (member (string-append "*scratch:" buf "*") names) "and its scratch"))
+      (t--wr-done! buf other (string-append "*scratch:" buf "*")))))
+
+(deftest 'the-companion-chat-opens-into-the-documents-group
+  "an optional third voice, in the same group as the document"
+  (lambda ()
+    (let* ((buf (t--wr-write! "zz-writing-companion.md" "Draft.\n"))
+           (companion (string-append "*chat:" buf "*")))
+      (switch-to-buffer! buf)
+      (run-command "chat-companion")
+      (check-equal! (current-buffer) companion "the companion has the focus")
+      (check-equal! (buffer-local-value 'mode-name companion) "chat-mode" "it is a chat")
+      (check-equal! (buffer-group companion) (buffer-group buf) "in the document's group")
+      (t--wr-done! buf companion))))
+
+
+
+
+;; This was writing_test.exs. The note above says one eval cannot both
+;; register the hook and watch it fire; org-test's undo-heals-folds waits
+;; on a change hook the same way, so the delivery is tried here too.
+(deftest 'the-word-count-follows-typing
+  "an edit in a live writing buffer reaches the modeline through its change hook"
+  (lambda ()
+    (with-frame
+      (lambda (frame)
+        (let ((buf (t--wr-write! "zz-writing-typed.md" "")))
+          (check-equal! (buffer-local-value 'modeline-info buf) "0 words" "an empty document")
+          (with-current-buffer buf (lambda () (insert! "hello brave new world")))
+          (check-true! (wait-until (lambda () (equal? (buffer-local-value 'modeline-info buf)
+                                                      "4 words · 1 min"))
+                                   2000)
+                       "the count follows the text")
+          (t--wr-done! buf))))))

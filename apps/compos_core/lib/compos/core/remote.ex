@@ -71,6 +71,17 @@ defmodule Compos.Core.Remote do
     end
   end
 
+  @doc "Run a command on the remote host and keep what it prints: {:ok, output} | {:error, msg}"
+  def sh_out(host, cmd) do
+    case System.cmd(ssh(), @ssh_opts ++ [host, cmd], stderr_to_stdout: true) do
+      {out, 0} -> {:ok, out}
+      {_, 255} -> {:error, "cannot reach #{host}"}
+      {out, _} -> {:error, String.trim(out)}
+    end
+  rescue
+    e in [ErlangError] -> {:error, "ssh spawn failed: #{Exception.message(e)}"}
+  end
+
   @doc "Write text to a remote file: :ok | {:error, msg}"
   def write(host, path, text) do
     # System.cmd can't feed stdin: stage the text in a temp file and let the

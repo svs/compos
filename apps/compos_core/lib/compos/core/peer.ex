@@ -70,7 +70,10 @@ defmodule Compos.Core.Peer do
   defp send_over_ssh(spec, line) do
     [host, path] = String.split(spec, ":", parts: 2)
 
-    Remote.sh(host, "printf %s " <> shell_quote(line) <> " | nc -U " <> shell_quote(path))
+    # One request line, then -N closes our side so nc exits once the reply is in;
+    # without it nc holds the socket open and the call never returns.
+    request = String.trim_trailing(line, "\n")
+    Remote.sh_out(host, "printf '%s\\n' " <> shell_quote(request) <> " | nc -N -U " <> shell_quote(path))
   end
 
   defp shell_quote(s), do: "'" <> String.replace(s, "'", "'\\''") <> "'"

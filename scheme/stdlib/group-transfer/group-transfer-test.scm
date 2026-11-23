@@ -1,0 +1,33 @@
+;;; group-transfer-test.scm --- a group survives export and import.
+
+(domain! 'testing)
+(effects! '(write))
+
+(deftest 'a-group-survives-export-and-import
+  "the copy has the settings and the files, and none of the machine-only settings"
+  (lambda ()
+    (let* ((dir (string-append (compos-cache-dir) "/zz-gt"))
+           (_ (make-directory! dir))
+           (f (string-append dir "/note.md"))
+           (_ (write-file! f "hello\n"))
+           (src (group-record-create! "zz-gt-src"))
+           (fb (find-file f)))
+      (buffer-add-group! fb src)
+      (group-cwd-set! src dir)
+      (group-setting-set! src 'github-owner "someone")
+      (group-setting-set! src 'browser-profile "Profile 9")
+      (let ((out (group-export src (string-append dir "/out"))))
+        (buffer-kill! fb)
+        (let* ((r (group-import! out))
+               (id (plist-get r 'id)))
+          (check-equal! (plist-get r 'name) "zz-gt-src <2>" "a free name beside the original")
+          (check-false! (equal? id src) "a new id")
+          (check-equal! (group-setting id 'github-owner) "someone" "a setting travels")
+          (check-false! (group-setting id 'browser-profile) "a machine-only one does not")
+          (check-true! (member f (group-buffers id)) "the file opens in the copy")
+          (buffer-kill! f)
+          (for-each (lambda (c) (when (buffer-known? c) (buffer-kill! c)))
+                    (list "*chat:zz-gt-src*" "*chat:zz-gt-src <2>*"))
+          (group-record-delete! id)
+          (group-record-delete! src)
+          (shell-command->string (string-append "rm -rf '" dir "'") "/tmp"))))))

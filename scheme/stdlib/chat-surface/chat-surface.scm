@@ -81,6 +81,11 @@
   (let ((r (chat-surface-input-region buf)))
     (substring-bytes (buffer-text buf) (car r) (cadr r))))
 
+(effects! '(read))
+(public! 'chat-surface-input-text
+  "(chat-surface-input-text BUF) — the text typed in the input of chat BUF, not yet sent")
+(effects! '(write))
+
 (define (chat-surface-clear-input! buf &optional read)
   "Delete the input. READ is the input text as the caller read it: the
 input is the tail of the buffer, so those exact bytes go from the end, and

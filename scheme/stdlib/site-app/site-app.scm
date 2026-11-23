@@ -2939,3 +2939,8 @@
   "(site-app-rows BUF) — the rows a website app's list BUF shows: its rows narrowed by the list's own filters")
 (public! 'site-app-spec
   "(site-app-spec NAME) — the registered spec plist of website app NAME, or #f")
+
+(domain! 'web)
+(effects! '(pure))
+(public! 'site-app-href-page
+  "(site-app-href-page SPEC HREF) — the page of SPEC whose items live under HREF's path and have a detail sheet, or #f")

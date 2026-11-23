@@ -1496,6 +1496,8 @@
 (effects! '(read))
 (public! 'video-edit-pieces "(video-edit-pieces BUF) — the edit's pieces in order, each (START END PATH)")
 (catalog-meta! 'function "video-edit-pieces" 'domain 'files 'effects '(read))
+(public! 'video-edit-read "(video-edit-read BUF) -- BUF's edit as data: (SETTINGS SOURCES), each source (PATH CUTS DUBS TITLE)")
+(catalog-meta! 'function "video-edit-read" 'domain 'files 'effects '(read))
 (effects! '(write execute))
 (public! 'video-edit-new "(video-edit-new PATH) — a new edit of the video or Cap recording PATH as NAME.vedit, the whole video one segment; answers its path")
 (catalog-meta! 'function "video-edit-new" 'domain 'files 'effects '(write execute))

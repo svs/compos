@@ -684,6 +684,21 @@
   '(text "first line\nsecond line")
   (lambda (p) (list 'tag "c-group" 'class "c-quote" 'text (component--get p 'text))))
 
+(defcomponent 'ui/audio
+  "A sound file to play: its title over a player. PATH is the file on disk."
+  '((path string required "the sound file, a full path") (title string optional "one line above the player; the file name when it is missing") (sub string optional "a dim line under the title"))
+  '(path "/tmp/take.wav" title "Take 2" sub "48 kHz · EQ")
+  (lambda (p)
+    (let ((path (component--get p 'path)))
+      (list 'tag "c-group" 'class "c-audio"
+            'children (append
+                        (list (list 'tag "c-group" 'class "c-prose" 'text (component--get p 'title (file-name-nondirectory path))))
+                        (if (component--has? p 'sub)
+                            (list (list 'tag "c-group" 'class "c-meta" 'segs (list (list "" (component--get p 'sub)))))
+                            '())
+                        (list (list 'tag "audio" 'class "c-audio-player" 'file path
+                                    'attrs (list (list "controls" "") (list "preload" "metadata")))))))))
+
 (defcomponent 'ui/chips
   "A wrapping row of short tags."
   '((items list required))
@@ -726,7 +741,7 @@
                                            (if (equal? title "") "" (string-append " · " title))))))))
 
 ;; the ones whose props are plain data, so a chat reply may draw them
-(for-each component-chat! '(ui/badge ui/kv ui/table ui/stat ui/stats ui/quote ui/chips ui/chart))
+(for-each component-chat! '(ui/badge ui/kv ui/table ui/stat ui/stats ui/quote ui/audio ui/chips ui/chart))
 
 (define *component-gallery-buffer* "*Components*")
 

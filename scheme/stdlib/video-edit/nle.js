@@ -71,7 +71,7 @@
     const d = e.data;
     if (d && d.compos === "message" && d.data && d.data.sources) setState(d.data);
     // a key the editor caught for this page: it runs as if typed here
-    if (d && d.compos === "message" && d.data && d.data.act) runAct(d.data.act);
+    if (d && d.compos === "message" && d.data && d.data.act) { closeCutMenu(); runAct(d.data.act); }
     if (d && d.compos === "message" && d.data && d.data.seek) {
       // the index moves the playhead and chooses; it never starts or stops playback
       const sk = d.data.seek;
@@ -533,11 +533,11 @@
         m.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); act("select-cut", { src, t: ct }).then(() => openCutMenu(tx.querySelector(".cutmark.sel") || m)); });
       }
       // a silence before this word: a mark you can hide
-      if (last && w[0] - last[1] >= 1.0) {
+      if (last && w[0] - last[1] >= 1.0 && !(s.okpauses || []).some((o) => Math.abs(o - last[1]) < 0.05)) {
         const g = { kind: "gap", a: last[1], b: w[0] };
         const m = el("span", "tok gap" + (selRange && selRange.src === src && Math.abs(selRange.a - g.a) < 0.02 && Math.abs(selRange.b - g.b) < 0.02 ? " sel" : ""), line, "⏸ " + (w[0] - last[1]).toFixed(1) + "s");
-        m.title = "silence · click, then ⌫ or h hides it";
-        m.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); act("select-range", { src, t: g.a, b: g.b }); });
+        m.title = "silence · click or ⌥← ⌥→ for its menu: a keeps it, c cuts it out";
+        m.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); pauseMenuFor = null; act("select-range", { src, t: g.a, b: g.b }); });
       }
       const sp = el("span", "w" + (c ? " " + c.state : "") + (dubAt(src, (w[0] + w[1]) / 2) ? " dubbed" : "") + ((S.sources[src].mutes || []).some((x) => (w[0] + w[1]) / 2 >= x.a && (w[0] + w[1]) / 2 < x.b) ? " muted" : ""), line, w[2] + " ");
       sp.dataset.n = n; sp.dataset.a = w[0]; sp.dataset.b = w[1];
@@ -568,8 +568,25 @@
       
       ["Delete the cut", "⌫", () => runAct("remove")],
     ];
+    showMenu(anchor, "✂ Cut at " + fmt(t), items);
+  }
+  // ---- a pause's menu: it opens by itself when a pause is chosen, by key or click
+  let pauseMenuFor = null;
+  function openPauseMenu(anchor) {
+    closeCutMenu();
+    if (!selRange) return;
+    const a = selRange.a, b = selRange.b;
+    showMenu(anchor, "⏸ Pause " + (b - a).toFixed(1) + "s at " + fmt(a), [
+      ["Keep it: it is meant, don't show it again", "a", () => runAct("accept-pause")],
+      ["Cut it out, a breath left at each end", "c", () => runAct("cut")],
+      ["Hide or show all of it", "h", () => runAct("hide")],
+      ["Mute or unmute it", "m", () => runAct("mute")],
+      ["Next pause or cut", "⌥→", () => runAct("next-point")],
+    ]);
+  }
+  function showMenu(anchor, head, items) {
     cutMenu = el("div", "cutmenu", document.body);
-    el("div", "cm-head", cutMenu, "✂ Cut at " + fmt(t));
+    el("div", "cm-head", cutMenu, head);
     for (const [label, key, act] of items) {
       const row = el("div", "cm-row", cutMenu);
       el("span", "cm-label", row, label);
@@ -740,6 +757,12 @@
     zoom = v.zoom ? { a: v.zoom.a, b: v.zoom.b } : null;
     if (v.seek) { loadSource(v.seek.src, v.seek.t); cur = segAt(v.seek.src, v.seek.t); }
     drawEditBar(); drawSourceBar(); drawTranscript(); drawSelection();
+    // a pause newly chosen opens its menu; one let go of closes it
+    const gapSel = tx.querySelector(".tok.gap.sel");
+    const pauseKey = gapSel && selRange ? selRange.src + ":" + selRange.a : null;
+    if (pauseKey && pauseKey !== pauseMenuFor) openPauseMenu(gapSel);
+    else if (!pauseKey && pauseMenuFor) closeCutMenu();
+    pauseMenuFor = pauseKey;
     // what was chosen comes into view in the transcript: a cut, a pause, else the first word of the segment
     const chosen = tx.querySelector(".cutmark.sel, .tok.gap.sel") || (selRange && selRange.src === src && (() => { const ws = S.sources[src].words || []; const n = ws.findIndex((w) => w[0] >= selRange.a - 0.05); return n >= 0 ? tx.querySelector('.w[data-n="' + n + '"]') : null; })());
     if (chosen && (v.seek || v.sel)) chosen.scrollIntoView({ block: "center" });

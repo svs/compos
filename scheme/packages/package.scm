@@ -328,7 +328,20 @@
                           (message (string-append "use-package: clone of " n " failed: " (string-trim out)))
                           (done #f))))))))))))
 
+(define package--using '())
+
 (define (package--use n k)
+  ;; A require that is already on its way skips: a recipe that requires
+  ;; itself, or two that require each other, looped the boot forever.
+  (if (member n package--using)
+      (k n)
+      (begin
+        (set! package--using (cons n package--using))
+        (package--use-1 n (lambda (v)
+                            (set! package--using (filter (lambda (x) (not (equal? x n))) package--using))
+                            (k v))))))
+
+(define (package--use-1 n k)
   ;; ensure, install the requires that have recipes, activate; K gets N or #f.
   ;; A require is NAME or (NAME MAJOR): MAJOR is the :major of NAME's API it
   ;; was written against, and a different one loads anyway with a warning;

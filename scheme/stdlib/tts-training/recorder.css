@@ -1,0 +1,16 @@
+/* recorder.css -- the voice recorder of tts-training (recorder.js). */
+:root { color-scheme: light dark; }
+body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; background: Canvas; color: CanvasText; }
+.rec { max-width: 46rem; margin: 0 auto; padding: 2rem 1.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
+.mood { font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; opacity: .6; }
+.script { font: 1.55rem/1.55 Georgia, serif; min-height: 9rem; }
+.meter { height: .55rem; border-radius: .3rem; background: color-mix(in srgb, CanvasText 10%, transparent); overflow: hidden; }
+.meter .bar { height: 100%; width: 0; background: color-mix(in srgb, CanvasText 35%, transparent); transition: width 60ms linear; }
+.meter .bar.ok { background: #3a9a5b; }
+.meter .bar.hot { background: #c8463d; }
+.row { display: flex; align-items: center; gap: 1rem; }
+.btn { font: inherit; font-weight: 600; padding: .55rem 1.2rem; border-radius: .5rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: transparent; color: inherit; cursor: pointer; }
+.rec.on .btn { background: #c8463d; color: white; border-color: #c8463d; }
+.clock { font-variant-numeric: tabular-nums; opacity: .7; }
+.status { opacity: .75; }
+.keys { font-size: .8rem; opacity: .55; }

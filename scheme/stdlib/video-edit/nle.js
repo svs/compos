@@ -92,6 +92,8 @@
   });
 
   function setState(s) {
+    // an answer without the edit (the editor failed): keep what is drawn
+    if (!s || !Array.isArray(s.sources)) { log("bad state: " + JSON.stringify(s).slice(0, 200)); return; }
     const t = srcTime();
     const shownUrl = S && S.sources[src] ? S.sources[src].url : null;
     S = s;

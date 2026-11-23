@@ -117,6 +117,8 @@
     (content-scale)
     ;; PDF files read and edited by their structure
     (pdf)
+    ;; record voice samples and hear them cloned: M-x tts-training
+    (tts-training)
     (morg-tangle "morg/morg-tangle.scm")
     (morg-show-source "morg/morg-show-source.scm")))
 

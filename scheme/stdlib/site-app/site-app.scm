@@ -791,7 +791,7 @@
       ;; a page is drawn from components; the blocks are rebuilt, never saved
       (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
       (buffer-set-local! buf 'render-mode "blocks"))))
-(mode-doc! "site-app-detail-mode" "A page of a site app, drawn from components and read from the live site. The page is read-only.")
+(mode-doc! "site-app-detail-mode" "A page of a site app, drawn from components and read from the live site. The page is read-only. Its tabs sit in the window's header line: M-<left> and M-<right> step them, wrapping; SPC and the letter marked in a tab's name take it; 6 to 0 still take them by place.")
 
 (define (site-app-real xs) (filter pair? (or xs '())))
 
@@ -864,7 +864,7 @@
     (append (site-app-card-key-labels buf)
             (site-app-detail-action-keys buf)
             (map (lambda (k) (list (car k) (caddr k))) (site-app-detail-extra-keys buf))
-            (if (> n 0) (list (list "t" "tabs")) '())
+            (if (> n 0) (list (list "M-←→" "tabs") (list "SPC" "tab") (list "t" "tabs")) '())
             (if (site-app-detail-stages buf) (list (list "[ ]" "stages") (list "/" "stage")) '())
             (list (list "s" "sections")
                   (list "M-↑↓" "parts")
@@ -971,6 +971,56 @@
                  (site-app-capitalize (plist-get t 'label))
                  (equal? (plist-get t 'id) active)))
          tabs)))
+
+;; The page's tabs ride the window's header line, as perf's do, not the
+;; page's body: the current one marked, each name with its letter marked,
+;; and SPC and that letter take it. The digits (6-0) stay the tab bars'.
+(define (site-app-detail-tab-keys tabs)
+  ;; each tab's letter, its first word's initial where it is free
+  (site-app-tab-letters (map (lambda (t) (site-app-capitalize (plist-get t 'label))) tabs)))
+
+(define (site-app-detail-header-sync! buf)
+  (desktop-skip! buf 'header-line-blocks)
+  (let* ((tabs (if (site-app-get buf 'data) (site-app-detail-tabs buf) '()))
+         (active (site-app-detail-active buf))
+         (keys (site-app-detail-tab-keys tabs))
+         (blocks (if (null? tabs)
+                     '()
+                     (list (component 'ui/tabs
+                             (list 'class "sa-detail-tabs"
+                                   'leader "SPC"
+                                   'tabs (map (lambda (t k)
+                                                (list (string-append site-app-tab-click (plist-get t 'id))
+                                                      (site-app-capitalize (plist-get t 'label))
+                                                      (equal? (plist-get t 'id) active)
+                                                      k))
+                                              tabs keys))))))
+         (labels (map (lambda (t k) (list (string-append "SPC " k) (site-app-capitalize (plist-get t 'label)))) tabs keys)))
+    (unless (equal? labels (buffer-local-value 'which-key-labels buf))
+      (buffer-set-local! buf 'which-key-labels labels))
+    (unless (equal? blocks (buffer-local-value 'header-line-blocks buf))
+      (buffer-set-local! buf 'header-line-blocks blocks)
+      (when (boundp 'dashboard--sync!) (dashboard--sync! buf)))))
+
+(define-command "site-app-detail-tab-key" "Show the tab of this page whose letter follows SPC"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (keys (last-keys))
+           (k (if (string? keys) (car (reverse (string-split keys " "))) (and (pair? keys) (car (reverse keys)))))
+           (tabs (site-app-detail-tabs buf))
+           (hit (let loop ((ts tabs) (ks (site-app-detail-tab-keys tabs)))
+                  (cond ((null? ts) #f)
+                        ((equal? (car ks) k) (car ts))
+                        (else (loop (cdr ts) (cdr ks)))))))
+      (if hit
+          (site-app-detail-select! buf (plist-get hit 'id))
+          (message (string-append "No tab on SPC " (or k "?")))))))
+
+;; SPC leads the page's tabs: a keymap of its own, so SPC is a prefix
+;; wherever point is and which-key names the tab each letter takes
+(define-keymap! "site-app-detail-leader-map")
+(for-each (lambda (c) (define-key "site-app-detail-leader-map" c "site-app-detail-tab-key"))
+  (map (lambda (i) (substring "abcdefghijklmnopqrstuvwxyz0123456789" i (+ i 1))) (iota 36)))
 
 (define (site-app-detail-bars buf)
   ;; the page's tab bars: its own tabs, then the stages of the tab it shows
@@ -1819,7 +1869,8 @@
                       (active (site-app-detail-active buf))
                       (section (site-app-detail-section buf active)))
                  (site-app-index-parts! buf
-                   (site-app-head-part (site-app-head-blocks b spec data tabs active (site-app-action-bar buf) (and row (site-app-field row 'avatar))))
+                   ;; the tabs are not in the body: they ride the header line
+                   (site-app-head-part (site-app-head-blocks b spec data '() active (site-app-action-bar buf) (and row (site-app-field row 'avatar))))
                    (cond ;; a page with no tabs is all head: nothing waits below it
                          ((null? tabs) '())
                          ;; a composed tab that draws itself ('draw BUF BUILDER) gives its claimed blocks
@@ -1853,6 +1904,8 @@
     (desktop-skip! buf 'footer-line-blocks)
     (buffer-set-local! buf 'footer-line-blocks
       (list (component 'ui/keys-bar (list 'main (site-app-detail-keys buf)))))
+    ;; the page's tabs, in the window's header line
+    (site-app-detail-header-sync! buf)
     buf))
 
 (define (site-app-detail-link-at buf)
@@ -2647,6 +2700,9 @@
         (list "q" "quit-window")))
 
 ;; 1-5 take the list's tabs, 6-0 the page's, / any of them by name
+;; SPC and a tab's marked letter take it (b brief, h history, a assessment)
+(bind-prefix! (mode-keymap "site-app-detail-mode") "SPC" "site-app-detail-leader-map")
+
 (tab-bars-declare! "site-app-detail-mode" site-app-detail-bars)
 
 (define (site-app-list-detail list-buf)
@@ -2763,7 +2819,7 @@
         'head-blocks (lambda (b) (site-app-list-head-blocks b))
         'preview site-app-show-detail!
         'debounce #t
-        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "←→" "sections") (list "1–5" "sections") (list "6–0" "page tabs") (list "/" "any tab") (list "[ ]" "status") (list "M-↑↓" "page parts") (list "M-←→" "page tabs")
+        'footer (lambda (b) (append (map (lambda (k) (list (car k) (caddr k))) list-keys) (list (list "←→" "sections") (list "1–5" "sections") (list "6–0" "page tabs") (list "/" "any tab") (list "[ ] M-←→" "status") (list "M-↑↓" "page parts")
                                     (list "g" "refresh") (list "q" "quit"))))
         ;; The digits are the tab bars' (tab-bars.scm): 1-5 the sections,
         ;; 6-0 the page beside the list. M-digit still takes a section.
@@ -2779,8 +2835,9 @@
                             ;; the page beside the list, part by part, without leaving the row
                             (list "M-<down>" "site-app-detail-anchor-next")
                             (list "M-<up>" "site-app-detail-anchor-prev")
-                            (list "M-<right>" "site-app-detail-tab-next-beside")
-                            (list "M-<left>" "site-app-detail-tab-prev-beside")
+                            ;; the status tabs, as a page's M-arrows step its tabs
+                            (list "M-<right>" "site-app-filter-next")
+                            (list "M-<left>" "site-app-filter-prev")
                             (list "q" "quit-window"))
                       ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
                       (map (lambda (k) (list (car k) (cadr k))) list-keys)
@@ -2813,13 +2870,13 @@
          (index (plist-get spec 'index-mode))
          (section-doc (lambda (page)
                         (string-append title " " (plist-get page 'label)
-                                       ", read from the live site. 1 to 5 switch sections and 6 to 0 the tabs of the page beside the list, / takes any tab by name, [ and ] walk the status tabs, g rereads, q quits."))))
+                                       ", read from the live site. 1 to 5 switch sections and 6 to 0 the tabs of the page beside the list, / takes any tab by name, [ and ] (or M-<left> and M-<right>) walk the status tabs, g rereads, q quits."))))
     (site-app-put! name spec)
     (site-app-card-keys! spec)
     (let ((major (plist-get spec 'detail-mode)))
       (when major
         (define-mode major (lambda () (buffer-set-read-only! (current-buffer) #t)))
-        (mode-doc! major (string-append title " page, read from the live site. The page is read-only."))
+        (mode-doc! major (string-append title " page, read from the live site. The page is read-only. Its tabs sit in the window's header line: M-<left> and M-<right> step them, wrapping; SPC and the letter marked in a tab's name take it; 6 to 0 still take them by place."))
         (mode-parent! major "site-app-detail-mode")))
     (for-each (lambda (page)
                 (let ((mode (plist-get page 'detail-mode))
@@ -2839,7 +2896,7 @@
     (when index
       (define-list-mode! index
         (site-app-list-opts name title pages list-keys
-                            (string-append title " index, read from the live site. Each section is a minor mode on it. 1 to 5 switch sections and 6 to 0 the tabs of the page beside the list, / takes any tab by name, [ and ] walk the status tabs, g rereads, q quits.")
+                            (string-append title " index, read from the live site. Each section is a minor mode on it. 1 to 5 switch sections and 6 to 0 the tabs of the page beside the list, / takes any tab by name, [ and ] (or M-<left> and M-<right>) walk the status tabs, g rereads, q quits.")
                             #f))
       (site-app-index-list-mode! index))
     ;; Every section is an index of its own: its buffer, its mode, its command.

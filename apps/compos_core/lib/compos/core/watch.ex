@@ -197,6 +197,11 @@ defmodule Compos.Core.Watch do
 
         {:error, reason} ->
           {:reply, {:error, "cannot watch #{root}: #{inspect(reason)}"}, state}
+
+        # a backend whose watcher cannot start (no inotifywait on this Linux,
+        # say) ignores instead of erroring; the caller hears why
+        :ignore ->
+          {:reply, {:error, "cannot watch #{root}: the backend ignored it"}, state}
       end
     else
       {:reply, {:error, "not a directory: #{root}"}, state}

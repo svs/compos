@@ -8,6 +8,17 @@ defmodule Compos.WatchTest.NoBackend do
   def subscribe(_pid), do: :ok
 end
 
+defmodule Compos.WatchTest.IgnoringBackend do
+  @moduledoc """
+  A backend whose watcher cannot start: `file_system` answers `:ignore`
+  when its worker refuses to boot, the way fs_inotify does on a Linux with
+  no inotifywait.
+  """
+
+  def start_link(_opts), do: :ignore
+  def subscribe(_pid), do: :ok
+end
+
 defmodule Compos.WatchTest do
   @moduledoc """
   Compos.Core.Watch.
@@ -268,6 +279,15 @@ defmodule Compos.WatchTest do
 
     assert {:error, msg} = Watch.watch(Path.join(ctx.dir, "file.txt"), ctx.server)
     assert msg =~ "not a directory"
+    assert Watch.watching(ctx.server) == []
+  end
+
+  test "a backend that ignores is refused, and the watcher lives on", ctx do
+    Application.put_env(:compos_core, :fs_backend, Compos.WatchTest.IgnoringBackend)
+    on_exit(fn -> Application.delete_env(:compos_core, :fs_backend) end)
+
+    assert {:error, msg} = Watch.watch(ctx.dir, ctx.server)
+    assert msg =~ "the backend ignored it"
     assert Watch.watching(ctx.server) == []
   end
 

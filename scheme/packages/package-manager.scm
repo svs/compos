@@ -150,7 +150,7 @@
          (repo (or (and (pair? from) (car from))
                    (and row (plist-get row 'repo))
                    (string-append package-manager-org "/compos-" name)))
-         (line (string-append "(use-package '" name " 'repo " (string #\") repo (string #\") ")")))
+         (line (string-append "(use-package '" name " 'repo \"" repo "\")")))
     (message (string-append "installing " name " from " repo " …"))
     (use-package name 'repo repo)
     (let ((saved (package-manager--with-init

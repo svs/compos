@@ -1349,9 +1349,42 @@
         ((not (equal? (list-mark-of buf b ctx) " "))
          (append (ibuffer-band buf b off "ibuffer-marked")
                  (ibuffer-dir-overlay buf b off)
-                 (ibuffer-md-overlay buf b off)))
+                 (ibuffer-md-overlay buf b off)
+                 (ibuffer-query-overlay buf b off)))
         (else (append (ibuffer-dir-overlay buf b off)
-                      (ibuffer-md-overlay buf b off)))))
+                      (ibuffer-md-overlay buf b off)
+                      (ibuffer-query-overlay buf b off)))))
+
+;; what you typed in the filter is lit wherever a row shows it: in the
+;; name, and in the words a transcript search put in place of the state.
+;; You see at once why the row is there.
+(define (ibuffer-query-spans lines off q)
+  (let ((n (string-length q)))
+    (if (< n 2)
+        '()
+        (let loop ((ls lines) (at off) (acc '()))
+          (if (null? ls)
+              (reverse acc)
+              (let* ((text (car (car ls)))
+                     (low (string-downcase text)))
+                (loop (cdr ls) (+ at (string-byte-length text) 1)
+                      (if (not (= (string-length low) (string-length text)))
+                          acc
+                          (let find ((i 0) (acc acc))
+                            (let ((hit (string-search q low i)))
+                              (if hit
+                                  (let ((s (+ at (string-byte-length (substring text 0 hit)))))
+                                    (find (+ hit n)
+                                          (cons (list s (+ s (string-byte-length (substring text hit (+ hit n))))
+                                                      "match")
+                                                acc)))
+                                  acc)))))))))))
+
+(define (ibuffer-query-overlay buf b off)
+  (let ((q (string-downcase (string-trim (or (list-query buf) "")))))
+    (if (< (string-length q) 2)
+        '()
+        (ibuffer-query-spans (list-row-lines buf b) off q))))
 
 (define (ibuffer-cell-text cell) (if (pair? cell) (car cell) cell))
 

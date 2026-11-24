@@ -617,9 +617,10 @@
       row.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); closeCutMenu(); act(); });
     }
     const r = anchor.getBoundingClientRect();
-    const w = 300;
+    // its real size, so it always stays inside the page
+    const w = cutMenu.offsetWidth, h = cutMenu.offsetHeight;
     cutMenu.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left - 10)) + "px";
-    cutMenu.style.top = (r.bottom + 6 + 260 > innerHeight ? Math.max(8, r.top - 266) : r.bottom + 6) + "px";
+    cutMenu.style.top = (r.bottom + 6 + h > innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6) + "px";
   }
   addEventListener("mousedown", (e) => { if (cutMenu && !cutMenu.contains(e.target)) closeCutMenu(); }, true);
   addEventListener("keydown", () => closeCutMenu(), true);
@@ -752,6 +753,8 @@
   // the few things that are the page's own: the media element and the file buttons
   const LOCAL = {
     "export-key": () => op({ op: "export" }), "import-key": () => op({ op: "import" }), "project-file": () => op({ op: "show-edit" }), "menu": () => openMenu(),
+    // RET on a chosen pause or cut opens its menu; with nothing chosen it plays from the cursor
+    "play-here": () => (tx.querySelector(".tok.gap.sel") || (selTok && selTok.kind === "cut" && (tx.querySelector(".cutmark.sel") || srcBar.querySelector(".cut.sel")))) ? openMenu() : act("play-here"),
     "source-earlier": () => op({ op: "move-source", src, dir: -1 }), "source-later": () => op({ op: "move-source", src, dir: 1 }),
     "drop-source": () => { if (confirm("Take " + S.sources[src].name + " out of the edit?")) op({ op: "remove-source", src }); },
   };

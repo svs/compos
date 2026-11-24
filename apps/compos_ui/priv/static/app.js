@@ -1693,12 +1693,16 @@
             // keyboard back and run it through the editor's dispatcher.
             const sink = document.getElementById("kb-sink");
             if (sink) sink.focus();
-            window.dispatchEvent(new KeyboardEvent("keydown", {
-              key: m.key, code: m.code,
-              shiftKey: !!m.shiftKey, altKey: !!m.altKey,
-              metaKey: !!m.metaKey, ctrlKey: !!m.ctrlKey,
-              bubbles: true, cancelable: true
-            }));
+            // the app sent it: RET here is the app's key, not "focus the app"
+            window.__composAppKey = true;
+            try {
+              window.dispatchEvent(new KeyboardEvent("keydown", {
+                key: m.key, code: m.code,
+                shiftKey: !!m.shiftKey, altKey: !!m.altKey,
+                metaKey: !!m.metaKey, ctrlKey: !!m.ctrlKey,
+                bubbles: true, cancelable: true
+              }));
+            } finally { window.__composAppKey = false; }
           } else if (m.compos === "request-focus") {
             // A cross-origin app cannot focus its own iframe element.
             // The parent grants focus only to the selected app window.
@@ -2495,7 +2499,7 @@
           // C-g from an app lands on the keyboard sink. RET returns
           // focus to the selected app when no editor panel owns RET.
           if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey &&
-              !e.shiftKey &&
+              !e.shiftKey && !window.__composAppKey &&
               !document.querySelector(".mb-panel, .which-key, .transient-panel")) {
             const app = document.querySelector(".window.active .app-preview");
             if (app) {

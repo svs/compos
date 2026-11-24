@@ -722,7 +722,7 @@
 
 (define (video-edit-mode-setup)
   (buffer-set-local! (current-buffer) 'imenu-index-function 'video-edit--imenu-rows))
-(define-mode "video-edit-mode" video-edit-mode-setup)
+(define-derived-mode "video-edit-mode" "scheme-mode" video-edit-mode-setup)
 
 (define (video-edit-page-mode-setup) #t)
 (define-mode "video-edit-page-mode" video-edit-page-mode-setup)
@@ -1551,7 +1551,7 @@ A take said again after the pause is a retake: its first words match words just 
 (define video-edit--timeline-keys
   ;; (KEY ACTION DOC): each key names an action; the page plays and draws, Scheme decides
   '(("SPC" "play" "Play or pause")
-    ("RET" "play-here" "Play from the cursor")
+    ("RET" "play-here" "Open the menu of the chosen pause or cut; with nothing chosen, play from the cursor")
     ("g" "go-to-cursor" "Move the playhead to the cursor and centre the transcript on it, without playing")
     ("<left>" "scrub-back" "Scrub a second back")
     ("<right>" "scrub-on" "Scrub a second on")
@@ -1643,6 +1643,9 @@ A take said again after the pause is a retake: its first words match words just 
 (mode-doc! "video-edit-mode"
   "An edit as text: one line per piece you keep, START END FILE, played in order. Delete a line to drop a piece, move it to reorder, change a time to trim. `audio clean` or `audio raw` and `size 2160`, `1080` or `720` set the whole edit. `C-c C-p` cuts the pauses out, `C-c C-k` splits the piece on this line at a time you type, `C-c C-v` shows the page with a filmstrip and a waveform per segment, `C-c C-r` writes a 720p preview and plays it there, `C-c C-e` exports the finished mp4.")
 
+;;;###autoload
+(autoload-modes "video-edit-mode" "video-edit-page-mode" "video-edit-timeline-mode")
+;;;###autoload
 (set! *auto-mode-alist* (cons (list ".vedit" "video-edit-mode") (filter (lambda (e) (not (equal? (car e) ".vedit"))) *auto-mode-alist*)))
 
 (effects! '(pure))

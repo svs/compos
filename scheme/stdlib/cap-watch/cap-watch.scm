@@ -54,6 +54,21 @@
 (define (cap-watch--finish! dir)
   (set! *cap-watch-busy* (filter (lambda (d) (not (equal? d dir))) *cap-watch-busy*)))
 
+(define (cap-watch--safe-name title)
+  (list->string (map (lambda (c) (if (member c '(#\/ #\: #\\)) #\- c)) (string->list (string-trim title)))))
+
+(define (cap-watch--unique-path parent safe)
+  (let loop ((n 1))
+    (let ((candidate (string-append parent (if (= n 1) safe (string-append safe " " (number->string n))) ".cap")))
+      (if (file-exists? candidate) (loop (+ n 1)) candidate))))
+
+(define (cap-watch--rename! dir title)
+  "rename DIR to match TITLE, keeping the .cap suffix; answers the new path, or DIR itself when the title gives no usable name or the move fails"
+  (let ((safe (cap-watch--safe-name title)))
+    (if (equal? safe "") dir
+        (let* ((new-dir (cap-watch--unique-path (path-directory dir) safe)))
+          (if (rename-file! dir new-dir) (cap--strip new-dir) dir)))))
+
 (define (cap-watch--process! dir)
   (let* ((b (cap-watch--buffer-name dir)) (src (cap-watch--source dir)))
     (buffer-create b)
@@ -71,10 +86,13 @@
                     (buffer-set-local! b 'cap-status "Writing a title…")
                     (title-card text
                       (lambda (card)
-                        (if card
-                            (buffer-set-locals! b (list 'cap-title (car card) 'cap-description (cadr card) 'cap-status #f))
-                            (buffer-set-local! b 'cap-status #f))
-                        (when (buffer-known? b) (cap--render! b))
+                        (if (not card)
+                            (buffer-set-local! b 'cap-status #f)
+                            (let* ((new-dir (cap-watch--rename! dir (car card)))
+                                   (new-b (cap-watch--buffer-name new-dir)))
+                              (unless (equal? new-b b) (buffer-rename! b new-b))
+                              (buffer-set-locals! new-b (list 'cap-dir new-dir 'cap-title (car card) 'cap-description (cadr card) 'cap-status #f))
+                              (when (buffer-known? new-b) (cap--render! new-b))))
                         (cap-watch--finish! dir)))))))))))
 
 (define (cap-watch--scan!)

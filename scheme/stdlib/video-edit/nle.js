@@ -79,6 +79,7 @@
       // a cut or a hidden part chosen from the index: it is picked, ready for the keys
       if (sk.select === "segment") act("select-segment", { src: sk.src, t: sk.t + 0.01 });
       else if (sk.select === "pause") act("select-range", { src: sk.src, t: sk.t, b: sk.b });
+      else if (sk.select === "dub") act("select-dub", { src: sk.src, t: sk.t });
       else if (sk.select === "hidden") {
         const h = clipOf(sk.src, sk.t + 0.01);
         if (h) {
@@ -88,6 +89,7 @@
         }
       }
       else if (sk.select) act("select-cut", { src: sk.src, t: sk.t });
+      else act("show", { src: sk.src, t: sk.t });
     }
   });
 
@@ -134,7 +136,10 @@
       video.src = s.url;
     } else {
       video.dataset.src = String(i);
-      if (t != null) video.currentTime = t;
+      if (t != null) {
+        if (video.readyState < 1) pendingT = t;
+        else video.currentTime = t;
+      }
     }
     if (src !== i) { src = i; zoom = null; drawTabs(); drawSourceBar(); drawTranscript(); }
   }
@@ -757,10 +762,12 @@
     return act(name, at);
   }
   // every action goes to Scheme with the playhead; the answer is the whole view
+  let actSeq = 0;
   function act(name, at) {
+    const seq = ++actSeq;
     const i = at ? at.src : Number(video.dataset.src), t = at ? at.t : video.currentTime;
     return fetch(API, { method: "POST", body: JSON.stringify({ op: "act", name, src: i, t, b: at && at.b, playing, caret }) })
-      .then((r) => r.json()).then((s) => { setState(s); applyView(s.view || {}); });
+      .then((r) => r.json()).then((s) => { if (seq !== actSeq) return; setState(s); applyView(s.view || {}); });
   }
   // the page draws Scheme's view: what is chosen, which video, the zoom, whole mode,
   // the cursor, playing or not, and where the playhead goes

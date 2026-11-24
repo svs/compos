@@ -2885,6 +2885,8 @@
     (if (or (not m) (member m seen))
         (map (lambda (n) (string->symbol (string-append n "-hook"))) acc)
         (loop (mode-parent m) (cons m acc) (cons m seen)))))
+(public! 'mode-hook-chain "(mode-hook-chain MODE) — the hook symbols run when MODE turns on, root ancestor first, e.g. (prog-mode-hook elixir-mode-hook)")
+(catalog-meta! 'function "mode-hook-chain" 'domain 'buffers 'effects '(read))
 
 ;; #t when MODE is NAME, or descends from it
 (define (derived-mode? mode name)

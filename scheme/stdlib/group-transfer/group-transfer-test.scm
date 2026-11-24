@@ -17,6 +17,10 @@
       (group-setting-set! src 'github-owner "someone")
       (group-setting-set! src 'browser-profile "Profile 9")
       (todo-create "zz-gt task" (list 'group src 'project "zz-gt"))
+      (group-layout-set! src (list 'focus "p1" 'next-pane 2 'capacity 1 'layout 'single 'next-window 2
+                                   'panes (list (list 'id "p1" 'share 1
+                                                      'windows (list (list 'key 1 'point (list f 3)
+                                                                           'buffers (list (cadr (car (buffer-read-many (list fb) '(id) '()))))))))))
       (let ((out (group-export src (string-append dir "/out"))))
         (buffer-kill! fb)
         ;; the other machine has never seen the task: take it out here
@@ -28,7 +32,11 @@
           (check-false! (equal? id src) "a new id")
           (check-equal! (group-setting id 'github-owner) "someone" "a setting travels")
           (check-false! (group-setting id 'browser-profile) "a machine-only one does not")
-          (check-true! (member f (group-buffers id)) "the file opens in the copy")
+          (check-true! (member f (group-known-buffers id)) "the file comes back in the copy")
+          (check-equal! (buffer-text f) "hello\n" "with its text")
+          (check-equal! (plist-get r 'layout) #t "the layout travels")
+          (check-equal! (plist-get (car (plist-get (car (plist-get (group-layout id) 'panes)) 'windows)) 'buffers)
+                        (list (cadr (car (buffer-read-many (list f) '(id) '())))) "and its window holds the file")
           (check-equal! (plist-get r 'tasks) 1 "the group's task travels")
           (let ((t (todo--first (lambda (t) (equal? (plist-get t 'title) "zz-gt task")) (todo--all))))
             (check-equal! (plist-get t 'group) id "the task is the copy's")

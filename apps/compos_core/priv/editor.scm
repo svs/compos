@@ -7320,6 +7320,8 @@
 (effects! '(write))
 (public! 'buffer-sleep! "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned")
 (catalog-meta! 'function "buffer-sleep!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "buffer-store-export!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "buffer-store-adopt!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-last-seen "(buffer-last-seen NAME) — unix seconds when NAME was last shown in the active window, or #f; reads without waking a dormant buffer")
 (catalog-meta! 'function "buffer-last-seen" 'domain 'buffers 'effects '(read))
 (public! 'buffer-note-seen! "(buffer-note-seen! NAME) — stamp NAME as seen now, at most one write a minute")

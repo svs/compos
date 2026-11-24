@@ -2918,6 +2918,17 @@ defmodule Compos.Core.SchemeAPI do
         fn [name] ->
           Compos.Core.sleep_buffer(name) == :ok
         end,
+      {"buffer-store-export!",
+       "(buffer-store-export! IDS DIR) — copy the checkpoint and history log of each buffer id into DIR/buffers and DIR/docs; a live one checkpoints first. Answers the ids copied."} =>
+        fn [ids, dir] when is_list(ids) and is_binary(dir) ->
+          Compos.Core.BufferStore.export(Enum.filter(ids, &is_binary/1), Path.expand(dir))
+        end,
+      {"buffer-store-adopt!",
+       "(buffer-store-adopt! DIR GROUP FROM-HOME TO-HOME) — make the checkpoints buffer-store-export! wrote into DIR dormant buffers here, in GROUP, with FROM-HOME rewritten to TO-HOME; a known id or name keeps the buffer here. Answers ((OLD-ID ID NAME ADOPTED?) ...)."} =>
+        fn [dir, group, from, to] when is_binary(dir) ->
+          str = fn v -> if is_binary(v), do: v, else: nil end
+          Compos.Core.BufferStore.adopt(Path.expand(dir), str.(group), str.(from), str.(to))
+        end,
       {"set-frame-group-label!",
        "(set-frame-group-label! NAME [FRAME]) — record a frame's group context; #f clears it. FRAME defaults to the selected one."} =>
         fn

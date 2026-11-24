@@ -290,9 +290,16 @@
 
 (define (dired-compact-cells buf e) (dired-cells-pick buf e '(0 1 3 4 6)))
 
+(define (dired-view-key buf)
+  "the v entry of the key bar: what v shows next, when a package binds it (gallery-mode)"
+  (if (and (mode-keymap "Dired") (keymap-lookup (mode-keymap "Dired") "v"))
+      (list (list "v" (if (minor-mode-on? buf "gallery-mode") "table" "grid")))
+      '()))
+
 (define (dired-narrow-footer buf)
-  '(("RET" "open") ("SPC" "select") ("x" "trash")
-    ("/" "filter") ("^" "up") ("q" "quit")))
+  (append '(("RET" "open") ("SPC" "select") ("x" "trash"))
+          (dired-view-key buf)
+          '(("/" "filter") ("^" "up") ("q" "quit"))))
 
 ;;; --- filters ------------------------------------------------------------------
 ;;; `/` narrows and `\` widens, and both are list-mode's: the stack, the
@@ -541,7 +548,7 @@
            "open in — or picks from its tabs: the mode a file opens in, its "
            "extension, its type. The arrows move the rows while you type, and `RET` "
            "keeps the narrowing and the row you chose. `\\` widens by one "
-           "and `.` hides the dotfiles. `s` changes sorting, `S` reverses it, "
+           "and `.` hides the dotfiles. `v` shows the files as a grid of thumbnails, and `v` again as the table. `s` changes sorting, `S` reverses it, "
            "and `G` groups directories first. The filters and sorting persist. "
            "`% m` marks and `% d` flags by regexp, `~` flags backups, `t` toggles "
            "the marks, `% R` renames by regexp. `!` runs a shell command on the "
@@ -592,11 +599,13 @@
     'meta (lambda (buf) (dired-meta buf))
     'total (lambda (buf) (or (buffer-local-value 'dired-total buf) 0))
     'footer (lambda (buf)
-              '(("RET" "open") ("M-RET" "open and go") ("SPC" "select") ("* s" "all") ("d" "flag")
-                ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
-                ("/" "filter") ("." "dotfiles") ("% m" "mark regexp") ("t" "toggle")
+              (append
+               '(("RET" "open") ("M-RET" "open and go") ("SPC" "select") ("* s" "all") ("d" "flag")
+                ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort"))
+               (dired-view-key buf)
+               '(("/" "filter") ("." "dotfiles") ("% m" "mark regexp") ("t" "toggle")
                 ("!" "shell") ("C-x C-q" "edit names")
-                ("^" "up") ("g" "revert") ("q" "quit")))
+                ("^" "up") ("g" "revert") ("q" "quit"))))
     ;; Marked rows go to trash by default. Permanent deletion uses `D`.
     'flags (list (list "d" "D" "trash"
                        (lambda (buf e)

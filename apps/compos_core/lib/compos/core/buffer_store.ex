@@ -286,6 +286,119 @@ defmodule Compos.Core.BufferStore do
     :exit, _ -> false
   end
 
+  @doc """
+  Copy the checkpoint and the history log of each id into DEST/buffers and
+  DEST/docs, so another daemon can adopt them. A live buffer writes its
+  checkpoint first. Answers the ids that had a checkpoint to copy.
+  """
+  def export(ids, dest) when is_list(ids) and is_binary(dest) do
+    File.mkdir_p!(Path.join(dest, "buffers"))
+    File.mkdir_p!(Path.join(dest, "docs"))
+
+    ids
+    |> Enum.uniq()
+    |> Enum.filter(fn id ->
+      with %{name: name} <- lookup_id(id), [_ | _] <- Compos.Core.live_pid(name) do
+        try do
+          Buffer.checkpoint_now(name)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+
+      src = checkpoint_path(id)
+
+      if File.exists?(src) do
+        File.cp!(src, Path.join([dest, "buffers", id <> ".etf"]))
+        log = Compos.Core.BufferHistoryStore.path(id)
+        if File.exists?(log), do: File.cp!(log, Path.join([dest, "docs", id <> ".loro"]))
+        true
+      else
+        false
+      end
+    end)
+  end
+
+  @doc """
+  Make the checkpoints under SRC/buffers (with their logs in SRC/docs)
+  dormant buffers of this daemon. Every string that starts with FROM_HOME
+  starts with TO_HOME instead, the name and path included, and the local
+  group-id becomes GROUP. An id this daemon knows stays as it is, and a
+  name it knows keeps its own buffer: either one maps to the buffer here.
+  Answers [[old_id, id_here, name_here, adopted?] ...].
+  """
+  def adopt(src, group, from_home, to_home) when is_binary(src) do
+    Path.wildcard(Path.join([src, "buffers", "*.etf"]))
+    |> Enum.flat_map(fn file ->
+      case read_term(file) do
+        %{version: v, id: id, name: name} when v in [1, 2] and is_binary(id) and is_binary(name) ->
+          cp = rehome(read_term(file), from_home, to_home)
+          adopt_one(cp, src, group)
+
+        _ ->
+          []
+      end
+    end)
+  end
+
+  defp adopt_one(%{id: id, name: name} = cp, src, group) do
+    cond do
+      row = lookup_id(id) ->
+        [[id, id, row.name, false]]
+
+      # a checkpoint on disk is a buffer here, even between a stop and its
+      # dormant row
+      File.exists?(checkpoint_path(id)) ->
+        [[id, id, BufferView.name_of_id(id) || name, false]]
+
+      row = lookup(name) ->
+        [[id, row.id, name, false]]
+
+      true ->
+        locals = if is_map(cp[:locals]), do: cp.locals, else: %{}
+        locals = if is_binary(group), do: Map.put(locals, "group-id", group), else: locals
+        cp = Map.put(cp, :locals, locals)
+        log = Path.join([src, "docs", id <> ".loro"])
+        dst_log = Compos.Core.BufferHistoryStore.path(id)
+
+        if File.exists?(log) and not File.exists?(dst_log) do
+          File.mkdir_p!(Path.dirname(dst_log))
+          File.cp!(log, dst_log)
+        end
+
+        atomic_write(checkpoint_path(id), :erlang.term_to_binary(cp))
+        row = row_of_checkpoint(cp)
+        BufferView.put_new(row)
+        # the listings read meta.db, which rereads the row it is told of
+        Compos.Core.Events.broadcast_meta(name, %{path: row.path, locals: row.locals})
+        touch(name)
+        [[id, id, name, true]]
+    end
+  end
+
+  defp rehome(term, from, to) when is_binary(from) and is_binary(to) and from != "",
+    do: rehome_term(term, from, to)
+
+  defp rehome(term, _from, _to), do: term
+
+  defp rehome_term(s, from, to) when is_binary(s) do
+    if String.starts_with?(s, from),
+      do: to <> binary_part(s, byte_size(from), byte_size(s) - byte_size(from)),
+      else: s
+  end
+
+  defp rehome_term([h | t], from, to), do: [rehome_term(h, from, to) | rehome_term(t, from, to)]
+
+  defp rehome_term(t, from, to) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.map(&rehome_term(&1, from, to)) |> List.to_tuple()
+
+  defp rehome_term(%_{} = s, _from, _to), do: s
+
+  defp rehome_term(m, from, to) when is_map(m),
+    do: Map.new(m, fn {k, v} -> {k, rehome_term(v, from, to)} end)
+
+  defp rehome_term(other, _from, _to), do: other
+
   def graveyard_dir, do: Path.join(dir(), "dead")
 
   def graveyard_log, do: Path.join(dir(), "graveyard.log")

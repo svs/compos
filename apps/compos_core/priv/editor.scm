@@ -7502,6 +7502,8 @@
 (public! 'editor-context "(editor-context EXCLUDE-BUF [SKIP]) — one line per visible buffer: name, mode, line at point and what its provider adds, the last focused first; \"\" if none")
 (public! 'goto-char! "(goto-char! BYTE-POS)")
 (public! 'set-mb-redirect! "(set-mb-redirect! BOOL) — #f makes current-buffer ignore an active minibuffer, so a preview hook can act on the invoking buffer; restore to #t after")
+(public! 'mb-tab-recall "(mb-tab-recall KEY LABELS DEFAULT) — index in LABELS of the tab last remembered under KEY, else DEFAULT")
+(catalog-meta! 'function "mb-tab-recall" 'domain 'interaction 'effects '(read))
 (public! 'line-start-position "(line-start-position LINE) — 1-based line's start byte offset, O(log n)")
 (public! 'insert! "(insert! TEXT) at point")
 (public! 'delete-char! "(delete-char! N) — negative deletes backward")

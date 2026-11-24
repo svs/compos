@@ -54,7 +54,7 @@
 ;; the stateless API lane still receives the immutable whole-buffer snapshot.
 ;; The overlay makes authorship visible without writing chat markers into the
 ;; document itself.
-(define *llm-mode-hooks* '())
+(defvar *llm-mode-hooks* '())
 
 (define (llm-mode--addressable-kind buf kind)
   (filter

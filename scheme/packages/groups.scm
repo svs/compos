@@ -5346,10 +5346,11 @@ is forgotten and that group falls back to creation order in the switcher."
 (public! 'group-membership-buffer? "(group-membership-buffer? BUF) — #t when BUF can belong to a group")
 (public! 'group-scratch-buffer? "(group-scratch-buffer? BUF) — #t when BUF is its group's scratch")
 (public! 'group-id-string? "(group-id-string? VALUE) — #t when VALUE is a group id string")
+(public! 'group-members-of "(group-members-of NAMES G) — the buffers of NAMES that belong to group G")
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
   '(group-display-name group-short-name group-label group-meta group-noise
     group-dirty? group-docs group-known-buffers group-user-buffers-mru
     group-primary-chat group-layout group-pinned? group-record-by-name
     group-record-id group-record-name group-visible-groups
     group-visible-work-buffers group-work-buffer? group-membership-buffer?
-    group-scratch-buffer? group-id-string?))
+    group-scratch-buffer? group-id-string? group-members-of))

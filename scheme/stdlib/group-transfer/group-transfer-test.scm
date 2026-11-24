@@ -32,7 +32,7 @@
           (check-false! (equal? id src) "a new id")
           (check-equal! (group-setting id 'github-owner) "someone" "a setting travels")
           (check-false! (group-setting id 'browser-profile) "a machine-only one does not")
-          (check-true! (member f (group-known-buffers id)) "the file comes back in the copy")
+          (check-equal! (buffer-group f) id "the file comes back in the copy")
           (check-equal! (buffer-text f) "hello\n" "with its text")
           (check-equal! (plist-get r 'layout) #t "the layout travels")
           (check-equal! (plist-get (car (plist-get (car (plist-get (group-layout id) 'panes)) 'windows)) 'buffers)

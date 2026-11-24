@@ -1059,6 +1059,10 @@
 (public! 'chats-row-label
   "(chats-row-label B) — the state a chat list row shows: the runtime while it works or asks, else the goal status of the newest turn")
 
+(effects! '(read))
+(public! 'chats-live-log-paths
+  "(chats-live-log-paths) — the transcript path of every open chat, each in its group's chats folder")
+
 (effects! '(destroy))
 (public! 'agents-archive!
   "(agents-archive! B) — archive the chat B: stop its runtime, release its windows and kill its buffer")

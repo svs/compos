@@ -320,3 +320,35 @@
         (lambda ()
           (set! *todo-item-providers* old)
           (buffer-kill! buf))))))
+
+(deftest 'moving-to-group-folders-keeps-every-task
+  "each task goes to its group's folder, a gone group's included; a task with no group stays in the old file, which is copied first"
+  (lambda ()
+    (let* ((root (string-append "/tmp/zz-todo-move-" (number->string (current-time))))
+           (old (string-append root "/zz-proj/todos.md"))
+           (old-dirs todo-directories))
+      (make-directory! (string-append root "/zz-proj"))
+      (with-fresh-group "zz-todo-move"
+        (lambda (g)
+          (write-file! old (string-append "# zz-proj\n\n"
+                                          "## TODO zz live\n#+id: t-zz-1\n#+group: " g "\n\n"
+                                          "## TODO zz gone\n#+id: t-zz-2\n#+group: grp:1:1\n\n"
+                                          "## TODO zz loose\n#+id: t-zz-3\n"))
+          (with-stubs (list (list 'compos-home (lambda () root)))
+            (lambda ()
+              (unwind-protect
+                (lambda ()
+                  (set! todo-directories (list (string-append root "/**/todos.md")))
+                  (todo--rescan!)
+                  (let ((r (todo-move-to-groups!))
+                        (where (lambda (id) (plist-get (todo-get id) 'file))))
+                    (check-equal! (plist-get r 'moved) 2 "the two grouped tasks move")
+                    (check-equal! (where "t-zz-1") (todo--group-file g) "to the live group's folder")
+                    (check-equal! (where "t-zz-2") (string-append root "/groups/grp-1-1/todos.md") "a gone group keeps its own folder")
+                    (check-equal! (where "t-zz-3") old "a task with no group stays")
+                    (check-equal! (plist-get (todo-get "t-zz-1") 'project) "zz-proj" "the project comes along")
+                    (check-true! (file-exists? (string-append old ".moved")) "the old file is copied first")))
+                (lambda ()
+                  (set! todo-directories old-dirs)
+                  (todo--rescan!)
+                  (shell-command->string (string-append "rm -rf '" root "'") "/tmp"))))))))))

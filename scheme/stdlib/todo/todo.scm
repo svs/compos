@@ -258,7 +258,8 @@
   (if (todo--group-path? path) todo-default-project (todo--file-project path)))
 
 (define (todo--group-file g)
-  (string-append (group-home-dir g) "/todos.md"))
+  ;; a group that is gone keeps a folder named for its id, as a live one has
+  (string-append (compos-home) "/groups/" (group-home-slug (or (group-resolve-id g) g)) "/todos.md"))
 
 ;; an open buffer may hold unsaved edits, so it reads live
 (define (todo--text path)
@@ -915,27 +916,34 @@
 (public! 'todo-create "(todo-create TITLE PROPS) — file a task; answers its id. PROPS must hold 'group, a group name or id (\"put a todo in X\" is group X); 'by is the name the change is logged under")
 
 (define (todo-move-to-groups!)
-  "(todo-move-to-groups!) — move every task out of the project files into its group's folder, groups/<id>/todos.md; each old file is kept as todos.md.moved. A file with unsaved edits, or with a task that has no group, stays. Answers (moved N files (PATH ...) kept (PATH ...))"
-  (let ((moved 0) (files '()) (kept '()))
+  "(todo-move-to-groups!) — move every task out of the project files into its group's folder, groups/<id>/todos.md. Each old file is first copied to todos.md.moved; a task with no group stays in it, and a file left empty goes. A file with unsaved edits is not touched. Answers (moved N stayed N files (PATH ...) kept (PATH ...))"
+  (let ((moved 0) (stayed 0) (files '()) (kept '()))
     (for-each
       (lambda (f)
-        (let ((tasks (todo--parsed f)))
-          (if (or (and (buffer-exists? f) (buffer-modified? f))
-                  (todo--first (lambda (t) (todo--blank? (plist-get t 'group))) tasks))
-              (set! kept (cons f kept))
-              (begin
+        (if (and (buffer-exists? f) (buffer-modified? f))
+            (set! kept (cons f kept))
+            (let* ((tasks (todo--parsed f))
+                   (loose (filter (lambda (t) (todo--blank? (plist-get t 'group))) tasks)))
+              (when (< (length loose) (length tasks))
+                (copy-file! f (string-append f ".moved"))
                 (for-each (lambda (t)
-                            (todo--append! (todo--group-file (plist-get t 'group)) (todo--render t))
-                            (set! moved (+ moved 1)))
+                            (unless (todo--blank? (plist-get t 'group))
+                              (todo--append! (todo--group-file (plist-get t 'group)) (todo--render t))
+                              (set! moved (+ moved 1))))
                           tasks)
                 (when (buffer-exists? f) (buffer-kill! f))
-                (rename-file! f (string-append f ".moved"))
+                (if (null? loose)
+                    (delete-file f)
+                    (write-file! f (string-append "# " (todo--file-project f) "\n\n"
+                                                  (string-join (map todo--render loose) "\n\n") "\n")))
+                (set! stayed (+ stayed (length loose)))
                 (set! files (cons f files))))))
-      (filter (lambda (f) (not (todo--group-path? f))) (todo--files)))
+      ;; the folders as they are now, not the cached list a rescan refreshes later
+      (filter (lambda (f) (and (file-exists? f) (not (todo--group-path? f)))) (todo--resolve)))
     (set! *todo-files* #f)
     (set! *todo-parse-cache* '())
     (todo--changed!)
-    (list 'moved moved 'files (reverse files) 'kept (reverse kept))))
+    (list 'moved moved 'stayed stayed 'files (reverse files) 'kept (reverse kept))))
 
 (define (todo-adopt-file! path g)
   "(todo-adopt-file! PATH G) — file the tasks of the todos.md at PATH in group G, as group-import! does with a group's own todos; a task whose id is already here stays out. Answers how many came in"

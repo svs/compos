@@ -1102,23 +1102,11 @@
       (message (if on "The 100 newest archived chats; A shows the live ones again" "The live chats"))))
   'modes '(chat-list-mode))
 
-;; / on the chat list has a Status tab: working, needs you, streaming and
-;; the rest, the words the row shows. is:needs types the same filter.
-(define chats-status-order
-  '("your turn" "needs you" "blocked" "working" "streaming" "starting"
-    "success" "idle" "stopped"))
-
+;; is:needs keeps the chats in a state: working, needs you, streaming and
+;; the rest, the words the row shows.
 (define (chats-row-status-label e)
   ;; an archived row is a saved file and has no state
   (and (string? e) (not (string-prefix? "/" e)) (chats-row-label e)))
-
-(define (chats-status-options buf)
-  (let ((seen (filter (lambda (s) s) (map chats-row-status-label (list-entries buf)))))
-    (map (lambda (s) (list s s))
-         (filter (lambda (s) (member s seen)) chats-status-order))))
-
-(define chats-facets
-  (list (list 'label "Status" 'kind "status" 'options chats-status-options)))
 
 (define (chats-filter buf e f)
   (if (equal? (car f) "status")
@@ -1162,8 +1150,9 @@
         'doc (string-append
                "The chats, as ibuffer lists buffers: the recent ones at rest, the "
                "chat you used last at the top. f filters every chat, by title, "
-               "state, model, and by a word somebody said in it; / has a Status tab "
-               "(working, needs you, ...), and is:needs types the same filter. < cycles the "
+               "state, model, and by a word somebody said in it, and lights the word; is:needs "
+               "keeps the chats in that state. / filters as ibuffer does: / c by what the "
+               "chats say (a regexp), / n by title, / ! negates, / | ors, / p pops and / / clears. < cycles the "
                "sections (group, subject, none: the most recent first), > the order. t "
                "shows the task the chat works. RET enters the chat; on a saved "
                "conversation at the bottom, RET reads it back. SPC marks, as in "
@@ -1182,7 +1171,6 @@
         ;; a chat's transcript size is not what you pick a chat by
         'hide-fields '(size)
         'show-fields '(cost turn)
-        'facets chats-facets
         'filter chats-filter
         'section-note (lambda (buf members) (chats-live-note members))
         ;; the list stands still: g draws it again when you ask
@@ -1193,8 +1181,9 @@
                 ("t" "chat-goto-todo-at-point")
                 ("+" "agent-open")
                 ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")
-                ;; / is the Status picker, not ibuffer's old / prefix
-                ("/" "list-filter")))))
+                ;; the chat list filters as ibuffer does: f types, / is
+                ;; ibuffer's own filter prefix
+                ("/" (keymap "ibuffer-filter-map"))))))
 
 (define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))
 

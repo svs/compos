@@ -159,6 +159,25 @@
               (else (copy-file! src dst)))))
     (directory-files from)))
 
+;; a group filled again: every file of the export replaces its copy here,
+;; except the tasks, which the group already holds
+(define (group-transfer--sync-dir! from to)
+  (make-directory! to)
+  (for-each
+    (lambda (entry)
+      (let* ((name (if (string-suffix? "/" entry) (substring entry 0 (- (string-length entry) 1)) entry))
+             (src (string-append from "/" name))
+             (dst (string-append to "/" name)))
+        (cond ((equal? name "todos.md") #f)
+              ((file-directory? src) (group-transfer--sync-dir! src dst))
+              ;; a link to a folder (skills-view) stays as this side made it
+              ((file-directory? dst) #f)
+              (else (ignore-errors
+                      (lambda ()
+                        (when (file-exists? dst) (delete-file! dst))
+                        (copy-file! src dst)))))))
+    (directory-files from)))
+
 (define (group-import! path &optional cwd into)
   "(group-import! PATH [CWD INTO]) -- make a new group from the folder group-export wrote, or fill the group INTO; CWD replaces the exported working directory; answers (id ID name NAME opened N tasks N buffers N new N layout BOOL skipped (PATH ...) missing (PATH ...))"
   (let* ((dir (expand-path path))
@@ -182,7 +201,9 @@
                 (group-setting-set! id (car s) (cadr s))
                 (loop (cddr s)))))
           (when (file-directory? (string-append dir "/home"))
-            (group-transfer--copy-home! (string-append dir "/home") (group-home-dir id))
+            (if old
+                (group-transfer--sync-dir! (string-append dir "/home") (group-home-dir id))
+                (group-transfer--copy-home! (string-append dir "/home") (group-home-dir id)))
             (group-config-load! id)
             (let ((todos (string-append dir "/home/todos.md")))
               ;; a group filled again already holds its tasks
@@ -191,6 +212,17 @@
           (let ((want (or cwd (plist-get plist 'cwd))))
             (when (and (not old) (string? want) (file-directory? (expand-path want)))
               (group-cwd-set! id want)))
+          ;; a group filled again takes the sender's buffers as they are now:
+          ;; its own copies of them go first, unless they hold unsaved work
+          (when old
+            (for-each
+              (lambda (b)
+                (when (and (string? b) (buffer-known? b)
+                           (equal? (group-resolve-id (buffer-group b)) id)
+                           ;; only a file holds unsaved work; a chat or an app page reads modified always
+                           (not (and (string? (buffer-path b)) (buffer-modified? b))))
+                  (buffer-kill! b)))
+              (buffer-ids->names (filter string? (or (plist-get plist 'buffers) '())))))
           ;; the buffers come back dormant in this group, the home rewritten
           (let* ((from (plist-get plist 'home))
                  (to (group-transfer--home))

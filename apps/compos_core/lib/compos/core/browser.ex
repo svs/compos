@@ -9,7 +9,8 @@ defmodule Compos.Core.Browser do
   requests independently.
 
   Mechanism only. Which commands a tab is offered, what a chord means, and what
-  a page's text becomes are all `scheme/packages/chrome.scm`. This module ships JSON in
+  a page's text becomes are all Scheme: the connection in `scheme/packages/browser.scm`,
+  the in-tab keys and commands in `scheme/stdlib/chrome/chrome.scm`. This module ships JSON in
   both directions and never interprets it.
 
   Inbound requests are answered by a Scheme closure registered with

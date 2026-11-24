@@ -80,6 +80,7 @@
 ;; retags them through group membership, so this follows groups
 (require 'apps)
 (require 'http)
+(require 'browser)
 ;; the event log: agents publish their status on it, so it follows the
 ;; chats table, whose status hook feeds it
 (require 'events)

@@ -10,7 +10,7 @@ defmodule Compos.Core.Browser.Prims do
   @doc "Every primitive under its {name, doc} key."
   def entries do
     %{
-      # --- browser (Compos.Core.Browser; policy in chrome.scm) ---------------
+      # --- browser (Compos.Core.Browser; Scheme side in browser.scm) ----------
       # Outbound: OP is the extension verb ("tabs", "eval", "read", "overlay",
       # "type", "click"...), ARGS a plist, CALLBACK gets a plist back — 'ok #t
       # plus the reply, or 'ok #f and 'error. Async because a page operation is

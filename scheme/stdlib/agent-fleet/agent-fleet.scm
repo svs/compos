@@ -381,7 +381,9 @@
 (ibuffer-kind! 'archived
   (list 'when? (lambda (b) (and (not (buffer-known? b)) (string-suffix? ".chat" b)))
         'dot (lambda (b) (list "●" "chat-archived"))
-        'name (lambda (b) (list "" (chats-archived-title b)))
+        'name (lambda (b) (list "" (string-append (if (chat-starred? b) "★ " "") (chats-archived-title b))))
+        ;; a starred archived chat leads the archived section
+        'starred (lambda (b) (chat-starred? b))
         ;; the row is the file, so its size is the file's own
         'size (lambda (b) (and (file-exists? b) (file-size b)))
         'label (lambda (b) "archived")
@@ -578,16 +580,64 @@
   'modes '(chat-list-mode ibuffer-mode))
 
 (define (chat-starred? buf)
-  (and (buffer-known? buf) (buffer-local-value 'chat-starred buf) #t))
+  (cond ((buffer-known? buf) (and (buffer-local-value 'chat-starred buf) #t))
+        ;; an archived chat keeps its star in its file's header
+        ((chats-archived-file? buf) (chats-archived-starred? buf))
+        (else #f)))
 
 (define (chat-star-set! buf on?)
-  (buffer-set-local! buf 'chat-starred (and on? #t))
-  (chat-log-save! buf)
+  (if (buffer-known? buf)
+      (begin
+        (buffer-set-local! buf 'chat-starred (and on? #t))
+        (chat-log-save! buf))
+      (chats-archived-star-set! buf on?))
   (chat-starred? buf))
+
+(define (chats-archived-file? b)
+  (and (string? b) (not (buffer-known? b)) (string-suffix? ".chat" b) (file-exists? b)))
+
+;; an archived chat is a file: its star is a key of the header line, read
+;; once per path and written back in place, so a revived chat wears it
+(define *chats-archived-stars* '())
+
+(define (chats-archived-header path)
+  (let ((text (ignore-errors (lambda () (read-file path)))))
+    (and (string? text)
+         (let ((nl (string-index text "\n")))
+           (list (chat-parse-header (if nl (substring-bytes text 0 nl) text))
+                 (if nl (substring-bytes text nl (string-byte-length text)) ""))))))
+
+(define (chats-archived-starred? path)
+  (let ((hit (assoc path *chats-archived-stars*)))
+    (if hit
+        (cadr hit)
+        (let* ((h (chats-archived-header path))
+               (on (and h (car h) (plist-get (car h) 'starred) #t)))
+          (set! *chats-archived-stars* (cons (list path on) *chats-archived-stars*))
+          on))))
+
+(define (chats-archived-star-set! path on?)
+  (let ((h (chats-archived-header path)))
+    (when (and h (car h))
+      (let* ((plist (let loop ((p (car h)) (out '()))
+                      (cond ((or (null? p) (null? (cdr p))) (reverse out))
+                            ((eq? (car p) 'starred) (loop (cddr p) out))
+                            (else (loop (cddr p) (cons (cadr p) (cons (car p) out)))))))
+             (plist (if on? (append plist (list 'starred #t)) plist)))
+        (write-file! path (string-append *chat-file-header* " " (value->string plist) (cadr h)))
+        (set! *chats-archived-stars*
+              (cons (list path (and on? #t))
+                    (filter (lambda (e) (not (equal? (car e) path))) *chats-archived-stars*)))))))
 
 (define-command "chat-toggle-star" "Star the chat at point, or the marked ones: a starred chat comes first in its group; again, unstar"
   (lambda ()
-    (let ((bs (agents-targets)))
+    ;; an archived row is a chat too: it keeps its star in its file
+    (let ((bs (filter (lambda (b) (or (buffer-known? b) (chats-archived-file? b)))
+                      (if (chat-buffer? (current-buffer))
+                          (list (current-buffer))
+                          (ibuffer-targets (if (equal? (mode-list-of (current-buffer)) "chat-mode")
+                                               (current-buffer)
+                                               (chat-list-buffer)))))))
       (if (null? bs)
           (message "no chat here")
           (let ((on? (not (chat-starred? (car bs)))))
@@ -1159,7 +1209,7 @@
     ;; conversations come under the live ones, and RET reads one back
     'extra-rows (lambda (buf)
                   (ibuffer-section buf "archived" "archived"
-                    (chats-archived-rows (and (buffer-local-value 'mode-list-extra-only buf) 100)) "faint" #t))
+                    (ibuffer-starred-first (chats-archived-rows (and (buffer-local-value 'mode-list-extra-only buf) 100))) "faint" #t))
     'text (lambda (b) (chat-list--read-text b))
     ;; only a saved conversation is a file: a row whose chat was killed
     ;; since the list was drawn names no file, and visiting its title

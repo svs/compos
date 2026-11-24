@@ -160,7 +160,7 @@
     (directory-files from)))
 
 (define (group-import! path &optional cwd into)
-  "(group-import! PATH [CWD INTO]) -- make a new group from the folder group-export wrote, or fill the group INTO; CWD replaces the exported working directory; answers (id ID name NAME opened N tasks N buffers N layout BOOL skipped (PATH ...) missing (PATH ...))"
+  "(group-import! PATH [CWD INTO]) -- make a new group from the folder group-export wrote, or fill the group INTO; CWD replaces the exported working directory; answers (id ID name NAME opened N tasks N buffers N new N layout BOOL skipped (PATH ...) missing (PATH ...))"
   (let* ((dir (expand-path path))
          (forms (scheme-read (read-file (string-append dir "/manifest.scm"))))
          (m (and (pair? forms) (car forms))))
@@ -170,7 +170,7 @@
                (old (and into (group-resolve-id into)))
                (name (if old (group-name old) (group-transfer--free-name (plist-get plist 'name))))
                (id (or old (group-record-create! name)))
-               (opened 0) (tasks 0) (adopted 0) (laid #f) (skipped '()) (missing '()))
+               (opened 0) (tasks 0) (adopted 0) (present 0) (laid #f) (skipped '()) (missing '()))
           (when (and into (not old))
             (error (string-append "group-import!: no group " (value->string into))))
           (unless old
@@ -203,6 +203,7 @@
                  (remap (lambda (uid) (let ((row (assoc uid map-rows))) (and row (cadr row)))))
                  (layout (plist-get plist 'layout)))
             (set! adopted (length (filter (lambda (r) (list-ref r 3)) map-rows)))
+            (set! present (length map-rows))
             (when (pair? layout)
               (let ((l (group-transfer--relayout layout remap rehome)))
                 (when (panes-layout? l)
@@ -224,7 +225,7 @@
                         (else (buffer-add-group! (find-file full) id)
                               (set! opened (+ opened 1))))))
               (or (plist-get plist 'members) '())))
-          (list 'id id 'name name 'opened opened 'tasks tasks 'buffers adopted 'layout laid
+          (list 'id id 'name name 'opened opened 'tasks tasks 'buffers present 'new adopted 'layout laid
                 'skipped (reverse skipped) 'missing (reverse missing))))))
 
 ;; the socket path as the other end's shell reads it: nc runs in the home
@@ -248,7 +249,9 @@
                           (shell-command->string
                             (string-append "log=$(rsync -a --partial '" out "' '" host ":" remote-dir "/' 2>&1); "
                                            "echo rsync-exit=$?; printf '%s\\n' \"$log\" | tail -5")
-                            (compos-home) k)))))
+                            (compos-home) k))
+                        ;; the copy takes as long as the group is big
+                        3600)))
           (if (not (string-contains? (value->string copied) "rsync-exit=0"))
               (error (string-append "group-send: rsync failed: " (value->string copied)))
               (peer-eval (string-append host ":" (group-transfer--socket-arg group-transfer-peer-socket))
@@ -286,7 +289,7 @@
                                (string-append "group-send to " host " failed: " (value->string value))))))))))))
 
 (public! 'group-export "(group-export G [DIR]) -- write group G as the folder DIR/NAME.group, by default under <compos-home>/exports; answers its path")
-(public! 'group-import! "(group-import! PATH [CWD INTO]) -- make a new group from the folder group-export wrote, or fill the group INTO; answers (id ID name NAME opened N tasks N buffers N layout BOOL skipped (PATH ...) missing (PATH ...))")
+(public! 'group-import! "(group-import! PATH [CWD INTO]) -- make a new group from the folder group-export wrote, or fill the group INTO; answers (id ID name NAME opened N tasks N buffers N new N layout BOOL skipped (PATH ...) missing (PATH ...))")
 (effects! '(write external execute))
 (public! 'group-send "(group-send G HOST [INTO]) -- export group G with its layout and buffers, rsync it to HOST and import it in the compos there, into the group INTO there when given; blocks, run it in a task")
 (catalog-meta! 'command "group-send" 'domain 'buffers 'effects '(write external execute))

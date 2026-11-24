@@ -89,6 +89,24 @@
                     (list 'agent-status (lambda (slug) (or status 'idle))))
     (lambda () (todo-assign-chat! id g))))
 
+(deftest 'a-task-lives-in-its-groups-folder
+  "a task is filed in groups/<id>/todos.md with its project on its own line, and a new group moves it"
+  (lambda ()
+    (t--todo-in-group
+      (lambda (g id)
+        (let ((t (todo-get id)))
+          (check-equal! (plist-get t 'file) (todo--group-file g) "filed in the group's folder")
+          (check-equal! (plist-get t 'project) "zz" "the project is the task's, not the folder's"))
+        (with-fresh-group "zz-todo-other"
+          (lambda (g2)
+            (todo-update id (list 'group g2))
+            (let ((t (todo-get id)))
+              (check-equal! (plist-get t 'file) (todo--group-file g2) "moved to the new group's folder")
+              (check-equal! (plist-get t 'project) "zz" "with its project")
+              (check-false! (todo--first (lambda (x) (equal? (plist-get x 'id) id))
+                                         (todo--parse (todo--group-file g) (todo--text (todo--group-file g))))
+                            "and gone from the old one"))))))))
+
 (deftest 'todo-a-sub-task-result-lands-on-the-task-and-its-parent
   "the task is the record: a review summary is the sub-task's status and goes to the parent's log"
   (lambda ()

@@ -224,7 +224,7 @@
 
 ;; change-hook registry keyed by buffer NAME in global state (org pattern):
 ;; rules outlive buffer kill + recreate, so re-enabling must not stack
-(defvar *writing-hooks* '())
+(defvar '*writing-hooks* '())
 
 (define (writing--ensure-hook! buf)
   (unless (assoc buf *writing-hooks*)

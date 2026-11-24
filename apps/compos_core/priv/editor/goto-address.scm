@@ -238,7 +238,7 @@
 
 ;; the reactor binds a rule to one buffer process, so a second watch of
 ;; the same name replaces the first, as font-lock does
-(defvar *goto-address-hooks* '())
+(defvar '*goto-address-hooks* '())
 
 ;; a listing draws rows, and the row is the action: Dired and every
 ;; list mode take no link paint (docs/LISTS.md, quiet popups)

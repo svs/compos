@@ -261,7 +261,7 @@
                    (and target (preview--csv-file buf target))))))
         (block-list buf)))))
 
-(defvar *preview-csv-hooks* '())
+(defvar '*preview-csv-hooks* '())
 
 (define (preview--csv-sync! buf)
   (buffer-set-local! buf 'preview-csv-files (preview-csv-files buf)))

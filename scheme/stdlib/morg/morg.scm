@@ -1196,7 +1196,7 @@
 
 ;; The reactor binds a rule to one buffer process. A killed and recreated
 ;; buffer has a new reference, so mode setup replaces the old rule.
-(defvar *morg-hooks* '())
+(defvar '*morg-hooks* '())
 
 (define (morg-ensure-hook! buf)
   (let ((old (assoc buf *morg-hooks*)))

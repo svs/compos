@@ -593,7 +593,7 @@
 
 ;; The reactor binds a rule to one buffer process. A killed and recreated
 ;; buffer has a new reference, so setup replaces the old rule.
-(defvar *markdown-hooks* '())
+(defvar '*markdown-hooks* '())
 
 (define (markdown--ensure-hook! buf)
   (let ((old (assoc buf *markdown-hooks*)))

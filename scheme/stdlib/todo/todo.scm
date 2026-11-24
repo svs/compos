@@ -1,7 +1,9 @@
 ;;; todo.scm --- the shared todo list every app and agent coordinates through.
 ;;;
-;;; A task is a level-2 morg heading in a project's todos.md, found by
-;;; todo-directories: hiring/todos.md holds the tasks of project "hiring".
+;;; A task is a level-2 morg heading in its group's todos.md,
+;;; groups/<id>/todos.md, found by todo-directories; its #+project: line
+;;; names its project. An older hiring/todos.md holds the tasks of project
+;;; "hiring" until todo-move-to-groups! moves them.
 ;;; The heading keyword stays TODO or DONE, so morg-todo and the agenda
 ;;; read these files unchanged; the finer state is #+state.
 ;;;
@@ -50,7 +52,7 @@
   (list (string-append (compos-home) "/**/todos.md")))
 
 (defcustom 'todo-directories (todo--home-directories)
-  "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. The default is every todos.md under the compos home of this daemon, (compos-home). A todos.md is the project its folder names; any other file, the project its own name gives. A new project goes where the first pattern puts it.")
+  "Where the todo files live: paths and patterns, where `*` matches within one name and `**` any depth of folders. The default is every todos.md under the compos home of this daemon, (compos-home). A group's tasks are in its folder, groups/<id>/todos.md, and each one names its project. An older todos.md elsewhere is the project its folder names; any other file, the project its own name gives.")
 
 (defcustom 'todo-skip-directories
   '("node_modules" "_build" "deps" "target" "venv" "dead" "worktree-daemons" "chrome-profile" "grammars")
@@ -79,7 +81,7 @@
     ("cancelled" "todo")))
 (define *todo-closed* '("done" "cancelled"))
 ;; the #+ lines, in the order they are written
-(define *todo-fields* '(id state assignee chats priority urgent goal source parent depends created by group))
+(define *todo-fields* '(id state assignee chats priority urgent goal source parent depends created by group project))
 ;; what todo-update may change
 (define *todo-settable*
   '(title state project assignee chats priority urgent deadline scheduled tags source parent depends goal notes status group))
@@ -243,6 +245,21 @@
         (list-ref parts (- (length parts) 2))
         (if (string-suffix? ".md" n) (substring-bytes n 0 (- (string-byte-length n) 3)) n))))
 
+;; A group keeps its tasks in its own folder, groups/<id>/todos.md, so the
+;; group carries them: group-export copies the folder. There the project is
+;; the task's #+project: line, not the folder's name.
+(define (todo--group-path? path)
+  (let ((parts (string-split path "/")))
+    (and (> (length parts) 2)
+         (equal? (list-ref parts (- (length parts) 1)) "todos.md")
+         (equal? (list-ref parts (- (length parts) 3)) "groups"))))
+
+(define (todo--path-project path)
+  (if (todo--group-path? path) todo-default-project (todo--file-project path)))
+
+(define (todo--group-file g)
+  (string-append (group-home-dir g) "/todos.md"))
+
 ;; an open buffer may hold unsaved edits, so it reads live
 (define (todo--text path)
   (if (buffer-exists? path)
@@ -284,7 +301,7 @@
   (let* ((head (caddr cur))
          (body (todo--trim-tail (nth 3 cur)))
          (base (list 'id #f 'kw (car head) 'title (cadr head) 'tags (caddr head)
-                     'project (todo--file-project path) 'file path
+                     'project (todo--path-project path) 'file path
                      'from (car cur) 'to (+ (car cur) 1 (length body)) 'pos (cadr cur)
                      'deadline #f 'scheduled #f 'depends '() 'log '() 'extra '())))
     (let loop ((ls body) (t base) (notes '()))
@@ -488,7 +505,7 @@
            (let ((cur (todo--text path)))
              (write-file! path (string-append cur (sep cur) text "\n"))))
           (else
-           (write-file! path (string-append "# " (todo--file-project path) "\n\n" text "\n"))
+           (write-file! path (string-append "# " (if (todo--group-path? path) "todos" (todo--file-project path)) "\n\n" text "\n"))
            (set! *todo-files* (append (todo--files) (list path)))
            (todo--agenda-sync!))))
   (todo--changed!))
@@ -585,7 +602,10 @@
 
 (define (todo-projects)
   "(todo-projects) — every project name"
-  (map todo--file-project (todo--files)))
+  (fold (lambda (acc p) (if (or (todo--blank? p) (member p acc)) acc (append acc (list p))))
+        (list todo-default-project)
+        (append (map todo--file-project (filter (lambda (f) (not (todo--group-path? f))) (todo--files)))
+                (map (lambda (t) (plist-get t 'project)) (todo--all)))))
 
 (category! 'writing)
 (public! 'todo-get "(todo-get ID) — one task as a plist, or #f")
@@ -649,13 +669,13 @@
                         'created (todo--now)
                         'by who
                         'group group
+                        'project (todo--slug (or (plist-get props 'project) todo-default-project))
                         'notes (or (plist-get props 'notes) "")
                         'goal (todo--norm 'goal (plist-get props 'goal))
                         'extra '()
                         'log (list (todo--log-line who "created")))))
           (when (todo--blank? (plist-get t 'title)) (todo--fail "a task needs a title"))
-          (todo--append! (todo--project-file (or (plist-get props 'project) todo-default-project))
-                         (todo--render t))
+          (todo--append! (todo--group-file group) (todo--render t))
           id))))
 
 (define (todo--norm k v)
@@ -744,10 +764,12 @@
             (if (null? lines)
                 t
                 (let ((new (plist-put new 'log (append (plist-get new 'log) lines))))
-                  (if (equal? (plist-get new 'project) (plist-get t 'project))
+                  ;; a task lives in its group's folder: a new group moves it there,
+                  ;; and so does any change to a task still in an old project file
+                  (if (equal? (todo--group-file (plist-get new 'group)) (plist-get t 'file))
                       (todo--write-span! t (todo--render new))
                       (begin (todo--write-span! t #f)
-                             (todo--append! (todo--project-file (plist-get new 'project)) (todo--render new))))
+                             (todo--append! (todo--group-file (plist-get new 'group)) (todo--render new))))
                   (todo--tell-parent! t new who text)
                   ;; a source (Linear, mail, ...) hears its task move: (FN OLD NEW WHO TEXT)
                   (unless (equal? (plist-get t 'state) (plist-get new 'state))
@@ -891,6 +913,43 @@
 
 (category! 'writing)
 (public! 'todo-create "(todo-create TITLE PROPS) — file a task; answers its id. PROPS must hold 'group, a group name or id (\"put a todo in X\" is group X); 'by is the name the change is logged under")
+
+(define (todo-move-to-groups!)
+  "(todo-move-to-groups!) — move every task out of the project files into its group's folder, groups/<id>/todos.md; each old file is kept as todos.md.moved. A file with unsaved edits, or with a task that has no group, stays. Answers (moved N files (PATH ...) kept (PATH ...))"
+  (let ((moved 0) (files '()) (kept '()))
+    (for-each
+      (lambda (f)
+        (let ((tasks (todo--parsed f)))
+          (if (or (and (buffer-exists? f) (buffer-modified? f))
+                  (todo--first (lambda (t) (todo--blank? (plist-get t 'group))) tasks))
+              (set! kept (cons f kept))
+              (begin
+                (for-each (lambda (t)
+                            (todo--append! (todo--group-file (plist-get t 'group)) (todo--render t))
+                            (set! moved (+ moved 1)))
+                          tasks)
+                (when (buffer-exists? f) (buffer-kill! f))
+                (rename-file! f (string-append f ".moved"))
+                (set! files (cons f files))))))
+      (filter (lambda (f) (not (todo--group-path? f))) (todo--files)))
+    (set! *todo-files* #f)
+    (set! *todo-parse-cache* '())
+    (todo--changed!)
+    (list 'moved moved 'files (reverse files) 'kept (reverse kept))))
+
+(define (todo-adopt-file! path g)
+  "(todo-adopt-file! PATH G) — file the tasks of the todos.md at PATH in group G, as group-import! does with a group's own todos; a task whose id is already here stays out. Answers how many came in"
+  (let* ((id (todo--group-of g))
+         (known (map (lambda (t) (plist-get t 'id)) (todo--all)))
+         (n 0))
+    (for-each (lambda (t)
+                (unless (member (plist-get t 'id) known)
+                  (todo--append! (todo--group-file id) (todo--render (plist-put t 'group id)))
+                  (set! n (+ n 1))))
+              (todo--parse path (todo--text path)))
+    n))
+(public! 'todo-move-to-groups! "(todo-move-to-groups!) — move every task from the project files into its group's folder; keeps each old file as todos.md.moved")
+(public! 'todo-adopt-file! "(todo-adopt-file! PATH G) — file the tasks of the todos.md at PATH in group G; answers how many came in")
 (public! 'todo-update "(todo-update ID PROPS) — change the task's fields; each change lands in its log")
 (public! 'todo-log "(todo-log ID TEXT [WHO]) — add a line to the task's log")
 (public! 'todo-triage "(todo-triage ID [PROPS]) — move an inbox task to todo")
@@ -3066,7 +3125,7 @@
 (define todo-prompt
   "## Shared todo list
 
-The user and every agent share one todo list. Each project keeps its tasks in a PROJECT/todos.md that `todo-directories` finds. Use the todo calls; do not edit those files.
+The user and every agent share one todo list. Each group keeps its tasks in its own folder, groups/<id>/todos.md, under the compos home; the project is a field of the task. Use the todo calls; do not edit those files.
 
 - Read: `(todo-list [SPEC])` gives open tasks, most urgent first. SPEC is a plist: state, project, assignee (\"none\" is unassigned), tag, text, overdue, ready. `(todo-next WHO)`, `(todo-get ID)` and `(todo-projects)` answer the rest.
 - File: `(todo-create TITLE PROPS)` gives the new id. PROPS must hold 'group: \"put a todo in X\" means group X, by name or id, not a project and not your own chat's group. Without it the call errors and lists the groups; pick one and call again. A task you find goes in as inbox, for the user to triage.

@@ -97,12 +97,14 @@
              (src (string-append from "/" name))
              (dst (string-append to "/" name)))
         (cond ((equal? name "group.scm") (write-file! dst (read-file src)))
+              ;; the tasks come in through todo-adopt-file!, under the new group's id
+              ((equal? name "todos.md") #f)
               ((file-exists? dst) #f)
               (else (copy-file! src dst)))))
     (directory-files from)))
 
 (define (group-import! path &optional cwd)
-  "(group-import! PATH [CWD]) -- make a new group from the folder group-export wrote; CWD replaces the exported working directory; answers (id ID name NAME opened N skipped (PATH ...) missing (PATH ...))"
+  "(group-import! PATH [CWD]) -- make a new group from the folder group-export wrote; CWD replaces the exported working directory; answers (id ID name NAME opened N tasks N skipped (PATH ...) missing (PATH ...))"
   (let* ((dir (expand-path path))
          (forms (scheme-read (read-file (string-append dir "/manifest.scm"))))
          (m (and (pair? forms) (car forms))))
@@ -111,7 +113,7 @@
         (let* ((plist (cddr m))
                (name (group-transfer--free-name (plist-get plist 'name)))
                (id (group-record-create! name))
-               (opened 0) (skipped '()) (missing '()))
+               (opened 0) (tasks 0) (skipped '()) (missing '()))
           (when (plist-get plist 'color) (group-record-update! id 'color (plist-get plist 'color)))
           (when (plist-get plist 'noise) (group-record-update! id 'noise (plist-get plist 'noise)))
           (when (plist-get plist 'meta) (group-record-update! id 'meta (plist-get plist 'meta)))
@@ -121,7 +123,10 @@
               (loop (cddr s))))
           (when (file-directory? (string-append dir "/home"))
             (group-transfer--copy-home! (string-append dir "/home") (group-home-dir id))
-            (group-config-load! id))
+            (group-config-load! id)
+            (let ((todos (string-append dir "/home/todos.md")))
+              (when (file-exists? todos)
+                (set! tasks (todo-adopt-file! todos id)))))
           (let ((want (or cwd (plist-get plist 'cwd))))
             (when (and (string? want) (file-directory? (expand-path want)))
               (group-cwd-set! id want)))
@@ -140,7 +145,7 @@
                         (else (buffer-add-group! (find-file full) id)
                               (set! opened (+ opened 1))))))
               (or (plist-get plist 'members) '())))
-          (list 'id id 'name name 'opened opened
+          (list 'id id 'name name 'opened opened 'tasks tasks
                 'skipped (reverse skipped) 'missing (reverse missing))))))
 
 ;; the socket path as the other end's shell reads it: nc runs in the home

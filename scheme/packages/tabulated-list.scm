@@ -465,7 +465,7 @@
 (define-keymap! "list-mode-map")
 (for-each (lambda (p) (define-key "list-mode-map" (car p) (cadr p)))
   '(("?" "list-keys-toggle")
-    ("/" "list-filter") ("f" "list-filter") ("\\" "list-filter-pop")
+    ("/" "list-filter") ("f" "list-facets") ("\\" "list-filter-pop")
     ("<" "list-cycle-grouping") (">" "list-cycle-sorting")
     ("n" "list-next") ("p" "list-prev")
     ("SPC" "list-toggle-mark") ("m" "list-mark")
@@ -2150,7 +2150,12 @@
     (unless (equal? before "") (minibuffer-input! before))))
 
 (define-command "list-filter"
-  "Narrow this list: pick a facet from the tabs when the list has them, else the rows that match what you type"
+  "Search this list: keep the rows whose name or content matches what you type. / is the search key on every list"
+  (lambda () (list-filter-live!))
+  'modes '(list-mode))
+
+(define-command "list-facets"
+  "Narrow this list by a facet (group, project, status) from the tabs when the list has them, else search as / does"
   (lambda ()
     (if (pair? (list-facets (current-buffer)))
         (list-facet-prompt! (current-buffer))

@@ -1839,6 +1839,7 @@ the chat."
       (if (and (string? c) (not (equal? c "")))
           (string-append " subject " (value->string c))
           ""))
+    (if (buffer-local-value 'chat-starred buf) " starred #t" "")
     ;; the newest turn's judgement of the goal, so a dormant or archived
     ;; chat still says where it stands
     (let ((g (buffer-local-value 'chat-goal-status buf)))
@@ -1962,7 +1963,7 @@ the chat."
                     v)))))
         '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)
-          (title chat-title) (summary chat-summary) (subject chat-subject)
+          (title chat-title) (summary chat-summary) (subject chat-subject) (starred chat-starred)
           (goal chat-goal-status) (goal-why chat-goal-why)
           (directory chat-directory) (slug agent-slug)))
       ;; a chat we wrote: from now on chat-log-save! writes its file

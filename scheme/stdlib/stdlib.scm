@@ -123,6 +123,13 @@
     (pdf)
     ;; record voice samples and hear them cloned: M-x tts-training
     (tts-training)
+    ;; audio and video editing, transcripts, and Cap recordings
+    (audio-edit)
+    (video-edit)
+    (video-transcript)
+    (cap)
+    (cap-watch)
+    (cap-dir)
     (morg-tangle "morg/morg-tangle.scm")
     (morg-show-source "morg/morg-show-source.scm")))
 

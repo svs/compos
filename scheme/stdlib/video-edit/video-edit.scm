@@ -1356,6 +1356,29 @@ A take said again after the pause is a retake: its first words match words just 
              ((and (pair? sel) (equal? (car sel) 'dub)) (video-edit-remove-dub! edit (video-edit--src-path edit (cadr sel)) (caddr sel)) (video-edit--tl-set-sel! tl #f) (list 'status "Take taken out"))
              ((and (pair? sel) (equal? (car sel) 'range)) (video-edit-toggle-hidden! edit (video-edit--src-path edit (cadr sel)) (caddr sel) (cadddr sel)) (list 'status "Segment toggled"))
              (else (list 'status "Nothing chosen · ⌥← ⌥→ goes to a cut"))))
+      ((and (pair? sel) (equal? (car sel) 'dub) (member name '("select-word-back" "select-word-on" "select-up" "select-down")))
+       ;; a chosen take: the shift arrows slide it, a tenth of a second or a second at a time
+       (let* ((di (cadr sel)) (path (video-edit--src-path edit di)) (dub (video-edit--dub-at edit path (caddr sel)))
+              (step (cond ((equal? name "select-word-back") -0.1) ((equal? name "select-word-on") 0.1) ((equal? name "select-up") -1) (else 1))))
+         (if (not dub) (list 'status "No take there")
+             (let ((na (video-edit--round (max 0 (min (- (video-edit--src-dur edit di) (- (cadr dub) (car dub))) (+ (car dub) step))))))
+               (video-edit-move-dub! edit path (car dub) na)
+               (video-edit--tl-set-sel! tl (list 'dub di na))
+               (list 'seek (list 'src di 't na)
+                     'status (string-append "Take at " (video-edit-format-time na) " · ⇧← ⇧→ moves it 0.1 s · ⇧↑ ⇧↓ 1 s · f fits the video to it"))))))
+      ((equal? name "fit-take")
+       ;; the video under the chosen take shows, a breath each side; the rest of the segments it sits in hides
+       (let* ((di (and (pair? sel) (equal? (car sel) 'dub) (cadr sel)))
+              (path (and di (video-edit--src-path edit di)))
+              (dub (and path (video-edit--dub-at edit path (caddr sel)))))
+         (if (not dub) (list 'status "Choose a take first: click its 🎙")
+             (list 'status (video-edit--fit-take! edit di dub)))))
+      ((equal? name "cut-detail")
+       ;; the page of the chosen cut, or of the segment under the playhead, beside the timeline
+       (let* ((on (and (pair? sel) (memq (car sel) '(cut dub range))))
+              (ci (if on (cadr sel) i)) (ct (if on (caddr sel) t)))
+         (video-edit-cut-page! edit ci ct tl)
+         (list 'status "The cut's page is beside the timeline · 1-9 plays a take · c clones the voice · f fits the video")))
       ((member name '("select-word-back" "select-word-on" "select-up" "select-down" "cut-nudge-back" "cut-nudge-on"))
        (if (not on-cut) (list 'status "Choose a cut first: ⌥← ⌥→, or click its ✂")
            (let* ((ci (cadr on-cut)) (ct (caddr on-cut)) (path (video-edit--src-path edit ci))
@@ -1389,7 +1412,7 @@ A take said again after the pause is a retake: its first words match words just 
          (video-edit--tl! tl "caret" #f))
        (video-edit--tl-set-sel! tl (list 'dub i t))
        (list 'seek (list 'src i 't t)
-             'status (string-append "Take at " (video-edit-format-time t) " · ⌫ takes it out, the original sound comes back")))
+             'status (string-append "Take at " (video-edit-format-time t) " · ⇧← ⇧→ moves it 0.1 s · ⇧↑ ⇧↓ 1 s · f fits the video to it · ⌫ takes it out")))
       ((equal? name "select-segment")
        (let ((r (video-edit--segment-at edit i t)))
          (unless (equal? i (video-edit--tl tl "shown" 0))
@@ -1565,10 +1588,12 @@ A take said again after the pause is a retake: its first words match words just 
     ("M->" "end" "The end of the edit")
     ("M-<left>" "previous-point" "The cut before")
     ("M-<right>" "next-point" "The next cut")
-    ("S-<left>" "select-word-back" "Move the chosen cut a word earlier")
-    ("S-<right>" "select-word-on" "Move the chosen cut a word later")
-    ("S-<up>" "select-up" "Move the chosen cut a line up")
-    ("S-<down>" "select-down" "Move the chosen cut a line down")
+    ("S-<left>" "select-word-back" "Move the chosen cut a word earlier, or the chosen take 0.1 s")
+    ("S-<right>" "select-word-on" "Move the chosen cut a word later, or the chosen take 0.1 s")
+    ("S-<up>" "select-up" "Move the chosen cut a line up, or the chosen take 1 s earlier")
+    ("S-<down>" "select-down" "Move the chosen cut a line down, or the chosen take 1 s later")
+    ("f" "fit-take" "Fit the video to the chosen take: it shows with a breath each side, the rest of its segment hides")
+    ("d" "cut-detail" "Open the page of the chosen cut: its words and every take in it")
     ("c" "cut" "Cut at the playhead, or cut out the chosen pause")
     ("a" "accept-pause" "Keep the chosen pause: it is meant, never shown again")
     ("o" "menu" "Open the menu of the chosen pause or cut")
@@ -1734,7 +1759,8 @@ A take said again after the pause is a retake: its first words match words just 
                              (cons (list (expand-file-name (cadr x))
                                          (sort (map video-edit--parse-cut (filter (lambda (y) (and (pair? y) (eq? (car y) 'cut))) (cddr x))))
                                          (map (lambda (y) (list (cadr y) (caddr y) (expand-file-name (cadddr y)))) (filter (lambda (y) (and (pair? y) (eq? (car y) 'dub))) (cddr x)))
-                                         (let ((t (let find ((ys (cddr x))) (cond ((null? ys) #f) ((and (pair? (car ys)) (eq? (car (car ys)) 'title)) (car ys)) (else (find (cdr ys))))))) (and t (cadr t))))
+                                         (let ((t (let find ((ys (cddr x))) (cond ((null? ys) #f) ((and (pair? (car ys)) (eq? (car (car ys)) 'title)) (car ys)) (else (find (cdr ys))))))) (and t (cadr t)))
+                                         (map (lambda (y) (list (cadr y) (caddr y) (expand-file-name (cadddr y)))) (filter (lambda (y) (and (pair? y) (eq? (car y) 'spare))) (cddr x))))
                                    sources)))
                       ((pair? x) (loop (cdr xs) (cons x settings) sources))
                       (else (loop (cdr xs) settings sources)))))))))
@@ -1752,6 +1778,7 @@ A take said again after the pause is a retake: its first words match words just 
                (string-append "\n  (source " (format "~s" (abbreviate-file-name (car s)))
                  (if (and (> (length s) 3) (string? (cadddr s))) (string-append "\n    (title " (format "~s" (cadddr s)) ")") "")
                  (apply string-append (map (lambda (d) (string-append "\n    (dub " (num (car d)) " " (num (cadr d)) " " (format "~s" (abbreviate-file-name (caddr d))) ")")) (caddr s)))
+                 (apply string-append (map (lambda (d) (string-append "\n    (spare " (num (car d)) " " (num (cadr d)) " " (format "~s" (abbreviate-file-name (caddr d))) ")")) (video-edit--spares s)))
                  (apply string-append (map (lambda (c) (string-append "\n    (cut " (num (car c)) (if (cadr c) " hidden" "") (if (caddr c) " muted" "")
                                                                      (if (and (string? (cadddr c)) (not (equal? (cadddr c) ""))) (string-append " " (format "~s" (cadddr c))) "")
                                                                      (if (and (> (length c) 4) (list-ref c 4)) (string-append " (mark " (number->string (list-ref c 4)) ")") "") ")"))
@@ -1762,12 +1789,12 @@ A take said again after the pause is a retake: its first words match words just 
 
 (define (video-edit-write! buf data)
   "(video-edit-write! BUF DATA) -- put DATA into BUF as the edit form: one undo step"
-  (video-edit--set-text! buf (video-edit--form-text (list (car data) (map (lambda (s) (list (car s) (sort (cadr s)) (caddr s) (and (> (length s) 3) (cadddr s)))) (cadr data))))))
+  (video-edit--set-text! buf (video-edit--form-text (list (car data) (map (lambda (s) (list (car s) (sort (cadr s)) (caddr s) (and (> (length s) 3) (cadddr s)) (video-edit--spares s))) (cadr data))))))
 
 (define (video-edit--update-source! buf path f)
   "rewrite the source PATH of BUF as (F CUTS DUBS) answers it, (CUTS DUBS)"
   (let ((data (video-edit-read buf)))
-    (video-edit-write! buf (list (car data) (map (lambda (s) (if (equal? (car s) path) (append (cons (car s) (f (cadr s) (caddr s))) (list (and (> (length s) 3) (cadddr s)))) s)) (cadr data))))))
+    (video-edit-write! buf (list (car data) (map (lambda (s) (if (equal? (car s) path) (append (cons (car s) (f (cadr s) (caddr s))) (list (and (> (length s) 3) (cadddr s)) (video-edit--spares s))) s)) (cadr data))))))
 
 (define (video-edit--state-at cuts t)
   "the cut whose segment holds T, or #f before the first cut"
@@ -1868,12 +1895,61 @@ A take said again after the pause is a retake: its first words match words just 
     (when path (video-edit--set-flag! buf path (car clip) (cadr clip) 'hidden (equal? state 'hidden) name))))
 
 (define (video-edit-add-dub! buf path a b file)
-  "(video-edit-add-dub! BUF PATH A B FILE) -- lay the take FILE over A..B of PATH"
-  (video-edit--update-source! buf path (lambda (cuts dubs) (list cuts (append dubs (list (list (video-edit--round a) (video-edit--round b) file)))))))
+  "(video-edit-add-dub! BUF PATH A B FILE) -- lay the take FILE over A..B of PATH; an older take it overlaps becomes a spare, the newest take plays"
+  (video-edit--rewrite-takes! buf path
+    (lambda (dubs spares)
+      (let ((over? (lambda (d) (not (or (<= (cadr d) (+ a 0.05)) (>= (car d) (- b 0.05)))))))
+        (list (append (filter (lambda (d) (and (not (over? d)) (not (equal? (caddr d) file)))) dubs)
+                      (list (list (video-edit--round a) (video-edit--round b) file)))
+              (append spares (filter over? dubs)))))))
 
 (define (video-edit-remove-dub! buf path a)
-  "(video-edit-remove-dub! BUF PATH A) -- take out PATH's take that starts nearest A"
-  (video-edit--update-source! buf path (lambda (cuts dubs) (list cuts (filter (lambda (d) (not (< (abs (- (car d) a)) 0.05))) dubs)))))
+  "(video-edit-remove-dub! BUF PATH A) -- take out PATH's take that starts nearest A; it stays as a spare take, the original sound plays there again"
+  (video-edit--rewrite-takes! buf path
+    (lambda (dubs spares)
+      (let ((out (filter (lambda (d) (< (abs (- (car d) a)) 0.05)) dubs)))
+        (list (filter (lambda (d) (not (< (abs (- (car d) a)) 0.05))) dubs) (append spares out))))))
+
+(define (video-edit--spares s)
+  "the spare takes of a source as read: takes kept but not playing"
+  (if (> (length s) 4) (or (list-ref s 4) '()) '()))
+
+(define (video-edit--rewrite-takes! buf path f)
+  "rewrite the takes of source PATH as (F DUBS SPARES) answers them, (DUBS SPARES); a file is never both"
+  (let ((data (video-edit-read buf)))
+    (video-edit-write! buf
+      (list (car data)
+            (map (lambda (s)
+                   (if (not (equal? (car s) path)) s
+                       (let* ((r (f (caddr s) (video-edit--spares s))) (dubs (car r))
+                              (spares (filter (lambda (sp) (not (let any ((ds dubs)) (and (pair? ds) (or (equal? (caddr (car ds)) (caddr sp)) (any (cdr ds))))))) (cadr r))))
+                         (list (car s) (cadr s) dubs (and (> (length s) 3) (cadddr s)) spares))))
+                 (cadr data))))))
+
+(define (video-edit-use-take! buf path file)
+  "(video-edit-use-take! BUF PATH FILE) -- make the spare take FILE play where it was laid in; any take it overlaps becomes a spare"
+  (let* ((s (assoc path (cadr (video-edit-read buf))))
+         (sp (and s (let find ((ss (video-edit--spares s))) (cond ((null? ss) #f) ((equal? (caddr (car ss)) file) (car ss)) (else (find (cdr ss))))))))
+    (and sp (begin (video-edit-add-dub! buf path (car sp) (cadr sp) file) #t))))
+
+(define (video-edit-forget-take! buf path file)
+  "(video-edit-forget-take! BUF PATH FILE) -- drop the spare take FILE from the edit; its file stays on disk"
+  (video-edit--rewrite-takes! buf path (lambda (dubs spares) (list dubs (filter (lambda (d) (not (equal? (caddr d) file))) spares)))))
+
+(define (video-edit-move-dub! buf path from to)
+  "(video-edit-move-dub! BUF PATH FROM TO) -- move PATH's take that starts nearest FROM to start at TO; it keeps its length"
+  (video-edit--update-source! buf path
+    (lambda (cuts dubs)
+      (list cuts (map (lambda (d) (if (< (abs (- (car d) from)) 0.05)
+                                      (list (video-edit--round to) (video-edit--round (+ to (- (cadr d) (car d)))) (caddr d))
+                                      d))
+                      dubs)))))
+
+(define (video-edit--dub-at edit path a)
+  "PATH's take that starts nearest A, as (START END FILE), else #f"
+  (let ((s (assoc path (cadr (video-edit-read edit)))))
+    (and s (let find ((ds (caddr s)))
+             (cond ((null? ds) #f) ((< (abs (- (car (car ds)) a)) 0.05) (car ds)) (else (find (cdr ds))))))))
 
 (define (video-edit-move-source! buf i dir)
   "(video-edit-move-source! BUF I DIR) -- move source I one place earlier (-1) or later (1)"
@@ -1889,7 +1965,7 @@ A take said again after the pause is a retake: its first words match words just 
 (define (video-edit-set-title! buf path title)
   "(video-edit-set-title! BUF PATH TITLE) -- the clip PATH is called TITLE in the project; #f or empty gives back its file name"
   (let ((data (video-edit-read buf)))
-    (video-edit-write! buf (list (car data) (map (lambda (s) (if (equal? (car s) path) (list (car s) (cadr s) (caddr s) (and (string? title) (not (equal? (string-trim title) "")) (string-trim title))) s)) (cadr data))))))
+    (video-edit-write! buf (list (car data) (map (lambda (s) (if (equal? (car s) path) (list (car s) (cadr s) (caddr s) (and (string? title) (not (equal? (string-trim title) "")) (string-trim title)) (video-edit--spares s)) s)) (cadr data))))))
 
 (define (video-edit-title buf path)
   "(video-edit-title BUF PATH) -- what the clip PATH is called: its title, else its file name without the ending"
@@ -1928,7 +2004,7 @@ A take said again after the pause is a retake: its first words match words just 
   (lambda (name)
     (advice-add! name 'around 'video-edit-one-step
       (lambda (next buf . args) (video-edit--one-step buf (lambda () (apply next (cons buf args)))))))
-  '(video-edit-add-clip! video-edit-set-clip! video-edit-add-cut! video-edit-remove-cut! video-edit-move-cut! video-edit-toggle-hidden! video-edit-toggle-muted! video-edit-add-dub! video-edit-remove-dub! video-edit-accept-pause! video-edit--set-text!))
+  '(video-edit-add-clip! video-edit-set-clip! video-edit-add-cut! video-edit-remove-cut! video-edit-move-cut! video-edit-toggle-hidden! video-edit-toggle-muted! video-edit-add-dub! video-edit-remove-dub! video-edit-move-dub! video-edit-use-take! video-edit-forget-take! video-edit-accept-pause! video-edit--set-text!))
 
 ;; ---- imenu: the edit's parts as an index. In the file a row goes to its
 ;; line; when the timeline is open it also puts the playhead there, and in
@@ -2111,3 +2187,181 @@ A take said again after the pause is a retake: its first words match words just 
                  (not (equal? (buffer-text buf) video-edit--timeline-html)))
         (video-edit--timeline-fill! buf)
         (app-reload! buf)))))
+
+;; ---- the cut page: one cut, its words and every take in it, the spare ones too
+
+(define (video-edit--fit-take! edit i dub)
+  "show the video under DUB (START END FILE) of source I with a breath each side, hide the rest of the segments it sits in; one undo step; answers a status line"
+  (let* ((path (video-edit--src-path edit i)) (pad 0.3)
+         (a (max 0 (- (car dub) pad))) (b (min (video-edit--src-dur edit i) (+ (cadr dub) pad)))
+         (s0 (cadr (video-edit--segment-at edit i (car dub)))) (s1 (caddr (video-edit--segment-at edit i (cadr dub)))))
+    (video-edit--one-step edit
+      (lambda ()
+        (video-edit--set-flag! edit path a b 'hidden #f #f)
+        (when (> (- a s0) 0.05) (video-edit--set-flag! edit path s0 a 'hidden #t #f))
+        (when (> (- s1 b) 0.05) (video-edit--set-flag! edit path b s1 'hidden #t #f))))
+    (string-append "Video fitted to the take: " (video-edit-format-time a) " → " (video-edit-format-time b) " · undo brings it back")))
+
+(define (video-edit--cut-page-name edit path a)
+  (string-append "*video-edit cut " (file-name-nondirectory path) " " (video-edit-format-time a) "*"))
+
+(define (video-edit--cut-takes edit path ca cb)
+  "the takes over CA..CB of PATH, playing first: (START END FILE PLAYING?)"
+  (let* ((s (assoc path (cadr (video-edit-read edit))))
+         (in? (lambda (d) (and (< (car d) (- cb 0.05)) (> (cadr d) (+ ca 0.05))))))
+    (if (not s) '()
+        (append (map (lambda (d) (list (car d) (cadr d) (caddr d) #t)) (filter in? (caddr s)))
+                (map (lambda (d) (list (car d) (cadr d) (caddr d) #f)) (filter in? (video-edit--spares s)))))))
+
+(define (video-edit--take-kind file)
+  (let ((n (file-name-nondirectory file)))
+    (cond ((or (string-contains? file "/tts-training/") (string-prefix? "cloned " n)) "cloned voice")
+          ((string-prefix? "take " n) "re-recorded")
+          (else "recording"))))
+
+(define (video-edit--said path a b)
+  "the words said in PATH between A and B, as one line"
+  (let ((ws (and (boundp 'video-transcript-words) (video-transcript-words path))))
+    (string-join (map caddr (filter (lambda (w) (and (>= (car w) (- a 0.05)) (< (car w) b))) (or ws '()))) " ")))
+
+(define (video-edit--cut-state edit i ca)
+  "(EDIT PATH I CA CB HIDDEN MUTED) for the segment of source I holding CA"
+  (let* ((r (video-edit--segment-at edit i ca)) (path (video-edit--src-path edit i))
+         (s (assoc path (cadr (video-edit-read edit))))
+         (c (and s (let find ((cs (cadr s))) (cond ((null? cs) #f) ((< (abs (- (car (car cs)) (cadr r))) 0.02) (car cs)) (else (find (cdr cs))))))))
+    (list edit path i (cadr r) (caddr r) (and c (cadr c)) (and c (caddr c)))))
+
+(define (video-edit--cut-page-blocks st)
+  (let* ((edit (list-ref st 0)) (path (list-ref st 1)) (ca (list-ref st 3)) (cb (list-ref st 4))
+         (takes (video-edit--cut-takes edit path ca cb)) (said (video-edit--said path ca cb)))
+    (list
+      (component 'ui/title (list 'text (string-append (video-edit-format-time ca) " → " (video-edit-format-time cb))
+                                 'badge (cond ((list-ref st 5) "hidden") ((list-ref st 6) "muted") (else "shown"))
+                                 'tone (cond ((list-ref st 5) "warn") ((list-ref st 6) "info") (else "ok"))))
+      (component 'ui/meta (list 'segs (list (list "" (video-edit-title edit path))
+                                            '("c-sep" "  ·  ") (list "" (video-edit-format-time (- cb ca)))
+                                            '("c-sep" "  ·  ") (list "c-dim" (string-append (number->string (length takes)) " takes")))))
+      (component 'ui/actions (list 'actions (list (list "video-edit-cut-clone" "Clone the voice" "c" "good")
+                                                  (list "video-edit-cut-fit" "Fit the video to the take" "f")
+                                                  (list "video-edit-cut-forget" "Forget a spare take" "X" "bad")
+                                                  (list "video-edit-cut-redraw" "Redraw" "g"))))
+      (component 'ui/group (list 'title "Said in the video"
+                                 'body (list (list 'tag "c-group" 'class (if (equal? said "") "c-prose c-dim" "c-prose")
+                                                   'text (if (equal? said "") "No words here, or no transcript yet." said)))))
+      (component 'ui/group
+        (list 'title (string-append "Takes  ·  " (number->string (length takes)))
+              'body (if (null? takes)
+                        (list (list 'tag "c-group" 'class "c-prose c-dim" 'text "No takes. c clones your voice saying these words; r on the timeline re-records them."))
+                        (let loop ((ts takes) (n 1) (acc '()))
+                          (if (null? ts) (reverse acc)
+                              (let* ((t (car ts)) (heard (video-edit--said (caddr t) 0 99999)))
+                                (loop (cdr ts) (+ n 1)
+                                      (cons (component 'ui/audio
+                                              (list 'path (caddr t)
+                                                    'title (string-append (number->string n) ".  " (if (cadddr t) "▶ plays" "spare") "  ·  "
+                                                                          (if (equal? heard "") (file-name-nondirectory (caddr t))
+                                                                              (if (> (string-length heard) 70) (string-append (substring heard 0 70) "…") heard)))
+                                                    'sub (string-append (video-edit--take-kind (caddr t)) " · " (video-edit-format-time (car t)) " → " (video-edit-format-time (cadr t))
+                                                                        (if (cadddr t) "" (string-append " · " (number->string n) " makes it play")))))
+                                            acc)))))))))))
+
+(define (video-edit-cut-page-draw! page)
+  "draw the cut page PAGE again from its edit"
+  (let* ((st0 (buffer-local-value 'video-edit-cut page))
+         (st (video-edit--cut-state (list-ref st0 0) (list-ref st0 2) (list-ref st0 3))))
+    (buffer-set-local! page 'video-edit-cut st)
+    (anchor-page! page (video-edit--cut-page-blocks st))
+    page))
+
+(define (video-edit-cut-page! edit i t &optional beside)
+  "(video-edit-cut-page! EDIT I T [BESIDE]) -- open the page of the cut of source I that holds T, beside the buffer BESIDE"
+  (let* ((st (video-edit--cut-state edit i t)) (page (video-edit--cut-page-name edit (list-ref st 1) (list-ref st 3))))
+    (buffer-create page)
+    (unless (equal? (buffer-local-value 'mode-name page) "video-edit-cut-mode")
+      (with-current-buffer page (lambda () (set-mode! "video-edit-cut-mode"))))
+    (when (and (buffer-group edit) (not (equal? (buffer-group page) (buffer-group edit)))) (buffer-move-to-group! page (buffer-group edit)))
+    (buffer-set-local! page 'video-edit-cut st)
+    (video-edit-cut-page-draw! page)
+    (if (and beside (buffer-known? beside)) (display-buffer-detail! page beside) (display-buffer-other-window! page))
+    page))
+
+(define (video-edit-cut-mode-setup) (buffer-set-read-only! (current-buffer) #t))
+(define-mode "video-edit-cut-mode" video-edit-cut-mode-setup)
+
+(define (video-edit--cut-here) (buffer-local-value 'video-edit-cut (current-buffer)))
+
+(define (video-edit--cut-redraw-all! edit)
+  (for-each (lambda (b) (when (and (equal? (buffer-local-value 'mode-name b) "video-edit-cut-mode")
+                                   (pair? (buffer-local-value 'video-edit-cut b))
+                                   (equal? (car (buffer-local-value 'video-edit-cut b)) edit))
+                          (video-edit-cut-page-draw! b)))
+            (buffer-list)))
+
+(advice-add! 'video-edit--refresh-views! 'around 'video-edit-cut-pages
+  (lambda (next buf . args) (let ((r (apply next (cons buf args)))) (video-edit--cut-redraw-all! buf) r)))
+
+(define (video-edit--cut-use! n)
+  (let* ((st (video-edit--cut-here)) (edit (list-ref st 0)) (path (list-ref st 1))
+         (takes (video-edit--cut-takes edit path (list-ref st 3) (list-ref st 4))))
+    (cond ((> n (length takes)) (message (string-append "No take " (number->string n))))
+          ((cadddr (list-ref takes (- n 1))) (message (string-append "Take " (number->string n) " already plays")))
+          (else (video-edit-use-take! edit path (caddr (list-ref takes (- n 1))))
+                (video-edit--refresh-views! edit)
+                (message (string-append "Take " (number->string n) " plays now · the take it overlapped is a spare"))))))
+
+(for-each (lambda (n)
+            (define-command (string-append "video-edit-cut-use-" (number->string n)) (string-append "Make take " (number->string n) " of this cut play")
+              (lambda () (video-edit--cut-use! n)) 'modes '(video-edit-cut-mode)))
+          '(1 2 3 4 5 6 7 8 9))
+
+(define-command "video-edit-cut-redraw" "Draw this cut's page again"
+  (lambda () (video-edit-cut-page-draw! (current-buffer))) 'modes '(video-edit-cut-mode))
+
+(define-command "video-edit-cut-fit" "Fit the video to the take that plays in this cut"
+  (lambda ()
+    (let* ((st (video-edit--cut-here)) (edit (list-ref st 0))
+           (on (filter cadddr (video-edit--cut-takes edit (list-ref st 1) (list-ref st 3) (list-ref st 4)))))
+      (if (null? on) (message "No take plays in this cut")
+          (begin (message (video-edit--fit-take! edit (list-ref st 2) (car on)))
+                 (video-edit--refresh-views! edit)))))
+  'modes '(video-edit-cut-mode))
+
+(define-command "video-edit-cut-forget" "Forget a spare take of this cut: it leaves the edit, its file stays"
+  (lambda ()
+    (let* ((st (video-edit--cut-here)) (edit (list-ref st 0)) (path (list-ref st 1))
+           (takes (video-edit--cut-takes edit path (list-ref st 3) (list-ref st 4)))
+           (n (string->number (read-string "Forget spare take number: "))))
+      (cond ((not (and n (>= n 1) (<= n (length takes)))) (message "No such take"))
+            ((cadddr (list-ref takes (- n 1))) (message "That take plays; ⌫ on the timeline takes it out first"))
+            (else (video-edit-forget-take! edit path (caddr (list-ref takes (- n 1))))
+                  (video-edit--refresh-views! edit)
+                  (message (string-append "Take " (number->string n) " forgotten · undo brings it back"))))))
+  'modes '(video-edit-cut-mode))
+
+(define-command "video-edit-cut-clone" "Speak this cut's words in your cloned voice and lay the take in"
+  (lambda ()
+    (let* ((st (video-edit--cut-here)) (edit (list-ref st 0)) (path (list-ref st 1)) (ca (list-ref st 3))
+           (said (video-edit--said path ca (list-ref st 4)))
+           (sample (and (boundp 'tts-training-samples) (pair? (tts-training-samples)) (car (tts-training-samples)))))
+      (cond ((equal? said "") (message "No words in this cut to speak"))
+            ((not sample) (message "No voice sample yet · M-x tts-training records one"))
+            (else
+             (message (string-append "Cloning the voice for " (number->string (length (string-split said " "))) " words…"))
+             (tts-training-generate! (plist-get sample 'id) said (if (equal? tts-training-engine "chatterbox") "chatterbox" "pocket")
+               (lambda (wav)
+                 (if (not wav) (message "The cloned take failed · see *tts-training-log*")
+                     (let* ((dst (string-append (video-edit--takes-dir edit) "cloned " (file-name-nondirectory path) " "
+                                                (list->string (map (lambda (c) (if (member c '(#\/ #\:)) #\- c)) (string->list (video-edit-format-time ca)))) ".wav")))
+                       (write-file! dst (read-file wav))
+                       (video-edit-add-dub! edit path ca (+ ca (video-edit--duration dst)) dst)
+                       (video-edit--refresh-views! edit)
+                       (video-edit--transcribe-take! edit dst)
+                       (message "Cloned take laid in · the take it overlapped is a spare")))))))))
+  'modes '(video-edit-cut-mode))
+
+(mode-keys! "video-edit-cut-mode"
+  (append '(("c" "video-edit-cut-clone") ("f" "video-edit-cut-fit") ("X" "video-edit-cut-forget") ("g" "video-edit-cut-redraw"))
+          (map (lambda (n) (list (number->string n) (string-append "video-edit-cut-use-" (number->string n)))) '(1 2 3 4 5 6 7 8 9))))
+
+(mode-doc! "video-edit-cut-mode"
+  "One cut of a video edit: its words and every take laid over it, the spare ones too. 1-9 makes that take play, c clones your voice saying the cut's words, f fits the video to the take that plays, X forgets a spare take, g redraws. d on the timeline opens it.")

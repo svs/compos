@@ -775,10 +775,20 @@
 
 (define (ibuffer-sort-rows buf rows)
   (let ((mode (ibuffer-sort buf)))
-    (cond ((equal? mode 'recent) rows)
-          ((equal? mode 'activity) (ibuffer-sort-activity rows))
-          ((equal? mode 'mode) (ibuffer-sort-modes rows))
-          (else (ibuffer-sort-names rows)))))
+    (ibuffer-starred-first
+      (cond ((equal? mode 'recent) rows)
+            ((equal? mode 'activity) (ibuffer-sort-activity rows))
+            ((equal? mode 'mode) (ibuffer-sort-modes rows))
+            (else (ibuffer-sort-names rows))))))
+
+;; a row its kind calls 'starred goes to the top of its section, and the
+;; order holds among the starred and among the rest
+(define (ibuffer-starred-first rows)
+  (let loop ((rs rows) (up '()) (down '()))
+    (cond ((null? rs) (if (null? up) rows (append (reverse up) (reverse down))))
+          ((ibuffer-ask (car rs) 'starred (lambda (b) #f))
+           (loop (cdr rs) (cons (car rs) up) down))
+          (else (loop (cdr rs) up (cons (car rs) down))))))
 
 ;;; --- headings -----------------------------------------------------------------
 ;;; A heading row is a list: (LABEL "" KIND KEY COUNT MODIFIED BYTES FACE
@@ -2668,8 +2678,8 @@
            "section sort by name or recency; > cycles the sort. "
            "TAB folds the rows under a row that has children, else the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
-           "a wide one the group. f narrows the table by name, mode, or path, "
-           "and \\ widens it. / filters as Emacs ibuffer does: / m mode, / n name, / f filename, / F directory, / . extension, / c contents (regexps fold case), / ! negates the newest filter, / | ors the two newest, / p pops one and / / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all, group, window. "
+           "a wide one the group. / searches the table by name, mode, or path, "
+           "and \\ widens it. f filters as Emacs ibuffer's / does: f m mode, f n name, f f filename, f F directory, f . extension, f c contents (regexps fold case), f ! negates the newest filter, f | ors the two newest, f p pops one and f / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all, group, window. "
            "SPC marks one row, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
@@ -2778,8 +2788,8 @@
     'filter (lambda (buf e f) (ibuffer-filter-row? buf e f))
     'keys '(("M-<down>" "ibuffer-next-group") ("M-<up>" "ibuffer-previous-group")
             ("<right>" "ibuffer-tab-next") ("<left>" "ibuffer-tab-prev")
-            ;; Emacs ibuffer's / filters, a prefix map; f stays the live filter
-            ("/" (keymap "ibuffer-filter-map"))
+            ;; / searches as on every list; Emacs ibuffer's filters are the f prefix
+            ("/" "list-filter") ("f" (keymap "ibuffer-filter-map"))
             ("M-n" "ibuffer-next-group") ("M-p" "ibuffer-previous-group")
             ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
             ("C-x o" "listing-preview-open-other") ("s-RET" "listing-preview-open-other")
@@ -3135,3 +3145,6 @@ buffers[profile=pretty] .ibuffer-section-info { padding-right: 1ch; }
 (public! 'ibuffer-prompt! "(ibuffer-prompt! SCOPE VIEW MODE LABEL PICK) — the table in the minibuffer form: a bottom popup with its filter line; RET calls (PICK ROW CLOSE!)")
 (public! 'ibuffer-pick! "(ibuffer-pick! ROW CLOSE! [WHERE]) — open a row: WHERE 'other keeps it in the window that previewed it, else the window the table leaves; CLOSE! closes the table")
 (public! 'ibuffer-group-buckets "(ibuffer-group-buckets ROWS CURRENT GROUP-OF [ORDER]) — rows in (LABEL KEY MEMBERS FACE) buckets: this group, the others by name (ORDER 'recent: most recently used first), ungrouped")
+
+(effects! '(read))
+(public! 'ibuffer-starred-first "(ibuffer-starred-first ROWS) — ROWS with the starred ones first, each part in its order; ROWS itself when none is starred")

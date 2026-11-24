@@ -315,9 +315,10 @@
           (else "✓"))))
 
 (define (chats-alert-name b)
-  (if (equal? (chat-row-status b) 'needs_attention)
-      (string-append "! " (chats-title b))
-      (chats-title b)))
+  (string-append
+    (if (equal? (chat-row-status b) 'needs_attention) "! " "")
+    (if (chat-starred? b) "★ " "")
+    (chats-title b)))
 
 (define (chats-metadata-text b)
   ;; Keep metadata separate from transcript snippets so search results can
@@ -343,6 +344,8 @@
                        (chats-state-face s))))
         'icon (lambda (b) (chats-todo-icon b))
         'name (lambda (b) (list "" (chats-alert-name b)))
+        ;; a starred chat leads its group
+        'starred (lambda (b) (chat-starred? b))
         ;; by name, never by value: a reload redefines the function and a
         ;; kind registered with the old one keeps calling it
         'size (lambda (b) (chats-filesize b))
@@ -573,6 +576,27 @@
           (message "No chat at point")
           (todo--show-chat-task! chat))))
   'modes '(chat-list-mode ibuffer-mode))
+
+(define (chat-starred? buf)
+  (and (buffer-known? buf) (buffer-local-value 'chat-starred buf) #t))
+
+(define (chat-star-set! buf on?)
+  (buffer-set-local! buf 'chat-starred (and on? #t))
+  (chat-log-save! buf)
+  (chat-starred? buf))
+
+(define-command "chat-toggle-star" "Star the chat at point, or the marked ones: a starred chat comes first in its group; again, unstar"
+  (lambda ()
+    (let ((bs (agents-targets)))
+      (if (null? bs)
+          (message "no chat here")
+          (let ((on? (not (chat-starred? (car bs)))))
+            (for-each (lambda (b) (chat-star-set! b on?)) bs)
+            (agents-relist!)
+            (message (string-append (if on? "starred " "unstarred ")
+                                    (number->string (length bs))
+                                    (if (= (length bs) 1) " chat" " chats")))))))
+  'modes '(chat-list-mode chat-mode))
 
 (define-command "chat-set-subject-at-point" "Give the chat at point a subject"
   (lambda ()
@@ -1149,10 +1173,10 @@
       (list
         'doc (string-append
                "The chats, as ibuffer lists buffers: the recent ones at rest, the "
-               "chat you used last at the top. f filters every chat, by title, "
+               "chat you used last at the top. / searches every chat, by title, "
                "state, model, and by a word somebody said in it, and lights the word; is:needs "
-               "keeps the chats in that state. / filters as ibuffer does: / c by what the "
-               "chats say (a regexp), / n by title, / ! negates, / | ors, / p pops and / / clears. < cycles the "
+               "keeps the chats in that state. f filters as ibuffer does: f c by what the "
+               "chats say (a regexp), f n by title, f ! negates, f | ors, f p pops and f / clears. < cycles the "
                "sections (group, subject, none: the most recent first), > the order. t "
                "shows the task the chat works. RET enters the chat; on a saved "
                "conversation at the bottom, RET reads it back. SPC marks, as in "
@@ -1179,11 +1203,11 @@
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh") ("w" "chats-watch")
                 ("t" "chat-goto-todo-at-point")
+                ("*" "chat-toggle-star")
                 ("+" "agent-open")
                 ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")
-                ;; the chat list filters as ibuffer does: f types, / is
-                ;; ibuffer's own filter prefix
-                ("/" (keymap "ibuffer-filter-map"))))))
+                ;; / searches as on every list; f is ibuffer's filter prefix
+                ("/" "list-filter") ("f" (keymap "ibuffer-filter-map"))))))
 
 (define (chat-list-preview!) (ibuffer-preview! (chat-list-buffer)))
 

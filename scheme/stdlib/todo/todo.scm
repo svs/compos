@@ -953,17 +953,20 @@
 (define (todo--view-spec buf)
   (cadr (or (assoc (todo--view buf) *todo-views*) (car *todo-views*))))
 
-;; `/` narrows by words, all of which must hit: p:PROJECT, s:STATE,
+;; `/` narrows by words, all of which must hit: p:PROJECT, g:GROUP, s:STATE,
 ;; @ASSIGNEE, #TAG, !PRIORITY, or any text of the task
 (define (todo--match buf t input)
   (let* ((s (lambda (k) (let ((v (plist-get t k))) (if (string? v) v ""))))
          (has? (lambda (hay w) (or (equal? w "") (completion-match? hay w 'substring))))
          (after (lambda (w n) (substring-bytes w n (string-byte-length w))))
          (tags (string-join (or (plist-get t 'tags) '()) " "))
-         (hay (string-join (list (s 'title) (s 'project) (s 'state) (s 'assignee) tags
+         ;; the group by its name, as the list shows it
+         (group (let ((g (plist-get t 'group))) (if (string? g) (or (group-name g) g) "")))
+         (hay (string-join (list (s 'title) (s 'project) group (s 'state) (s 'assignee) tags
                                  (s 'source) (s 'notes) (s 'id)) " ")))
     (null? (remove (lambda (w)
              (cond ((string-prefix? "p:" w) (has? (s 'project) (after w 2)))
+                   ((string-prefix? "g:" w) (has? group (after w 2)))
                    ((string-prefix? "s:" w) (has? (s 'state) (after w 2)))
                    ((string-prefix? "@" w) (has? (s 'assignee) (after w 1)))
                    ((string-prefix? "#" w) (has? tags (after w 1)))
@@ -1054,10 +1057,20 @@
 
 ;;; `/` picks a group, a project or a status from tabs
 (define (todo--filter buf t f)
-  (let ((k (car f)) (v (car (cdr f))))
-    (cond ((equal? k "group") (equal? (plist-get t 'group) v))
+  (let ((k (car f)) (v (car (cdr f)))
+        (s (lambda (key) (let ((x (plist-get t key))) (if (string? x) x "")))))
+    (cond ((todo--sep? t) #t)
+          ((equal? k "group") (equal? (plist-get t 'group) v))
           ((equal? k "project") (equal? (plist-get t 'project) v))
           ((equal? k "state") (equal? (plist-get t 'state) v))
+          ;; the f prefix filters, as ibuffer's are
+          ((equal? k "assignee") (equal? (plist-get t 'assignee) v))
+          ((equal? k "tag") (and (member v (or (plist-get t 'tags) '())) #t))
+          ((equal? k "priority") (equal? (s 'priority) v))
+          ((equal? k "title") (completion-match? (s 'title) v 'substring))
+          ((equal? k "content") (completion-match? (string-append (s 'title) " " (s 'notes)) v 'substring))
+          ((equal? k "not") (not (list-filter-match? buf t (nth 2 f))))
+          ((equal? k "or") (or (list-filter-match? buf t (nth 2 f)) (list-filter-match? buf t (nth 3 f))))
           (else #t))))
 
 (define *todo-facets*
@@ -2413,10 +2426,10 @@
   (lambda (buf) (list (list "Task" (todo--detail-tab-row buf)))))
 
 ;; / on a task's page filters the list, as it does on the list
-(define-command "todo-detail-filter" "Filter the todo list from a task's page, as / does on the list"
+(define-command "todo-detail-filter" "Search the todo list from a task's page, as / does on the list"
   (lambda ()
     (let ((buf (todo--list-buffer)))
-      (if buf (list-facet-prompt! buf) (message "No todo list open"))))
+      (if buf (with-current-buffer buf (lambda () (list-filter-live!))) (message "No todo list open"))))
   'modes '(todo-detail-mode))
 (define-key (mode-keymap "todo-detail-mode") "/" "todo-detail-filter")
 
@@ -2808,6 +2821,106 @@
         'default "all")))
   'modes '(todo-mode))
 
+;; f is the filter prefix, as / is in Emacs ibuffer: each filter stacks on
+;; the ones before it, f ! negates the newest, f | ors the two newest, \\
+;; pops one and f / drops them all. / stays the text search.
+(define-keymap! "todo-filter-map")
+
+(define (todo--filter-add! buf f)
+  (list-filter-push! buf f)
+  (list-goto-first-entry buf)
+  (message (string-append "Filter: " (list-filters-text buf))))
+
+;; one filter as the list's filter line names it
+(define (todo--filter-text-of buf f)
+  (let ((saved (list-filters buf)))
+    (buffer-set-local! buf 'list-filters (list f))
+    (let ((s (list-filters-text buf)))
+      (buffer-set-local! buf 'list-filters saved)
+      s)))
+
+(define (todo--filter-values buf key)
+  (let loop ((ts (todo-list (todo--view-spec buf))) (out '()))
+    (if (null? ts) (sort out)
+        (let* ((v (plist-get (car ts) key))
+               (vs (if (list? v) v (list v))))
+          (loop (cdr ts)
+                (fold (lambda (acc x) (if (and (string? x) (not (equal? x "")) (not (member x acc))) (cons x acc) acc))
+                      out vs))))))
+
+(define (todo--filter-read! prompt key kind)
+  (let* ((buf (todo--list-buffer))
+         (here (let ((t (todo--at))) (and t (plist-get t key))))
+         (here (if (list? here) (and (pair? here) (car here)) here)))
+    (completing-read prompt (todo--filter-values buf key)
+      (lambda (v) (when (and (string? v) (not (equal? v ""))) (todo--filter-add! buf (list kind v))))
+      'default (if (string? here) here ""))))
+
+(define (todo--filter-text! prompt kind)
+  (let ((buf (todo--list-buffer)))
+    (completing-read prompt '()
+      (lambda (v) (when (and (string? v) (not (equal? v ""))) (todo--filter-add! buf (list kind v)))))))
+
+(define-command "todo-filter-by-group" "Keep the tasks of one group"
+  (lambda ()
+    (let* ((buf (todo--list-buffer))
+           (names (map (lambda (g) (list (or (group-name g) g) g)) (todo--filter-values buf 'group)))
+           (here (let ((t (todo--at))) (and t (plist-get t 'group)))))
+      (completing-read "Filter by group: " (map car names)
+        (lambda (n) (let ((hit (assoc n names)))
+                      (when hit (todo--filter-add! buf (list "group" (cadr hit))))))
+        'default (if (string? here) (or (group-name here) "") ""))))
+  'modes '(todo-mode))
+(define-command "todo-filter-by-project" "Keep the tasks of one project"
+  (lambda () (todo--filter-read! "Filter by project: " 'project "project")) 'modes '(todo-mode))
+(define-command "todo-filter-by-state" "Keep the tasks in one state"
+  (lambda () (todo--filter-read! "Filter by state: " 'state "state")) 'modes '(todo-mode))
+(define-command "todo-filter-by-assignee" "Keep the tasks of one assignee"
+  (lambda () (todo--filter-read! "Filter by assignee: " 'assignee "assignee")) 'modes '(todo-mode))
+(define-command "todo-filter-by-tag" "Keep the tasks with one tag"
+  (lambda () (todo--filter-read! "Filter by tag: " 'tags "tag")) 'modes '(todo-mode))
+(define-command "todo-filter-by-priority" "Keep the tasks of one priority"
+  (lambda () (todo--filter-read! "Filter by priority: " 'priority "priority")) 'modes '(todo-mode))
+(define-command "todo-filter-by-title" "Keep the tasks whose title has the text"
+  (lambda () (todo--filter-text! "Filter by title: " "title")) 'modes '(todo-mode))
+(define-command "todo-filter-by-content" "Keep the tasks whose title or notes have the text"
+  (lambda () (todo--filter-text! "Filter by content: " "content")) 'modes '(todo-mode))
+(define-command "todo-negate-filter" "Turn the newest filter into its opposite"
+  (lambda ()
+    (let* ((buf (todo--list-buffer)) (fs (list-filters buf)))
+      (if (null? fs) (message "no filter")
+          (begin (buffer-set-local! buf 'list-filters (cdr fs))
+                 (todo--filter-add! buf (list "not" (todo--filter-text-of buf (car fs)) (car fs)))))))
+  'modes '(todo-mode))
+(define-command "todo-or-filter" "Join the two newest filters: keep a task either one keeps"
+  (lambda ()
+    (let* ((buf (todo--list-buffer)) (fs (list-filters buf)))
+      (if (< (length fs) 2) (message "or needs two filters")
+          (let ((a (cadr fs)) (b (car fs)))
+            (buffer-set-local! buf 'list-filters (cddr fs))
+            (todo--filter-add! buf (list "or" (string-append (todo--filter-text-of buf a) " | " (todo--filter-text-of buf b)) a b))))))
+  'modes '(todo-mode))
+(define-command "todo-filter-disable" "Drop every filter"
+  (lambda ()
+    (let ((buf (todo--list-buffer)))
+      (list-filter-clear! buf)
+      (list-goto-first-entry buf)
+      (message "Filters off")))
+  'modes '(todo-mode))
+
+(for-each (lambda (p) (define-key "todo-filter-map" (car p) (cadr p)))
+  '(("g" "todo-filter-by-group") ("p" "todo-filter-by-project") ("s" "todo-filter-by-state")
+    ("@" "todo-filter-by-assignee") ("#" "todo-filter-by-tag") ("i" "todo-filter-by-priority")
+    ("n" "todo-filter-by-title") ("c" "todo-filter-by-content")
+    ("!" "todo-negate-filter") ("|" "todo-or-filter") ("t" "list-facets") ("/" "todo-filter-disable")))
+
+(for-each (lambda (p) (command-label! (car p) (cadr p)))
+  '(("todo-filter-by-group" "group") ("todo-filter-by-project" "project") ("todo-filter-by-state" "state")
+    ("todo-filter-by-assignee" "assignee") ("todo-filter-by-tag" "tag") ("todo-filter-by-priority" "priority")
+    ("todo-filter-by-title" "title") ("todo-filter-by-content" "title or notes")
+    ("todo-negate-filter" "negate last") ("todo-or-filter" "or last two")
+    ("list-facets" "tabs") ("todo-filter-disable" "clear all")))
+
 (define-command "todo-refresh" "Re-read the todo files, and look again for new ones"
   (lambda () (todo--refresh-all!) (todo--rescan!))
   'modes '(todo-mode))
@@ -2892,7 +3005,7 @@
     'nest-cell 2
     'footer (lambda (buf)
               '(("←→" "status") ("RET" "open") ("a" "actions") ("TAB" "fold") ("t" "accept") ("s" "start") ("i" "inbox") ("d" "done") ("x" "cancel") ("W" "wait")
-                ("M-o" "agent") ("c" "capture") ("+" "sub-task") ("/" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("w" "watch") ("q" "quit")))
+                ("M-o" "agent") ("c" "capture") ("+" "sub-task") ("/" "search") ("f" "filter") ("<" "group") (">" "sort") ("g" "refresh") ("w" "watch") ("q" "quit")))
     'noun "task"
     ;; the stacked layout has no columns until it draws, so the table's own
     ;; arrow remap misses it at open; the mode states it
@@ -2916,11 +3029,13 @@
             ("<right>" "todo-next-view")
             ("<left>" "todo-prev-view")
             ("F" "todo-filter-project")
+            ;; f filters as / does in Emacs ibuffer; / is the text search
+            ("f" (keymap "todo-filter-map"))
             (">" "todo-next-sort")
             ("g" "todo-refresh")
             ("k" "todo-dismiss")
             ("q" "quit-window"))
-    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `s` also opens its chat. `M-o` goes to its chat, or hands it to a new chat in a group, `N` adds a note. `a` opens the task's action menu: every move, and the deadline, project, priority and urgent mark, which the task's page also has as `D`, `P`, `!` and `T`. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `N` and the action menu act on the marked tasks after asking. imenu picks a status tab. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` filters with tabs, Group, Project and Status (the views, then every single state), each led by All, and the status tabs count what the filter and the typed text leave; on a task's page `/` filters the list too; left and right change the tab. Words that match no choice filter the text: p:project, s:state, @assignee, #tag, !priority, or any text; `\\` drops the filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
+    'doc "The shared todo list from todo-directories, most urgent first: review, then doing, todo, inbox and waiting. `t` accepts a task (triage it, approve it from review, or reopen a done or cancelled one), `i` sends it back to the inbox, `d` closes it, `x` cancels, `W` parks it, `s` starts it. `s` also opens its chat. `M-o` goes to its chat, or hands it to a new chat in a group, `N` adds a note. `a` opens the task's action menu: every move, and the deadline, project, priority and urgent mark, which the task's page also has as `D`, `P`, `!` and `T`. With tasks marked (`SPC`, or `*` for every task the filter shows), `t`, `i`, `d`, `x`, `W`, `s`, `M-o`, `N` and the action menu act on the marked tasks after asking. imenu picks a status tab. `c` files a new task, `+` a sub-task under the task at point. The status tabs, each with its count, head the list: open, inbox, waiting, closed, all; left and right (or `v`) step them, and a click takes one. `>` cycles the order: status, urgency (urgent first), deadline, created (newest first). `<` cycles the sections: none, group, project, status. It opens on the tasks of the group you are in. `/` searches the title, notes, project, state, assignee, tags and id; words narrow further: p:project, g:group, s:state, @assignee, #tag, !priority; on a task's page `/` searches the list too. `f` filters as Emacs ibuffer's `/` does, and the filters stack: `f g` group, `f p` project, `f s` state, `f @` assignee, `f #` tag, `f i` priority, `f n` title, `f c` title or notes, `f !` negates the newest filter, `f |` ors the two newest, `f /` drops them all; `f t` picks Group, Project or Status from tabs. The status tabs count what the filters and the typed text leave. `\\` drops the newest filter. A sub-task sits under its task, indented; `TAB` folds the sub-tasks under a task, and `S-TAB` folds them all or opens them all. `RET` shows the task as its own page; `k` dismisses a task: its page and its chats close, the state stays; `e` opens the task's file."))
 
 ;; the list is an index and a task's page its detail: RET opens it beside
 ;; the list, and the detail steps to the next and previous task in place

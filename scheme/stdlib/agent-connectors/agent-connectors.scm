@@ -46,6 +46,9 @@ nonstandard install out of the built-in connector catalog."
     install (("claude" "curl -fsSL https://claude.ai/install.sh | bash")
              ("claude-agent-acp" "npm install -g --no-audit --no-fund --prefer-offline @agentclientprotocol/claude-agent-acp"))
     signin "claude"
+    ;; the compos tools load up front: deferred behind ToolSearch, apropos
+    ;; and eval-scheme each cost a round before the first call
+    default-env (("ENABLE_TOOL_SEARCH" "false"))
     ;; The editor names every tool through MCP and writes the whole
     ;; system prompt, so the adapter's own tools have no place in an
     ;; editor thread: everything goes through Scheme. settingSources and
@@ -589,8 +592,19 @@ You are the assistant inside the compos editor. The editor's instructions arrive
                   conf))
         conf)))
 
+(define (agent-config-default-env conf)
+  ;; a connector's default-env fills only the keys nobody else set
+  (let ((defaults (plist-get conf 'default-env)))
+    (if (pair? defaults)
+        (let ((env (or (plist-get conf 'env) '())))
+          (append (list 'env (append env (filter (lambda (p) (not (assoc (car p) env)))
+                                                 defaults)))
+                  conf))
+        conf)))
+
 (define (agent-resolve-config* opts)
   (agent-config-env-resolve
+   (agent-config-default-env
    (agent-config-buffer-env
    (let* ((cname (or (plist-get opts 'connector) *default-connector*))
           ;; A thread works where its buffer works. The ACP and Codex lanes are
@@ -620,7 +634,7 @@ You are the assistant inside the compos editor. The editor's instructions arrive
                       conf)))
            ((plist-get conf 'env) conf)           ; explicit env wins
            (else (append (list 'model m) conf (agent-model-env m)))))
-   opts)))
+   opts))))
 
 (define (connector-names)
   (let loop ((cs *agent-connectors*) (acc '()))

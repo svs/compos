@@ -997,8 +997,27 @@
          (reverse (map cadr (sort (map (lambda (t) (list (todo--last-active t) t)) ts)))))
         (else ts)))
 
+(define (todo--with-parents ts)
+  ;; a tab shows the parent of every task it shows, whatever the parent's own
+  ;; state, so a client's inbox tasks sit under the client in the inbox tab
+  ;; too. Each missing ancestor lands just before its first descendant.
+  (let* ((all (todo--all))
+         (by-id (lambda (id) (find (lambda (t) (equal? (plist-get t 'id) id)) all)))
+         (seen (map (lambda (t) (plist-get t 'id)) ts))
+         (out '()))
+    (define (chain t acc)
+      (let* ((pid (plist-get t 'parent))
+             (p (and pid (not (member pid seen)) (not (member pid (map car acc))) (by-id pid))))
+        (if p (chain p (cons (list pid p) acc)) acc)))
+    (for-each (lambda (t)
+                (for-each (lambda (pr) (set! seen (cons (car pr) seen)) (set! out (cons (cadr pr) out)))
+                          (chain t '()))
+                (set! out (cons t out)))
+              ts)
+    (reverse out)))
+
 (define (todo--rows buf)
-  (list-keep buf (todo--sections buf (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf)))))
+  (list-keep buf (todo--sections buf (todo--with-parents (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf))))))
 
 ;;; `<` cycles what a section is; a section heading is a row of kind sep
 (define *todo-groupings* '("none" "group" "project" "status"))

@@ -36,11 +36,13 @@ defmodule Compos.Core.Session do
   # still stale; past this the reply is dropped and reported once
   @stale_frame_retries 10
 
-  # sweep when the frame count doubles since the last sweep (with a floor so
-  # small sessions never bother); checked on a timer — evals no longer pass
-  # through this process, so it cannot count them
-  @gc_floor 5_000
+  # the frame GC is checked on a timer (evals do not pass through this
+  # process, so it cannot count them). A tick sweeps once @gc_idle_slack
+  # frames are garbage. The sweep runs only when no eval is in flight
+  # (Env.begin_gc), so an idle editor gives its dead frames back within a
+  # tick and a busy one skips the tick.
   @gc_interval 30_000
+  @gc_idle_slack 500
 
   # the interpreter handle: constant after init (the store is a shared ETS
   # table), so lane workers read it from persistent_term instead of asking
@@ -896,7 +898,7 @@ defmodule Compos.Core.Session do
     count = Scheme.frame_count(interp)
 
     state =
-      if count > max(state.last_live * 2, @gc_floor) do
+      if count > state.last_live + @gc_idle_slack do
         Scheme.gc(interp, external_roots())
         after_count = Scheme.frame_count(interp)
         # a busy store skips the sweep: keep the baseline so we retry

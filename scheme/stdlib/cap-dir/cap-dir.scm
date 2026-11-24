@@ -15,6 +15,12 @@
 (domain! 'files)
 (effects! '(pure))
 
+(defgroup 'cap-dir "Browse Cap recordings as an app.")
+
+(defcustom 'cap-dir-open-as-app #t
+  "Open cap-watch-directory from Dired as the Cap recordings app, instead of listing it."
+  'group 'cap-dir 'type 'boolean)
+
 (define *cap-dir-buffer* "*Cap Recordings*")
 
 (define (cap-dir--buffer-name dir)
@@ -71,7 +77,7 @@
     'meta (lambda (buf) (string-append (number->string (length (list-source-entries buf))) " recordings"))
     'preview (lambda (buf row) (cap-dir--show! buf row))
     'footer (lambda (buf) '(("RET" "open") ("/" "filter") ("g" "refresh") ("q" "quit")))
-    'keys (list (list "RET" "cap-dir-open") (list "q" "quit-window"))))
+    'keys (list (list "RET" "cap-dir-open") (list "d" "cap-dir-dired") (list "q" "quit-window"))))
 
 (define-command "cap-dir-open" "Open the recording on this row"
   (lambda ()
@@ -79,10 +85,38 @@
       (if row (cap-dir--show! *cap-dir-buffer* row) (message "No recording selected"))))
   'modes '(cap-dir-mode))
 
+(define (cap-dir--open-app!)
+  (let ((buf (cap-dir--listing!)))
+    (app-open! buf)
+    (let ((row (list-current buf))) (when row (cap-dir--show! buf row)))
+    buf))
+
 (define-command "cap-dir" "Open the Cap recordings app"
+  (lambda () (cap-dir--open-app!)))
+
+(define-command "cap-dir-pages-toggle" "Turn on or off opening the Cap folder from Dired as the app, and keep the choice"
   (lambda ()
-    (let ((buf (cap-dir--listing!)))
-      (app-open! buf)
-      (let ((row (list-current buf))) (when row (cap-dir--show! buf row))))))
+    (customize-save! 'cap-dir-open-as-app (not cap-dir-open-as-app))
+    (message (if cap-dir-open-as-app "The Cap folder opens as the app" "The Cap folder opens in Dired"))))
+
+;; the Cap folder opened from Dired opens as the app. cap-dir-dired, and a
+;; Dired already on the folder, still list its files.
+(define cap-dir--listing #f)
+
+(define (cap-dir--dired dir)
+  (set! cap-dir--listing dir)
+  (let ((b (dired-open dir))) (set! cap-dir--listing #f) b))
+
+(define-command "cap-dir-dired" "List the Cap folder's files in Dired, instead of the app"
+  (lambda () (cap-dir--dired (expand-file-name cap-watch-directory)))
+  'modes '(cap-dir-mode))
+
+(advice-add! 'dired-open-directory 'around 'cap-dir
+  (lambda (next dir)
+    (if (and cap-dir-open-as-app
+             (equal? (cap--strip (expand-file-name dir)) (expand-file-name cap-watch-directory))
+             (not (equal? cap-dir--listing dir)))
+        (cap-dir--open-app!)
+        (next dir))))
 
 (provide 'cap-dir)

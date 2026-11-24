@@ -1,7 +1,7 @@
 defmodule Compos.MixProject do
   use Mix.Project
 
-  @version "0.9.18"
+  @version "0.9.19"
   # one stamp per mix run: two builds of one commit (a jj working copy
   # keeps git HEAD still) still unpack into their own directories
   @build_stamp System.os_time(:second)

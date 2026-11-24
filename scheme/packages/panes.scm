@@ -1272,6 +1272,7 @@
 (public! 'panes-fill-panes "(panes-fill-panes LAYOUT CANDIDATES MODE-OF) -> LAYOUT: each pane with no window takes the next buffer of CANDIDATES that no pane shows; a pane with none stays blank; pure")
 (catalog-meta! 'function "panes-fill-panes" 'effects '(pure))
 (public! 'panes-blank-layout "(panes-blank-layout) -> LAYOUT: one pane that shows no window; pure")
+(public! 'panes-layout? "(panes-layout? X) -> BOOL: #t when X is a well-formed layout, a layout in the old shape too; pure")
 (catalog-meta! 'function "panes-blank-layout" 'effects '(pure))
 (public! 'panes-remove-buffer "(panes-remove-buffer LAYOUT BUF) -> LAYOUT: BUF leaves its window; the next buffer shows, an emptied window closes and the next window of its pane shows; pure")
 (catalog-meta! 'function "panes-remove-buffer" 'effects '(pure))

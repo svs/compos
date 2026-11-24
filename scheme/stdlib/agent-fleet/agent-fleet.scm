@@ -1182,7 +1182,7 @@
                "conversation at the bottom, RET reads it back. SPC marks, as in "
                "ibuffer. s steers the chat at point or the marked ones, y and d "
                "answer a permission, r gives a title, k kills, a archives, D deletes, "
-               "+ starts a chat, S stars the chat (a starred chat comes first in its group), w watches: one list, the busiest first, kept up as chats change, . shows the hidden chats too, the ones an agent "
+               "+ starts a chat, P stars the chat (a starred chat comes first in its group), w watches: one list, the busiest first, kept up as chats change, . shows the hidden chats too, the ones an agent "
                "started for itself, and puts them away again, A shows the 100 newest archived chats alone and the live ones again, g reads the "
                "chats again, and q gives the frame back.")
         'category 'chat
@@ -1203,7 +1203,7 @@
                 ("a" "chats-archive") ("D" "chat-delete") ("r" "chat-retitle-at-point")
                 ("g" "agents-refresh") ("w" "chats-watch")
                 ("t" "chat-goto-todo-at-point")
-                ("S" "chat-toggle-star")
+                ("P" "chat-toggle-star")
                 ("+" "agent-open")
                 ("." "ibuffer-toggle-hidden") ("A" "chats-show-archived")
                 ;; / searches as on every list; f is ibuffer's filter prefix

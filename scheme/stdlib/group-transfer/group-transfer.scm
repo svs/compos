@@ -155,6 +155,8 @@
         (cond ((equal? name "group.scm") (write-file! dst (read-file src)))
               ;; the tasks come in through todo-adopt-file!, under the new group's id
               ((equal? name "todos.md") #f)
+              ;; links to the sender's skill folders: the import builds its own
+              ((equal? name "skills-view") #f)
               ((file-exists? dst) #f)
               (else (copy-file! src dst)))))
     (directory-files from)))
@@ -169,6 +171,8 @@
              (src (string-append from "/" name))
              (dst (string-append to "/" name)))
         (cond ((equal? name "todos.md") #f)
+              ;; links to the sender's skill folders: the import builds its own
+              ((equal? name "skills-view") #f)
               ((file-directory? src) (group-transfer--sync-dir! src dst))
               ;; a link to a folder (skills-view) stays as this side made it
               ((file-directory? dst) #f)
@@ -204,7 +208,16 @@
             (if old
                 (group-transfer--sync-dir! (string-append dir "/home") (group-home-dir id))
                 (group-transfer--copy-home! (string-append dir "/home") (group-home-dir id)))
+            ;; group.scm names the sender's paths (cwd, skills-dir): they
+            ;; take this machine's home, as the buffers do
+            (let ((conf (string-append (group-home-dir id) "/group.scm"))
+                  (from (plist-get plist 'home)))
+              (when (and (string? from) (file-exists? conf))
+                (let ((text (read-file conf)))
+                  (unless (equal? from (group-transfer--home))
+                    (write-file! conf (string-replace text from (group-transfer--home)))))))
             (group-config-load! id)
+            (ignore-errors (lambda () (skills-group-forget! id) (skills-view-render! id)))
             (let ((todos (string-append dir "/home/todos.md")))
               ;; a group filled again already holds its tasks
               (when (and (not old) (file-exists? todos))

@@ -60,14 +60,79 @@
 
 ;;; ------------------------------------------------------------- listing
 
-(define (demo-app--rows buf) (demo-app-plants))
+;; Sorting and grouping. The list owns the sort: each sortable column
+;; says 'sort NAME, the heading of the sorted one carries an arrow, > steps
+;; the sort and >> turns the order round. The rows read the choice with
+;; list-sort-by and list-sort-desc?. Grouping (<) is the mode's: it keeps
+;; the choice in a buffer local, and a section is a row of its own.
+(define demo-app-groupings '("none" "state" "room"))
+
+(define (demo-app--group-by buf) (or (buffer-local-value 'demo-app-group buf) "none"))
+(define (demo-app--sep? p) (equal? (plist-get p 'kind) "sep"))
+
+(define (demo-app--section buf p)
+  (let ((g (demo-app--group-by buf)))
+    (cond ((equal? g "room") (plist-get p 'room))
+          ((equal? g "state") (let ((d (demo-app--due p))) (cond ((< d 0) "1 thirsty") ((= d 0) "2 due today") (else "3 fine"))))
+          (else ""))))
+
+(define (demo-app--sort-key buf p)
+  (let ((s (list-sort-by buf)))
+    (cond ((equal? s "name") (plist-get p 'name))
+          ((equal? s "room") (plist-get p 'room))
+          (else (demo-app--due p)))))
+
+(define (demo-app--uniq xs)
+  (let loop ((xs xs) (out '()))
+    (cond ((null? xs) (reverse out))
+          ((member (car xs) out) (loop (cdr xs) out))
+          (else (loop (cdr xs) (cons (car xs) out))))))
+
+(define (demo-app--rows buf)
+  "the plants in the chosen order, under a section row each when grouped"
+  (let* ((by (lambda (p) (demo-app--section buf p)))
+         (secs (sort (demo-app--uniq (map by (demo-app-plants)))))
+         (grouped? (not (equal? (demo-app--group-by buf) "none"))))
+    (apply append
+      (map (lambda (sec)
+             (let* ((in (filter (lambda (p) (equal? (by p) sec)) (demo-app-plants)))
+                    (up (map caddr (sort (map (lambda (p) (list (demo-app--sort-key buf p) (plist-get p 'name) p)) in))))
+                    (rows (if (list-sort-desc? buf) (reverse up) up))
+                    (label (if (equal? (demo-app--group-by buf) "state") (substring sec 2 (string-length sec)) sec)))
+               (if grouped?
+                   (cons (list 'kind "sep" 'id (string-append "sep:" sec) 'name label) rows)
+                   rows)))
+           secs))))
+
+(effects! '(write))
+(define (demo-app--cycle! buf local options what)
+  (let* ((now (or (buffer-local-value local buf) (car options)))
+         (tail (member now options))
+         (next (if (and tail (pair? (cdr tail))) (cadr tail) (car options))))
+    (buffer-set-local! buf local next)
+    (list-refresh! buf)
+    (message (string-append "Plants " what " " next))))
+
+(define (demo-app--regroup! buf) (demo-app--cycle! buf 'demo-app-group demo-app-groupings "grouped by"))
+(effects! '(read))
 
 (define (demo-app--cells buf p)
+  (if (demo-app--sep? p)
+      (list "" (list (plist-get p 'name) "list-section-name") "" "")
   (let ((st (demo-app--state p)))
     (list (if (plist-get p 'starred) "*" "")
           (plist-get p 'name)
-          (list (car st) (string-append "c-" (cadr st)))
-          (list (plist-get p 'room) "c-dim"))))
+          (car st)
+          (plist-get p 'room)))))
+
+;; The table draws as todo's does: a grid in the sans face, one style per
+;; column. The plant name is the title and takes the spare width, the
+;; water state is a pill whose tone follows the state, the room is dim.
+(define (demo-app--columns buf)
+  (list (list "" 2 'style 'dim)
+        (list "PLANT" #f 'style 'title 'sort "name")
+        (list "WATER" 11 'style (lambda (buf p) (if (demo-app--sep? p) #f (list 'badge (cadr (demo-app--state p))))) 'sort "water")
+        (list "ROOM" 14 'style 'dim 'sort "room")))
 
 (define (demo-app--listing)
   "the listing of the current group: one copy per group"
@@ -76,11 +141,13 @@
 ;; imenu is chosen: the rows by the name a reader knows, kind plant,
 ;; the doc one line to choose by.
 (define (demo-app--list-imenu buf)
-  (map (lambda (p off)
-         (list (with-current-buffer buf (lambda () (line-number-at-pos off)))
-               "plant" (plist-get p 'name)
-               (string-append (car (demo-app--state p)) " · " (plist-get p 'room))))
-       (demo-app-plants) (list-offsets buf)))
+  (filter (lambda (r) r)
+    (map (lambda (p off)
+           (and (not (demo-app--sep? p))
+                (list (with-current-buffer buf (lambda () (line-number-at-pos off)))
+                      "plant" (plist-get p 'name)
+                      (string-append (car (demo-app--state p)) " · " (plist-get p 'room)))))
+         (demo-app--rows buf) (list-offsets buf))))
 
 (effects! '(write display))
 (define-list-mode! *demo-app-mode*
@@ -88,24 +155,32 @@
     'doc (string-append
            "House plants, the model app. Moving the point shows the plant's page beside the list. "
            "t waters the plant, s stars it, z snoozes it a day, g redraws. "
+           "> sorts by the next column (its heading carries the arrow), >> turns the order round, < groups by none, state or room. "
            "/ narrows the rows, w watches, q quits. The same keys work on the page.")
     'buffer "*demo-app*"
     'transient #f
-    'plain #t
+    ;; the whole row lights up, as on the todo list
+    'selection-face "select"
+    'selection-trim 1
     'rows demo-app--rows
     'key (lambda (buf p) (plist-get p 'id))
     'markable? (lambda (buf p) #f)
-    'columns (lambda (buf) (list (list "" 2) (list "plant" 18) (list "water" 11) (list "room" #f)))
+    'columns demo-app--columns
     'cells demo-app--cells
     'layouts (list (list 'name 'narrow 'max-cols (lambda (buf) 40)
-                         'columns (lambda (buf) (list (list "plant" #f) (list "water" 11)))
+                         'columns (lambda (buf) (let ((c (demo-app--columns buf))) (list (cadr c) (caddr c))))
                          'cells (lambda (buf p) (let ((c (demo-app--cells buf p))) (list (cadr c) (caddr c)))))
                    (list 'name 'wide 'default #t))
+    'regroup demo-app--regroup!
+    'section? (lambda (buf p) (demo-app--sep? p))
+    'separator? (lambda (buf p) (demo-app--sep? p))
     'preview (lambda (buf p) (demo-app-show-detail! p))
-    'title (lambda (buf) "House plants")
+    'title (lambda (buf) (string-append "House plants   by " (list-sort-by buf)
+                                        (if (equal? (demo-app--group-by buf) "none") ""
+                                            (string-append " · in " (demo-app--group-by buf)))))
     'noun "plant"
     ;; the listing draws its keymap
-    'footer (lambda (buf) (demo-app--keys-card '(("/" "filter") ("w" "watch") ("q" "quit"))))
+    'footer (lambda (buf) (demo-app--keys-card '((">" "sort") (">>" "reverse") ("<" "group") ("/" "filter") ("w" "watch") ("q" "quit"))))
     'keys (append (map (lambda (v) (list (car v) (cadr v))) demo-app-verbs)
                   '(("q" "quit-window")))))
 
@@ -175,7 +250,7 @@
 (effects! '(write display))
 (define (demo-app-show-detail! p)
   "(demo-app-show-detail! PLANT) -- draw PLANT's page and show it beside the listing"
-  (when p
+  (when (and p (not (demo-app--sep? p)))
     (let ((buf (demo-app-detail-buffer p)))
       (unless (buffer-known? buf)
         (buffer-create buf)

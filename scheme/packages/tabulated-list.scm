@@ -582,6 +582,49 @@
 (define (list-sort-step! buf sorts step &optional default)
   (list-sort-set! buf (list-cycle (list-sort buf default) sorts step)))
 
+;; Sorting the list owns. A column that says 'sort NAME is a sort; a mode
+;; may name its sorts itself with 'sorts. The mode's rows read the choice
+;; with (list-sort-by BUF) and (list-sort-desc? BUF) and answer the rows in
+;; that order. The heading of the sorted column carries an arrow, up for
+;; ascending and down for descending. > steps to the next sort, ascending;
+;; >> (a second > at once) turns the order round instead.
+(defcustom 'list-sort-double-ms 400
+  "A second > within this many milliseconds turns the sort order round instead of stepping the sort."
+  'type 'integer 'group 'tabulated-list)
+
+(define (list-col-sort c) (let ((t (memq 'sort c))) (and t (pair? (cdr t)) (cadr t))))
+
+(define (list-sorts buf)
+  (or (list-opt buf 'sorts)
+      (let ((d (list-declared-columns buf)))
+        (filter (lambda (x) x) (map list-col-sort (if (pair? d) (car d) '()))))))
+
+(define (list-sort-by buf)
+  (let ((s (list-sorts buf)))
+    (list-sort buf (and (pair? s) (car s)))))
+
+(define (list-sort-desc? buf) (eq? (buffer-local-value 'list-sort-desc buf) #t))
+
+(define (list-sort-mark buf c)
+  (let ((s (list-col-sort c)))
+    (if (and s (equal? s (list-sort-by buf))) (if (list-sort-desc? buf) " ▼" " ▲") "")))
+
+(define (list-sort-press! buf)
+  (let* ((now (monotonic-ms))
+         (at (buffer-local-value 'list-sort-at buf))
+         (double (and (number? at) (< (- now at) list-sort-double-ms))))
+    (if double
+        (begin (list-sort-set! buf (or (buffer-local-value 'list-sort-prev buf) (list-sort-by buf)))
+               (buffer-set-local! buf 'list-sort-desc (not (buffer-local-value 'list-sort-prev-desc buf)))
+               (buffer-set-local! buf 'list-sort-at #f))
+        (begin (buffer-set-local! buf 'list-sort-prev (list-sort-by buf))
+               (buffer-set-local! buf 'list-sort-prev-desc (list-sort-desc? buf))
+               (list-sort-step! buf (list-sorts buf) 1 (list-sort-by buf))
+               (buffer-set-local! buf 'list-sort-desc #f)
+               (buffer-set-local! buf 'list-sort-at now)))
+    (let ((resort (list-opt buf 'resort))) (if resort (resort buf) (list-refresh! buf)))
+    (message (string-append "Sorted by " (list-sort-by buf) (if (list-sort-desc? buf) ", descending" ", ascending")))))
+
 ;;; --- `/` narrows --------------------------------------------------------------
 ;;; One filter, for every list. You press `/` and type; the list narrows
 ;;; on every keystroke to the rows that match. The arrows move the rows
@@ -1226,7 +1269,7 @@
                                     (string-byte-length chip) "warn"))))))))
 
 (define (list-label-line buf cols)
-  (let* ((labels (map (lambda (c) (list (string-upcase (car c)) "faint")) cols))
+  (let* ((labels (map (lambda (c) (list (string-append (string-upcase (car c)) (list-sort-mark buf c)) "faint")) cols))
          (laid (list-lay-out labels cols)))
     (list (string-trim-right (string-append "  " (car laid)))
           (list-shift-spans (car (cdr laid)) 2))))
@@ -2173,8 +2216,12 @@
   'modes '(list-mode))
 
 (define-command "list-cycle-sorting"
-  "Cycle through the sorting mechanisms declared by this list"
-  (lambda () (list-cycle-declared! 'resort "this list has no sorting"))
+  "Sort by the next column; pressed twice at once, turn the order round"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (pair? (list-sorts buf))
+          (list-sort-press! buf)
+          (list-cycle-declared! 'resort "this list has no sorting"))))
   'modes '(list-mode))
 
 (define-command "list-filter-pop" "Drop the most recent filter on this list"
@@ -2504,7 +2551,7 @@
           (if (equal? meta "") '() (list (line "lg-head-line f-dim" meta)))
           (list (list 'tag "div" 'class "lg-row lg-head"
                       'attrs (list (list "style" (list-grid-template cols flex)))
-                      'children (map (lambda (c) (list 'tag "span" 'class "lg-cell" 'text (car c))) cols)))))))
+                      'children (map (lambda (c) (list 'tag "span" 'class "lg-cell" 'text (string-append (car c) (list-sort-mark buf c)))) cols)))))))
 
 (define-style! 'list-grid "
 .lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
@@ -3477,6 +3524,13 @@ mode's own buffer when no other group holds it, else a copy BUF<n>"
 (domain! 'unknown)
 (effects! '(unknown))
 
+(effects! '(read))
+(public! 'list-sorts "(list-sorts BUF) - the sorts list BUF offers: its sorts option, or the 'sort NAME of its columns" 'ui)
+(public! 'list-sort-by "(list-sort-by BUF) - the sort list BUF shows now; the first of its sorts until one is chosen" 'ui)
+(public! 'list-sort-desc? "(list-sort-desc? BUF) - #t when list BUF sorts descending" 'ui)
+(effects! '(write))
+(public! 'list-sort-press! "(list-sort-press! BUF) - what > does: the next sort, ascending; a second press at once turns the order round" 'ui)
+(effects! '(unknown))
 (public! 'list-own-composml "(list-own-composml BUF) - the composml renderer list BUF draws its rows with: its composml option, or the grid row renderer for a grid; #f when neither" 'ui)
 (public! 'list-mode-copies "(list-mode-copies BUF) - BUF and the copies other groups keep of it, when BUF is the buffer a list mode names" 'ui)
 

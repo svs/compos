@@ -56,7 +56,7 @@ Four keys are bound on your map AFTER your own, so a mode that declares one sile
 |---|---|---|
 | `/` | `list-filter` | narrows the rows to what you type. `/` is the search key everywhere in this editor, so it is the search key here |
 | `<` | `list-cycle-grouping` | your optional regroup callback |
-| `>` | `list-cycle-sorting` | your optional resort callback |
+| `>` | `list-cycle-sorting` | the next sort, ascending; `>>` (a second `>` at once) turns the order round. A column that says `'sort NAME` is a sort, and its heading carries the arrow. The rows read the choice with `(list-sort-by BUF)` and `(list-sort-desc? BUF)`. Without sort columns, your optional resort callback |
 | `SPC` | your `'mark-command`, else `list-mark` | |
 
 Nine more are inherited from `list-mode-map` and ARE yours to shadow: `f` also filters, `\\` pops the filter, `?` grows the keys card into the whole keymap, `n`/`p` walk, `m` marks, `u`/`U`/`*` unmark and mark-all, `x` executes the marks, `g` reverts. Most apps shadow `g` with their own refetch. That is fine.

@@ -476,7 +476,7 @@
   (let ((root (if dir (jj-root-of-dir dir) (jj-here))))
     (and root (pair? paths)
          (pair? (jj-revs root (string-append change " & remote_bookmarks()..@")))
-         (let ((slug (and (boundp 'jj-run-slug) (jj-run-slug))))
+         (let ((slug (jj-author-slug (or (current-edit-author) ""))))
            (jj-sh root (string-append "jj split -r " change
                                       " -m '" (jj-quote (if slug (string-append text "\n\nAgent: " slug) text)) "' "
                                       (string-join (map (lambda (p) (string-append "'" (jj-quote p) "'")) paths) " ")

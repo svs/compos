@@ -429,7 +429,8 @@
                 (message (string-append "Killed " (number->string (length (car r))) " " mode " buffers"
                                         (if (null? kept) ""
                                             (string-append "; kept " (number->string (length kept)) " with unsaved changes"))))))
-            (lambda () (message "Cancelled")))))))
+            (lambda () (message "Cancelled"))))))
+  'public #t)
 
 (public! 'mode-kill! "(mode-kill! MODE) -- kill every buffer of MODE, live or asleep, but a file with unsaved changes; answers (KILLED KEPT)")
 

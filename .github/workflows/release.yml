@@ -1,5 +1,5 @@
 # Builds the single-file compos executable for each target and attaches it
-# to a GitHub release. Releases are tested and built on marilyn
+# to a GitHub release. Releases are tested and built on vidura
 # (compos-release-watch), so this runs only by hand, for the other targets.
 # Each target builds on its own runner: the Rust and C NIFs compile natively,
 # so Burrito never cross-compiles them. On Linux Burrito ships a musl runtime,

@@ -16,7 +16,7 @@
 ;;; The scene is a view over those events and nothing else, so what it
 ;;; shows is what happened. RET on a row shows the whole trace.
 ;;;
-;;; The model is qwen3 on marilyn: free, fast, and not very good. The demo
+;;; The model is qwen3 on vidura: free, fast, and not very good. The demo
 ;;; is about cost, speed and seeing everything; the answers may be wrong.
 ;;; It files no real todos and sends nothing.
 
@@ -29,9 +29,9 @@
 (define *events-demo-buffer* "*events-demo*")
 
 (define events-demo-models
-  '((host "ssh:marilyn" model "qwen3:0.6b")
-    (host "ssh:marilyn" model "qwen3:1.7b")
-    (host "ssh:marilyn:8089/v1" model "qwen3-4b")))
+  '((host "ssh:vidura" model "qwen3:0.6b")
+    (host "ssh:vidura" model "qwen3:1.7b")
+    (host "ssh:vidura:8089/v1" model "qwen3-4b")))
 
 ;; the scene's switches; they survive a reload
 (define events-demo-model (if (boundp 'events-demo-model) events-demo-model (car events-demo-models)))

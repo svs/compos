@@ -88,8 +88,8 @@
 ;;; --- the host -------------------------------------------------------------------
 ;;; A host is a URL. "localhost", "box.local" and "10.0.0.4:8080" are all
 ;;; names a person types, so the scheme and the default port fill in. A
-;;; name that already carries a port or a path keeps it. "ssh:marilyn"
-;;; and "ssh:marilyn:8089" name a machine we hold a shell on, and the
+;;; name that already carries a port or a path keeps it. "ssh:vidura"
+;;; and "ssh:vidura:8089" name a machine we hold a shell on, and the
 ;;; requests to it run there, against its own loopback.
 
 (define *models-default-port* "11434")
@@ -164,8 +164,8 @@
 (define models-daemon-timeout 600000)
 
 ;; (TARGET PORT PATH) for an ssh host, and #f for a URL. The path is the
-;; part after the port: "ssh:marilyn:8089/v1" is an OpenAI-shaped server
-;; on that machine, and "ssh:marilyn" is its ollama.
+;; part after the port: "ssh:vidura:8089/v1" is an OpenAI-shaped server
+;; on that machine, and "ssh:vidura" is its ollama.
 (define (models--ssh-spec host)
   (let ((h (string-trim (or host ""))))
     (if (string-prefix? "ssh:" h)
@@ -194,7 +194,7 @@
         (string-suffix? "/v1" (nth 2 ssh))
         (string-suffix? "/v1" (models--host-url host)))))
 
-;; the short name the host column carries: "marilyn", "localhost",
+;; the short name the host column carries: "vidura", "localhost",
 ;; "127.0.0.1:8127". A port the person had to give is part of the name,
 ;; because one machine runs more than one model server.
 ;; this machine is "local", the word the host prompt already takes, so

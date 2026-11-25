@@ -106,7 +106,7 @@ A handler should read like pseudocode. It has two kinds of step, and they do not
 
 Use inference only where the decision needs judgement (is this an ask? which open todo is this?). Everything that can be a rule is a rule: lookups, thresholds, routing, keys.
 
-`yes?` and `pick` are typed: they go through `decide` (JEV, Laya, Haiku, per `decide-config!`), or to a local model when the call names one: `'model '(host "ssh:marilyn" model "qwen3:0.6b")`, an Ollama host, or an OpenAI-shaped one whose host ends `/v1`. A small local model is offered no way out in `pick`: if its answer names no option, the answer is none. `extract` is the one free-text step: it answers a list of plists.
+`yes?` and `pick` are typed: they go through `decide` (JEV, Laya, Haiku, per `decide-config!`), or to a local model when the call names one: `'model '(host "ssh:vidura" model "qwen3:0.6b")`, an Ollama host, or an OpenAI-shaped one whose host ends `/v1`. A small local model is offered no way out in `pick`: if its answer names no option, the answer is none. `extract` is the one free-text step: it answers a list of plists.
 
 | Call | Is |
 |---|---|

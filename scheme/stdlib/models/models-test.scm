@@ -209,20 +209,20 @@
 (deftest 'models-an-ssh-host-is-a-shell-not-a-socket
   "ssh:NAME names a machine the requests run on, against its own loopback"
   (lambda ()
-    (check-equal! (models--ssh-spec "ssh:marilyn") (list "marilyn" "11434" "")
+    (check-equal! (models--ssh-spec "ssh:vidura") (list "vidura" "11434" "")
                   "the port fills in")
-    (check-equal! (models--ssh-spec "ssh:marilyn:8089/v1")
-                  (list "marilyn" "8089" "/v1")
+    (check-equal! (models--ssh-spec "ssh:vidura:8089/v1")
+                  (list "vidura" "8089" "/v1")
                   "and the port and path a person gave stay")
     (check-false! (models--ssh-spec "http://box:11434") "a URL is not an ssh host")
-    (check-equal! (models--host-label "ssh:marilyn") "marilyn"
+    (check-equal! (models--host-label "ssh:vidura") "vidura"
                   "the host column names the machine")
     (check-equal! (models--host-label "http://box.local:11434") "box.local"
                   "and the host of a URL, without the port")
-    (check-false! (models--local? "ssh:marilyn") "an ssh host is another machine")
+    (check-false! (models--local? "ssh:vidura") "an ssh host is another machine")
     (check-true! (models--local? "localhost") "and localhost is this one")
     (check-true! (string-contains?
-                   (models--ssh-curl (list "marilyn" "11434" "") "GET" "/api/tags" #f 10)
+                   (models--ssh-curl (list "vidura" "11434" "") "GET" "/api/tags" #f 10)
                    "http://127.0.0.1:11434/api/tags")
                  "the request runs there, against that machine's loopback")))
 
@@ -232,7 +232,7 @@
     (let ((r (models--ssh-reply "{\"models\":[]}\n200")))
       (check-true! (http-ok? r) "200 is an answer")
       (check-equal! (plist-get (http-json r) 'models) '() "and the body is its JSON"))
-    (let ((r (models--ssh-reply "ssh: connect to host marilyn: refused")))
+    (let ((r (models--ssh-reply "ssh: connect to host vidura: refused")))
       (check-false! (http-ok? r) "a shell that says nothing is no answer")
       (check-true! (string-contains? (http-message r) "refused") "and it says why"))
     (let ((r (models--ssh-reply "not found\n404")))
@@ -243,7 +243,7 @@
   (lambda ()
     (t--models-scene
       (lambda ()
-        (set! models-hosts (list "http://localhost:11434" "ssh:marilyn"))
+        (set! models-hosts (list "http://localhost:11434" "ssh:vidura"))
         (set! *models-request*
           (lambda (host method path body seconds k)
             (k (t--models-reply
@@ -255,16 +255,16 @@
                                        'details (list 'parameter_size "1.0B"
                                                       'quantization_level "Q4_K_M")))))))))
         (list-mode-show! "models-mode")
-        (wait-until (lambda () (string-contains? (buffer-text *models-buffer*) "marilyn:1b"))
+        (wait-until (lambda () (string-contains? (buffer-text *models-buffer*) "vidura:1b"))
                     3000)
         (let ((text (buffer-text *models-buffer*)))
           (check-true! (string-contains? text "local:1b") "the model on this machine")
-          (check-true! (string-contains? text "marilyn:1b") "and the one on the ssh host")
+          (check-true! (string-contains? text "vidura:1b") "and the one on the ssh host")
           (check-true! (string-contains? text "2 hosts") "the meta counts the hosts")
           (check-true! (string-contains? text "2 models") "and the models they hold"))
         (let ((rows (list-entries *models-buffer*)))
           (check-equal! (length rows) 2 "one row per model")
-          (check-true! (member "ssh:marilyn" (map models--entry-host rows))
+          (check-true! (member "ssh:vidura" (map models--entry-host rows))
                        "and a row carries the host it came from"))))))
 
 (deftest 'models-an-openai-shaped-server-is-read-and-not-managed
@@ -275,7 +275,7 @@
         (check-true! (models--openai? "http://127.0.0.1:8127/v1")
                      "an address ending /v1 is an OpenAI-shaped server")
         (check-false! (models--openai? "http://localhost:11434") "an ollama host is not")
-        (check-true! (models--openai? "ssh:marilyn:8089/v1") "and one over ssh is")
+        (check-true! (models--openai? "ssh:vidura:8089/v1") "and one over ssh is")
         (check-equal! (models--host-label "http://127.0.0.1:8127/v1") "local:8127"
                       "this machine, and the port that tells two servers apart")
         (check-equal! (models--openai-name "/Users/svs/.compos/models/title") "title"

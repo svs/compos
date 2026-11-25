@@ -19,7 +19,7 @@
 
   // Put TEXT on the system clipboard. navigator.clipboard exists only in
   // a secure context: https, or localhost. A daemon opened by host name
-  // over plain http (http://marilyn:4004) has none, so a hidden textarea
+  // over plain http (http://vidura:4004) has none, so a hidden textarea
   // and execCommand("copy") carry the text there.
   const copyText = (text) => {
     if (!text) return;

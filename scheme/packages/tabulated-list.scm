@@ -2442,31 +2442,42 @@
             (list 'tag "span" 'class class 'segs (list-face-segs text face))
             (list 'tag "span" 'class class 'text text)))))
 
-(define (list-grid-template cols)
-  ;; the visible columns on their widths; the last takes what is left. A
-  ;; width is the most a column takes, not the least: a window narrower than
-  ;; the widths the list was laid out for shrinks the columns, and a long
-  ;; cell ends in an ellipsis, rather than the row running off the window
-  (let ((n (length cols)))
+(define (list-grid-template cols . flex)
+  ;; the visible columns on their widths. FLEX, when given, holds one flag
+  ;; per column: the flagged column, the one declared without a width, takes
+  ;; what is left; without one, the last column does. A width is the most a
+  ;; column takes, not the least: a window narrower than the widths the list
+  ;; was laid out for shrinks the columns, and a long cell ends in an
+  ;; ellipsis, rather than the row running off the window
+  (let* ((n (length cols))
+         (flags (if (pair? flex) (car flex) '()))
+         (fill (let loop ((fs flags) (i 1))
+                 (cond ((null? fs) n) ((car fs) i) (else (loop (cdr fs) (+ i 1)))))))
     (string-append "grid-template-columns:"
       (string-join (let loop ((ks cols) (i 1) (out '()))
                      (if (null? ks) (reverse out)
                          (loop (cdr ks) (+ i 1)
-                               (cons (if (= i n) "minmax(0,1fr)"
+                               (cons (if (= i fill) "minmax(0,1fr)"
                                          (string-append "minmax(0," (number->string (list-col-width (car ks))) "ch)"))
                                      out))))
                    " "))))
 
+(define (list-grid-flex buf)
+  ;; one flag per fitted column: #t for the one declared without a width
+  (let ((declared (let ((d (list-declared-columns buf))) (if (pair? d) (car d) '()))))
+    (map (lambda (c) (not (list-col-width c))) declared)))
+
 (define (list-grid-row buf row)
   (let* ((cols (car (list-column-lines buf)))
          (cells (let ((cs (list-row-cells buf row))) (if (pair? cs) (car cs) '())))
-         (shown (let loop ((ks cols) (cs cells) (out '()))
+         (shown (let loop ((ks cols) (cs cells) (fs (list-grid-flex buf)) (out '()))
                   (if (or (null? ks) (null? cs)) (reverse out)
-                      (loop (cdr ks) (cdr cs)
-                            (if (list-col-hidden? (car ks)) out (cons (cons (car ks) (car cs)) out)))))))
+                      (loop (cdr ks) (cdr cs) (if (pair? fs) (cdr fs) '())
+                            (if (list-col-hidden? (car ks)) out
+                                (cons (list (car ks) (car cs) (and (pair? fs) (car fs))) out)))))))
     (list 'tag "div" 'class "lg-row"
-          'attrs (list (list "style" (list-grid-template (map car shown))))
-          'children (map (lambda (p) (list-grid-cell buf (car p) (cdr p) row)) shown))))
+          'attrs (list (list "style" (list-grid-template (map car shown) (map caddr shown))))
+          'children (map (lambda (p) (list-grid-cell buf (car p) (cadr p) row)) shown))))
 
 ;; The grid's head: the title with the narrowing chip at the right, the
 ;; mode's meta and panel lines, and the column labels on the rows' grid.
@@ -2474,7 +2485,13 @@
 (define (list-grid-head buf head)
   (if (list-opt buf 'header)
       (map (lambda (ln) (list 'tag "div" 'class "lg-head-line" 'text (car ln))) head)
-      (let* ((cols (filter (lambda (c) (not (list-col-hidden? c))) (car (list-column-lines buf))))
+      (let* ((all (car (list-column-lines buf)))
+             (flex (let loop ((ks all) (fs (list-grid-flex buf)) (out '()))
+                     (if (null? ks) (reverse out)
+                         (loop (cdr ks) (if (pair? fs) (cdr fs) '())
+                               (if (list-col-hidden? (car ks)) out
+                                   (cons (and (pair? fs) (car fs)) out))))))
+             (cols (filter (lambda (c) (not (list-col-hidden? c))) all))
              (chip (list-chip buf))
              (meta (car (list-meta-line buf)))
              (line (lambda (cls text) (list 'tag "div" 'class cls 'text text))))
@@ -2486,7 +2503,7 @@
                                             (list (list 'tag "span" 'class "f-warn" 'text chip))))))
           (if (equal? meta "") '() (list (line "lg-head-line f-dim" meta)))
           (list (list 'tag "div" 'class "lg-row lg-head"
-                      'attrs (list (list "style" (list-grid-template cols)))
+                      'attrs (list (list "style" (list-grid-template cols flex)))
                       'children (map (lambda (c) (list 'tag "span" 'class "lg-cell" 'text (car c))) cols)))))))
 
 (define-style! 'list-grid "

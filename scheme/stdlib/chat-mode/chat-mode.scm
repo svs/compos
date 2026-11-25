@@ -2180,6 +2180,16 @@ the chat."
 ;; wipe the conversation, keep the identity: group, backend, model,
 ;; presets and permission mode survive; every chat comes back as the one
 ;; rich surface (a legacy plain chat upgrades on reset). Idempotent.
+(define (chat-reset-next-title name)
+  "The next free NAME<N> after NAME: Foo gives Foo<2>, Foo<2> gives Foo<3>."
+  (let* ((m (re-match "^(.*)<([0-9]+)>$" name))
+         (base (if m (cadr m) name)))
+    (let loop ((n (if m (+ 1 (string->number (caddr m))) 2)))
+      (let ((cand (string-append base "<" (number->string n) ">")))
+        (cond ((>= n 1000) #f)
+              ((buffer-known? cand) (loop (+ n 1)))
+              (else cand))))))
+
 (define-command "chat-reset" "Reset this chat: clear the transcript, start fresh"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -2206,10 +2216,12 @@ the chat."
             (chat-clear-locals! buf chat-conversation-locals)
             (chat-clear-runtime! buf)
             (buffer-delete-range! buf 0 (buffer-size buf))
-            ;; the title named the old conversation: go back to a fresh
-            ;; untitled name so the next prompt titles it again
-            (let ((buf (let ((fresh (and titled? g (group-chat-new-name g))))
-                         (if (and fresh (rename-buffer! buf fresh)) fresh buf))))
+            ;; a titled chat keeps its title with the next free <N>
+            ;; suffix: Foo becomes Foo<2>, Foo<2> becomes Foo<3>
+            (let ((buf (let ((fresh (and titled? (chat-reset-next-title buf))))
+                         (if (and fresh (rename-buffer! buf fresh))
+                             (begin (buffer-set-local! fresh 'chat-title fresh) fresh)
+                             buf))))
               (group-chat-init! buf (or g buf))
               (with-current-buffer buf
                 (lambda () (set-mode! "chat-mode") (end-of-buffer!)))

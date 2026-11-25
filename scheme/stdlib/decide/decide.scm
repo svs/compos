@@ -366,17 +366,32 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
 
 (define (decide--git-pattern? p) (string-contains? p "git[-_ ]+"))
 
+(define (permission-deny-patterns)
+  "the patterns that ask: the text rules everywhere that ask or deny, else *permission-deny-patterns*"
+  (if (boundp (quote permission-rules))
+      (apply append
+        (map (lambda (r) (let ((sel (plist-get r 'selector)))
+                           (if (and (= (length sel) 2) (equal? (car sel) 'text)
+                                    (equal? (plist-get r 'scope) 'everywhere)
+                                    (member (plist-get r 'gives) '(ask deny)))
+                               (list (cadr sel)) '())))
+             (permission-rules)))
+      *permission-deny-patterns*))
+
+(define (permission-pattern-suspended? p)
+  "#t when the pattern P does not apply now: git with decide-allow-git on, or a shell pattern the sandbox holds"
+  (or (and decide-allow-git (decide--git-pattern? p))
+      (and (boundp (quote agent-sandbox-on?))
+           (member p agent-sandbox-covered-patterns)
+           (agent-sandbox-on?)
+           #t)))
+
 (define (permission-denied-verb? text)
   "(permission-denied-verb? TEXT) — the deny pattern TEXT names, or #f; with decide-allow-git on, git never asks"
   (let ((t (string-downcase text)))
-    (let loop ((ps *permission-deny-patterns*))
+    (let loop ((ps (permission-deny-patterns)))
       (cond ((null? ps) #f)
-            ((and decide-allow-git (decide--git-pattern? (car ps))) (loop (cdr ps)))
-            ;; a pattern only a shell command acts on: the sandbox holds it
-            ((and (boundp (quote agent-sandbox-on?))
-                  (member (car ps) agent-sandbox-covered-patterns)
-                  (agent-sandbox-on?))
-             (loop (cdr ps)))
+            ((permission-pattern-suspended? (car ps)) (loop (cdr ps)))
             ((re-match? (car ps) t) (car ps))
             (else (loop (cdr ps)))))))
 
@@ -555,13 +570,20 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
               (set! decide--shell-seen (list-head decide--shell-seen 200))))
           kind))))
 
-(define (decide--shell-rule kind)
-  "the policy row for KIND: a kind the sandbox holds runs, when the agent's chat has it on"
+(define (decide--shell-rule kind &optional ctx)
+  "the policy row (KIND allow|ask|refuse) for KIND: a kind the sandbox holds runs, when the agent's chat has it on; else the rule engine decides, in CTX or the current chat's"
   (cond ((not kind) #f)
         ((and (boundp (quote agent-sandbox-on?))
               (member kind agent-sandbox-covered-kinds)
               (agent-sandbox-on?))
          (list kind 'allow))
+        ((boundp (quote permission-decide))
+         (let ((r (permission-decide (permission-shell-action "" kind)
+                                     (or ctx (permission-context (current-buffer))))))
+           (cond ((not r) (assq kind decide-shell-policy))
+                 ((equal? (plist-get r 'gives) 'deny) (list kind 'refuse))
+                 ((equal? (plist-get r 'gives) 'ask) (list kind 'ask))
+                 (else (list kind 'allow)))))
         (else (assq kind decide-shell-policy))))
 
 (define (decide-shell-verdict code)

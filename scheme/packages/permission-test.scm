@@ -202,7 +202,8 @@
 
 (deftest 'an-always-answer-becomes-a-rule-the-chat-keeps
   "The backend's own allow_always binds the backend. This policy runs
-   first, so the answer has to live here or the next call asks again."
+   first, so the answer has to live here, as a rule of the engine, or the
+   next call asks again."
   (lambda ()
     (let ((buf (t--perm-buf "*zz-always*"))
           (raw "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"gh api repos/a\"}}"))
@@ -218,8 +219,8 @@
       (check-equal! (permit? buf "Run command" "execute" raw) 'ask
                     "the first call asks")
 
-      ;; ...and the answer ends the asking for the whole family
-      (permission-always-allow! buf (permission-signature "Run command" "execute" raw))
+      ;; ...and the answer, a rule at the chat's scope, ends the asking for the whole family
+      (permission-grant-for! buf (permission-request-actions "Run command" "execute" raw) 'chat)
       (check-equal! (permit? buf "Run command" "execute" raw) 'allow-always
                     "the call that was answered runs")
       (check-equal! (permit? buf "Run command" "execute"
@@ -241,12 +242,15 @@
       (check-equal! (permit? buf "Run command" "execute" raw) 'ask
                     "ask mode means ask, rule or no rule")
 
-      ;; and no answer of the user's reaches past the deny-list
+      ;; a deny-listed verb asks even in auto; the user's own answer on the
+      ;; card passes it, in this chat only
       (buffer-set-local! buf 'chat-permission-mode 'auto)
       (let ((bad "{\"kind\":\"execute\",\"rawInput\":{\"command\":\"git push origin\"}}"))
-        (permission-always-allow! buf (permission-signature "Run command" "execute" bad))
         (check-equal! (permit? buf "Run command" "execute" bad) 'ask
-                      "an irreversible verb asks even with a rule"))
+                      "an irreversible verb asks, even in auto")
+        (permission-grant-for! buf (permission-request-actions "Run command" "execute" bad) 'chat)
+        (check-equal! (permit? buf "Run command" "execute" bad) 'allow-always
+                      "the user's answer for this chat passes it"))
       (buffer-kill! buf))))
 
 (deftest 'an-inline-session-answers-a-permission-through-the-one-decision

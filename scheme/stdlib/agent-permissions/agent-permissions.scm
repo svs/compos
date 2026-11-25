@@ -3,6 +3,9 @@
 ;;; This module owns permission verdicts, profiles, backend mode sync, and
 ;;; answers. Agent runtime and transcript functions remain in agent.scm.
 
+;; the rule engine every gate below reads
+(load "permission-rules.scm")
+
 (domain! 'permissions)
 (effects! '(write))
 (category! 'chat)
@@ -225,25 +228,44 @@
 ;; (permit? BUF TITLE KIND RAW) -> allow-always | ask | reject: the one
 ;; permission decision. Every lane asks it: the ACP request, the direct
 ;; lane, the MCP proxy and an M-x command a chat runs.
+(define (permit--engine buf title kind raw)
+  "what the rule engine gives this request: allow-always, ask, reject, or #f when no rule speaks"
+  (let* ((hit (permission-decide-all (permission-request-actions title kind raw) (permission-context buf)))
+         (gives (and hit (car hit))))
+    (cond ((not gives) #f)
+          ((equal? gives 'deny) 'reject)
+          ((equal? gives 'ask) 'ask)
+          ;; ask mode means every call asks: no allow rule waves one through
+          ((equal? (chat-permission-mode buf) 'ask) 'ask)
+          (else (when (equal? gives 'notify) (permission-notify! buf (cadr hit) (caddr hit)))
+                'allow-always))))
+
+(define (permission-notify! buf rule action)
+  "say in chat BUF, and in the echo area, that ACTION ran under the notify RULE"
+  (let ((line (string-append "ran under a notify rule: " (permission--str (plist-get action 'function))
+                             "  (" (permission-describe-rule rule) ")")))
+    (message line)
+    (let ((slug (and buf (buffer-exists? buf) (agent-slug-of buf))))
+      (when slug
+        (let ((start (agent-render! slug (string-append "  " line "\n") "agent-meta")))
+          (agent-block-push! buf start (agent-mark slug) "meta" '()))))))
+
 (define (permit? buf title kind raw)
     (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
            (profile (and buf (buffer-exists? buf)
                          (buffer-local-value 'agent-permission-profile buf))))
-      (cond ((let ((shell (permission-shell-text title kind raw)))
-               (and shell (permission-denied-verb? shell)))
-             'ask)
-            ((profile-denies? profile text) 'reject)
+      (cond ((profile-denies? profile text) 'reject)
             ;; a turn an outsider's words started may not send unasked,
             ;; whatever the stance and whatever "always" said before
             ((and (permission-outside-text? buf)
                   (permission-may-send? title kind raw))
              'ask)
-            ;; the user already answered "always" for this verb in this
-            ;; chat. It sits under the deny-list and the profile, which
-            ;; no answer of the user's can wave through, and over
-            ;; everything else — including the file gate, because a gate
-            ;; set to ask that asks again after "always" is the bug.
-            ((permission-always-allowed? buf title kind raw) 'allow-always)
+            ;; the rule engine (permission-rules.scm): the deny patterns,
+            ;; the user's Always answers at every scope, and every rule the
+            ;; user wrote in M-x permissions. It sits under the profile and
+            ;; the outsider gate and over the file gate, because a gate set
+            ;; to ask that asks again after Always is the bug.
+            ((permit--engine buf title kind raw))
             ((filesystem-tool-verdict title kind))  ; files go through buffers
             ;; a shell command is exactly the irreversible act the approve
             ;; stance promises to surface: the popup decides, not a silent
@@ -506,37 +528,86 @@
                                        "allow_once" "allow"))
   'modes '(chat-mode))
 
-(define-command "agent-permission-always" "Allow and stop asking for this tool"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (slug (agent-slug-of buf))
-           (info (and slug (agent-info slug)))
-           (pending (and info (plist-get info 'permission)))
-           (asked (buffer-local-value 'permission-asked buf)))
-      ;; the answer becomes this chat's rule, so the next call of the same
-      ;; verb never reaches the user. agent.scm recorded what was asked,
-      ;; because the backend's pending record keeps no arguments.
-      (when (and pending asked)
-        (let ((sig (permission-signature (car asked) (cadr asked) (nth 2 asked))))
-          (permission-always-allow! buf sig)
-          (message (string-append "always allowing in this chat: " sig))))
-      (agent-answer-permission! slug "allow_always" "allow")))
+;; A card's Always answer becomes a rule of the engine (permission-rules.scm)
+;; at the scope the user picked. The rule takes the selector of the rule
+;; that asked, so the narrower scope wins over it; a call no rule asked for
+;; gets a rule for its own function. An editor card (the MCP proxy) writes
+;; its rule where the call waits, in mcp-proxy--grant!, which has the call's
+;; arguments; a backend's card keeps none, so its rule is written here from
+;; what agent.scm recorded.
+(define (permission-request-actions title kind raw)
+  "the actions of one backend permission request. Only a shell command carries text, so a pattern rule reads shell commands and never a word in a query or a string"
+  (if (equal? kind "execute")
+      ;; the verb names the rule a card writes; the pattern rules read the whole line
+      (let ((cmd (permission-command-text title raw)))
+        (list (plist-put (permission-shell-action cmd #f) 'text
+                         (or (permission-shell-text title kind raw) cmd))))
+      (let ((shell (permission-shell-text title kind raw)))
+        (cons (permission-tool-action title #f)
+              (if shell (list (permission-shell-action shell #f)) '())))))
+
+(define (permission-grant-for! buf actions scope)
+  "write the rule a card's Always answer gives ACTIONS in chat BUF at SCOPE; answers its id or #f. SCOPE (turns N) is a pass: this chat, for N turns, this one included"
+  (when (and (or (equal? scope 'chat) (pair? scope)) (not (buffer-local-value 'chat-id buf)) (boundp (quote chat-stable-id!)))
+    (chat-stable-id! buf))
+  (let* ((ctx (permission-context buf))
+         (pass (and (pair? scope) (plist-get ctx 'chat) (permission-pass-expires (plist-get ctx 'chat) (cadr scope))))
+         (sc (permission-scope-of ctx (if (pair? scope) 'chat scope)))
+         (hit (permission-decide-all actions ctx))
+         ;; no rule asked: a lone call gets a rule for its function; an eval
+         ;; payload's many calls name nothing worth a rule
+         (sel (if (and hit (member (car hit) '(ask deny)))
+                  (plist-get (cadr hit) 'selector)
+                  (and (pair? actions) (null? (cdr actions))
+                       (permission-grant-selector (car actions) 'function))))
+         (id (and sc sel (ignore-errors
+                           (lambda () (permission-rule-add! sel sc 'allow "card"
+                                                            (if pass "a pass given on a card" "answered Always on a card")
+                                                            #f pass))))))
+    (message (cond (id (string-append "rule added: " (permission-describe-rule (permission-rule id))))
+                   ((not sc) "no such scope here: allowed once")
+                   (else "that rule is locked: allowed once; M-x permissions changes it")))
+    id))
+
+(define (permission--answer-always! scope)
+  (let* ((buf (current-buffer))
+         (slug (agent-slug-of buf))
+         (info (and slug (agent-info slug)))
+         (pending (and info (plist-get info 'permission)))
+         (asked (buffer-local-value 'permission-asked buf)))
+    (buffer-set-local! buf 'permission-grant-scope scope)
+    (when (and pending asked (not (buffer-local-value 'permission-asked-editor buf)))
+      (buffer-set-local! buf 'permission-grant-scope #f)
+      (permission-grant-for! buf (permission-request-actions (car asked) (cadr asked) (nth 2 asked)) scope))
+    (agent-answer-permission! slug "allow_always" "allow")))
+
+(define-command "agent-permission-always" "Allow this kind of call in this group from now on"
+  (lambda () (permission--answer-always! 'group))
   'modes '(chat-mode))
 
-;; Always, but only while this chat's task is open. The card's own answer
-;; is allow_always; tools.scm sees the chat's scope and keeps the grant on
-;; the chat with the task's id instead of on the group.
+;; The card's other scopes: the chat's open task (the rule ends with the
+;; task), this chat alone, or every chat.
 (define-command "agent-permission-for-task" "Allow this kind of call until this chat's task is done"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (slug (agent-slug-of buf))
-           (task (and (boundp (quote mcp-proxy--chat-task)) (mcp-proxy--chat-task buf))))
-      (if (not task)
-          (message "this chat works no open task: use Allow or Always")
-          (begin
-            (buffer-set-local! buf 'permission-grant-scope 'task)
-            (message (string-append "allowing until " task " is done"))
-            (agent-answer-permission! slug "allow_always" "allow")))))
+    (if (mcp-proxy--chat-task (current-buffer))
+        (permission--answer-always! 'task)
+        (message "this chat works no open task: use Allow or Always")))
+  'modes '(chat-mode))
+
+(define-command "agent-permission-turn" "Allow this kind of call until this turn ends"
+  (lambda () (permission--answer-always! '(turns 1)))
+  'modes '(chat-mode))
+
+(define-command "agent-permission-3-turns" "Allow this kind of call for this turn and the next two"
+  (lambda () (permission--answer-always! '(turns 3)))
+  'modes '(chat-mode))
+
+(define-command "agent-permission-chat" "Allow this kind of call in this chat from now on"
+  (lambda () (permission--answer-always! 'chat))
+  'modes '(chat-mode))
+
+(define-command "agent-permission-everywhere" "Allow this kind of call in every chat from now on"
+  (lambda () (permission--answer-always! 'everywhere))
   'modes '(chat-mode))
 
 (define-command "agent-permission-deny" "Deny the pending permission request"

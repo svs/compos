@@ -2049,30 +2049,11 @@
 ;; That is the fail-closed rule, applied where it bites.
 ;; author: the proxy sends its thread's slug (COMPOS_AGENT), so edits an
 ;; external agent makes through this bridge land in buffer-authors
-;; What "always" remembers: the VERB the policy tripped on, for every
-;; chat of the asking chat's group. It is kept in the group record, so it
-;; lasts as long as the group. The key is never eval-scheme itself — that
-;; tool's name says nothing about what it runs.
-(define (mcp-proxy--grant-key slug name args-json raw)
-  ;; the pattern itself, so the box can list it and take it back; a
-  ;; shell gate ask keys on its kind, such as "shell edit"
-  (let* ((chat (and slug (agent-info slug) (agent-buf slug)))
-         (group (and chat (buffer-group chat)))
-         (verb (or (permission-denied-verb? raw)
-                   (car (mcp-proxy--action slug name args-json raw)))))
-    (and group (not (equal? verb "eval-scheme")) (list group verb))))
+;; What "always" remembers is a rule of the engine (permission-rules.scm),
+;; written at the scope the card's answer picked: group by default, or the
+;; chat, the chat's task, or everywhere. mcp-proxy--grant! writes it.
 
-(define (mcp-proxy--granted? slug name args-json raw)
-  (let ((key (mcp-proxy--grant-key slug name args-json raw)))
-    (and key
-         (or (member (cadr key) (or (group-setting (car key) 'always-verbs) '()))
-             (mcp-proxy--task-granted? slug (cadr key)))
-         #t)))
-
-;; A grant for one task: agent-permission-for-task answers the card and
-;; sets the chat's 'permission-grant-scope to task. The verb is then kept
-;; on the chat with the id of its open task, and holds only while that
-;; task is open: done or cancelled, the next call asks again.
+;; The open task a chat works: a task rule holds only while it is open.
 (define (mcp-proxy--chat-task chat)
   "the id of the open task CHAT works, or #f"
   (let ((id (buffer-local-value 'chat-id chat)))
@@ -2080,34 +2061,39 @@
          (let ((ts (todo-list (list 'assignee id))))
            (and (pair? ts) (plist-get (car ts) 'id))))))
 
-(define (mcp-proxy--task-open? id)
-  (let ((t (and id (boundp (quote todo-get)) (todo-get id))))
-    (and t (not (member (plist-get t 'state) '("done" "cancelled"))) #t)))
-
-(define (mcp-proxy--task-granted? slug verb)
-  (let ((chat (and slug (agent-info slug) (agent-buf slug))))
-    (and chat
-         (let loop ((gs (or (buffer-local-value 'task-grants chat) '())))
-           (and (pair? gs)
-                (or (and (equal? (car (car gs)) verb) (mcp-proxy--task-open? (cadr (car gs))))
-                    (loop (cdr gs))))))))
-
 (define (mcp-proxy--grant! slug name args-json raw)
-  (let* ((key (mcp-proxy--grant-key slug name args-json raw))
-         (chat (and slug (agent-info slug) (agent-buf slug)))
-         (task (and chat (equal? (buffer-local-value 'permission-grant-scope chat) 'task)
-                    (mcp-proxy--chat-task chat))))
-    (when chat (buffer-set-local! chat 'permission-grant-scope #f))
-    (cond
-      ((not key) #f)
-      (task
-       (let ((gs (or (buffer-local-value 'task-grants chat) '())))
-         (unless (member (list (cadr key) task) gs)
-           (buffer-set-local! chat 'task-grants (cons (list (cadr key) task) gs)))))
-      (else
-       (let ((verbs (or (group-setting (car key) 'always-verbs) '())))
-         (unless (member (cadr key) verbs)
-           (group-setting-set! (car key) 'always-verbs (cons (cadr key) verbs))))))))
+  (let* ((chat (and slug (agent-info slug) (agent-buf slug)))
+         (scope (or (and chat (buffer-local-value 'permission-grant-scope chat)) 'group)))
+    (when chat
+      (buffer-set-local! chat 'permission-grant-scope #f)
+      (permission-grant-for! chat (mcp-proxy--actions slug name args-json raw) scope))))
+
+(define (mcp-proxy--actions slug name args-json raw)
+  "the actions the rule engine judges for one proxied call: each Scheme call and shell command of an eval-scheme payload, else the tool itself; none for a read-only eval"
+  (let* ((code (and (equal? name "eval-scheme") (mcp-proxy--code args-json)))
+         (forms (and code (ignore-errors (lambda () (scheme-read code))))))
+    (cond ((equal? name "eval-scheme-read") '())
+          ((pair? forms)
+           (let* ((cmds (mcp-proxy--shell-commands forms))
+                  (kind (and (pair? cmds) (decide--shell-kind-seen code)))
+                  (names (let dedupe ((ns (mcp-proxy--calls forms)) (out '()))
+                           (cond ((null? ns) (reverse out))
+                                 ((member (car ns) out) (dedupe (cdr ns) out))
+                                 (else (dedupe (cdr ns) (cons (car ns) out)))))))
+             ;; only a shell command carries text: a pattern rule reads shell commands
+             (append (map (lambda (n) (permission-call-action n #f)) names)
+                     (map (lambda (c) (permission-shell-action c kind)) cmds))))
+          (else (list (permission-tool-action name #f))))))
+
+(define (mcp-proxy--engine-verdict slug name args-json raw)
+  "deny, ask or allow-always from the rule engine, or #f when no rule speaks; a notify rule allows and tells the chat"
+  (let* ((buf (and slug (agent-info slug) (agent-buf slug)))
+         (hit (permission-decide-all (mcp-proxy--actions slug name args-json raw) (permission-context buf))))
+    (and hit
+         (cond ((equal? (car hit) 'deny) 'deny)
+               ((equal? (car hit) 'ask) 'ask)
+               (else (when (equal? (car hit) 'notify) (permission-notify! buf (cadr hit) (caddr hit)))
+                     'allow-always)))))
 
 (define (mcp-proxy--refused raw verdict)
   (base64-encode
@@ -2319,7 +2305,7 @@
        (let ((code (mcp-proxy--code args-json)))
          (and code (decide-shell-calls? code) (decide--shell-kind-seen code)))))
 
-(define (mcp-proxy--shell-refusal name args-json)
+(define (mcp-proxy--shell-refusal name args-json &optional slug)
   (and (equal? name "eval-scheme")
        (boundp (quote decide-shell-verdict))
        decide-shell-gate
@@ -2327,7 +2313,8 @@
          (and code
               (decide-shell-calls? code)
               (let* ((kind (decide--shell-kind-seen code))
-                     (rule (and kind (assq kind decide-shell-policy))))
+                     (chat (and slug (agent-info slug) (agent-buf slug)))
+                     (rule (and kind (decide--shell-rule kind (permission-context chat)))))
                 (and rule (equal? (cadr rule) 'refuse)
                      (decide-refusal kind)))))))
 
@@ -2343,7 +2330,7 @@
          (answer (and (equal? name "eval-scheme")
                       (boundp (quote decide-shell-read-answer))
                       (decide-shell-read-answer (mcp-proxy--code args-json))))
-         (refusal (and (not answer) (mcp-proxy--shell-refusal name args-json)))
+         (refusal (and (not answer) (mcp-proxy--shell-refusal name args-json slug)))
          (verdict (cond ((or answer refusal) 'deny)
                         ;; permit? sees no chat on this lane, so the mark of
                         ;; a turn an outsider started is read here
@@ -2353,7 +2340,8 @@
                                 (or (and (equal? name "eval-scheme") (mcp-proxy--code args-json))
                                     raw)))
                          'ask)
-                        ((mcp-proxy--granted? slug name args-json raw) 'allow-always)
+                        ;; the rule engine: every rule, at every scope
+                        ((mcp-proxy--engine-verdict slug name args-json raw))
                         (else (mcp-proxy--shell-ask name args-json
                                 (permit? #f name "tool"
                                          (or (and (equal? name "eval-scheme")

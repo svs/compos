@@ -324,8 +324,10 @@
            (else
              ;; what was asked, kept for the answer: the backend's pending
              ;; record holds no arguments, and "Always" needs them to
-             ;; write a rule the policy can match next time
+             ;; write a rule the policy can match next time. An editor card
+             ;; writes its rule where its call waits (mcp-proxy--grant!).
              (buffer-set-local! buf 'permission-asked (list title kind raw))
+             (buffer-set-local! buf 'permission-asked-editor (and (plist-get e 'editor) #t))
              ;; only a real ask waits on the user — an auto-answered
              ;; request must never claim it
              (chat-activity! buf "needs permission")

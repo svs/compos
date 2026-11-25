@@ -1008,14 +1008,20 @@
                    (list 'tag "c-toolbar" 'class "ag-perm-actions"
                          'children
                          (append
-                          (list (chat-view--button "ag-btn allow" "chat-cmd:agent-permission-allow" "Allow")
-                                (chat-view--button "ag-btn session" "chat-cmd:agent-permission-always" "Always"))
-                          ;; only a chat that works an open task can grant for it;
-                          ;; it answers with the backend's own Always option
+                          ;; Allow is this call only; each other allow writes a rule
+                          ;; (permission-rules.scm) at the scope it names, and
+                          ;; answers with the backend's own Always option
+                          (list (chat-view--button "ag-btn allow" "chat-cmd:agent-permission-allow" "Allow once")
+                                (chat-view--button "ag-btn session" "chat-cmd:agent-permission-turn" "This turn")
+                                (chat-view--button "ag-btn session" "chat-cmd:agent-permission-3-turns" "3 turns")
+                                (chat-view--button "ag-btn session" "chat-cmd:agent-permission-chat" "This chat"))
+                          ;; only a chat that works an open task can grant for it
                           (if (and (boundp (quote mcp-proxy--chat-task)) (mcp-proxy--chat-task buf))
-                              (list (chat-view--button "ag-btn session" "chat-cmd:agent-permission-for-task" "For this task"))
+                              (list (chat-view--button "ag-btn session" "chat-cmd:agent-permission-for-task" "This task"))
                               '())
-                          (list (chat-view--button "ag-btn deny" "chat-cmd:agent-permission-deny" "Deny")))))))
+                          (list (chat-view--button "ag-btn session" "chat-cmd:agent-permission-always" "This group")
+                                (chat-view--button "ag-btn session" "chat-cmd:agent-permission-everywhere" "Everywhere")
+                                (chat-view--button "ag-btn deny" "chat-cmd:agent-permission-deny" "Deny")))))))
       ((equal? kind "question")
        (let ((qid (nth 3 b)) (answers (or (nth 6 b) '())))
          (list 'tag "c-question" 'class "ag-question"

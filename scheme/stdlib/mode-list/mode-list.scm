@@ -376,6 +376,63 @@
             (message "ungrouped -- most recent first")))))
   'modes '(chat-list-mode))
 
+(effects! '(destroy))
+
+(define (mode-kill-rows)
+  ;; (NAME MODE) for every buffer: the live ones as they are now, the asleep
+  ;; ones from the index, which may not have a buffer made a moment ago
+  (let ((live (buffer-read-many (buffer-list-mru) '() '("mode-name"))))
+    (append live
+            (filter (lambda (r) (not (assoc (car r) live)))
+                    (cadr (buffer-rows (list 'fields '(mode))))))))
+
+(define (mode-kill-modes)
+  ;; every major mode that has a buffer, live or asleep, the current buffer's first
+  (let* ((here (buffer-local-value 'mode-name (current-buffer)))
+         (modes (dedupe-names (filter string? (map cadr (mode-kill-rows))))))
+    (if (and (string? here) (member here modes))
+        (cons here (remove (lambda (m) (equal? m here)) modes))
+        modes)))
+
+(define (mode-kill-buffers mode)
+  ;; the buffers of MODE, live and asleep
+  (map car (filter (lambda (r) (equal? (cadr r) mode)) (mode-kill-rows))))
+
+(define (mode-kill! mode)
+  "(mode-kill! MODE) -- kill every buffer of MODE, live or asleep, but a file with unsaved changes; answers (KILLED KEPT)"
+  (let* ((names (mode-kill-buffers mode))
+         (kept (filter (lambda (b) (and (buffer-path b) (buffer-modified? b))) names))
+         (gone (filter (lambda (b) (not (member b kept))) names)))
+    (for-each (lambda (b)
+                (when (process-running? b) (process-kill! b))
+                (buffer-kill! b))
+              gone)
+    (list gone kept)))
+
+(define-command "mode-kill" "Kill every buffer of one major mode; the current buffer's mode is the default"
+  (interactive (lambda (k)
+                 (let* ((modes (mode-kill-modes))
+                        (here (and (pair? modes) (car modes))))
+                   (minibuffer-read (if here (string-append "Kill buffers of mode (default " here "): ") "Kill buffers of mode: ")
+                     modes
+                     (lambda (m)
+                       (let ((m (string-trim m)))
+                         (k (list (if (and (equal? m "") here) here m)))))))))
+  (lambda (mode)
+    (let ((n (length (mode-kill-buffers mode))))
+      (if (= n 0)
+          (message (string-append "No buffers in " mode))
+          ;; a kill this wide asks first
+          (y-or-n (string-append "Kill " (number->string n) " buffers in " mode "?")
+            (lambda ()
+              (let* ((r (mode-kill! mode)) (kept (cadr r)))
+                (message (string-append "Killed " (number->string (length (car r))) " " mode " buffers"
+                                        (if (null? kept) ""
+                                            (string-append "; kept " (number->string (length kept)) " with unsaved changes"))))))
+            (lambda () (message "Cancelled")))))))
+
+(public! 'mode-kill! "(mode-kill! MODE) -- kill every buffer of MODE, live or asleep, but a file with unsaved changes; answers (KILLED KEPT)")
+
 (effects! '(read))
 
 (public! 'mode-list "(mode-list MODE [QUERY]) -- list every buffer of MODE, as ibuffer lists buffers")

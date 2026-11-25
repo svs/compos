@@ -1082,7 +1082,8 @@
 (define (ibuffer-columns buf fields)
   (append (list (list "" 1)
                 (list "" 1)
-                (list "" (ibuffer-name-width buf fields) 'left ibuffer-name-trim))
+                (list (if (equal? (list-mode-of buf) "chat-list-mode") "CHAT" "NAME")
+                      (ibuffer-name-width buf fields) 'left ibuffer-name-trim))
           fields))
 
 ;;; A FIELD is one narrow column beside the name: (TAG WIDTH ALIGN TRIM).
@@ -1113,8 +1114,16 @@
 
 (define (ibuffer-field-tag f) (car f))
 
-(define (ibuffer-field-column f)
-  (list "" (nth 1 f) (nth 2 f) (nth 3 f)))
+(define (ibuffer-field-column f &optional buf)
+  (list (ibuffer-field-title (car f) buf) (nth 1 f) (nth 2 f) (nth 3 f)))
+
+;; the column header names each field; a chat's mode column shows its state
+(define (ibuffer-field-title tag buf)
+  (let ((chat? (and buf (equal? (list-mode-of buf) "chat-list-mode"))))
+    (cond ((equal? tag 'mode) (if chat? "STATE" "MODE"))
+          ((equal? tag 'size) (if chat? "TOKENS" "SIZE"))
+          ((equal? tag 'last) "LAST")
+          (else (string-upcase (symbol->string tag))))))
 
 (define (ibuffer-field-fit buf f)
   ;; the page sizes the column, for the same reason ibuffer-name-fit does
@@ -1205,7 +1214,7 @@
     (if hit
         (cadr hit)
         (let ((cols (ibuffer-columns buf
-                      (map ibuffer-field-column
+                      (map (lambda (f) (ibuffer-field-column f buf))
                            (ibuffer-fields-fitted buf (ibuffer-fields buf all))))))
           (set! *ibuffer-columns-memo* (cons (list key cols) *ibuffer-columns-memo*))
           cols))))
@@ -2671,7 +2680,8 @@
   (list
     'composml-root (lambda (buf) (list 'tag "buffers" 'attrs '(("face" "fixed-pitch"))))
     'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
-    'composml-fields (lambda (buf entry) (ibuffer-composml-fields buf entry))
+    ;; no composml-fields: the rows draw as the grid todo draws, a title,
+    ;; a column header and cells
     'doc (string-append
            "A traditional buffer management table. A section is a group, "
            "a mode, or a directory; < cycles the grouping. Rows inside a "

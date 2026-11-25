@@ -482,7 +482,8 @@
     (minibuffer-read "Apropos (words): " (history-items 'apropos)
       (lambda (query)
         (history-push! 'apropos query)
-        (apropos-page query)))))
+        (apropos-page query))))
+  'public #t)
 (catalog-meta! 'command "apropos" 'domain 'discovery 'effects '(read external))
 
 (define-command "apropos-rebuild-embeddings"

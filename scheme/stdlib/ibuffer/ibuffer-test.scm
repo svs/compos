@@ -290,13 +290,13 @@
                   '(size mode group last) "by directory every field earns its place")
     (ibuffer-test-reset!)))
 
-(deftest 'ibuffer-shows-no-key-bar-and-no-column-names
-  "the head is one line: the title, the counts, and where the keys are"
+(deftest 'ibuffer-shows-the-keys-at-the-foot-and-names-its-columns
+  "the list looks like todo: a title, a row of column names, the keys in the bar at the foot"
   (lambda ()
     (ibuffer-test-open! 'mode 'name)
     (check-true! (pair? (ibuffer-compact-footer "*ibuffer*")) "the footer names the main keys for the bar")
-    (check-equal! (list-label-lines "*ibuffer*" (list-columns "*ibuffer*")) '()
-                  "and no column is named, so no label row")
+    (check-true! (member "NAME" (map car (list-columns "*ibuffer*"))) "the name column is named")
+    (check-true! (list-grid? "*ibuffer*") "and the rows draw as the grid todo draws")
     (check-false! (string-contains? (car (ibuffer-meta "*ibuffer*")) "? keys")
                   "the head says nothing about keys: the bar at the foot has them")
     (ibuffer-test-reset!)))

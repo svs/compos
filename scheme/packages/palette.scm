@@ -98,8 +98,11 @@
          (exact (let ((n (string-join (filter (lambda (w) (not (equal? w "")))
                                               (string-split (string-downcase (string-trim query)) " "))
                                       "-")))
+                  ;; the whole name runs a command command-public-only
+                  ;; hides; only a command's own 'modes keep it out
                   (and (command-fn n)
-                       (command-applicable? n (command-palette--origin))
+                       (or (command-applicable? n (command-palette--origin))
+                           (not (assoc n *command-modes*)))
                        n))))
     (append
       (let ((bind (command-palette--bind-hit query)))

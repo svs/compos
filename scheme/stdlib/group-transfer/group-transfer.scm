@@ -240,6 +240,10 @@
               (let ((l (group-transfer--relayout layout remap rehome)))
                 (when (panes-layout? l)
                   (group-layout-set! id l)
+                  ;; a frame standing in the group draws its own model: it
+                  ;; takes the layout too, or it keeps the old windows
+                  (when (equal? (ignore-errors (lambda () (frame-group))) id)
+                    (ignore-errors (lambda () (with-frame-windows (lambda () (panes-apply! l))))))
                   (set! laid #t)))))
           (let ((base (group-cwd id)))
             (for-each

@@ -305,7 +305,11 @@
     (read-string "What do you want to do? "
                  (lambda (query)
                    (and query (not (equal? query ""))
-                        (task-run! (lambda () (jev-apropos--show query))))))))
+                        (task-run! (lambda () (jev-apropos query))
+                                   (lambda (ok? hit)
+                                     (cond ((not ok?) (message (string-append "jev-apropos: " (value->string hit))))
+                                           (hit (jev-apropos-page query hit))
+                                           (else (message "jev-apropos: nothing fits."))))))))))
 
 (effects! '(read external execute))
 (public! 'jev-apropos "(jev-apropos QUERY) — apropos finds candidates, JEV picks the command; answers (name doc key use) or #f")

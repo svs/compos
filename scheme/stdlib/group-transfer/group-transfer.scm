@@ -293,6 +293,9 @@
               (peer-eval (string-append host ":" (group-transfer--socket-arg group-transfer-peer-socket))
                          (string-append "(group-import! \"~/" remote-dir "/" name "\" #f "
                                         (if into (format "~s" into) "#f") ")")))))))
+(define (peer-eval-on host code)
+  "(peer-eval-on HOST CODE) -- evaluate CODE, a string, on the compos at HOST, found over ssh at group-transfer-peer-socket; answers its printed result. It blocks: run it in a task"
+  (peer-eval (string-append host ":" (group-transfer--socket-arg group-transfer-peer-socket)) code))
 
 (define-command "group-export" "Write this group as a folder another compos can import"
   (lambda ()
@@ -328,6 +331,7 @@
 (public! 'group-import! "(group-import! PATH [CWD INTO]) -- make a new group from the folder group-export wrote, or fill the group INTO; answers (id ID name NAME opened N tasks N buffers N new N layout BOOL skipped (PATH ...) missing (PATH ...))")
 (effects! '(write external execute))
 (public! 'group-send "(group-send G HOST [INTO]) -- export group G with its layout and buffers, rsync it to HOST and import it in the compos there, into the group INTO there when given; blocks, run it in a task")
+(public! 'peer-eval-on "(peer-eval-on HOST CODE) -- evaluate CODE, a string, on the compos at HOST over ssh, at group-transfer-peer-socket; answers its printed result; blocks, run it in a task")
 (catalog-meta! 'command "group-send" 'domain 'buffers 'effects '(write external execute))
 
 (provide 'group-transfer)

@@ -1007,9 +1007,15 @@
              (list (chat-view--text "c-text" "ag-perm-title" (string-append "needs permission — " (nth 3 b)))
                    (list 'tag "c-toolbar" 'class "ag-perm-actions"
                          'children
-                         (list (chat-view--button "ag-btn allow" "chat-cmd:agent-permission-allow" "Allow")
-                               (chat-view--button "ag-btn session" "chat-cmd:agent-permission-always" "Always")
-                               (chat-view--button "ag-btn deny" "chat-cmd:agent-permission-deny" "Deny"))))))
+                         (append
+                          (list (chat-view--button "ag-btn allow" "chat-cmd:agent-permission-allow" "Allow")
+                                (chat-view--button "ag-btn session" "chat-cmd:agent-permission-always" "Always"))
+                          ;; only a chat that works an open task can grant for it;
+                          ;; it answers with the backend's own Always option
+                          (if (and (boundp (quote mcp-proxy--chat-task)) (mcp-proxy--chat-task buf))
+                              (list (chat-view--button "ag-btn session" "chat-cmd:agent-permission-for-task" "For this task"))
+                              '())
+                          (list (chat-view--button "ag-btn deny" "chat-cmd:agent-permission-deny" "Deny")))))))
       ((equal? kind "question")
        (let ((qid (nth 3 b)) (answers (or (nth 6 b) '())))
          (list 'tag "c-question" 'class "ag-question"
@@ -1731,5 +1737,7 @@
 ;; read lookups agents call from eval-scheme-read
 (public! 'agent-buf "(agent-buf SLUG) — the buffer of the agent SLUG")
 (catalog-meta! 'function "agent-buf" 'effects '(read))
+(public! 'agent-status "(agent-status SLUG) — the status of the agent SLUG, or 'dead when its buffer is gone")
+(catalog-meta! 'function "agent-status" 'effects '(read))
 (public! 'agent-slug-of "(agent-slug-of BUF) — the agent slug of chat BUF, or #f")
 (catalog-meta! 'function "agent-slug-of" 'effects '(read))

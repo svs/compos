@@ -105,6 +105,40 @@ fn home_dir() -> String {
     }
 }
 
+/// GET PATH from the daemon over plain HTTP/1.0: the body of a 200, else None.
+fn http_get(host: &str, port: u16, path: &str) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    let addr = (host, port).to_socket_addrs().ok()?.next()?;
+    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(10))).ok()?;
+    write!(s, "GET {path} HTTP/1.0\r\nHost: {host}\r\n\r\n").ok()?;
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf).ok()?;
+    let status = buf.split(|b| *b == b'\n').next()?;
+    if !status.windows(5).any(|w| w == b" 200 ") {
+        return None;
+    }
+    let body = buf.windows(4).position(|w| w == b"\r\n\r\n")? + 4;
+    Some(buf[body..].to_vec())
+}
+
+/// Show PNG as the app's Dock and app-switcher icon. Main thread only.
+#[cfg(target_os = "macos")]
+fn set_dock_icon(png: &[u8]) {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let data = NSData::with_bytes(png);
+    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_dock_icon(_png: &[u8]) {}
+
 fn spawn_daemon() {
     let root = project_root();
     let home = home_dir();
@@ -201,6 +235,11 @@ fn main() {
                         std::thread::sleep(Duration::from_millis(200));
                         if let Some(w) = handle.get_webview_window("main") {
                             let _ = w.eval(&format!("location.replace({url:?})"));
+                        }
+                        // wear the daemon's logo, so each daemon's shell
+                        // tells itself apart in the Dock and Cmd-Tab
+                        if let Some(png) = http_get(&host, port, "/logo/icon.png") {
+                            let _ = handle.run_on_main_thread(move || set_dock_icon(&png));
                         }
                         return;
                     }

@@ -21,7 +21,7 @@ Read the `mode-create` skill first. It owns how a mode and its components are bu
 
 1. `(apropos "WORDS")` for every verb the app needs, `(apropos-components "WORDS")` for every part of the view.
 2. Read `scheme/packages/detail.scm`. It is short and it is the whole detail contract.
-3. Read one existing app end to end: `notmuch.scm` for the group, `sentry.scm` or `whatsapp.scm` for a listing whose rows are their own buffers.
+3. Start from the model app: `scheme/stdlib/demo-app/demo-app.scm`, opened with `M-x demo-app`. Copy the file, rename `demo-app` to the app's name everywhere, and replace its data section with the app's own source. The model follows every rule in this skill in one short file. When the model and this skill disagree, fix the model. For a real data source, also read `sentry.scm` or `whatsapp.scm`.
 4. Confirm every name you mean to call with `(boundp 'NAME)`. Do not write a call from memory.
 
 ## The four invariants
@@ -305,6 +305,14 @@ A detail page that is only `label  value` rows is a debug dump. Users call it na
 ### Every button has a key
 
 There is no button without a key, and the key is drawn on it. Draw the bar with `ui/actions`; an action is `(CLICK LABEL KEY [CLASS])`, CLASS its tone (`good`, `bad`). Take the site's own key when it has one, else the first free letter of the label. A button the app cannot press itself still gets its key: it opens the page on the site, and the label says so (`↗`). The same key works from the listing (`app-detail-keys!`).
+
+### Every page shows its keymap
+
+Every buffer of the app draws its keys: the listing and each page. A key that works but is not drawn does not exist for the user.
+
+- The listing draws its keys card from `'footer`.
+- Each page draws the same card with `ui/keys-bar` in its `footer-line-blocks`, set on every draw. Add the keys that only a page has, such as `` C-` `` and `M-RET`.
+- Make both cards, both keymaps and the action bar from one table of verbs. Then a verb cannot be bound in one place and missing in another. `demo-app-verbs` in the model app does this.
 
 ### Anchor the content, never the controls
 

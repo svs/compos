@@ -145,8 +145,10 @@
   "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return at once; CALLBACK gets the output, with the agent's chat as the current buffer, so an event-publish! of a job: topic there wakes that chat. An agent's command must pass decide-shell-policy, judged on CMD itself, and runs in its chat's sandbox when the sandbox is on."
   (let* ((author (current-edit-author))
          (chat (agent-sandbox--author-chat))
+         ;; a package the agent called runs its own commands unjudged
          (no (and (string? author) (string-prefix? "agent:" author) (string? cmd)
                   (boundp 'decide-shell-command-verdict)
+                  (or (not (boundp 'decide-payload-judged?)) (decide-payload-judged? chat))
                   (decide-shell-command-verdict cmd))))
     (when no (error no))
     (apply %shell-command->string-builtin

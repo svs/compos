@@ -306,7 +306,10 @@
            ;; user's selected window. Inside this binding switch-to-buffer!
            ;; retargets subsequent point-relative operations without display.
            (r (with-current-buffer (current-buffer)
-                (lambda () (eval-string-safe code)))))
+                (lambda ()
+                  (if (boundp 'decide-with-payload)
+                      (decide-with-payload code (lambda () (eval-string-safe code)))
+                      (eval-string-safe code))))))
       (if (equal? (car r) 'ok)
           (value->string (cadr r))
           (string-append "error: " (cadr r) (tool--error-hint (cadr r) code)))))
@@ -579,7 +582,10 @@
           (string-append "refused: " why
                          (if (string-contains? why " is unbound.") "" ". Use eval-scheme for this code."))
           (let ((r (with-current-buffer (current-buffer)
-                     (lambda () (eval-string-safe code)))))
+                     (lambda ()
+                       (if (boundp 'decide-with-payload)
+                           (decide-with-payload code (lambda () (eval-string-safe code)))
+                           (eval-string-safe code))))))
             (if (equal? (car r) 'ok)
                 (value->string (cadr r))
                 (string-append "error: " (cadr r) (tool--error-hint (cadr r) code)))))))

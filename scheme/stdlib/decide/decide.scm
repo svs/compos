@@ -466,6 +466,25 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
         (decide--tree-calls? forms)
         (re-match? decide--shell-primitives code))))
 
+;; The shell gate judges the shell commands an agent runs. A package the
+;; agent calls, such as mail-search running notmuch, runs its own commands:
+;; those are the package's, not the agent's. So an eval marks the chat with
+;; whether its payload itself calls a shell, and the sandbox judges a shell
+;; command only when the mark is not 'no.
+(define (decide-with-payload code thunk)
+  "(decide-with-payload CODE THUNK) -- run THUNK, an agent's eval of CODE; the shell commands it runs are judged only when CODE itself calls a shell"
+  (let ((buf (current-buffer)))
+    (buffer-set-local! buf 'decide-payload-shell
+                       (if (and (string? code) (not (decide-shell-calls? code))) 'no 'yes))
+    (let ((r (thunk)))
+      (buffer-set-local! buf 'decide-payload-shell #f)
+      r)))
+
+(define (decide-payload-judged? chat)
+  "(decide-payload-judged? CHAT) -- #f while CHAT runs a payload that calls no shell itself, so a package's own shell commands run unjudged; else #t"
+  (not (and chat (buffer-exists? chat)
+            (eq? (buffer-local-value 'decide-payload-shell chat) 'no))))
+
 (define (decide--shell-criteria)
   (list 'edit "A shell command creates, writes, moves, renames or deletes a file or directory by itself: a > or >> redirection, sed -i, tee, cp, mv, rm, mkdir, touch, ln, patch, or an install step."
         'read "A shell command reads or searches files or directories: cat, head, tail, less, sed -n, ls, find, grep, rg, ag, wc, or a pipeline that feeds one of those a path."

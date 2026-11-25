@@ -7,7 +7,8 @@ defmodule Compos.Rpc.Server do
       echo '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(+ 1 2)"}}' \\
         | nc -U ~/.compos/sock
 
-  Methods: `eval` (params.code), `reload` (params.paths), `shutdown`, `ping`.
+  Methods: `eval` (params.code), `initialize` (answers name, version and
+  the primer), `reload` (params.paths), `shutdown`, `ping`.
 
   Frames: eval runs against the **last-active frame** (the one that saw
   input most recently). Window primitives act there; target another frame
@@ -107,11 +108,16 @@ defmodule Compos.Rpc.Server do
   # A client that connects cold used to learn nothing: it got a socket and
   # no idea what was on the other end. `initialize` answers with the
   # primer — what this is, the one call that finds everything else, and the
-  # category list — so being useful is one round-trip away.
+  # category list — so being useful is one round-trip away. It names the
+  # daemon and its version first, so a client knows whom it reached.
   defp handle_request(%{"method" => "initialize"} = req) do
     case Session.eval("(hello)") do
       {:ok, printed} ->
-        JsonRpc.response(req["id"], %{primer: unquote_printed(printed)})
+        JsonRpc.response(req["id"], %{
+          name: Application.get_env(:compos_core, :name),
+          version: version(),
+          primer: unquote_printed(printed)
+        })
 
       {:error, msg} ->
         JsonRpc.error(req["id"], -32000, msg)
@@ -169,6 +175,15 @@ defmodule Compos.Rpc.Server do
   end
 
   defp handle_request(req), do: JsonRpc.error(req["id"], -32601, "method not found")
+
+  # the version that runs: a release's, counting a Scheme update it took;
+  # in a checkout, the version the app loaded with
+  defp version do
+    case Session.eval("(release-running-version)") do
+      {:ok, <<?\", _::binary>> = printed} -> unquote_printed(printed)
+      _ -> to_string(Application.spec(:compos_core, :vsn))
+    end
+  end
 
   # eval returns a PRINTED value, so a string comes back quoted
   defp unquote_printed(<<?", _::binary>> = printed) do

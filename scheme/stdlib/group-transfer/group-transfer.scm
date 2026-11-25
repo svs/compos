@@ -303,16 +303,16 @@
     (if (pair? m) (string-append (list-ref m 1) host (list-ref m 2)) url)))
 
 (define (daemon-connect! host &optional k)
-  "(daemon-connect! HOST [K]) -- in a task, ask the compos at HOST, an ssh address, for its name over group-transfer-peer-socket, and add it to the daemon registry as NAME@HOST; K gets (HOST NAME URL), or #f when nothing answers there"
+  "(daemon-connect! HOST [K]) -- in a task, ask the compos at HOST, an ssh address, for its name over group-transfer-peer-socket, and add it to the daemon registry as NAME@HOST; K gets (HOST NAME URL VERSION), or #f when nothing answers there"
   (task-spawn
     (lambda ()
-      (let* ((v (ignore-errors (lambda () (car (scheme-read (peer-eval-on host "(list (daemon-name) (editor-url))"))))))
+      (let* ((v (ignore-errors (lambda () (car (scheme-read (peer-eval-on host "(list (daemon-name) (editor-url) (or (release-running-version) \"checkout\"))"))))))
              (r (and (pair? v) (string? (car v)) (string? (cadr v))
                      (let ((url (daemons--url-on host (cadr v)))
                            (name (string-append (car v) "@" host)))
                        (daemon-register! name url host)
-                       (list host name url)))))
-        (message (if r (string-append "connected to " (cadr r)) (string-append "no compos answers at " host)))
+                       (list host name url (caddr v))))))
+        (message (if r (string-append "connected to " (cadr r) ", compos " (cadddr r)) (string-append "no compos answers at " host)))
         (when k (k r))
         r))))
 
@@ -356,7 +356,7 @@
 (effects! '(write external execute))
 (public! 'group-send "(group-send G HOST [INTO]) -- export group G with its layout and buffers, rsync it to HOST and import it in the compos there, into the group INTO there when given; blocks, run it in a task")
 (public! 'peer-eval-on "(peer-eval-on HOST CODE) -- evaluate CODE, a string, on the compos at HOST over ssh, at group-transfer-peer-socket; answers its printed result; blocks, run it in a task")
-(public! 'daemon-connect! "(daemon-connect! HOST [K]) -- in a task, ask the compos at the ssh address HOST for its name and add it to the daemon registry as NAME@HOST; K gets (HOST NAME URL) or #f")
+(public! 'daemon-connect! "(daemon-connect! HOST [K]) -- in a task, ask the compos at the ssh address HOST for its name and add it to the daemon registry as NAME@HOST; K gets (HOST NAME URL VERSION) or #f")
 (catalog-meta! 'command "group-send" 'domain 'buffers 'effects '(write external execute))
 
 (provide 'group-transfer)

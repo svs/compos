@@ -402,6 +402,25 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
     "When none of those is the right call, ask (apropos \"WORDS\") for the one that is: "
     "the catalog answers for the editor as it is now, and this list does not. "))
 
+(defcustom 'decide-refusal-doors-packages '((jj "jj"))
+  "For each kind of shell command the policy refuses, the package whose functions do that work instead. A refusal lists them, so the agent finds the door without a search."
+  'type 'sexp 'group 'decide)
+
+(define (decide-refusal-doors kind)
+  "(decide-refusal-doors KIND) — the functions that do KIND's work, one per line, read from the catalog; empty when KIND has no door package"
+  (let ((pkg (let ((e (assoc kind decide-refusal-doors-packages))) (and e (cadr e)))))
+    (if (not pkg) ""
+        (let ((rows (report-errors "decide: refusal doors"
+                      (lambda () (apropos pkg 'package pkg 'kind "function" 'lexical #t)))))
+          (if (not (pair? rows)) ""
+              (string-append " Use these instead:"
+                (apply string-append
+                       (map (lambda (e) (string-append "\n  " (or (plist-get e 'sig) (plist-get e 'name))
+                                                       " - " (or (plist-get e 'doc) "")))
+                            rows))))))))
+(domain! 'decide)
+(effects! '(read))
+
 (define (decide-refusal kind &optional detail)
   "(decide-refusal KIND [DETAIL]) — the words of one refusal: edit, read, denied with DETAIL naming the kind of shell command the user denied, or policy with DETAIL naming what the policy matched"
   (cond ((equal? kind 'edit)
@@ -425,9 +444,8 @@ for 'noul use true or false.\n\nQuestions:\n" qlines "\n")))
         ((equal? kind 'jj)
          (string-append
            "refused by the shell gate: jj runs through jj.scm, never the shell. "
-           "Every save already lands in your run's jj change. "
-           "Label it with (jj-describe! TEXT); read with (jj-log [REVSET]), (jj-show CHANGE), "
-           "(chat-changes), (chat-diff) or (chat-changes-report)."))
+           "Every save already lands in your run's jj change."
+           (decide-refusal-doors 'jj)))
         ((equal? kind 'denied)
          "refused: denied in the chat. Do not retry it — ask what to do instead.")
         (else

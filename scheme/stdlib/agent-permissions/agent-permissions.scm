@@ -523,6 +523,22 @@
       (agent-answer-permission! slug "allow_always" "allow")))
   'modes '(chat-mode))
 
+;; Always, but only while this chat's task is open. The card's own answer
+;; is allow_always; tools.scm sees the chat's scope and keeps the grant on
+;; the chat with the task's id instead of on the group.
+(define-command "agent-permission-for-task" "Allow this kind of call until this chat's task is done"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (agent-slug-of buf))
+           (task (and (boundp (quote mcp-proxy--chat-task)) (mcp-proxy--chat-task buf))))
+      (if (not task)
+          (message "this chat works no open task: use Allow or Always")
+          (begin
+            (buffer-set-local! buf 'permission-grant-scope 'task)
+            (message (string-append "allowing until " task " is done"))
+            (agent-answer-permission! slug "allow_always" "allow")))))
+  'modes '(chat-mode))
+
 (define-command "agent-permission-deny" "Deny the pending permission request"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
                                        "reject_once" "reject"))

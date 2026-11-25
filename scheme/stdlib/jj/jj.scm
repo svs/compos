@@ -468,6 +468,22 @@
                 text))))
 (public! 'jj-describe-change! "(jj-describe-change! CHANGE TEXT [DIR]) — describe one unpushed change as TEXT and keep its Agent line")
 
+;; Two pieces of work that landed in one change: PATHS go to a new change
+;; before it, described as TEXT with this run's Agent line; the rest keeps
+;; the change and its description.
+(define (jj-split-change! change paths text &optional dir)
+  "(jj-split-change! CHANGE PATHS TEXT [DIR]) — move PATHS, relative to the repo root, out of one unpushed change into a new change before it, described as TEXT; answers the log of the two"
+  (let ((root (if dir (jj-root-of-dir dir) (jj-here))))
+    (and root (pair? paths)
+         (pair? (jj-revs root (string-append change " & remote_bookmarks()..@")))
+         (let ((slug (and (boundp 'jj-run-slug) (jj-run-slug))))
+           (jj-sh root (string-append "jj split -r " change
+                                      " -m '" (jj-quote (if slug (string-append text "\n\nAgent: " slug) text)) "' "
+                                      (string-join (map (lambda (p) (string-append "'" (jj-quote p) "'")) paths) " ")
+                                      " 2>&1"))
+           (jj-log (string-append "(" change ")- | " change) root)))))
+(public! 'jj-split-change! "(jj-split-change! CHANGE PATHS TEXT [DIR]) — move PATHS out of one unpushed change into a new change before it, described as TEXT")
+
 ;;; --- the push -----------------------------------------------------------
 
 ;; Identity rides in descriptions, so there is nothing to leak and nothing

@@ -2065,15 +2065,49 @@
 (define (mcp-proxy--granted? slug name args-json raw)
   (let ((key (mcp-proxy--grant-key slug name args-json raw)))
     (and key
-         (member (cadr key) (or (group-setting (car key) 'always-verbs) '()))
+         (or (member (cadr key) (or (group-setting (car key) 'always-verbs) '()))
+             (mcp-proxy--task-granted? slug (cadr key)))
          #t)))
 
+;; A grant for one task: agent-permission-for-task answers the card and
+;; sets the chat's 'permission-grant-scope to task. The verb is then kept
+;; on the chat with the id of its open task, and holds only while that
+;; task is open: done or cancelled, the next call asks again.
+(define (mcp-proxy--chat-task chat)
+  "the id of the open task CHAT works, or #f"
+  (let ((id (buffer-local-value 'chat-id chat)))
+    (and id (boundp (quote todo-list))
+         (let ((ts (todo-list (list 'assignee id))))
+           (and (pair? ts) (plist-get (car ts) 'id))))))
+
+(define (mcp-proxy--task-open? id)
+  (let ((t (and id (boundp (quote todo-get)) (todo-get id))))
+    (and t (not (member (plist-get t 'state) '("done" "cancelled"))) #t)))
+
+(define (mcp-proxy--task-granted? slug verb)
+  (let ((chat (and slug (agent-info slug) (agent-buf slug))))
+    (and chat
+         (let loop ((gs (or (buffer-local-value 'task-grants chat) '())))
+           (and (pair? gs)
+                (or (and (equal? (car (car gs)) verb) (mcp-proxy--task-open? (cadr (car gs))))
+                    (loop (cdr gs))))))))
+
 (define (mcp-proxy--grant! slug name args-json raw)
-  (let ((key (mcp-proxy--grant-key slug name args-json raw)))
-    (when key
-      (let ((verbs (or (group-setting (car key) 'always-verbs) '())))
-        (unless (member (cadr key) verbs)
-          (group-setting-set! (car key) 'always-verbs (cons (cadr key) verbs)))))))
+  (let* ((key (mcp-proxy--grant-key slug name args-json raw))
+         (chat (and slug (agent-info slug) (agent-buf slug)))
+         (task (and chat (equal? (buffer-local-value 'permission-grant-scope chat) 'task)
+                    (mcp-proxy--chat-task chat))))
+    (when chat (buffer-set-local! chat 'permission-grant-scope #f))
+    (cond
+      ((not key) #f)
+      (task
+       (let ((gs (or (buffer-local-value 'task-grants chat) '())))
+         (unless (member (list (cadr key) task) gs)
+           (buffer-set-local! chat 'task-grants (cons (list (cadr key) task) gs)))))
+      (else
+       (let ((verbs (or (group-setting (car key) 'always-verbs) '())))
+         (unless (member (cadr key) verbs)
+           (group-setting-set! (car key) 'always-verbs (cons (cadr key) verbs))))))))
 
 (define (mcp-proxy--refused raw verdict)
   (base64-encode

@@ -88,6 +88,7 @@
 (require 'cron)
 (require 'events-demo)
 (require 'watchers)
+(require 'permissions)
 (require 'keys)
 (require 'keymaps)
 (require 'package)

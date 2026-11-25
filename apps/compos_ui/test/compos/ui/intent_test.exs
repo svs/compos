@@ -111,6 +111,26 @@ defmodule Compos.Ui.IntentTest do
     assert Buffer.text(buf) == "(xdefine)"
   end
 
+  test "a caret measured before a chat wrote above it lands where the reader put it", %{conn: conn} do
+    buf = fresh_buffer("said\n> input line")
+    {:ok, view, _} = live(conn, "/")
+    win = Editor.render_state().tree.id
+    v = Buffer.version(buf)
+
+    # the chat streams above the input while the report travels
+    :ok = Buffer.insert_at(buf, 4, " more", source: :editor)
+    :ok = Buffer.insert_at(buf, 9, " words", source: :editor)
+
+    # the reader put the caret on "input" (byte 7 of the text they saw)
+    view |> element("#editor") |> render_hook("sel", %{
+      "win" => win, "point" => 7, "mark" => nil, "v" => v
+    })
+
+    assert Buffer.point(buf) == 7 + 11
+    KeyDispatch.handle_key("C-a")
+    assert Buffer.point(buf) == 16
+  end
+
   test "a ranged insertText replaces the range", %{conn: conn} do
     buf = fresh_buffer("hello world")
     {:ok, view, _} = live(conn, "/")

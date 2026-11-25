@@ -101,7 +101,7 @@ defmodule Compos.Ui.EditorLive do
   # handle_info
   @impl true
   def handle_event("key", %{"k" => spec} = p, socket) do
-    Input.dispatch(socket.assigns.frame, spec)
+    socket = own_input(socket, fn -> Compos.Core.KeyDispatch.handle_key(spec) end)
     {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
 
@@ -119,9 +119,10 @@ defmodule Compos.Ui.EditorLive do
     at = if own? and is_integer(p["at"]), do: p["at"], else: -1
     v = if own? and is_integer(p["v"]), do: p["v"], else: -1
 
-    Input.run(socket.assigns.frame, fn ->
-      Compos.Core.KeyDispatch.handle_intent(type, from, to, text, at, v)
-    end)
+    socket =
+      own_input(socket, fn ->
+        Compos.Core.KeyDispatch.handle_intent(type, from, to, text, at, v)
+      end)
 
     {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
@@ -166,12 +167,21 @@ defmodule Compos.Ui.EditorLive do
       when is_integer(point) and point >= 0 do
     with id when is_integer(id) <- safe_int(win),
          true <- id == Compos.Core.Editor.active_window(socket.assigns.frame) do
+      own = Map.get(socket.assigns, :own_input, %{})
+
       Input.run(socket.assigns.frame, fn ->
         buf = Compos.Core.Editor.current_buffer()
 
-        if Compos.Core.Buffer.exists?(buf) and
-             (not Map.has_key?(p, "v") or p["v"] == Compos.Core.Buffer.version(buf)) do
-          mark = if is_integer(p["mark"]) and p["mark"] != point, do: p["mark"], else: nil
+        # The caret was measured against the text the page had. A chat
+        # writing above it since moved that text: the report is carried
+        # through those edits, so it still names the place the reader chose.
+        # A report measured before this page's own last key predates that
+        # key, and the key's point stands.
+        with true <- Compos.Core.Buffer.exists?(buf),
+             false <- is_integer(p["v"]) and p["v"] < Map.get(own, buf, 0),
+             {:ok, point} <- reported_byte(buf, p["v"], point),
+             {:ok, mark} <- reported_byte(buf, p["v"], p["mark"]) do
+          mark = if mark != point, do: mark, else: nil
           # a keyboard motion keeps the mark (the region follows point, as
           # in Emacs); a click or a drag says what the mark is
           unless mark == nil and p["keep"] == true do
@@ -1195,6 +1205,31 @@ defmodule Compos.Ui.EditorLive do
 
   # a client that cannot name its window sends null: no window, no crash
   defp safe_int(_), do: nil
+
+  # a reported byte at the version the page measured it against, carried
+  # to the buffer's text now; no version means now, no byte means none
+  defp reported_byte(_buf, _v, nil), do: {:ok, nil}
+  defp reported_byte(_buf, nil, byte) when is_integer(byte), do: {:ok, byte}
+
+  defp reported_byte(buf, v, byte) when is_integer(v) and is_integer(byte),
+    do: Compos.Core.Buffer.map_since(buf, v, byte)
+
+  defp reported_byte(_buf, _v, _byte), do: :error
+
+  # Run one key or intent of this page, and remember the version it left
+  # its buffer at: a caret report the page measured before it is stale.
+  defp own_input(socket, fun) do
+    {buf, v} =
+      Input.run(socket.assigns.frame, fn ->
+        fun.()
+        buf = Compos.Core.Editor.current_buffer()
+        {buf, Compos.Core.Buffer.exists?(buf) && Compos.Core.Buffer.version(buf)}
+      end)
+
+    if is_integer(v),
+      do: assign(socket, :own_input, Map.put(Map.get(socket.assigns, :own_input, %{}), buf, v)),
+      else: socket
+  end
 
   defp count_arg(n) when is_integer(n) and n >= 0, do: n
   defp count_arg(_), do: 0

@@ -672,6 +672,35 @@ defmodule Compos.Core.Buffer do
   @doc "The mutation journal, newest first: [{version, author, pos, ins, del}]."
   def edit_log(name), do: GenServer.call(via(name), :edit_log)
 
+  @doc """
+  BYTE as the client measured it against version V, carried through the
+  edits since: `{:ok, byte}`, or `:error` when V is ahead of the buffer or
+  the journal no longer reaches back to it. A chat writing above a caret
+  moves the text under a report while it travels; the report still names
+  the place the reader chose.
+  """
+  def map_since(name, v, byte) when is_integer(v) and is_integer(byte),
+    do: GenServer.call(via(name), {:map_since, v, byte})
+
+  @doc false
+  def map_through(log, current, v, byte) do
+    since = log |> Enum.take_while(fn {ver, _, _, _, _} -> ver > v end) |> Enum.reverse()
+
+    cond do
+      v > current or byte < 0 ->
+        :error
+
+      Enum.map(since, &elem(&1, 0)) != Enum.to_list((v + 1)..current//1) ->
+        :error
+
+      true ->
+        {:ok,
+         Enum.reduce(since, byte, fn {_, _, pos, ins, del}, p ->
+           p |> adjust_delete(pos, del) |> adjust_insert(pos, ins)
+         end)}
+    end
+  end
+
   @doc "Return the durable Provenance status for the buffer."
   def provenance(name), do: GenServer.call(via(name), :provenance)
 
@@ -1834,6 +1863,9 @@ defmodule Compos.Core.Buffer do
   end
 
   defp on_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
+
+  defp on_call({:map_since, v, byte}, _from, state),
+    do: {:reply, map_through(state.edit_log, state.version, v, byte), state}
 
   defp on_call(:provenance, _from, state) do
     state = flush_provenance(state)

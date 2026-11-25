@@ -3070,6 +3070,10 @@
           const win = buf.closest(".window");
           if (!win || !win.classList.contains("active")) return;
           markCurrentRow(buf);
+          // measure the caret now, against the text the page has now:
+          // a chat writing above it may patch the nodes under it before
+          // the report goes, and the report must name this place
+          this._selMeasure = this.measureSelection(buf);
           // report when the caret comes to rest: a held arrow moves
           // it thirty times a second, and a server redraw per step
           // starves the paint of the caret itself
@@ -3112,26 +3116,37 @@
         // the selection of the active editable surface, as bytes
         // KEEP: a keyboard motion leaves the mark alone (Emacs: the
         // region follows point); a click clears it
-        this.sendSelection = (buf, keep) => {
+        // the selection as bytes, with the version of the text they
+        // were measured against
+        this.measureSelection = (buf) => {
           const sel = window.getSelection();
-          if (!sel || !sel.rangeCount || !buf.contains(sel.focusNode)) return false;
+          if (!sel || !sel.rangeCount || !buf.contains(sel.focusNode)) return null;
           const point = domByte(sel.focusNode, sel.focusOffset);
-          const mark = sel.isCollapsed ? null : domByte(sel.anchorNode, sel.anchorOffset);
-          if (point == null) return false;
+          if (point == null) return null;
           // At a soft wrap the end of one row and the start of the
           // next are one byte. A caret at the end of its text node
           // sits on the upper row; remember that, so the redraw puts
           // it back there and not at the head of the row below.
           // upstream = the caret is drawn on the row of the character
           // before it; at a soft wrap that row is the upper one
-          this._affinity = wrapAffinity(sel);
+          return { buf, point, v: parseInt(buf.dataset.v, 10), affinity: wrapAffinity(sel),
+            mark: sel.isCollapsed ? null : domByte(sel.anchorNode, sel.anchorOffset) };
+        };
+        this.sendSelection = (buf, keep) => {
+          // a caret move still waiting to report was measured when it
+          // happened; a patch since may have moved the nodes under it
+          const held = this._selPending && this._selMeasure && this._selMeasure.buf === buf;
+          const m = held ? this._selMeasure : this.measureSelection(buf);
+          this._selMeasure = null;
+          if (!m) return false;
+          const { point, mark } = m;
+          this._affinity = m.affinity;
           // a selection this client reported is a native one; a plain
           // motion key after it reports the caret and drops the mark
           if (mark !== null) this._nativeSel = true;
           else if (this._dropMark || !keep) { keep = false; this._nativeSel = false; }
           this._dropMark = false;
-          this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep,
-            v: parseInt(buf.dataset.v, 10) });
+          this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep, v: m.v });
           this._gestureAt = 0;
           // syncEditable waits for the server to agree with this
           this._reported = { point, mark, at: performance.now(), acked: false };
@@ -3921,6 +3936,17 @@
           // stamp to tell a reader's caret move from a patch's
           this._patchAt = now;
           clearTimeout(this._selt);
+          // A caret move still waiting to report goes now, as measured
+          // before this patch: the server carries it through the text
+          // the patch brought (a chat writing above the caret). Dropping
+          // it left point where it was, and C-a acted there.
+          const m = this._selPending && this._selMeasure;
+          if (m && m.buf.isConnected && m.buf.hasAttribute("contenteditable")) {
+            const w = m.buf.closest(".window");
+            if (w && w.classList.contains("active"))
+              this.sendSelection(m.buf, now - (this._motionAt || 0) < 1200);
+          }
+          this._selMeasure = null;
           this._selPending = false;
           this._gestureAt = 0;
         }

@@ -107,7 +107,7 @@ defmodule Compos.Ui.Reach do
       String.ends_with?(host, ".localhost") -> true
       host == name -> true
       String.starts_with?(host, name <> ".") and String.ends_with?(host, ".ts.net") -> true
-      true -> trusted_address?(host)
+      true -> trusted_address?(host) or own_tailnet_name?(host)
     end
   end
 
@@ -116,6 +116,20 @@ defmodule Compos.Ui.Reach do
   defp hostname do
     {:ok, name} = :inet.gethostname()
     name |> to_string() |> String.split(".") |> hd() |> String.downcase()
+  end
+
+  # A MagicDNS name of this machine. Tailscale keeps the old machine name
+  # after a hostname change, so the name in the browser can differ from
+  # hostname(). Only a bare name or a *.ts.net name counts, so a public name
+  # that resolves to a tailnet address does not pass.
+  defp own_tailnet_name?(host) do
+    with true <- not String.contains?(host, ".") or String.ends_with?(host, ".ts.net"),
+         {:ok, ip} <- :inet.getaddr(String.to_charlist(host), :inet),
+         {:ok, ifs} <- :inet.getifaddrs() do
+      Enum.any?(ifs, fn {_, opts} -> {:addr, ip} in opts end)
+    else
+      _ -> false
+    end
   end
 
   defp trusted_address?(host) do

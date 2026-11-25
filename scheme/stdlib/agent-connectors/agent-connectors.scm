@@ -559,9 +559,17 @@ You are the assistant inside the compos editor. The editor's instructions arrive
 ;; attaches: a chat answers with its 'chat-directory (buffer-directory follows
 ;; that local), any other buffer with the directory it belongs to.
 (define (agent-config-buffer-cwd opts)
+  ;; a chat carried from another machine keeps that machine's directory;
+  ;; a process cannot start there, so a missing directory falls back to
+  ;; the group's, else the home directory
   (let ((buf (plist-get opts 'buffer)))
     (if (and (string? buf) (buffer-exists? buf))
-        (list 'cwd (buffer-directory buf))
+        (let* ((dir (buffer-directory buf))
+               (g (buffer-group buf))
+               (gdir (and g (group-cwd g))))
+          (list 'cwd (cond ((and (string? dir) (file-directory? dir)) dir)
+                           ((and (string? gdir) (file-directory? gdir)) gdir)
+                           (else (getenv "HOME")))))
         '())))
 
 ;; an env value that is a symbol names a secret setting (keys.scm) or a

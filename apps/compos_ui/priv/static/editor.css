@@ -547,11 +547,15 @@ body {
 }
 .buffer-footer:has(.c-keys-bar.expanded) { padding: var(--s5) var(--row-px) var(--s6); }
 .buffer-footer .c-keys-bar { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
-/* the keys card gives way to the buffer in a narrow window */
 /* a narrow window keeps its keys: the card wraps, with tighter gaps */
 @container (max-width: 520px) {
   .buffer-footer .keys-line { gap: var(--s2) var(--s6); }
   .buffer-footer .keys-more { padding-left: 0; border-left: 0; }
+}
+/* a very narrow window gives the room to the buffer: only `? all N`
+   stays, and ? still opens the whole map */
+@container (max-width: 360px) {
+  .buffer-footer .c-keys-bar:not(.expanded) .keys-main { display: none; }
 }
 .buffer-footer .keys-line {
   display: flex; flex-wrap: wrap; align-items: baseline;

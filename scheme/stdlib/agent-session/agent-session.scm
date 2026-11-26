@@ -546,19 +546,46 @@
              (lang #f)
              (else (up (- j 1))))))))))
 
+(define *client-selection* #f)
+
+(define (client-selection-set! text)
+  ;; the text the user highlighted in the browser, sent with the key that
+  ;; arrives now: a rich chat or a preview has no region for it
+  (set! *client-selection* (cons text (monotonic-ms))))
+
+(define (client-selection)
+  ;; the browser selection the current key carried, or #f; it is taken
+  ;; once, and a selection older than two seconds is not this key's
+  (let ((s *client-selection*))
+    (set! *client-selection* #f)
+    (and s (< (- (monotonic-ms) (cdr s)) 2000)
+         (not (equal? (string-trim (car s)) ""))
+         (car s))))
+
+(define (chat-eval-source buf)
+  ;; what C-c C-c in a chat runs: the region, else the browser
+  ;; selection, else the Scheme fence at point
+  (let ((sel (client-selection)))
+    (cond
+      ((and (mark) (not (= (mark) (point)))) (region-text))
+      (sel sel)
+      (else (chat-scheme-fence-at buf (line-number-at-pos (point)))))))
+
 (define-command "chat-eval-block"
-  "Evaluate the Scheme block at point in a chat reply; the value lands in the transcript"
+  "Evaluate Scheme from a chat: the region, the text selected in the browser, or the Scheme block at point"
   (lambda ()
     (let* ((buf (current-buffer))
-           (src (chat-scheme-fence-at buf (line-number-at-pos (point)))))
+           (src (chat-eval-source buf)))
       (cond
-        ((not src) (message "no Scheme block at point"))
+        ((not src) (message "select Scheme, or put point in a Scheme block"))
         ((not (chat-scheme-well-formed? (string-trim src)))
          (message "the block is not a whole expression"))
         (else (chat-scheme-eval! buf (string-trim src) (and (current-prefix-arg) #t))))))
   'modes '(chat-mode))
 
 (define-key "chat-mode-map" "C-c C-c" "chat-eval-block")
+(public! 'client-selection-set! "(client-selection-set! TEXT) — the browser sends what the user highlighted with the key it presses")
+(public! 'client-selection "(client-selection) — the text highlighted in the browser when the current key was pressed, or #f; taken once")
 
 ;; An input that opens with ! is prose for fast-code: it resolves to Scheme
 ;; before it runs, and then takes the same path a parenthesised input takes.

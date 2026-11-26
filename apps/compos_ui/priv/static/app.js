@@ -2603,7 +2603,13 @@
           // every key goes to the editor as the key it is. A visual
           // row move is Scheme reading the wrap map this client
           // measured after the last paint; nothing is decided here.
-          Telem.push(this, "key", { k: spec, seq: composPredict.barrier() });
+          // Text highlighted in the page travels with the key: a rich
+          // chat or a preview has no region, and a command may want it.
+          const nsel = window.getSelection();
+          const sel = ((nsel && !nsel.isCollapsed) ? nsel.toString() : "") || previewSelection();
+          const payload = { k: spec, seq: composPredict.barrier() };
+          if (sel) payload.sel = sel.slice(0, 20000);
+          Telem.push(this, "key", payload);
         };
         window.addEventListener("keydown", this.handler);
         this.keyupH = (e) => {

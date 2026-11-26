@@ -103,7 +103,21 @@ defmodule Compos.Ui.EditorLive do
   # handle_info
   @impl true
   def handle_event("key", %{"k" => spec} = p, socket) do
-    socket = own_input(socket, fn -> Compos.Core.KeyDispatch.handle_key(spec) end)
+    socket =
+      own_input(socket, fn ->
+        # text highlighted in the browser travels with the key: a rich
+        # chat or a preview has no region for it
+        case p["sel"] do
+          sel when is_binary(sel) and sel != "" ->
+            Compos.Core.Session.call_named("client-selection-set!", [sel])
+
+          _ ->
+            :ok
+        end
+
+        Compos.Core.KeyDispatch.handle_key(spec)
+      end)
+
     {:noreply, socket |> ack(p) |> drain() |> refresh()}
   end
 

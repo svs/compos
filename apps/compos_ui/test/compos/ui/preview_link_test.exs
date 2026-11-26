@@ -92,9 +92,19 @@ defmodule Compos.Ui.PreviewLinkTest do
 
   test "the explicit link action asks for a named destination group", %{
     conn: conn,
-    target: target
+    source: source,
+    target: target,
+    group: group
   } do
     {:ok, view, _html} = mount_frame!(conn)
+
+    # the new frame is in its own group; the reader clicks in the draft's
+    # window, so the link resolves against the draft's directory
+    assert {:ok, _} =
+             Session.eval(~s{(begin
+               (switch-to-group! (group-resolve-id "#{group}"))
+               (switch-to-buffer! "#{source}"))})
+
     win = Editor.render_state().tree.id
 
     view

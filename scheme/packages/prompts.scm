@@ -393,3 +393,8 @@
       (if buf
           (prompt-report-anchors! (help-doc! "system prompt" (chat-prompt-report buf)))
           (message "No chat here — open one with M-x chat first")))))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(read))
+(public! 'chat-prompt-snapshot "(chat-prompt-snapshot BUF) — the prompt parts chat BUF sends now")

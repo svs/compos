@@ -2104,3 +2104,8 @@
   "(chat-cwd-move! BUF DIR) -> validate, set and move in one call: (STATUS DIR), STATUS 'not-a-chat, 'no-such-directory, 'moved, 'deferred, 'workspace or 'none")
 (public! 'chat-cwd-note
   "(chat-cwd-note STATUS DIR) -> the one-line report for a chat-cwd-move! result")
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(read))
+(public! 'chat-thread-context "(chat-thread-context SLUG DISPLAY) — the context block of a thread")

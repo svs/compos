@@ -577,6 +577,8 @@
 
 (public! 'code-browse "Toggle structural browsing of the current buffer")
 (public! 'code-goto-definition "Go to the definition of the symbol at point")
+(catalog-meta! 'function "code-browse" 'domain 'code 'effects '(write display))
+(catalog-meta! 'function "code-goto-definition" 'domain 'code 'effects '(write display))
 
 ;;; --- structure for an agent ---------------------------------------------------
 ;;; The same node backend the reader browses with, as four functions an

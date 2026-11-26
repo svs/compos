@@ -279,3 +279,12 @@
 (package! morg-kinds-parent-package morg-kinds-parent-namespace)
 (domain! morg-kinds-parent-domain)
 (effects! morg-kinds-parent-effects)
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'writing)
+(effects! '(read))
+(public! 'fence-kind-body-spans "(fence-kind-body-spans ...) — the spans of a fenced block body")
+(public! 'fence-kind-line-face "(fence-kind-line-face LANG LINE [ARGS]) — the face for one body line, or #f")
+(public! 'fence-kind-page-head "(fence-kind-page-head LANG ARGS) — the head of a fenced block on the rendered page")
+(public! 'fence-kind-run "(fence-kind-run LANG) — the runner of fence kind LANG, or #f")
+(public! 'fence-kind-runnable? "(fence-kind-runnable? LANG) — #t when a block of LANG can run")

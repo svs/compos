@@ -1835,3 +1835,12 @@ the focus; #f for a window or a buffer."
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(buffer-default-keybindings focus-default-keybindings
     window-default-keybindings))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'windows)
+(effects! '(read))
+(public! 'layout-hidden-windows "(layout-hidden-windows) — the windows that wait off the screen")
+(public! 'window-work-buffer? "(window-work-buffer? BUF) — #t when BUF makes its window a work window")
+(effects! '(write display))
+(public! 'show-in-other-work-window! "(show-in-other-work-window! NAME) — show NAME beside the listing, never on top of it")
+(public! 'window-show-buffer! "(window-show-buffer! WIN NAME) — show NAME in window WIN")

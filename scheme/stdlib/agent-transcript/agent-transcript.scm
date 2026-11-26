@@ -1747,3 +1747,8 @@
 (catalog-meta! 'function "agent-status" 'effects '(read))
 (public! 'agent-slug-of "(agent-slug-of BUF) — the agent slug of chat BUF, or #f")
 (catalog-meta! 'function "agent-slug-of" 'effects '(read))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(read))
+(public! 'chat-view-block "(chat-view-block BUF B OPEN-CARDS) — the view of one transcript block, or #f")

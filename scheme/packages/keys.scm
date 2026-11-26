@@ -334,3 +334,9 @@
   "(keychain-secret-get SERVICE [ACCOUNT]) — a macOS Keychain generic password")
 (public! 'secret-tool-get
   "(secret-tool-get SERVICE) — a Linux Secret Service secret stored with service=SERVICE")
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'secrets)
+(effects! '(read))
+(public! 'key-get "(key-get VAR) — the value of key VAR, or #f")
+(public! 'secret-value "(secret-value NAME) — the value of secret NAME, or #f")

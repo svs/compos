@@ -3244,3 +3244,10 @@ The user and every agent share one todo list. Each group keeps its tasks in its 
           (let ((b (visit path)))
             (window-set-buffer! (get-other-window) b)
             (when n (buffer-goto-line! b n))))))))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(write spend))
+(public! 'todo-assign-chat! "(todo-assign-chat! ID GROUP [WHO]) — start a chat in GROUP on todo ID")
+(effects! '(write))
+(public! 'todo-reopen "(todo-reopen ID [REASON WHO]) — open a closed todo again")

@@ -5347,3 +5347,16 @@ is forgotten and that group falls back to creation order in the switcher."
     group-record-id group-record-name group-visible-groups
     group-visible-work-buffers group-work-buffer? group-membership-buffer?
     group-scratch-buffer? group-id-string? group-members-of))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'windows)
+(effects! '(write))
+(public! 'buffer-add-group! "(buffer-add-group! B GROUP) — put buffer B in GROUP")
+(public! 'buffer-joined-group! "(buffer-joined-group! B ID) — B is in group ID now; run the join hook")
+(public! 'group-buffer-kill-repair "(group-buffer-kill-repair NAME) — keep a killed buffer's window in its group")
+(public! 'group-layout-save! "(group-layout-save! G) — the frame's model of G becomes G's layout")
+(effects! '(write display))
+(public! 'group-kill-follow! "(group-kill-follow!) — enter the most recent group after a kill")
+(public! 'mode-consolidate! "(mode-consolidate!) — gather windows of one mode together")
+(effects! '(read))
+(public! 'group-pseudo-here? "(group-pseudo-here? ID) — #t when ID is a pseudo group and every pane shows a member of it")

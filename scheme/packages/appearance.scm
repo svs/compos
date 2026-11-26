@@ -268,6 +268,7 @@
   "(ui-scale-apply! N) — set the whole application's text scale to step N; 0 is normal")
 (public! 'frame-ui-scale
   "(frame-ui-scale [FRAME]) — FRAME's own text scale step, or #f when it follows ui-scale")
+(catalog-meta! 'function "frame-ui-scale" 'domain 'ui 'effects '(read))
 (public! 'frame-ui-scale-apply!
   "(frame-ui-scale-apply! N [FRAME]) — give FRAME its own text scale step N; #f makes it follow ui-scale again")
 

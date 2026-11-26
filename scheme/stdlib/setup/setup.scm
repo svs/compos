@@ -872,3 +872,8 @@
 ;; program's full path as the connector's command override
 (effects! '(read write execute))
 (public! 'setup-inference-scan "(setup-inference-scan) — every declared connector as (NAME KIND READY? DETAIL NEXT): what this machine can actually run")
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'setup)
+(effects! '(read))
+(public! 'setup-secret-scan "(setup-secret-scan) — the secrets setup finds and where")

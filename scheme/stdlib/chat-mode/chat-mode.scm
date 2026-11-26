@@ -3127,3 +3127,10 @@ input start, and a region worked out again would cut the wrong bytes."
 
 (global-set-key "C-c RET" "chat-companion-ask")
 
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(write external execute))
+(public! 'chat-attach-agent! "(chat-attach-agent! BUF CONNECTOR [MODEL OPTS]) — start an agent of CONNECTOR in chat BUF")
+(effects! '(read))
+(public! 'chat-preamble "(chat-preamble BUF) — the preamble text of chat BUF")

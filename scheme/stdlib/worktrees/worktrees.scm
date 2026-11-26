@@ -1006,3 +1006,11 @@
   "(workspace-name-from-chat! BUF NAME) — apply the LLM chat name to its project worktree")
 (public! 'workspace-llm-defaults-note!
   "(workspace-llm-defaults-note! BUF) — make BUF's LLM settings the defaults for new worktree chats")
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(write execute))
+(public! 'agent-worktree-opts "(agent-worktree-opts BUF SLUG OPTS) — OPTS with the cwd the agent runs in; may create a worktree")
+(public! 'workspace-chat-inherit! "(workspace-chat-inherit! ...) — copy the durable workspace locals into a new chat")
+(effects! '(destroy execute))
+(public! 'workspace-land-and-teardown! "(workspace-land-and-teardown! BUF) — land BUF's worktree change and remove the worktree")

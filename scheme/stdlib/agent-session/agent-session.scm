@@ -2116,3 +2116,10 @@ An agent that calls it becomes the chat's parent: the chat's answers wake it."
         (let ((slug (execute task)))
           (display-buffer-other-window! (agent-buf slug))
           slug)))))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(read))
+(public! 'agent-editor-context "(agent-editor-context BUF) — the editor context block for BUF's next turn, or #f when nothing changed")
+(effects! '(write external spend))
+(public! 'agent-send-msg! "(agent-send-msg! SLUG RAW) — send one raw message to the agent SLUG")

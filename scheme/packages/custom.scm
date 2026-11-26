@@ -224,3 +224,8 @@
 (effects! '(write))
 (public! 'customize-save-face! "(customize-save-face! 'face 'attr VALUE) — persist one face attribute")
 (effects! '(write))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'customize)
+(effects! '(write))
+(public! 'customize-set! "(customize-set! NAME VALUE) — set option NAME for this session; customize-save! keeps it")

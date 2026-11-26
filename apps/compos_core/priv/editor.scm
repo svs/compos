@@ -1121,6 +1121,8 @@
   "(command-label! NAME LABEL) — the display name key panels show for command NAME, e.g. (command-label! \"ibuffer-filter-by-name\" \"name (regex)\"); M-x keeps NAME")
 (public! 'command-label
   "(command-label NAME) — command NAME's display name, or #f")
+(catalog-meta! 'function "command-label!" 'domain 'commands 'effects '(write))
+(catalog-meta! 'function "command-label" 'domain 'commands 'effects '(read))
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
 ;;; A hook is a name and a list of functions. add-hook! puts a function on
@@ -7337,8 +7339,6 @@
 (effects! '(write))
 (public! 'buffer-sleep! "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned")
 (catalog-meta! 'function "buffer-sleep!" 'domain 'buffers 'effects '(write))
-(catalog-meta! 'function "buffer-store-export!" 'domain 'buffers 'effects '(write))
-(catalog-meta! 'function "buffer-store-adopt!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-last-seen "(buffer-last-seen NAME) — unix seconds when NAME was last shown in the active window, or #f; reads without waking a dormant buffer")
 (catalog-meta! 'function "buffer-last-seen" 'domain 'buffers 'effects '(read))
 (public! 'buffer-note-seen! "(buffer-note-seen! NAME) — stamp NAME as seen now, at most one write a minute")
@@ -7428,9 +7428,10 @@
 (public! 'write-refusal "(write-refusal PATH SOURCE PERMITTED?) — #f when the write is allowed, else the reason it is not")
 (effects! '(write))
 (public! 'allow-one-write! "(allow-one-write! PATH) — let the next write to PATH set the confirmable rules aside; a person's answer buys this, and it is spent once")
-(domain! 'unknown)
-(effects! '(unknown))
+(domain! 'files)
+(effects! '(read))
 (public! '*scheme-write-roots* "extra directories where a buffer may start a new .scm file")
+(catalog-meta! 'function "*scheme-write-roots*" 'domain 'files 'effects '(read))
 (public! 'save-buffer-named! "(save-buffer-named! NAME) — save another buffer; the window goes back where it was")
 (catalog-meta! 'function "save-buffer-named!" 'domain 'files 'effects '(write))
 (catalog-meta! 'command "write-file" 'domain 'files 'effects '(write))
@@ -8132,7 +8133,9 @@
 ;; published and stamped here: the stamp belongs to the primitive, and a
 ;; read is taken or refused by it whether or not the package loaded
 (let ((stamps '(((read) count-words file-glob google-accounts google-oauth-status)
-                ((write) append-file! redo! vm-collect!)
+                ((read) call-gate-armed?)
+                ((write) append-file! redo! vm-collect! buffer-store-export! buffer-store-adopt!)
+                ((write execute) with-call-gate)
                 ((write execute) release-install-binary!)
                 ((write external) google-http! google-oauth-start! web-server-start! web-server-stop!)
                 ((write external execute) endpoint-ask endpoint-send! endpoint-start! endpoint-stop!)
@@ -8216,3 +8219,31 @@
 (require 'minibuffer)
 
 (message "editor.scm loaded")
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'system)
+(effects! '(write))
+(public! 'alias-once! "(alias-once! NAME TARGET) — bind NAME to TARGET unless NAME is bound")
+(public! 'buffer-kill-repair "(buffer-kill-repair ...) — the window repair after BUF is killed; packages advise it")
+(public! 'enable-minor-mode! "(enable-minor-mode! BUF NAME) — turn minor mode NAME on in BUF")
+(public! 'disable-minor-mode! "(disable-minor-mode! BUF NAME) — turn minor mode NAME off in BUF")
+(public! 'toggle-minor-mode! "(toggle-minor-mode! NAME) — toggle minor mode NAME in the current buffer")
+(public! 'register-minor-mode! "(register-minor-mode! NAME SETUP TEARDOWN [KEYMAP]) — define a minor mode")
+(public! 'editing-neutral-commands! "(editing-neutral-commands! NAMES) — mark commands that do not end an editing run")
+(public! 'frame-client-lost! "(frame-client-lost! ...) — a frame's client left for good")
+(public! 'on-input-intent! "(on-input-intent! TYPE FN) — add FN to the input-intent hook of TYPE")
+(public! 'on-fs-change! "(on-fs-change! FN) — add FN to fs-change-hook")
+(public! 'on-buffer-created! "(on-buffer-created! FN) — add FN to buffer-created-hook")
+(public! 'on-buffer-woken! "(on-buffer-woken! FN) — add FN to buffer-woken-hook")
+(public! 'on-buffer-shown! "(on-buffer-shown! FN) — add FN to buffer-shown-hook")
+(public! 'on-buffer-renamed! "(on-buffer-renamed! FN) — add FN to buffer-renamed-hook")
+(public! 'rename-buffer! "(rename-buffer! ...) — rename a buffer; runs buffer-renamed-hook")
+(public! 'restore-buffer-runtime! "(restore-buffer-runtime! ...) — give a woken dormant buffer its runtime state again")
+(public! 'window-configuration-changed! "(window-configuration-changed! ...) — run window-configuration-change-hook")
+(effects! '(write display))
+(public! 'buffer-context-switch! "(buffer-context-switch! ...) — show BUF in its own context: its group or its window")
+(effects! '(write execute))
+(public! 'run-hooks "(run-hooks HOOK ...) — run the functions on each HOOK")
+(effects! '(read))
+(public! 'public-api "(public-api) — every public name and its doc")
+(public! 'public-entry "(public-entry NAME) — the public entry of NAME, or #f")

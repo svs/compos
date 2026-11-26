@@ -72,3 +72,8 @@
     ;; is renamed after that
     (lambda (pos inserted deleted source)
       (capf-auto--changed! (current-buffer) inserted deleted source))))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'editing)
+(effects! '(write))
+(public! 'capf-auto-watch! "(capf-auto-watch! BUF) — start completion-at-point as you type in BUF")

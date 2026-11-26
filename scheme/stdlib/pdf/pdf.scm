@@ -1026,3 +1026,8 @@
 (public! 'pdf-insert-text-after
   "(pdf-insert-text-after PATH QUERY TEXT [GAP] [FONT] [SIZE]) -> one working-copy path after the first matching line")
 (catalog-meta! 'function "pdf-insert-text-after" 'domain 'documents 'effects '(read write execute))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'files)
+(effects! '(write))
+(public! 'pdf-reader-setup! "(pdf-reader-setup! BUF) — make BUF a PDF reader")

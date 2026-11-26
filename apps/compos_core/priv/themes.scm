@@ -2407,3 +2407,8 @@
   '(frame-theme-apply! load-theme theme-apply!))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(defface! define-theme-skin!))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'faces)
+(effects! '(write))
+(public! 'define-theme "(define-theme NAME FACES) — define a color theme")

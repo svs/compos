@@ -304,3 +304,14 @@
 (define (event-feed-stop!)
   "(event-feed-stop!) — stop the feed webhook"
   (web-server-stop! "event-feed"))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'system)
+(effects! '(write))
+(public! 'event-define-view! "(event-define-view! NAME PATTERN STEP [INIT]) — fold matching events into a view")
+(public! 'event-feed-route! "(event-feed-route! PATH HANDLER) — route an incoming feed path to HANDLER")
+(public! 'event-publish! "(event-publish! TOPIC KIND [DATA]) — send an event; listeners on TOPIC wake")
+(public! 'event-subscribe! "(event-subscribe! NAME PATTERN FN) — call FN on each event that matches PATTERN")
+(public! 'events-arrived! "(events-arrived!) — deliver the queued events")
+(effects! '(read))
+(public! 'event-log "(event-log [PATTERN LIMIT]) — the recent events that match PATTERN")

@@ -1299,3 +1299,11 @@
              ". No document text is attached. Call (markdown-outline \""
              buf "\"), then call (markdown-read \"" buf
              "\" LINE) for relevant sections.")))))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'writing)
+(effects! '(read))
+(public! 'morg-line-spans "(morg-line-spans E FENCE-ARGS BOX) — the spans of one scan entry")
+(public! 'morg-scan "(morg-scan BUF) — the structure of morg buffer BUF")
+(effects! '(write))
+(public! 'morg-refontify! "(morg-refontify! BUF) — paint morg buffer BUF again")

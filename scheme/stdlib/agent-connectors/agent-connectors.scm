@@ -558,3 +558,8 @@ You are the assistant inside the compos editor. The editor's instructions arrive
   ;; adapter reports after a reattach must redraw them, or the window keeps
   ;; the default model it drew before the session knew its own
   (when (boundp 'dashboard--sync!) (dashboard--sync! buf)))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(read))
+(public! 'agent-config-with-system-parts "(agent-config-with-system-parts CONF) — CONF with the system prompt parts filled in")

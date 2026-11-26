@@ -1152,6 +1152,7 @@
                    ((= n 0) #f)
                    (else (prompt--do 'move step) (walk (- n 1)))))))))
 (public! 'minibuffer-pick! "(minibuffer-pick! LABEL) — highlight the row LABEL of the open prompt and take it as RET would; #f when it shows no such row")
+(catalog-meta! 'function "minibuffer-pick!" 'domain 'interaction 'effects '(write))
 (public! 'minibuffer-confirm-input! "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate.")
 (public! 'minibuffer-cancel! "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit.")
 (public! 'minibuffer-detach! "(minibuffer-detach!) — close the prompt; return its state and closures, or #f.")
@@ -1180,3 +1181,8 @@
     minibuffer-next! minibuffer-prev! minibuffer-sync-input!))
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(write)))
   '(minibuffer-mode-ensure!))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'interaction)
+(effects! '(read))
+(public! 'history-order "(history-order KEY CANDIDATES) — CANDIDATES with remembered ones first, newest first")

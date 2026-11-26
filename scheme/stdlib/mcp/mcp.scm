@@ -864,3 +864,9 @@
             (fold (lambda (a s) (if (member s a) a (cons s a)))
                   acc (preset-servers p)))
           '() presets)))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'chat)
+(effects! '(read))
+(public! 'chat-presets-of "(chat-presets-of BUF) — the presets chat BUF wears")
+(public! 'preset-get "(preset-get NAME KEY) — the value of KEY in preset NAME")

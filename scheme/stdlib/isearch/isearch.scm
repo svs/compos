@@ -334,3 +334,8 @@
 ;; eval-scheme-read takes or refuses them by what they do
 (for-each (lambda (n) (catalog-meta! 'function (symbol->string n) 'effects '(read)))
   '(isearch-matches hl-line-on?))
+
+;;; Catalog stamps for the names the docs and skills teach (the effects audit of 2026-11-26).
+(domain! 'search)
+(effects! '(write display))
+(public! 'isearch "(isearch BACKWARD) — start an incremental search")

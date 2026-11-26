@@ -6210,6 +6210,8 @@
           (set! *command-rows-cache*
             (take (alist-put (alist-delete *command-rows-cache* buf) buf (cons key rows)) 8))
           rows))))
+(public! 'command-rows
+  "(command-rows) -- the M-x rows for the current buffer, as the palette and M-x show them; kept per buffer until its keymaps, mode or the command table change")
 
 ;; ROWS with the names in history KEY first, newest first, like history-order.
 (define (command-rows-by-history key rows)

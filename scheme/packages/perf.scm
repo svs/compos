@@ -870,17 +870,6 @@
 (define (perf--current-tab)
   (if (equal? (current-buffer) *perf-browsers-buffer*) "browsers" (perf--tab (current-buffer))))
 
-;; take one tab of the row
-(define (perf--take-tab! key)
-  (cond ((equal? key "system") (run-command "perf-tab-system"))
-        ((equal? key "compos") (run-command "perf-tab-compos"))
-        ((equal? key "history") (run-command "perf-tab-history"))
-        ((not (perf--browsers-mode!)) (message "The browsers list is not loaded (web package)"))
-        (else
-          (let ((buf (perf--browsers-buffer!)))
-            (unless (equal? (current-buffer) buf) (switch-to-buffer-here! buf))
-            (web--browsers-refresh! buf)))))
-
 ;; take one tab of the row: a perf tab, or the browsers list on a profile
 (define (perf--take-tab! key)
   (cond ((equal? key "system") (run-command "perf-tab-system"))

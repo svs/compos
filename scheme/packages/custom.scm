@@ -96,17 +96,6 @@
   ;; the state the save made, so the caller needs no read to confirm it
   (list name (symbol-value name) 'saved (custom-file)))
 
-;; Emacs add-to-list: ELEMENT goes first, or last with APPEND, unless the
-;; list holds it already. The value of the session only; customize-save!
-;; keeps a value for good.
-(define (add-to-list! name element &optional at-end)
-  (let ((old (if (boundp name) (symbol-value name) '())))
-    (if (member element old)
-        old
-        (let ((new (if at-end (append old (list element)) (cons element old))))
-          (set-symbol-value! name new)
-          new))))
-
 (define (customize-save-face! face &rest attrs)
   (custom-set-faces! (list face attrs))
   (custom-write!))
@@ -235,4 +224,3 @@
 (effects! '(write))
 (public! 'customize-save-face! "(customize-save-face! 'face 'attr VALUE) — persist one face attribute")
 (effects! '(write))
-(public! 'add-to-list! "(add-to-list! 'name ELEMENT [APPEND]) — put ELEMENT first in the list variable, or last with APPEND, unless it is there")

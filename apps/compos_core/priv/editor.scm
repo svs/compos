@@ -4706,10 +4706,10 @@
   "Directories (load NAME) searches for a relative NAME, in order.")
 
 ;; Emacs add-to-list: VALUE goes to the front of the list VAR names, once.
-(define (add-to-list! var value)
-  (let ((cur (symbol-value var)))
+(define (add-to-list! var value &optional at-end)
+  (let ((cur (if (boundp var) (symbol-value var) '())))
     (unless (member value cur)
-      (set-symbol-value! var (cons value cur)))
+      (set-symbol-value! var (if at-end (append cur (list value)) (cons value cur))))
     (symbol-value var)))
 
 ;; The user's config, in load order: saved customizations load last so
@@ -7856,7 +7856,7 @@
 (public! 'autoload-command "(autoload-command NAME FILE [DOC]) — the command NAME exists for M-x and the keys; its first run loads FILE")
 (public! 'autoload-harvest! "(autoload-harvest! [DIRS]) — install the ;;;###autoload cookies of every unprovided file in DIRS (load-path); returns the files read")
 (public! 'load "(load NAME) — find NAME on load-path, evaluate it, and provide its library name")
-(public! 'add-to-list! "(add-to-list! 'VAR VALUE) — VALUE goes to the front of the list VAR names, once")
+(public! 'add-to-list! "(add-to-list! 'VAR VALUE [AT-END]) — VALUE goes to the front of the list VAR names, or the end with AT-END, once")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'files 'effects '(read)))
   '("featurep" "locate-library" "autoload-file" "priv-path"))

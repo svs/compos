@@ -703,32 +703,6 @@
 ;;; a prompt: a browser page under the chrome extension. RET and
 ;;; C-c C-o mean what they mean in the modal.
 
-;; a file row carries its root in the 4th slot; the prompt's candidate encoder reads a 4th slot as chips,
-;; so the prompt gets the row without it and the confirm looks the full
-;; row up by name
-(define (switch-prompt-row e)
-  (cond ((switch-file-row? e) (list (car e) (string-append "file · " (nth 3 e)) "file"))
-        ((buffer-known? (car e)) (cons (switch-chat-label (car e)) (cdr e)))
-        (else e)))
-
-;; the rows the prompt offers, labelled the way you would name them: a
-;; chat by its title. A label must name ONE row, so a title another row
-;; already wears -- as its own name or as an earlier label -- is dropped
-;; for the buffer's own name, which is unique.
-(define (switch-prompt-rows rows)
-  (let ((names (map car rows)))
-    (let loop ((rs rows) (seen '()) (out '()))
-      (if (null? rs)
-          (reverse out)
-          (let* ((e (car rs))
-                 (r (switch-prompt-row e))
-                 (label (if (or (equal? (car r) (car e))
-                                (and (not (member (car r) names))
-                                     (not (member (car r) seen))))
-                            (car r)
-                            (car e))))
-            (loop (cdr rs) (cons label seen) (cons (cons label (cdr r)) out)))))))
-
 ;; RET with nothing typed takes the first row that is neither a heading
 ;; nor the buffer you are already on, so the prompt advertises exactly that
 (define (switch-first-choice rows &optional here)

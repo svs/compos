@@ -1493,26 +1493,8 @@ is forgotten and that group falls back to creation order in the switcher."
 ;;; back to the layout you left behind; a scene asserts one. Two different
 ;;; questions — "where was I" and "build me this" — so two verbs.
 
-;; App windows are identified by app-id.
-;; An app can assign the same id to its listing, detail, and auxiliary buffers.
-(domain! 'windows)
-(effects! '(read))
-(define (app-windows id)
-  "Return visible windows whose buffers belong to app ID."
-  (filter (lambda (row)
-            (equal? (app-id (cadr row)) id))
-          (window-list)))
-
 (domain! 'buffers)
 (effects! '(write display))
-(define (app-move-buffers id destination)
-  "Move every known buffer of app ID to DESTINATION, including visible app windows."
-  (let ((buffers (filter (lambda (buf)
-                           (and (buffer-known? buf)
-                                (equal? (app-id buf) id)))
-                         (buffer-list))))
-    (group-move-buffers-to! buffers destination)
-    buffers))
 
 (define *scenes* '())             ; ((group-name spec) ...) — by NAME, not id:
                                   ; a declaration outlives the record it names

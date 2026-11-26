@@ -465,7 +465,9 @@
     (display-buffer-other-window! b)
     b))
 
-(define (chat-scheme-run! buf src other?)
+(define (chat-scheme-eval! buf src other?)
+  ;; evaluate SRC and write what it printed into BUF's transcript; the
+  ;; input and point stay where they are. Answers what was printed.
   (let* ((cmd (chat-scheme-command src))
          (result (eval-string-safe (if cmd
                                        (string-append "(run-command \"" cmd "\")")
@@ -476,11 +478,6 @@
                     (string-append "λ " src "\n→ " *chat-scheme-buffer*)
                     body))
          (text (string-append "\n" shown "\n")))
-    ;; the expression joins this chat's prompt history before it runs:
-    ;; up-arrow reaches the last thing you evaluated here
-    (chat-history-push! buf src)
-    (chat-history-reset! buf)
-    (chat-clear-input! buf)
     (when (and other? ok) (chat-scheme-other-window! body))
     ;; status, not conversation: it is saved with the chat, and every
     ;; model-facing path filters a status row out. The agent is not told
@@ -493,10 +490,68 @@
       (let* ((start (chat-render! buf text))
              (end (+ start (string-byte-length text))))
         (agent-block-push! buf start end "eval" '())))
-    (end-of-buffer!)
     (message (if ok "ok" (cadr result)))
+    body))
+
+(define (chat-scheme-run! buf src other?)
+  ;; the expression joins this chat's prompt history before it runs:
+  ;; up-arrow reaches the last thing you evaluated here
+  (chat-history-push! buf src)
+  (chat-history-reset! buf)
+  (chat-clear-input! buf)
+  (let ((body (chat-scheme-eval! buf src other?)))
+    (end-of-buffer!)
     ;; what was printed, for a caller that records the run
     body))
+
+(define chat-scheme-fence-languages '("scheme" "scm"))
+
+(define (chat-scheme--fence-lang line)
+  ;; the language a fence line opens, "" for a bare fence, #f for no fence
+  (let ((t (string-trim line)))
+    (and (string-prefix? "```" t)
+         (let ((info (string-trim (substring t 3 (string-length t)))))
+           (if (equal? info "") ""
+               (car (string-split info #\space)))))))
+
+(define (chat-scheme-fence-at buf line)
+  ;; the body of the Scheme fence that holds 1-based LINE in BUF, or #f
+  (let* ((lines (list->vector (string-split (buffer-text buf) #\newline)))
+         (n (vector-length lines))
+         (i (- line 1)))
+    (let up ((j i))
+      (cond
+        ((< j 0) #f)
+        (else
+         (let ((lang (chat-scheme--fence-lang (vector-ref lines j))))
+           (cond
+             ;; a bare fence above point closes some earlier block, unless
+             ;; point is on it: then it is this block's closing fence
+             ((and lang (equal? lang "") (< j i)) #f)
+             ((and lang (equal? lang "")) (up (- j 1)))
+             ((and lang (member lang chat-scheme-fence-languages))
+              (let down ((k (+ j 1)) (acc '()))
+                (cond
+                  ((>= k n) #f)
+                  ((equal? (chat-scheme--fence-lang (vector-ref lines k)) "")
+                   (and (>= k i) (string-join (reverse acc) "\n")))
+                  (else (down (+ k 1) (cons (vector-ref lines k) acc))))))
+             (lang #f)
+             (else (up (- j 1))))))))))
+
+(define-command "chat-eval-block"
+  "Evaluate the Scheme block at point in a chat reply; the value lands in the transcript"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (src (chat-scheme-fence-at buf (line-number-at-pos (point)))))
+      (cond
+        ((not src) (message "no Scheme block at point"))
+        ((not (chat-scheme-well-formed? (string-trim src)))
+         (message "the block is not a whole expression"))
+        (else (chat-scheme-eval! buf (string-trim src) (and (current-prefix-arg) #t))))))
+  'modes '(chat-mode))
+
+(define-key "chat-mode-map" "C-c C-c" "chat-eval-block")
 
 ;; An input that opens with ! is prose for fast-code: it resolves to Scheme
 ;; before it runs, and then takes the same path a parenthesised input takes.

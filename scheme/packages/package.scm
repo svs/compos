@@ -22,6 +22,12 @@
 ;;; A repo can carry recipe.scm at its root, (NAME :requires (A B) :api N).
 ;;; use-package installs each require that has a recipe first, and refuses
 ;;; a package whose :api is newer than compos-api-version.
+;;;
+;;; package-install! and package-uninstall! keep init.scm, the recipe, the
+;;; pin and the clone together. Three files share the work, one owner each:
+;;; this file installs and reads and writes packages.lock; package-update.scm
+;;; moves the pins (update, hold, rollback); packages.scm is M-x packages,
+;;; the listing and the sources that offer packages.
 
 (domain! 'packages)
 (effects! '(pure))
@@ -446,6 +452,80 @@
 (public! 'use-package "(use-package 'NAME ['repo USER/REPO | 'url URL] ['branch B] ['defer #t]) - keys are quoted symbols, :repo spelled 'repo; - clone NAME if missing (in a task), check out its pin, put it on load-path and load it; publishes packages loaded or failed")
 (public! 'package-thaw! "(package-thaw!) - in a task, check every package out at its packages.lock pin, cloning what is missing; publishes packages thawed")
 
+;; install and uninstall: the use-package line of init.scm, the recipe, the
+;; pin and the clone, together; each publishes packages changed
+
+(define (package--init-path) (string-append (compos-home) "/init.scm"))
+
+(define (package--init-line name text)
+  (let ((head (string-append "(use-package '" name " ")))
+    (let loop ((ls (string-split text "\n")))
+      (cond ((null? ls) #f)
+            ((string-prefix? head (string-trim (car ls))) (car ls))
+            (else (loop (cdr ls)))))))
+
+(define (package--with-init f)
+  ;; run F on the init.scm buffer and save it, unless it held unsaved work; #t when saved
+  (let* ((path (package--init-path))
+         (known (buffer-known? path))
+         (buf (find-file path))
+         (dirty (buffer-modified? buf)))
+    (f buf)
+    (unless dirty (with-current-buffer buf (lambda () (buffer-save!))))
+    (unless (or known dirty) (buffer-kill! buf))
+    (not dirty)))
+
+(define (package--source-of n)
+  ;; where N comes from now: its recipe, else its pin, as OWNER/REPO or a git url
+  (let* ((r (assoc n package--recipes))
+         (url (or (and r (package-recipe-url (cdr r)))
+                  (let ((p (assoc n (package-lock)))) (and p (cadr p))))))
+    (and (string? url) (or (package-github-repo url) url))))
+
+(define (package-install! name . from)
+  (let* ((n (package--name name))
+         (src (or (and (pair? from) (car from))
+                  (package--source-of n)
+                  (string-append package-default-org "/compos-" n)))
+         (key (if (string-contains? src "://") 'url 'repo))
+         (line (string-append "(use-package '" n " '" (symbol->string key) " \"" src "\")")))
+    (message (string-append "installing " n " from " src " ..."))
+    (use-package n key src)
+    (let ((saved (package--with-init
+                   (lambda (buf)
+                     (let ((text (buffer-text buf)))
+                       (unless (package--init-line n text)
+                         (buffer-append! buf (string-append (if (or (equal? text "") (string-suffix? "\n" text)) "" "\n")
+                                                            line "\n"))))))))
+      (unless saved (message (string-append "init.scm has unsaved changes: added " n " to it but did not save"))))
+    (event-publish! "packages" 'changed n)
+    n))
+
+(define (package-uninstall! name)
+  (let ((n (package--name name)))
+    (cond
+      ((assoc n (package-core-pins)) (message (string-append n " is a core package; it cannot be uninstalled")) #f)
+      ((assoc n package-develop-directories) (message (string-append n " is a develop checkout; M-x package-develop with an empty dir first")) #f)
+      (else
+        (let ((saved (package--with-init
+                       (lambda (buf)
+                         (let ((l (package--init-line n (buffer-text buf))))
+                           (when l (buffer-delete-text! buf (string-append l "\n"))))))))
+          (set! package--recipes (filter (lambda (r) (not (equal? (car r) n))) package--recipes))
+          (let ((lock (package-lock)))
+            (when (assoc n lock)
+              (package-lock-write! (filter (lambda (p) (not (equal? (car p) n))) lock))))
+          (let ((dir (string-append (package-repos-dir) "/" n)))
+            (when (file-directory? dir) (trash-file! dir)))
+          (event-publish! "packages" 'changed n)
+          (message (string-append "uninstalled " n
+                                  (if (featurep (string->symbol n)) "; its code stays loaded until restart" "")
+                                  (if saved "" "; init.scm had unsaved changes, so it is not saved")))
+          n)))))
+
+(public! 'package-install! "(package-install! NAME [FROM]) - clone and load package NAME and add its use-package line to init.scm; FROM is OWNER/REPO or a git url, else NAME's recipe or pin, else package-default-org/compos-NAME; answers NAME")
+(public! 'package-uninstall! "(package-uninstall! NAME) - drop NAME's use-package line from init.scm, its recipe and its packages.lock pin, and trash its clone; refuses a core or develop package; answers NAME or #f")
+
 ;; ---- git state and pull requests: an agent and the user send a change upstream
 
 (effects! '(pure))
@@ -644,7 +724,7 @@
     (message (string-append "sending " name " upstream"))))
 
 
-(define-command "package-install" "Clone a package from GitHub (user/repo) or a git url and load it"
+(define-command "package-install" "Clone a package from GitHub (user/repo) or a git url, load it and add it to init.scm"
   (interactive
     (lambda (k)
       (minibuffer-read "Install package (user/repo or git url): " '()
@@ -652,14 +732,11 @@
           (let ((s (string-trim spec)))
             (unless (equal? s "") (k (list s))))))))
   (lambda (s)
-    (let* ((url? (string-contains? s "://"))
-           (base (car (reverse (string-split s "/"))))
+    (let* ((base (car (reverse (string-split s "/"))))
            (bare (if (string-suffix? ".git" base) (substring base 0 (- (string-length base) 4)) base))
            ;; a community repo is compos-NAME; the package in it is NAME
-           (name (if (string-prefix? "compos-" bare) (substring bare 7 (string-length bare)) bare))
-           (key (if url? 'url 'repo)))
-      (use-package name key s)
-      (message (format "installing ~a; add (use-package '~a '~a ~s) to init.scm" name name key s)))))
+           (name (if (string-prefix? "compos-" bare) (substring bare 7 (string-length bare)) bare)))
+      (package-install! name s))))
 
 (define-command "package-freeze" "Pin every installed package at its current commit in packages.lock"
   (lambda ()

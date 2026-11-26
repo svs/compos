@@ -12,7 +12,6 @@
 ;;; init.scm is the boot manifest, not a package: its requires do not count.
 
 (require 'tabulated-list)
-(require 'package-manager)
 (require 'package-update)
 
 (domain! 'packages)
@@ -750,8 +749,8 @@
   (let ((name (plist-get row 'name)))
     (cond ((not (equal? (plist-get row 'tier) "installed")) (message (string-append name " is not an installed clone")) #f)
           ((plist-get row 'dev) (message (string-append name " is a develop checkout: M-x package-develop with an empty dir first")) #f)
-          (else (package-manager-uninstall! name)
-                (set! packages--scan-cache #f)
+          ((not (package-uninstall! name)) #f)
+          (else (set! packages--scan-cache #f)
                 (when (buffer-known? *packages-buffer*) (list-refresh! *packages-buffer*))
                 #t))))
 
@@ -764,7 +763,13 @@
   'modes '(packages-detail-mode packages-mode))
 
 (define-command "packages-open-repo" "Open the GitHub repo of the package at point"
-  (lambda () (package-manager-open-repo! (packages--at)))
+  (lambda ()
+    (let ((row (packages--at)))
+      (if (and row (plist-get row 'repo))
+          (let ((url (string-append "https://github.com/" (plist-get row 'repo))))
+            (shell-command->string (string-append "open " url) (compos-home) (lambda (out) #t))
+            url)
+          (begin (message "no repo for this package") #f))))
   'modes '(packages-detail-mode packages-mode))
 
 (define-command "packages-add-source" "Add a package source: a GitHub org or user, or OWNER/REPO"
@@ -831,7 +836,7 @@
           ((packages-loaded? row) (message (string-append name " is already loaded")) #f)
           ((packages-available? row)
            (message (string-append "installing " name " from " (plist-get row 'repo)))
-           (package-manager-install! name (plist-get row 'repo))
+           (package-install! name (plist-get row 'repo))
            #t)
           (else
            (message (string-append "loading " name))

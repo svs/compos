@@ -1180,6 +1180,30 @@
           (else (split-window! 'h 0.5) (other-window!) (switch-to-buffer-here! name)))
     (active-window)))
 
+;; C-x 4 f: visit a file and show it only in another window (Emacs
+;; find-file-other-window). The window you are in keeps its buffer.
+(define (find-file-other-window! path)
+  "Visit local PATH and show it in another window; answer its buffer."
+  (let* ((p (normalize-file-input path))
+         (buf (find-file p)))
+    (with-current-buffer buf
+      (lambda ()
+        (auto-mode p)
+        (run-hooks 'find-file-hook)))
+    (display-buffer-other-window! buf)
+    buf))
+
+(define-command "find-file-other-window"
+  "Find a file and display it only in another window"
+  (lambda ()
+    (read-file-name "Find file in other window: " find-file-other-window!)))
+
+(define-key "ctl-x-4-map" "f" "find-file-other-window")
+(catalog-meta! 'function "find-file-other-window!" 'domain 'files 'effects '(write display))
+(catalog-meta! 'command "find-file-other-window" 'domain 'files 'effects '(write display))
+
+(public! 'find-file-other-window!
+  "(find-file-other-window! PATH) — visit PATH and show it only in another window; answers the buffer")
 (public! 'window-fill-buffers
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
 (public! 'window-fill-decide

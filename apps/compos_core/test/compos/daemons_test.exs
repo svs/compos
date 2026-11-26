@@ -1,5 +1,5 @@
 defmodule Compos.DaemonsTest do
-  @moduledoc "Daemon registry, workspace ownership, and the C-x d list."
+  @moduledoc "Daemon registry, workspace ownership, and the C-x D list."
 
   use Compos.Case
 
@@ -43,10 +43,10 @@ defmodule Compos.DaemonsTest do
     :ok
   end
 
-  test "C-x d opens the daemon table and RET requests same-tab navigation" do
+  test "C-x D opens the daemon table and RET requests same-tab navigation" do
     eval!(~s{(daemon-register! "remote" "https://dev.example.test" "server")})
 
-    press(["C-x", "d"])
+    press(["C-x", "D"])
 
     assert Editor.current_buffer() == "*daemons*"
     assert eval!(~s{(buffer-text "*daemons*")}) =~ "remote"
@@ -91,7 +91,7 @@ defmodule Compos.DaemonsTest do
       ~s{(daemon-assign-workspace! "worktree-a1" "http://localhost:4204" "/tmp/a1-home" "#{workspace}")}
     )
 
-    press(["C-x", "d"])
+    press(["C-x", "D"])
     press("n")
     press("RET")
 
@@ -121,7 +121,7 @@ defmodule Compos.DaemonsTest do
       ~s{(daemon-assign-workspace! "worktree-broken" "http://localhost:4298" "/tmp/broken-home" "#{workspace}")}
     )
 
-    press(["C-x", "d"])
+    press(["C-x", "D"])
     press("n")
     press("RET")
 

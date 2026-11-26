@@ -26,13 +26,13 @@ defmodule Compos.Ui.DaemonSwitchTest do
     {:ok, conn: build_conn()}
   end
 
-  test "C-x d switches the same client to a second daemon endpoint", %{conn: conn} do
+  test "C-x D switches the same client to a second daemon endpoint", %{conn: conn} do
     remote = "http://localhost:4555"
     {:ok, _} = Session.eval(~s{(daemon-register! "feature" "#{remote}" "local")})
     {:ok, view, _html} = live(conn, "/")
 
     view |> element("#editor") |> render_hook("key", %{"k" => "C-x"})
-    view |> element("#editor") |> render_hook("key", %{"k" => "d"})
+    view |> element("#editor") |> render_hook("key", %{"k" => "D"})
     assert render(view) =~ "feature"
 
     view |> element("#editor") |> render_hook("key", %{"k" => "n"})

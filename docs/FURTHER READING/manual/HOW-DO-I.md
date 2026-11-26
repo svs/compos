@@ -253,7 +253,7 @@ To try an expression now, press `M-:` (`eval-expression`). In a Scheme buffer, `
 
 ### How do I set up the AI models?
 
-Press `M-x setup-ai-guide`. It explains models, chats, and agents, then walks through a real reply. `M-x setup-inference` detects local commands and registered keys; it cannot check a login. For a guided OpenRouter key setup, use `M-x setup-bot`.
+Press `M-x setup-ai-guide`. It explains models, chats, and agents, then walks through a real reply. `M-x setup-inference` detects local commands and registered keys; it cannot check a login. For a guided OpenRouter key setup, use `M-x setup`.
 
 ### How do I share a link to a buffer?
 

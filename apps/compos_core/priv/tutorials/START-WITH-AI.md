@@ -47,8 +47,8 @@ is not signed in, run `claude auth login`. Then install the adapter with
 For other external agents, install the named program and complete its provider
 login or key setup. The scan can see a program when its account is not ready.
 
-For a direct OpenRouter API model, type `M-x setup-bot`. Follow its OpenRouter
-question to enter a key. You may skip its unrelated service questions.
+For a direct OpenRouter API model, type `M-x setup`. On the OpenRouter card,
+add a key.
 `M-x setup-secrets` helps choose secret storage; it does not, by itself,
 register a model key. Do not paste a key into a chat or this guide.
 
@@ -180,7 +180,7 @@ If you ask for an edit, inspect the result in the buffer before saving it.
 
 | Key | When to use it |
 | --- | --- |
-| `M-x` | Find a command by name, such as `setup-inference` or `setup-bot`. |
+| `M-x` | Find a command by name, such as `setup-inference` or `setup`. |
 | `C-c n` | Start a new chat buffer in the current group. |
 | `C-c c` | Open the current group's chat without starting a new one. |
 | `M-x chat-list` | Find an existing chat or agent thread. |

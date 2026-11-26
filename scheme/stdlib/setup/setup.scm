@@ -418,7 +418,7 @@
                  (begin
                    (setup-install-agent! name)
                    (message (string-append "Setup: installing " (plist-get r 'program)
-                                           "; run M-x setup-bot again when it is done")))
+                                           "; run M-x setup again when it is done")))
                  (message (string-append "Setup: install " (plist-get r 'program) " first")))
              (k))
             ((equal? kind 'secret)
@@ -457,28 +457,6 @@
 (define (setup--show-document! title markdown)
   (bot-show-document-other-window!
     *setup-buffer* title markdown setup-bot-silent-mode))
-
-(define (find-file-other-window! path)
-  "Visit local PATH in another window, or do nothing in silent mode."
-  (if setup-bot-silent-mode
-      (begin (message (string-append "Silent setup did not open " path)) #f)
-      (let* ((p (normalize-file-input path))
-             (buf (find-file p)))
-        (with-current-buffer buf
-          (lambda ()
-            (auto-mode p)
-            (run-hooks 'find-file-hook)))
-        (display-buffer-other-window! buf)
-        buf)))
-
-(define setup-find-file-other-window! find-file-other-window!)
-
-(define-command "find-file-other-window"
-  "Find a file and display it only in another window"
-  (lambda ()
-    (read-file-name "Find file in other window: " find-file-other-window!)))
-
-(define-key "ctl-x-4-map" "f" "find-file-other-window")
 
 ;;; --- guided setup -------------------------------------------------------------
 
@@ -527,73 +505,6 @@
       (setup--show-doppler!)
       (setup--secret-help! name)))
 
-(define (setup--finish!)
-  (message "Setup is ready. Run M-x setup-bot whenever you want to revisit it."))
-
-(define (setup--choose-lesson)
-  (minibuffer-read "What would you like to learn? "
-    '("M-x and philosophy" "Writing code" "Finish")
-    (lambda (choice)
-      (cond ((equal? choice "M-x and philosophy") (run-command "setup-teach-keys"))
-            ((equal? choice "Writing code") (run-command "setup-teach-code"))
-            (else (setup--finish!))))))
-
-(define (setup--ask-lesson)
-  (y-or-n "Would you like a short editor lesson?"
-    setup--choose-lesson setup--finish!))
-
-(define (setup--open-connector! name)
-  (cond
-    ((equal? name "Spotify")
-     (if setup-bot-silent-mode
-         (message "Spotify is available. Silent setup did not open its tab.")
-         (run-command "spotify")))
-    ((equal? name "Mail")
-     (if setup-bot-silent-mode
-         (message "Mail is available. Silent setup kept the window layout unchanged.")
-         (begin
-           (buffer-create *notmuch-hello-buffer*)
-           (with-current-buffer *notmuch-hello-buffer*
-             (lambda () (set-mode! "notmuch-hello-mode")))
-           (display-buffer-other-window! *notmuch-hello-buffer*))))))
-
-(define (setup--choose-connector)
-  (let ((names (map car (filter cadr (setup-connectors)))))
-    (if (null? names)
-        (setup--ask-lesson)
-        (minibuffer-read "Connect a service: " (append names '("Skip"))
-          (lambda (choice)
-            (unless (equal? choice "Skip") (setup--open-connector! choice))
-            (setup--ask-lesson))))))
-
-(define (setup--ask-connectors)
-  (y-or-n "Would you like to connect mail or Spotify now?"
-    setup--choose-connector setup--ask-lesson))
-
-;; The connectors declare what they need, so the bot asks only what is
-;; missing for the one the user picks.
-(define (setup--ask-provider)
-  (let ((names (setup-connector-names)))
-    (minibuffer-read "Which connector should new chats use? " (append names '("Skip"))
-      (lambda (choice)
-        (if (member choice names)
-            (setup-satisfy! choice setup--ask-connectors)
-            (setup--ask-connectors))))))
-
-(define (setup--choose-secret-backend)
-  (let ((names (map car
-                 (setup--available-secret-backends (setup-secret-backends)))))
-    (if (null? names)
-        (setup--ask-provider)
-        (minibuffer-read "Secret backend: " names
-          (lambda (choice)
-            (setup--configure-secret-backend! choice)
-            (setup--ask-provider))))))
-
-(define (setup--ask-secrets)
-  (y-or-n (setup-secret-greeting)
-    setup--choose-secret-backend setup--ask-provider))
-
 (define (setup-report)
   "Return a secret-free setup report for the bot and the user."
   (string-append
@@ -636,9 +547,6 @@
       '(("[`M-x setup-teach-code`](compos:setup/code)" "The code-agent workflow.")
         ("[`M-x setup-teach-keys`](compos:setup/keys)" "M-x and the editor philosophy.")
         ("`M-x apropos`" "Search the live command and function catalog.")))))
-
-(define-command "setup-bot" "Walk through first-run setup one question at a time"
-  (lambda () (setup--ask-secrets)))
 
 (define-command "setup-report" "Open the secret-free setup status report"
   setup-report
@@ -951,10 +859,6 @@
 (public! 'setup-use-connector! "(setup-use-connector! NAME [MODEL]) -- make connector NAME the default for new chats; setup-connector-chosen-hook runs after")
 (public! 'setup-satisfy!
   "(setup-satisfy! CONNECTOR K) — ask for the connector's first unmet need, then K; with none left the connector becomes the default")
-(public! 'setup-find-file-other-window!
-  "(setup-find-file-other-window! PATH) — visit PATH only in another window; silent mode does nothing")
-(public! 'find-file-other-window!
-  "(find-file-other-window! PATH) — visit PATH only in another window; silent setup does nothing")
 (public! 'bot-show-document-other-window!
   "(bot-show-document-other-window! BUFFER TITLE MARKDOWN SILENT?) — show bot documentation only in another window")
 (public! 'setup-report "(setup-report) — secret-free first-run setup report")

@@ -452,7 +452,7 @@
    "release-build-and-install" "release-install" "repl" "scheme-repl"
    "definition-go" "scratch-new" "screenshot-frame" "screenshot-window"
    "screenshot-pick" "screenshot-path" "screenshot-clear" "screenshot-target"
-   "screenshot-highlight" "setup-ai-guide" "setup-bootstrap-gemini" "setup-bot"
+   "screenshot-highlight" "setup-ai-guide" "setup-bootstrap-gemini"
    "setup-install-connector" "setup-report" "setup-secrets" "setup-teach-code"
    "setup-teach-keys" "setup-welcome" "compos-home" "setup" "setup-inference"
    "setup-learning-space" "setup-reset" "chat-show-skills" "slides-new"

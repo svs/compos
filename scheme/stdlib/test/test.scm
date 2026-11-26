@@ -310,7 +310,22 @@
       (load path))
     files)
   (set! *test-file-needs-disposable* #f)
+  (test-forget-fixture-modes!)
   (length *tests*))
+
+;; A test file that defines a mode at load time puts it in the mode
+;; catalog, and M-x and apropos then offer it in the live editor. The
+;; mode stays defined for its tests; only its catalog entries go.
+(define (test-forget-fixture-modes!)
+  (for-each
+    (lambda (e)
+      (let ((name (plist-get e 'name)))
+        (catalog-forget! 'mode name)
+        (catalog-forget! 'command name)))
+    (filter (lambda (e)
+              (and (equal? (plist-get e 'kind) "mode")
+                   (string-suffix? "-test" (or (plist-get e 'package) ""))))
+            (catalog))))
 
 ;; the names each suite registered, so each command runs its own
 (defvar '*core-test-names* '())

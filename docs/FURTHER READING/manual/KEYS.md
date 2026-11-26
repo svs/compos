@@ -125,7 +125,7 @@ Every key in the global map, except the keys that insert their own character. A 
 | `C-x K` | `window-kill-buffers` | Kill every buffer in this window: the one it shows and its whole history |
 | `C-x b` | `ibuffer-prompt` | Switch to a buffer with the plain minibuffer list |
 | `C-x c` | `chat-prompt` | Switch to a chat with the plain minibuffer list |
-| `C-x d` | `daemons` | List daemons and switch this browser tab |
+| `C-x D` | `daemons` | List daemons and switch this browser tab |
 | `C-x e` | `window-eat` | Eat the neighboring pane and take its space |
 | `C-x f` | `frame-switch` | Switch to another frame: type to narrow, RET selects |
 | `C-x g` | `group-switch` | Switch to a group and restore its layout |

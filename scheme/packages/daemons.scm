@@ -395,7 +395,7 @@
     'keys '(("RET" "workspace-open-tab") ("g" "workspaces-refresh")
             ("q" "quit-window"))))
 
-(define-key "ctl-x-map" "d" "daemons")
+(define-key "ctl-x-map" "D" "daemons")
 
 (category! 'sessions)
 (effects! '(write external))
@@ -418,7 +418,7 @@
   "(daemon-ensure-workspace! WORKSPACE) — start its local daemon and wait until it accepts connections")
 (public! 'daemon-arrived!
   "(daemon-arrived!) — announce this daemon and the frame's restored workspace")
-(public! 'daemons "M-x daemons or C-x d — switch this tab to another daemon")
+(public! 'daemons "M-x daemons or C-x D — switch this tab to another daemon")
 (public! 'workspaces
   "M-x workspaces — open a workspace in a new browser tab")
 

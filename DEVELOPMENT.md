@@ -15,7 +15,7 @@ config home. When you save a file, the daemon reloads it without a restart.
 Browser clients reload themselves through a boot-id check.
 
 Each daemon records its name and URL in `~/.local/state/compos/daemons.json`. Run another
-daemon with a different home and port, then use `C-x d` to switch the current
+daemon with a different home and port, then use `C-x D` to switch the current
 browser tab. Set `COMPOS_DAEMON_REGISTRY` when the daemons must share another
 registry path.
 

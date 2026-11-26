@@ -1158,7 +1158,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | Command | Key | What it does |
 |---|---|---|
 | `daemon-visit` |  | Switch this browser tab to the daemon at point |
-| `daemons` | `C-x d` | List daemons and switch this browser tab |
+| `daemons` | `C-x D` | List daemons and switch this browser tab |
 | `daemons-refresh` |  | Refresh the daemon list |
 | `workspace-open-tab` |  | Open the workspace at point in a new browser tab |
 | `workspaces` |  | List workspaces and open one in a new browser tab |
@@ -1224,7 +1224,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `setup` |  | Set up Compos: choose a model and a search model, then learn with the guide |
 | `setup-ai-guide` |  | Read the first-run AI setup guide |
 | `setup-bootstrap-gemini` |  | Set Gemini Nano as the default local connector |
-| `setup-bot` |  | Walk through first-run setup one question at a time |
 | `setup-inference` |  | Choose the model that new chats use |
 | `setup-install-connector` |  | Install the agent program of a connector in a terminal buffer |
 | `setup-learning-space` |  | Open the tutorial: practice, a slide that teaches, and the lesson |

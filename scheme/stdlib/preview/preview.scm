@@ -381,14 +381,14 @@
   (lambda () (preview-view! (current-buffer) #f) (editing-quit!)))
 (define-command "preview-tab-preview" "Show the rendered page"
   (lambda () (preview-view! (current-buffer) #t) (editing-quit!)))
-(define-command "preview-tab-left" "Show the raw tab; the client sends the arrow only in the movement state"
+(define-command "preview-tab-prev" "Show the raw tab; the client sends the arrow only in the movement state"
   (lambda () (preview-tab-step! #f))
   'modes '(morg-mode))
-(define-command "preview-tab-right" "Show the preview tab; the client sends the arrow only in the movement state"
+(define-command "preview-tab-next" "Show the preview tab; the client sends the arrow only in the movement state"
   (lambda () (preview-tab-step! #t))
   'modes '(morg-mode))
-(define-key "morg-mode-map" "<left>" "preview-tab-left")
-(define-key "morg-mode-map" "<right>" "preview-tab-right")
+(define-key "morg-mode-map" "<left>" "preview-tab-prev")
+(define-key "morg-mode-map" "<right>" "preview-tab-next")
 
 (define (preview--morg-tabs!)
   (let ((buf (current-buffer)))

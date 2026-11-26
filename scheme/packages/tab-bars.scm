@@ -17,6 +17,16 @@
 ;;; and TABS are as ui/tabs takes them: (CLICK LABEL [CURRENT? [KEY]]). A
 ;;; tab is taken the way the mouse takes it, through the buffer's block-click
 ;;; hook, so an app hands over the tabs it already draws and nothing else.
+;;;
+;;; One convention holds for every in-buffer tab row, here, in ui/tabs'
+;;; tabs-map and in tabulated-list's list tabs:
+;;;   - <right> and <left> step to the next and previous tab;
+;;;   - a step command is named MODE-tab-next and MODE-tab-prev;
+;;;   - a digit takes a tab by its place, counted from 1: tab 1 is the first
+;;;     tab drawn, never a tab before it. tabs-map takes 1 to 9 of the row at
+;;;     point; an app's pair of panes takes 1 to 5 and 6 to 0, as above.
+;;;   - a command that takes the tab at a place is named after what the tab
+;;;     shows and its place from 1, as tab-bars-index-1 or site-app-section-1.
 
 (domain! 'ui)
 (effects! '(pure))

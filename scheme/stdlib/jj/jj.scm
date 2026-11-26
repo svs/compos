@@ -484,6 +484,18 @@
            (jj-log (string-append "(" change ")- | " change) root)))))
 (public! 'jj-split-change! "(jj-split-change! CHANGE PATHS TEXT [DIR]) — move PATHS out of one unpushed change into a new change before it, described as TEXT")
 
+;; Push up to one change and no further: the changes after it, another
+;; chat's work in progress among them, stay local.
+(define (jj-push-change! change &optional dir)
+  "(jj-push-change! CHANGE [DIR]) — move the tracked bookmark to CHANGE and push it; the changes after CHANGE stay unpushed; answers jj's output"
+  (let* ((root (if dir (jj-root-of-dir dir) (jj-here)))
+         (bm (and root (jj-tracked-bookmark root))))
+    (cond ((not root) #f)
+          ((not bm) "jj: no bookmark tracks a remote")
+          (else (jj-sh root (string-append "jj bookmark set " bm " -r " change " 2>&1"))
+                (string-trim (jj-sh root "jj git push 2>&1"))))))
+(public! 'jj-push-change! "(jj-push-change! CHANGE [DIR]) — push the tracked bookmark up to CHANGE; later changes stay local")
+
 ;;; --- the push -----------------------------------------------------------
 
 ;; Identity rides in descriptions, so there is nothing to leak and nothing

@@ -777,7 +777,7 @@
        (not (process-running? buf))
        (or (buffer-path buf) (equal? buf "*scratch*"))
        (not (member (or (buffer-local-value 'mode-name buf) "")
-                    '("chat-mode" "dired-mode" "notmuch-mode")))))
+                    '("chat-mode" "Dired" "dired-mode" "notmuch-mode")))))
 
 ;; evil-mode is evil-local-mode in every eligible buffer, now and as
 ;; buffers appear. The globalized mode owns the flag and the sweep.

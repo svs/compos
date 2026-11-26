@@ -540,7 +540,9 @@
 
 ;; each opening starts on the tab C-x b opens on
 ;; ibuffer's views: All and Group. A pane's or a window's buffers are the
-;; windows list zoomed in (C-x w), not tabs of this one
+;; windows list zoomed in (C-x w), not tabs of this one. C-x b's
+;; switch-buffer-initial-tab may name a tab ibuffer has not (last,
+;; window, pane, mode): then the list opens on Group
 (define *ibuffer-tabs* '((all "All") (group "Group")))
 
 (define (ibuffer-tab-step-of tab step)
@@ -2690,7 +2692,7 @@
            "TAB folds the rows under a row that has children, else the section at point. A narrow window shows the "
            "name and the age; a wider one adds the size and the mode, and "
            "a wide one the group. / searches the table by name, mode, or path, "
-           "and \\ widens it. f filters as Emacs ibuffer's / does: f m mode, f n name, f f filename, f F directory, f . extension, f c contents (regexps fold case), f ! negates the newest filter, f | ors the two newest, f p pops one and f / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all, group, window. "
+           "and \\ widens it. f filters as Emacs ibuffer's / does: f m mode, f n name, f f filename, f F directory, f . extension, f c contents (regexps fold case), f ! negates the newest filter, f | ors the two newest, f p pops one and f / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all and group; the buffers of a window or a pane are in the windows list, C-x w. "
            "SPC marks one row, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "

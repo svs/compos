@@ -545,7 +545,7 @@
 (for-each
   (lambda (n)
     (let ((i (number->string n)))
-      (define-command (string-append "site-app-tab-" i) (string-append "Open section " i " of this website app")
+      (define-command (string-append "site-app-section-" i) (string-append "Open section " i " of this website app")
         (lambda () (site-app-select-page! (- n 1))))))
   '(1 2 3 4 5 6 7 8 9))
 ;; ---------------------------------------------------------------- tabs by key
@@ -2294,14 +2294,6 @@
               (lambda (tab answer)
                 (when answer (site-app-collect-detail! name buf tab url wait page gen)))))))))
 
-(define (site-app-detail-nth! n)
-  ;; 1 is the site's first tab; 0 reaches back to the composed tab before it
-  (let* ((buf (current-buffer))
-         (tabs (site-app-detail-tabs buf))
-         (i (+ n (site-app-composed-lead buf) -1)))
-    (when (and (>= i 0) (< i (length tabs)))
-      (site-app-detail-select! buf (plist-get (list-ref tabs i) 'id)))))
-
 (define (site-app-detail-step! d)
   (let* ((buf (current-buffer))
          (tabs (site-app-detail-tabs buf))
@@ -2457,15 +2449,9 @@
           (for-each (lambda (index) (app-detail-keys! index mode))
                     (site-app-index-modes name)))))))
 
-(define-command "site-app-detail-tab-0" "Show this page's composed tab" (lambda () (site-app-detail-nth! 0)))
-(define-command "site-app-detail-tab-1" "Show this page's first tab" (lambda () (site-app-detail-nth! 1)))
-(define-command "site-app-detail-tab-2" "Show this page's second tab" (lambda () (site-app-detail-nth! 2)))
-(define-command "site-app-detail-tab-3" "Show this page's third tab" (lambda () (site-app-detail-nth! 3)))
-(define-command "site-app-detail-tab-4" "Show this page's fourth tab" (lambda () (site-app-detail-nth! 4)))
-(define-command "site-app-detail-tab-5" "Show this page's fifth tab" (lambda () (site-app-detail-nth! 5)))
-(define-command "site-app-detail-next-tab" "Show this page's next tab" (lambda () (site-app-detail-step! 1))
+(define-command "site-app-detail-tab-next" "Show this page's next tab" (lambda () (site-app-detail-step! 1))
   'modes '(site-app-detail-mode))
-(define-command "site-app-detail-prev-tab" "Show this page's previous tab" (lambda () (site-app-detail-step! -1))
+(define-command "site-app-detail-tab-prev" "Show this page's previous tab" (lambda () (site-app-detail-step! -1))
   'modes '(site-app-detail-mode))
 (define (site-app-fold-anchor! buf a)
   ;; a card folds by its own state, so the page redraws it shut or open and a
@@ -2674,14 +2660,14 @@
   'modes '(site-app-detail-mode))
 
 (mode-keys! "site-app-detail-mode"
-  (list (list "TAB" "site-app-detail-next-tab")
-        (list "S-TAB" "site-app-detail-prev-tab")
+  (list (list "TAB" "site-app-detail-tab-next")
+        (list "S-TAB" "site-app-detail-tab-prev")
         ;; as on the list beside it
-        (list "M-<right>" "site-app-detail-next-tab")
-        (list "M-<left>" "site-app-detail-prev-tab")
+        (list "M-<right>" "site-app-detail-tab-next")
+        (list "M-<left>" "site-app-detail-tab-prev")
         ;; the tabs across the top, as every app's
-        (list "<right>" "site-app-detail-next-tab")
-        (list "<left>" "site-app-detail-prev-tab")
+        (list "<right>" "site-app-detail-tab-next")
+        (list "<left>" "site-app-detail-tab-prev")
         (list "t" "site-app-tabs")
         (list "s" "site-app-sections")
         (list "<down>" "site-app-detail-next")
@@ -2836,7 +2822,7 @@
                       ;; the app's own list keys: 'list-keys ((KEY COMMAND LABEL) ...)
                       (map (lambda (k) (list (car k) (cadr k))) list-keys)
                       (map (lambda (p) (list (string-append "M-" (plist-get p 'key))
-                                             (string-append "site-app-tab-" (plist-get p 'key))))
+                                             (string-append "site-app-section-" (plist-get p 'key))))
                            pages))))
 
 (define (site-app-index-list-mode! mode)
@@ -2847,7 +2833,7 @@
   ;; its keys' commands are offered in it
   (for-each (lambda (name) (command-modes-add! name mode))
             (append (list "site-app-tabs" "site-app-sections")
-                    (map (lambda (n) (string-append "site-app-tab-" (number->string n))) '(1 2 3 4 5 6 7 8 9))))
+                    (map (lambda (n) (string-append "site-app-section-" (number->string n))) '(1 2 3 4 5 6 7 8 9))))
   ;; The index keeps its own bindings; unclaimed detail-page keys run in the
   ;; adjacent detail, just as they do when focus is on the detail itself.
   (when (boundp 'app-detail-keys!)

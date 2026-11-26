@@ -591,7 +591,7 @@ A project is a directory under version control. {{project-switch-project}} goes 
 - {{window-layout}} arranges the visible buffers in a layout that you choose.")
 
 (defhowto! "Buffers and windows" "get back the windows I had"
-  "Press {{winner-previous}}. Each press restores an earlier arrangement of windows and buffers. {{winner-next}} goes forward again.")
+  "Press {{winner-previous}}. Each press puts back an earlier arrangement of the panes; the windows keep the buffers they show now. {{winner-next}} goes forward again.")
 
 (defhowto! "Buffers and windows" "read the other window without leaving this one"
   "Press {{scroll-other-window}} to scroll the other window down, and {{scroll-other-window-down}} to scroll it up. Point stays in this window.")

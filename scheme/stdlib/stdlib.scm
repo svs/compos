@@ -56,6 +56,8 @@
     (gallery)
     (agent-machine)
     (agent)
+    ;; the model catalog: the published one, the providers' own lists, M-x llm-catalog-refresh
+    (llm-catalog)
     (bookmark)
     (register)
     (chat)

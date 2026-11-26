@@ -12,8 +12,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
   use GenServer, restart: :temporary
 
-  alias Compos.Core.JsonRpc
   alias Compos.Core.Agent.Backend
+  alias Compos.Core.Agent.Backend.JsonLines
 
   # --- behaviour --------------------------------------------------------------
 
@@ -38,20 +38,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
 
   @impl GenServer
   def init({config, owner}) do
-    transport = Compos.Core.Agent.Transport.impl()
-    cmd = Map.get(config, "cmd", "claude-code-acp")
-
-    {:ok, tp} =
-      transport.open(cmd, [cd: Map.get(config, "cwd"), env: Map.get(config, "env")], self())
-
     state = %{
       config: config,
       owner: owner,
-      transport: transport,
-      tp: tp,
-      partial: "",
-      next_id: 1,
-      pending_rpc: %{},
       session_id: nil,
       # ACP session config options (opencode): which option ids the session
       # exposes, and the model id it currently runs
@@ -78,6 +67,8 @@ defmodule Compos.Core.Agent.Backend.ACP do
       # text, so every update is dropped until the reply lands
       loading: false
     }
+
+    state = Map.merge(state, JsonLines.open(config, "claude-code-acp"))
 
     {:ok,
      request(state, "initialize", %{
@@ -215,51 +206,34 @@ defmodule Compos.Core.Agent.Backend.ACP do
   # --- incoming bytes (real port or fake transport) ---------------------------
 
   @impl GenServer
-  def handle_info({:acp_data, data}, state), do: {:noreply, ingest(state, data)}
-
-  def handle_info({port, {:data, data}}, %{tp: port} = state),
-    do: {:noreply, ingest(state, data)}
-
-  def handle_info({:acp_exit, status}, state), do: adapter_exit(state, status)
-
-  def handle_info({port, {:exit_status, status}}, %{tp: port} = state),
-    do: adapter_exit(state, status)
-
-  def handle_info(_msg, state), do: {:noreply, state}
+  def handle_info(msg, state) do
+    case JsonLines.classify(msg, state) do
+      {:data, data} -> {:noreply, ingest(state, data)}
+      {:exit, status} -> adapter_exit(state, status)
+      :other -> {:noreply, state}
+    end
+  end
 
   @impl GenServer
   def terminate(_reason, state) do
-    state.transport.close(state.tp)
+    JsonLines.close(state)
     :ok
   end
 
   # --- framing ----------------------------------------------------------------
 
-  defp ingest(state, data) do
-    {frames, partial} = JsonRpc.decode_lines(state.partial <> data)
-    Enum.reduce(frames, %{state | partial: partial}, &handle_frame(&2, &1))
-  end
+  defp ingest(state, data), do: JsonLines.ingest(state, data, &handle_frame/2)
 
   # --- json-rpc ---------------------------------------------------------------
 
-  defp request(state, method, params, pending_method \\ nil) do
-    id = state.next_id
-    send_frame(state, JsonRpc.request(id, method, params))
+  defp request(state, method, params, pending_method \\ nil),
+    do: JsonLines.request(state, method, params, pending_method, [])
 
-    pending_method = pending_method || method
-    %{state | next_id: id + 1, pending_rpc: Map.put(state.pending_rpc, id, pending_method)}
-  end
-
-  defp notify(state, method, params), do: send_frame(state, JsonRpc.notification(method, params))
-  defp respond(state, id, result), do: send_frame(state, JsonRpc.response(id, result))
+  defp notify(state, method, params), do: JsonLines.notify(state, method, params, [])
+  defp respond(state, id, result), do: JsonLines.respond(state, id, result, [])
 
   defp respond_error(state, id, code, message),
-    do: send_frame(state, JsonRpc.error(id, code, message))
-
-  defp send_frame(state, frame) do
-    state.transport.send_frame(state.tp, JsonRpc.encode(frame))
-    state
-  end
+    do: JsonLines.respond_error(state, id, code, message, [])
 
   # Map.get/Map.put, not the struct-update syntax: a backend process
   # started before a hot reload carries a state map without the key

@@ -1527,13 +1527,13 @@
 (define (winner-previous!) (run-command "layout-undo"))
 (define (winner-next!) (run-command "layout-redo"))
 
-(define-command "winner-previous" "Switch to the previous window and buffer arrangement"
+(define-command "winner-previous" "Put back the previous pane arrangement; the windows keep the buffers they show now (layout-undo)"
   (lambda () (winner-previous!)))
-(define-command "winner-next" "Switch to the next window and buffer arrangement"
+(define-command "winner-next" "Go forward again to the pane arrangement winner-previous left (layout-redo)"
   (lambda () (winner-next!)))
-(define-command "winner-undo" "Restore the previous window and buffer arrangement"
+(define-command "winner-undo" "Put back the previous pane arrangement; the windows keep the buffers they show now (layout-undo)"
   (lambda () (winner-previous!)))
-(define-command "winner-redo" "Walk forward to a later window and buffer arrangement"
+(define-command "winner-redo" "Go forward again to the pane arrangement winner-undo left (layout-redo)"
   (lambda () (winner-next!)))
 
 (for-each

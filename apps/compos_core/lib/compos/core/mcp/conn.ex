@@ -81,7 +81,9 @@ defmodule Compos.Core.MCP.Conn do
       resources: [],
       prompts: [],
       log: [],
-      last_slug: nil
+      last_slug: nil,
+      # cleared when a server refuses the 2026-07-28 _meta (HTTP 400)
+      elicitation_meta: true
     }
 
     {:ok, state, {:continue, :connect}}
@@ -140,15 +142,12 @@ defmodule Compos.Core.MCP.Conn do
   def handle_call(:log, _from, state), do: {:reply, Conn.entries(state), state}
 
   def handle_call({:call_tool, tool, args, extra_params, slug}, from, state) do
-    params =
-      Map.merge(
-        %{
-          "name" => tool,
-          "arguments" => args,
-          "_meta" => elicitation_meta()
-        },
-        extra_params || %{}
-      )
+    base = %{"name" => tool, "arguments" => args}
+
+    base =
+      if state.elicitation_meta, do: Map.put(base, "_meta", elicitation_meta()), else: base
+
+    params = Map.merge(base, extra_params || %{})
 
     state = if slug, do: %{state | last_slug: slug}, else: state
     {:noreply, send_req(state, "tools/call", params, {:reply, from})}
@@ -202,6 +201,9 @@ defmodule Compos.Core.MCP.Conn do
   def handle_info({:elicitation_reply, id, response}, state) do
     {:noreply, send_msg(state, JsonRpc.response(id, response))}
   end
+
+  def handle_info(:drop_elicitation_meta, state),
+    do: {:noreply, %{state | elicitation_meta: false}}
 
   def handle_info(:stop_conn, state), do: {:stop, :normal, state}
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
@@ -368,8 +370,24 @@ defmodule Compos.Core.MCP.Conn do
     headers =
       if session_id, do: [{"mcp-session-id", session_id} | headers], else: headers
 
+    post = fn m -> Req.post(url, json: m, headers: headers, receive_timeout: @call_timeout) end
+
     Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-      case Req.post(url, json: msg, headers: headers, receive_timeout: @call_timeout) do
+      first = post.(msg)
+
+      # a server older than 2026-07-28 may refuse the elicitation _meta with a
+      # 400: send the call again without it, and stop sending it to that server
+      reply =
+        case {first, msg} do
+          {{:ok, %{status: 400}}, %{"params" => %{"_meta" => _} = params}} ->
+            send(me, :drop_elicitation_meta)
+            post.(%{msg | "params" => Map.delete(params, "_meta")})
+
+          _ ->
+            first
+        end
+
+      case reply do
         {:ok, %{status: status, body: body, headers: rh}} when status in 200..299 ->
           sid = rh |> Map.get("mcp-session-id", []) |> List.first()
 
@@ -380,8 +398,8 @@ defmodule Compos.Core.MCP.Conn do
             end
           end
 
-        {:ok, %{status: status}} ->
-          if id, do: send(me, {:http_response, id, {:error, "mcp http #{status}"}})
+        {:ok, %{status: status, body: body}} ->
+          if id, do: send(me, {:http_response, id, {:error, http_error(status, body)}})
 
         {:error, e} ->
           if id, do: send(me, {:http_response, id, {:error, Exception.message(e)}})
@@ -390,6 +408,13 @@ defmodule Compos.Core.MCP.Conn do
 
     state
   end
+
+  defp http_error(status, body) when body in [nil, ""], do: "mcp http #{status}"
+
+  defp http_error(status, body) when is_binary(body),
+    do: "mcp http #{status}: #{String.slice(body, 0, 300)}"
+
+  defp http_error(status, body), do: "mcp http #{status}: #{inspect(body, limit: 20)}"
 
   @doc false
   # streamable HTTP responses: plain JSON map, or an SSE stream whose data

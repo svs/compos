@@ -504,6 +504,13 @@
     ;; what was printed, for a caller that records the run
     body))
 
+(public! 'chat-scheme-eval!
+  "(chat-scheme-eval! BUF SRC OTHER?) — evaluate SRC as Scheme in the chat BUF and print the value into its transcript, or to *chat-eval* in the other window when OTHER?; answers the printed text")
+(catalog-meta! 'function "chat-scheme-eval!" 'domain 'chat 'effects '(write execute display))
+(public! 'chat-scheme-run!
+  "(chat-scheme-run! BUF SRC OTHER?) — chat-scheme-eval! after SRC joins the prompt history and the input clears")
+(catalog-meta! 'function "chat-scheme-run!" 'domain 'chat 'effects '(write execute display))
+
 (define chat-scheme-fence-languages '("scheme" "scm"))
 
 (define (chat-scheme--fence-lang line)

@@ -400,7 +400,7 @@ defmodule Compos.Core.LLM do
 
     {result, error?} =
       case gate_call(opts[:gate], call["name"], call["input"]) do
-        :allow -> run_tool(dispatcher, call["name"], call["input"], concurrent?)
+        :allow -> run_tool(dispatcher, call["name"], call["input"], concurrent?, opts[:slug])
         {:ok, text} -> {to_string(text), false}
         {:error, text} -> {"error: #{text}", true}
         {:deny, why} ->
@@ -502,14 +502,14 @@ defmodule Compos.Core.LLM do
   # web fetch inside Session.call_fn would block every keystroke.
   # Returns {result-text, error?}: the wire marks a failed tool result, and
   # the record keeps the mark.
-  defp run_tool(_dispatcher, "mcp__" <> _ = name, input, _concurrent?) do
-    case Compos.Core.MCP.call_qualified(name, input) do
+  defp run_tool(_dispatcher, "mcp__" <> _ = name, input, _concurrent?, slug) do
+    case Compos.Core.MCP.call_qualified(name, input, slug: slug) do
       {:ok, text} -> {text, false}
       {:error, msg} -> {"error: #{msg}", true}
     end
   end
 
-  defp run_tool(dispatcher, name, input, concurrent?) do
+  defp run_tool(dispatcher, name, input, concurrent?, _slug) do
     # the tool loop's own lane: a slow Scheme tool holds this loop, not
     # the UI — self() is the loop task, so each loop serializes alone
     result =

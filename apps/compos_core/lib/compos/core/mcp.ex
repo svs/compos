@@ -22,7 +22,7 @@ defmodule Compos.Core.MCP do
   """
 
   alias Compos.Core.{Session}
-  alias Compos.Core.MCP.Conn
+  alias Compos.Core.MCP.{Conn, Elicitation}
 
   alias Compos.Core.Roots
 
@@ -146,14 +146,18 @@ defmodule Compos.Core.MCP do
   end
 
   @doc "Call a tool by qualified name (mcp__server__tool) with a JSON args map."
-  def call_qualified("mcp__" <> rest, args) do
+  @max_elicitation_rounds 5
+
+  def call_qualified(name, args, opts \\ [])
+
+  def call_qualified("mcp__" <> rest, args, opts) do
     case String.split(rest, "__", parts: 2) do
-      [server, tool] -> call(server, tool, args)
+      [server, tool] -> call(server, tool, args, opts)
       _ -> {:error, "bad mcp tool name: mcp__#{rest}"}
     end
   end
 
-  def call_qualified(name, _), do: {:error, "bad mcp tool name: #{name}"}
+  def call_qualified(name, _, _opts), do: {:error, "bad mcp tool name: #{name}"}
 
   @doc """
   Call a tool, waiting up to `wait_ms` for a server that is still shaking
@@ -161,9 +165,9 @@ defmodule Compos.Core.MCP do
   has no other way to know when the tools arrive. Run this in a task: it
   sleeps.
   """
-  def call_when_ready(server, tool, args, wait_ms) do
+  def call_when_ready(server, tool, args, wait_ms, opts \\ []) do
     if await_ready(server, wait_ms),
-      do: call(server, tool, args),
+      do: call(server, tool, args, opts),
       else: {:error, "mcp server not connected: #{server}"}
   end
 
@@ -182,14 +186,33 @@ defmodule Compos.Core.MCP do
   @doc "True once the handshake published the server's tools."
   def ready?(server), do: :persistent_term.get({:compos_mcp, server}, nil) != nil
 
-  def call(server, qualified_tool, args) do
+  def call(server, qualified_tool, args, opts \\ []) do
     with pid when pid != nil <- whereis(server),
          %{tools: tools} <- :persistent_term.get({:compos_mcp, server}, nil) do
       # the wire name may differ from the qualified segment (charset mangling)
       tool = Map.get(tools, qualified_tool, qualified_tool)
-      Conn.call_tool(pid, tool, args)
+      call_with_elicitation(pid, server, tool, args, %{}, opts, @max_elicitation_rounds)
     else
       _ -> {:error, "mcp server not connected: #{server}"}
+    end
+  end
+
+  defp call_with_elicitation(_pid, server, tool, _args, _extra, _opts, 0),
+    do: {:error, "#{server} #{tool}: too many elicitation rounds"}
+
+  defp call_with_elicitation(pid, server, tool, args, extra, opts, rounds) do
+    case Conn.call_tool(pid, tool, args, extra, opts) do
+      {:input_required, result} ->
+        case Elicitation.resolve_stateless(server, tool, result, opts) do
+          {:ok, retry_params} ->
+            call_with_elicitation(pid, server, tool, args, retry_params, opts, rounds - 1)
+
+          {:error, msg} ->
+            {:error, msg}
+        end
+
+      other ->
+        other
     end
   end
 

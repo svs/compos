@@ -21,9 +21,9 @@ defmodule Compos.MCPTest do
 
   @fixture Path.expand("../support/fake_mcp_server.exs", __DIR__)
 
-  defp connect!(name) do
+  defp connect!(name, extra_args \\ []) do
     on_exit(fn -> MCP.disconnect(name) end)
-    {:ok, _} = MCP.connect(name, %{"command" => "elixir", "args" => [@fixture]})
+    {:ok, _} = MCP.connect(name, %{"command" => "elixir", "args" => [@fixture | extra_args]})
     wait_until(fn -> MCP.tool_specs([name]) != [] end)
   end
 
@@ -31,7 +31,8 @@ defmodule Compos.MCPTest do
     test "handshake publishes qualified specs carrying the raw JSON schema" do
       connect!("fake")
 
-      assert [[name, desc, schema, effects]] = MCP.tool_specs(["fake"])
+      specs = MCP.tool_specs(["fake"])
+      assert [name, desc, schema, effects] = Enum.find(specs, &(hd(&1) == "mcp__fake__echo"))
       assert name == "mcp__fake__echo"
       assert desc =~ "Echo"
       assert Jason.decode!(schema)["required"] == ["v"]
@@ -207,6 +208,42 @@ defmodule Compos.MCPTest do
       # usage callback saw the summed rounds
       assert eval!("(plist-get zz-mcp-usage 'input)") == "15"
       assert eval!("(plist-get zz-mcp-usage 'output)") == "9"
+    end
+  end
+
+  describe "form elicitation" do
+    test "stateless InputRequiredResult replays tools/call with requestState and inputResponses" do
+      connect!("elicit1", ["--elicitation"])
+
+      handler = fn server, tool, params ->
+        assert server == "elicit1"
+        assert tool == "guarded"
+        assert params["message"] =~ "Guarded action"
+        %{"action" => "accept", "content" => %{"approval_choice" => "ALLOW_ONCE"}}
+      end
+
+      assert {:ok, "approved:ALLOW_ONCE:hello"} =
+               MCP.call("elicit1", "guarded", %{"v" => "hello"}, elicitation_handler: handler)
+
+      deny_handler = fn _server, _tool, _params ->
+        %{"action" => "accept", "content" => %{"approval_choice" => "DENY_ONCE"}}
+      end
+
+      assert {:error, "denied:DENY_ONCE"} =
+               MCP.call("elicit1", "guarded", %{"v" => "hello"}, elicitation_handler: deny_handler)
+    end
+
+    test "stateful server-initiated elicitation/create replies and completes tools/call" do
+      connect!("elicit2", ["--elicitation"])
+
+      Application.put_env(:compos_core, :mcp_elicitation_fun, fn _server, _tool, params ->
+        assert params["message"] == "Confirm world"
+        %{"action" => "accept", "content" => %{"confirm" => true}}
+      end)
+
+      on_exit(fn -> Application.delete_env(:compos_core, :mcp_elicitation_fun) end)
+
+      assert {:ok, "stateful:true:world"} = MCP.call("elicit2", "ask_stateful", %{"v" => "world"})
     end
   end
 

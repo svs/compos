@@ -47,9 +47,9 @@ defmodule Compos.Core.MCP.Conn do
 
   def status(pid), do: Conn.call(pid, :status, :busy)
 
-  @doc "Call a tool; returns {:ok, text} | {:error, msg}."
-  def call_tool(pid, tool, args) do
-    GenServer.call(pid, {:call_tool, tool, args}, @call_timeout)
+  @doc "Call a tool; returns {:ok, text} | {:input_required, result} | {:error, msg}."
+  def call_tool(pid, tool, args, extra_params \\ %{}, opts \\ []) do
+    GenServer.call(pid, {:call_tool, tool, args, extra_params, opts[:slug]}, @call_timeout)
   catch
     :exit, reason -> {:error, "mcp call timed out or connection died: #{inspect(reason)}"}
   end
@@ -80,7 +80,8 @@ defmodule Compos.Core.MCP.Conn do
       caps: %{},
       resources: [],
       prompts: [],
-      log: []
+      log: [],
+      last_slug: nil
     }
 
     {:ok, state, {:continue, :connect}}
@@ -138,8 +139,19 @@ defmodule Compos.Core.MCP.Conn do
 
   def handle_call(:log, _from, state), do: {:reply, Conn.entries(state), state}
 
-  def handle_call({:call_tool, tool, args}, from, state) do
-    {:noreply, send_req(state, "tools/call", %{name: tool, arguments: args}, {:reply, from})}
+  def handle_call({:call_tool, tool, args, extra_params, slug}, from, state) do
+    params =
+      Map.merge(
+        %{
+          "name" => tool,
+          "arguments" => args,
+          "_meta" => elicitation_meta()
+        },
+        extra_params || %{}
+      )
+
+    state = if slug, do: %{state | last_slug: slug}, else: state
+    {:noreply, send_req(state, "tools/call", params, {:reply, from})}
   end
 
   # --- wire in (stdio) ------------------------------------------------------
@@ -187,6 +199,10 @@ defmodule Compos.Core.MCP.Conn do
     end
   end
 
+  def handle_info({:elicitation_reply, id, response}, state) do
+    {:noreply, send_msg(state, JsonRpc.response(id, response))}
+  end
+
   def handle_info(:stop_conn, state), do: {:stop, :normal, state}
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
   def handle_info(_, state), do: {:noreply, state}
@@ -211,8 +227,16 @@ defmodule Compos.Core.MCP.Conn do
   defp initialize_params do
     %{
       protocolVersion: @protocol,
-      capabilities: %{},
+      capabilities: %{elicitation: %{form: %{}}},
       clientInfo: %{name: "compos", version: "0.1.0"}
+    }
+  end
+
+  defp elicitation_meta do
+    %{
+      "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+      "io.modelcontextprotocol/clientInfo" => %{"name" => "compos", "version" => "0.1.0"},
+      "io.modelcontextprotocol/clientCapabilities" => %{"elicitation" => %{"form" => %{}}}
     }
   end
 
@@ -227,6 +251,10 @@ defmodule Compos.Core.MCP.Conn do
 
     case {tag, msg} do
       {nil, _} ->
+        state
+
+      {{:reply, from}, %{"result" => %{"resultType" => "input_required"} = result}} ->
+        GenServer.reply(from, {:input_required, result})
         state
 
       {{:reply, from}, %{"result" => result}} ->
@@ -269,9 +297,24 @@ defmodule Compos.Core.MCP.Conn do
     end
   end
 
-  # server-initiated: answer pings, ignore the rest (logging/progress)
+  # server-initiated: answer pings and stateful elicitation/create, ignore the rest
   defp dispatch(%{"method" => "ping", "id" => id}, state),
     do: send_msg(state, JsonRpc.response(id, %{}))
+
+  defp dispatch(%{"method" => "elicitation/create", "id" => id, "params" => params}, state) do
+    me = self()
+    name = state.name
+    slug = state.last_slug
+
+    Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
+      response =
+        Compos.Core.MCP.Elicitation.respond_stateful(name, nil, params || %{}, slug: slug)
+
+      send(me, {:elicitation_reply, id, response})
+    end)
+
+    state
+  end
 
   defp dispatch(_msg, state), do: state
 

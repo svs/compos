@@ -5,6 +5,7 @@ defmodule Compos.Core.MCP.Prims do
   alias Compos.Core.Session
 
   @mcp_wait 30_000
+  @mcp_call_wait 120_000
   alias Compos.Core.Roots
 
   @doc "Every primitive under its {name, doc} key."
@@ -57,22 +58,23 @@ defmodule Compos.Core.MCP.Prims do
        "(mcp-tool-call SERVER TOOL ARGS [TIMEOUT|CB]) — call one tool; without CB, wait for text."} =>
         fn
           [server, tool, args] ->
-            mcp_wait_call(s(server), s(tool), mcp_args(args), @mcp_wait)
+            mcp_wait_call(s(server), s(tool), mcp_args(args), @mcp_call_wait, current_agent_slug())
 
           [server, tool, args, timeout] when is_integer(timeout) ->
-            mcp_wait_call(s(server), s(tool), mcp_args(args), timeout)
+            mcp_wait_call(s(server), s(tool), mcp_args(args), timeout, current_agent_slug())
 
           [server, tool, args, callback] ->
             key = {:mcp_call, make_ref()}
             Roots.hold(key, callback)
             {server, tool, args} = {s(server), s(tool), mcp_args(args)}
+            slug = current_agent_slug()
             # the callback comes back to the frame and buffer that asked, as a
             # task-run! callback does; a failure then reaches that chat
             fid = Compos.Core.Frame.current()
             buffer = Compos.Core.Frame.buffer_context()
 
             Task.Supervisor.start_child(Compos.Core.TaskSupervisor, fn ->
-              result = Compos.Core.MCP.call_when_ready(server, tool, args, @mcp_wait)
+              result = Compos.Core.MCP.call_when_ready(server, tool, args, @mcp_wait, slug: slug)
 
               try do
                 Session.apply_callback(callback, mcp_callback_args(result), fid, nil, buffer)
@@ -88,10 +90,17 @@ defmodule Compos.Core.MCP.Prims do
 
   # the task owns the timeout, not the connection: Conn gives a tool call
   # two minutes, and the session cannot wait that long for anything
-  defp mcp_wait_call(server, tool, args, timeout) do
+  defp current_agent_slug do
+    case Process.get(:compos_edit_author) do
+      "agent:" <> slug when slug != "" -> slug
+      _ -> nil
+    end
+  end
+
+  defp mcp_wait_call(server, tool, args, timeout, slug) do
     task =
       Task.Supervisor.async_nolink(Compos.Core.TaskSupervisor, fn ->
-        Compos.Core.MCP.call_when_ready(server, tool, args, timeout)
+        Compos.Core.MCP.call_when_ready(server, tool, args, min(timeout, @mcp_wait), slug: slug)
       end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do

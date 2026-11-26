@@ -68,7 +68,7 @@
 
 ;; the tint under a marked row: a background alone, so the row's own
 ;; faces show through
-(defface! 'ibuffer-marked 'bg "rgba(213, 172, 102, 0.13)")
+(defface! 'ibuffer-marked 'bg "var(--list-marked-bg, color-mix(in srgb, var(--accent-fg, #7aa2f7) 22%, transparent))")
 
 ;; A section heading is a BAND, not a highlight on its own text. A face
 ;; paints the bytes it covers, and a heading's bytes stop where its name
@@ -1081,9 +1081,22 @@
         (list-fit s w 'middle)
         (list-fit (string-append lead "…" (string-join (cdr parts) ": ")) w 'end))))
 
-(define (ibuffer-columns buf fields)
-  (append (list (list "" 1)
-                (list "" 1)
+;; The dot says what a row is doing. A chat list wide enough for its
+;; STATE column says it there in words, so the dot would say it twice.
+(define (ibuffer-dot? buf tags)
+  (not (and (equal? (list-mode-of buf) "chat-list-mode") (memq 'mode tags))))
+
+;; the field tags the active layout shows
+(define (ibuffer-layout-tags buf)
+  (let* ((layout (plist-get (list-active-layout buf) 'name))
+         (all (cond ((equal? layout 'narrow) *ibuffer-narrow-fields*)
+                    ((equal? layout 'compact) *ibuffer-compact-fields*)
+                    (else *ibuffer-wide-fields*))))
+    (map ibuffer-field-tag (ibuffer-fields buf all))))
+
+(define (ibuffer-columns buf fields &optional no-dot?)
+  (append (if no-dot? '() (list (list "" 1)))
+          (list (list "" 1)
                 (list (if (equal? (list-mode-of buf) "chat-list-mode") "CHAT" "NAME")
                       (ibuffer-name-width buf fields) 'left ibuffer-name-trim))
           fields))
@@ -1215,9 +1228,11 @@
          (hit (assoc key *ibuffer-columns-memo*)))
     (if hit
         (cadr hit)
-        (let ((cols (ibuffer-columns buf
-                      (map (lambda (f) (ibuffer-field-column f buf))
-                           (ibuffer-fields-fitted buf (ibuffer-fields buf all))))))
+        (let* ((fields (ibuffer-fields buf all))
+               (cols (ibuffer-columns buf
+                       (map (lambda (f) (ibuffer-field-column f buf))
+                            (ibuffer-fields-fitted buf fields))
+                       (not (ibuffer-dot? buf (map ibuffer-field-tag fields))))))
           (set! *ibuffer-columns-memo* (cons (list key cols) *ibuffer-columns-memo*))
           cols))))
 
@@ -1229,10 +1244,12 @@
 (define (ibuffer-cells-for buf b all)
   (let ((fields (ibuffer-fields buf all)))
     (if (ibuffer-heading? b)
-        (ibuffer-heading-cells buf b (length fields))
+        (let ((cells (ibuffer-heading-cells buf b (length fields))))
+          (if (ibuffer-dot? buf (map ibuffer-field-tag fields)) cells (cdr cells)))
         ;; the mode says what a buffer is, so it reads as metadata (dim);
         ;; the size and the age are the quiet columns (faint)
-        (append (ibuffer-cell-head buf b)
+        (append (let ((head (ibuffer-cell-head buf b)))
+                  (if (ibuffer-dot? buf (map ibuffer-field-tag fields)) head (cdr head)))
                 (map (lambda (f)
                        (list (ibuffer-field-fill
                                (ibuffer-field-cell b (ibuffer-field-tag f)))
@@ -1427,10 +1444,12 @@
 ;; the name column starts after the mark, the dot and the icon, each
 ;; with a gap; every overlay over the name measures from there
 (define (ibuffer-name-start buf b off)
-  (let ((dot (let ((d (ibuffer-cell-text (ibuffer-row-dot b))))
-               (if (equal? d "") " " d)))
+  (let ((dot (if (ibuffer-dot? buf (ibuffer-layout-tags buf))
+                 (let ((d (ibuffer-cell-text (ibuffer-row-dot b))))
+                   (string-append (if (equal? d "") " " d) "  "))
+                 ""))
         (icon (let ((i (ibuffer-row-icon b))) (if (equal? i "") " " i))))
-    (+ off 2 (string-byte-length dot) 2 (string-byte-length icon) 2
+    (+ off 2 (string-byte-length dot) (string-byte-length icon) 2
        (string-byte-length (list-nest-prefix buf b)))))
 
 ;; the emphasis a Markdown name carries, as faces over the drawn name.
@@ -1656,6 +1675,33 @@
 ;; the first row the list holds, never the heading over it: a table opens
 ;; on something you can act on, and folding a section is not an opening
 ;; act
+;; M-o on a list of buffers is M-o on its rows, as on the todo list: the
+;; row at point, or every marked row. A chat row is its own chat; a buffer
+;; row gets its companion chat, made quietly when it has none. The first
+;; one shows; the rest wait in their groups.
+(define (ibuffer-companion-of row)
+  (cond ((not (and (string? row) (buffer-known? row))) #f)
+        ((chat-buffer? row) row)
+        (else (let* ((got (llm-companion-ensure! row))
+                     (chat (car got))
+                     (opening (and (cadr got) (chat-opening-prompt row))))
+                (when opening (agent-continue! chat opening))
+                chat))))
+
+(define-command "ibuffer-companion" "Go to the chat of the buffer at point or of each marked buffer"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (chats (filter string? (map ibuffer-companion-of (ibuffer-targets buf)))))
+      (cond ((null? chats) (message "no buffer here"))
+            (else (when (pair? (list-marked buf *list-mark-char*))
+                    (list-clear-marks! buf)
+                    (list-redraw! buf))
+                  (pop-to-buffer (car chats))
+                  (when (pair? (cdr chats))
+                    (message (string-append (number->string (length chats))
+                                            " chats ready; this is the first")))))))
+  'modes '(ibuffer-mode chat-list-mode isubagents-mode ibuffer-pretty-mode))
+
 (define (ibuffer-goto-first-row! &optional buf)
   (let* ((buf (or buf (ibuffer-view)))
          (es (list-entries buf)))
@@ -2064,15 +2110,15 @@
 (ibuffer-view! *ibuffer-prompt-buffer* 'sort 'recent)
 
 (define-style! 'ibuffer-semantic-list "
-/* The rows of a section hang off its spine and sit in from the name
-   that opens them. The text stays flush -- the nesting is drawn, not
-   spelled -- so a copy of the table is still a table. */
+/* The rows of a section sit in from the name that opens them. The text
+   stays flush -- the nesting is drawn, not spelled -- so a copy of the
+   table is still a table. No rule runs down the side: it clashed with
+   the state dots. */
 :is(buffers, chat-list) > .semantic-direct[level] {
   padding-left: 1.6ch;
-  box-shadow: inset 1px 0 var(--faint-fg, #3a3a44);
 }
 :is(buffers, chat-list) > .semantic-direct[marked=true] {
-  box-shadow: inset 3px 0 var(--accent-fg, #7aa2f7);
+  background: var(--list-marked-bg, color-mix(in srgb, var(--accent-fg, #7aa2f7) 22%, transparent));
 }
 
 /* A chat that is running says so without a word, and says it by colour.
@@ -2104,7 +2150,6 @@
 .window.bare .dash-top { display: none; }
 .window.bare .modeline { display: none; }
 .window.bare .buf { padding-top: 2px; }
-.window.bare.active .line.hl-line { box-shadow: inset 2px 0 0 var(--accent-fg, #26356b); }
 ")
 
 ;; the keys the filter line answers while the table stands behind it
@@ -2643,6 +2688,13 @@
   (or (not (equal? (ibuffer-grouping buf) 'none))
       (not (buffer-known? entry))))
 
+;; The id a buffer row keys by: the buffer's registry id, which a rename
+;; keeps; a row that names no buffer (a saved chat's path) is its own key.
+(define (ibuffer-row-id b)
+  (if (string? b)
+      (or (cadr (car (buffer-read-many (list b) '(id) '()))) b)
+      b))
+
 ;; The renderer keeps a whitelist of attribute names, so a row says how
 ;; deep it sits with 'level -- a name the whitelist already carries --
 ;; and the style rules hang the spine and the indent off that.
@@ -2693,7 +2745,7 @@
            "name and the age; a wider one adds the size and the mode, and "
            "a wide one the group. / searches the table by name, mode, or path, "
            "and \\ widens it. f filters as Emacs ibuffer's / does: f m mode, f n name, f f filename, f F directory, f . extension, f c contents (regexps fold case), f ! negates the newest filter, f | ors the two newest, f p pops one and f / drops them all. S-TAB folds every section. <left> and <right> switch the tabs: all and group; the buffers of a window or a pane are in the windows list, C-x w. "
-           "SPC marks one row, * marks all shown rows, u "
+           "M-o goes to the chat of the row at point, or of each marked row. SPC marks one row, * marks all shown rows, u "
            "unmarks one row, and U clears all marks. k kills now. d flags "
            "rows for killing, and x executes the flags. G puts the targets "
            "in a group, and K kills the group at point. RET enters the "
@@ -2709,13 +2761,17 @@
     'section? (lambda (buf b) (ibuffer-heading? b))
     ;; a row sits under its listed parent; the name cell takes the indent
     'parent (lambda (buf b) (and (string? b) (ibuffer-row-parent b)))
-    'nest-cell 2
+    ;; the name cell: after the dot and the icon, or the icon alone
+    'nest-cell (lambda (buf) (if (ibuffer-dot? buf (ibuffer-layout-tags buf)) 2 1))
     'nest-flat? (lambda (buf) (ibuffer-nest-flat? buf))
     'markable? (lambda (buf b) (string? b))
+    ;; a buffer row keys by the buffer's id, never its name: a rename
+    ;; keeps the id, and a mark stays on the buffer it was put on. A row
+    ;; that names no buffer keys by itself.
     'key (lambda (buf b)
            (if (ibuffer-heading? b)
                (string-append "section:" (ibuffer-heading-key b))
-               b))
+               (ibuffer-row-id b)))
     'match (lambda (buf row input) (ibuffer-match? buf row input))
     ;; what TAB and M-g mean to a prompt standing in front of this table
     'fold (lambda (buf)
@@ -2806,7 +2862,7 @@
             ("M-n" "ibuffer-next-group") ("M-p" "ibuffer-previous-group")
             ("C-c i" "ibuffer-toggle-info") ("C-c p" "ibuffer-toggle-pretty")
             ("C-x o" "listing-preview-open-other") ("s-RET" "listing-preview-open-other")
-            ("RET" "ibuffer-visit")
+            ("RET" "ibuffer-visit") ("M-o" "ibuffer-companion")
             ("C-c v" "ibuffer-toggle-preview")
             ;; p turns the row preview off
             ;; and on; C-p and <up> still move to the row above

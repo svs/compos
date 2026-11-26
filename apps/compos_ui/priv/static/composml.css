@@ -18,7 +18,7 @@
 .buf[rows-click] .line, .semantic-list > .semantic-item { cursor: pointer; }
 .semantic-item[unread="true"] { border-left-color: var(--list-unread-fg, currentColor); }
 .semantic-item[unread="true"] > [field="primary"] { font-weight: 700; }
-.semantic-item[marked="true"] { border-left-color: var(--list-marked-fg, var(--accent-fg, #a03020)); }
+.semantic-item[marked="true"] { background: var(--list-marked-bg, color-mix(in srgb, var(--accent-fg, #7aa2f7) 22%, transparent)); }
 .semantic-item > .list-mark { position: absolute; left: .05em; top: .6em; font-size: .75em; color: var(--list-marked-fg, var(--accent-fg, currentColor)); }
 .semantic-item > [field] { display: block; min-width: 0; overflow-wrap: anywhere; }
 .semantic-item > [field="primary"] { grid-column: 1; }

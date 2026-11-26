@@ -130,7 +130,7 @@ defmodule Compos.IbufferPickerTest do
     assert Buffer.text(view) =~ "Buffer"
     eval!(~s{(begin (list-set-query! #{inspect(view)} "picker-target")
       (list-goto-index! #{inspect(view)} 1) (run-command "list-toggle-mark"))})
-    assert eval!(~s{(and (assoc "*picker-target*" (list-marks #{inspect(view)})) #t)}) == "#t"
+    assert eval!(~s{(equal? (list-mark-of #{inspect(view)} "*picker-target*") "*")}) == "#t"
     eval!(~s{(list-redraw! #{inspect(view)})})
     assert inspect(Buffer.get_local(view, "render-records"), limit: :infinity) =~ "ibuffer-mode"
     Compos.Core.kill_buffer(view)

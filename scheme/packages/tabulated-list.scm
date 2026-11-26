@@ -2532,8 +2532,13 @@
                       (loop (cdr ks) (cdr cs) (if (pair? fs) (cdr fs) '())
                             (if (list-col-hidden? (car ks)) out
                                 (cons (list (car ks) (car cs) (and (pair? fs) (car fs))) out)))))))
+    ;; a grid has no mark column: the row says it is marked, and the page
+    ;; tints the whole row ([marked=true] in composml.css)
     (list 'tag "div" 'class "lg-row"
-          'attrs (list (list "style" (list-grid-template (map car shown) (map caddr shown))))
+          'attrs (append (list (list "style" (list-grid-template (map car shown) (map caddr shown))))
+                         (let ((m (list-mark-of buf row)))
+                           (if (equal? m " ") '()
+                               (list (list "marked" "true") (list "mark" m)))))
           'children (map (lambda (p) (list-grid-cell buf (car p) (cadr p) row)) shown))))
 
 ;; The grid's head: the title with the narrowing chip at the right, the
@@ -2567,6 +2572,8 @@
 .lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
 /* a row is also a semantic item: keep the list's own height, not the item's padding */
 .semantic-list > .lg-row { padding: 3px 0; }
+/* a marked row is tinted whole: a grid has no mark column to show it */
+.lg-row[marked=true] { background: var(--list-marked-bg, color-mix(in srgb, var(--accent-fg, #7aa2f7) 22%, transparent)); }
 .lg-row > .lg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .lg-head { color: var(--dim-fg); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-bg); }
 .lg-head-title { display: flex; justify-content: space-between; gap: 2ch; padding: 6px 0 2px; font-family: var(--font-sans); font-weight: 600; white-space: pre; overflow: hidden; }
@@ -2861,7 +2868,8 @@
                    (if (and hidden (> hidden 0)) (string-append "▸ +" (number->string hidden) " ") ""))))
 
 (define (list-nest-cells buf row cells)
-  (let* ((i (list-opt buf 'nest-cell))
+  ;; 'nest-cell is an index, or (buf) -> index for a mode whose columns move
+  (let* ((i (let ((n (list-opt buf 'nest-cell))) (if (procedure? n) (n buf) n)))
          (pre (if i (list-nest-prefix buf row) "")))
     (if (or (not i) (equal? pre "") (null? cells) (not (pair? (car cells))) (>= i (length (car cells))))
         cells

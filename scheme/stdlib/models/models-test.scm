@@ -59,6 +59,7 @@
                         (list '*models-error* #f)
                         (list '*models-errors* '())
                         (list '*models-daemon-hosts* (lambda () '()))
+                        (list '*models-endpoint-hosts* (lambda () '()))
                         (list '*models-daemon-ask* *models-daemon-ask*)
                         (list '*models-daemon-running?* *models-daemon-running?*)
                         (list '*models-disk-scan* *models-disk-scan*)
@@ -296,6 +297,20 @@
         (set! t--models-calls '())
         (with-current-buffer *models-buffer* (lambda () (run-command "models-start")))
         (check-equal! t--models-calls '() "and a load sends nothing to a server that only answers")))))
+
+(deftest 'models-an-endpoint-server-is-a-host-too
+  "a server added in M-x llm-connectors shows in the list; a provider endpoint does not"
+  (lambda ()
+    (with-stubs (list (list 'llm-connectors-endpoints
+                            '(("mine" "http://127.0.0.1:8000/v1" "openai" ())
+                              ("groq" #f "openai" ())))
+                      (list 'models-host "http://localhost:11434")
+                      (list 'models-hosts (list "http://localhost:11434"))
+                      (list '*models-daemon-hosts* (lambda () '())))
+      (lambda ()
+        (check-equal! (models-host-list)
+                      '("http://localhost:11434" "http://127.0.0.1:8000/v1")
+                      "the server is a host, and a provider with no address is not")))))
 
 (deftest 'models-the-disk-holds-models-no-server-runs
   "a model file is in the list, and it does not claim to be a service"

@@ -2038,6 +2038,13 @@ defmodule Compos.Core.SchemeAPI do
         fn [] ->
           :persistent_term.get(:compos_editor_url, "http://localhost:4004")
         end,
+      {"system-name",
+       "(system-name) — return the machine hostname, as Emacs's system-name."} => fn [] ->
+        case :inet.gethostname() do
+          {:ok, name} -> to_string(name)
+          _ -> "localhost"
+        end
+      end,
       {"daemon-name", "(daemon-name) — return this daemon's configured name."} => fn [] ->
         Application.get_env(:compos_core, :name, "compos")
       end,

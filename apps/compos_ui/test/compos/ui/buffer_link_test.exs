@@ -32,7 +32,14 @@ defmodule Compos.Ui.BufferLinkTest do
   # the test endpoint runs on its own port; a link names the port it came from
   defp base do
     port = Application.get_env(:compos_ui, Compos.Ui.Endpoint)[:http][:port]
-    "http://localhost:#{port}"
+
+    host =
+      case :inet.gethostname() do
+        {:ok, name} -> to_string(name)
+        _ -> "localhost"
+      end
+
+    "http://#{host}:#{port}"
   end
 
   test "C-c l copies the link to this buffer and line", %{conn: conn} do

@@ -13,3 +13,22 @@
         (url-encode (compos-socket-path))
         "&line=34")
       "the path and socket are safe URL fields and the line is preserved")))
+
+(deftest 'a-buffer-link-includes-the-machine-hostname-and-port
+  "buffer-link and copy-buffer-link carry the machine hostname, port, buffer, and line"
+  (lambda ()
+    (let ((expected-base (string-replace (editor-url) "://localhost"
+                                         (string-append "://" (system-name)))))
+      (check-equal!
+        (buffer-link "/tmp/a file.md" 34)
+        (string-append expected-base "/b/%2Ftmp%2Fa%20file.md?line=34")
+        "buffer-link uses the machine hostname and port")
+      (let ((buf (test-buffer! "zz-link-test-buf" "one\ntwo\n")))
+        (with-current-buffer buf
+          (lambda ()
+            (goto-char! 4)
+            (run-command "copy-buffer-link")
+            (check-equal! (kill-top)
+                          (string-append expected-base "/b/zz-link-test-buf?line=2")
+                          "copy-buffer-link copies the host, port, buffer, and line")))
+        (buffer-kill! buf)))))

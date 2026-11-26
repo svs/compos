@@ -7115,10 +7115,17 @@
 (domain! 'buffers)
 (effects! '(read))
 
+(define (buffer-link-base)
+  (let ((url (editor-url))
+        (host (system-name)))
+    (if (and (string? host) (> (string-length host) 0))
+        (string-replace url "://localhost" (string-append "://" host))
+        url)))
+
 (define (buffer-link &optional buf line)
   (let ((name (or buf (current-buffer)))
         (n (or line (if buf #f (line-number-at-pos (point))))))
-    (string-append (editor-url) "/b/" (url-encode name)
+    (string-append (buffer-link-base) "/b/" (url-encode name)
                    (if n (string-append "?line=" (number->string n)) ""))))
 
 (define (compos-link &optional buf line)
@@ -7131,9 +7138,9 @@
 (effects! '(write))
 
 (define-command "copy-buffer-link"
-  "Copy an compos:// link to this buffer and line to the clipboard"
+  "Copy a link with this machine's host, port, buffer, and line to the clipboard"
   (lambda ()
-    (let ((link (compos-link)))
+    (let ((link (buffer-link)))
       ;; the kill ring too: a client with no clipboard permission still
       ;; pastes it with C-y
       (kill-push! link)
@@ -8044,7 +8051,7 @@
   '(cron-next cron-previous parts->time time->parts cron-running?
     cron-scheduled cron-zone compos-config-dir compos-home
     compos-project-dir compos-socket-path daemon-name daemon-registry-path
-    daemon-source-root daemon-workspace-root editor-url system-type
+    daemon-source-root daemon-workspace-root editor-url system-name system-type
     ssh-command socket-listeners vm-fds vm-ports telemetry-snapshot
     client-memory-samples primitive-doc primitive-docs symbol-value
     job-local wait-until profile-stop))

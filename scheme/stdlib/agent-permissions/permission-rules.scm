@@ -467,9 +467,10 @@
         (when (boundp (quote *permission-deny-patterns*))
           (for-each (lambda (p) (add! (list 'text p) 'everywhere 'ask "was *permission-deny-patterns*" #t))
                     *permission-deny-patterns*))
-        ;; 3. what a direct tool call that destroys or spends gets
-        (add! (list 'kind 'tool 'effect "destroy") 'everywhere 'ask "a tool that destroys asks")
-        (add! (list 'kind 'tool 'effect "spend") 'everywhere 'ask "a tool that spends asks")
+        ;; 3. what an action that destroys or spends gets: a tool, and a
+        ;; stamped function an eval calls or reaches
+        (add! (list 'effect "destroy") 'everywhere 'ask "an action that destroys asks")
+        (add! (list 'effect "spend") 'everywhere 'ask "an action that spends asks")
         ;; 4. the folders a sandboxed shell writes
         (when (boundp (quote agent-sandbox-writable))
           (for-each (lambda (d) (add! (list 'kind 'shell 'effect "write" 'path d) 'everywhere 'allow

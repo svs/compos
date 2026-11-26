@@ -262,22 +262,27 @@ defmodule Compos.Ui.MobileLive do
 
   defp refresh(socket) do
     fid = socket.assigns.frame
-    state = Editor.render_state(fid)
+    {state, effects} = Editor.render_state_and_effects(fid)
 
-    state =
+    {state, effects} =
       if fid && state.frame != fid do
         {:ok, ^fid} = Editor.attach_frame(fid)
-        Editor.render_state(fid)
+        Editor.render_state_and_effects(fid)
       else
-        state
+        {state, effects}
       end
 
     caret_owner = if state.minibuffer, do: nil, else: state.active
 
-    {tree, cache} =
-      EditorLive.decorate_tree(state.tree, socket.assigns.line_cache, state.faces, caret_owner)
+    raw_leaf = find_leaf(state.tree, state.active) || first_leaf(state.tree)
 
-    leaf = find_leaf(tree, state.active) || first_leaf(tree)
+    {leaf, cache} =
+      if raw_leaf do
+        EditorLive.decorate_tree(raw_leaf, socket.assigns.line_cache, state.faces, caret_owner)
+      else
+        {nil, %{}}
+      end
+
     leaf_id = leaf && leaf.id
 
     # the phone draws one window: only its cache entries live on
@@ -320,7 +325,7 @@ defmodule Compos.Ui.MobileLive do
         sheet: sheet
       )
 
-    case fid && Editor.take_navigation(fid) do
+    case fid && effects.navigation do
       url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
       _ -> socket
     end

@@ -65,6 +65,10 @@ defmodule Compos.Core.Editor do
 
   def render_state(fid \\ nil), do: GenServer.call(__MODULE__, {:render_state, fid(fid)})
 
+  @doc "Return render state and drain pending frame effects (clipboard, navigation, slide, select) in one call."
+  def render_state_and_effects(fid \\ nil),
+    do: GenServer.call(__MODULE__, {:render_state_and_effects, fid(fid)})
+
   @doc """
   Read-only view for desktop save (S15): the frame's tree with each
   leaf's top and effective per-window point, plus faces — none of
@@ -881,38 +885,19 @@ defmodule Compos.Core.Editor do
   end
 
   def handle_call({:render_state, fid}, _from, state) do
-    f = frame(state, fid)
-    {tree, rendered} = render_walk(f.tree, f.total_rows, f.win_rows, Map.get(f, :group_label), Map.get(f, :win_stacks, %{}))
-    state = put_frame(state, %{f | tree: tree})
+    {rendered, state} = build_render_state(fid, state)
+    {:reply, rendered, state}
+  end
 
-    {:reply,
-     %{
-       frame: f.id,
-       frame_group: Map.get(f, :group_label),
-       frame_group_color: Map.get(f, :group_color),
-       tree: rendered,
-       active: f.active,
-       pending: f.pending,
-       # the next key is not plain text: a prefix waits for its key, a
-       # command reads the key itself, or a count is open. The browser
-       # paints no typed character until this clears (Compos.Ui.RopeSync).
-       key_hold:
-         f.pending != [] or Map.get(f, :key_capture) not in [nil, false] or
-           Map.get(f, :prefix_arg) not in [nil, false],
-       minibuffer: f.minibuffer && render_minibuffer(f.minibuffer, minibuf_of(f)),
-       transient: Map.get(f, :transient),
-       # a pending prefix has which-key rows; the client asks Scheme for
-       # them (which-key-rows) once its idle delay has passed, so a fast
-       # chord never pays for them
-       which_key: if(f.pending == [], do: nil, else: :pending),
-       completion: f.completion && render_completion(f.completion),
-       echo: f.echo,
-       workspace: workspace_context(),
-       modeline_extra: state.modeline_extra,
-       chrome: Map.get(state, :chrome, %{}),
-       faces: frame_faces(state, f),
-       styles: frame_styles(state, f)
-     }, state}
+  def handle_call({:render_state_and_effects, fid}, _from, state) do
+    {rendered, state} = build_render_state(fid, state)
+
+    if is_nil(fid) or rendered.frame == fid do
+      {effects, state} = take_frame_effects(rendered.frame, state)
+      {:reply, {rendered, effects}, state}
+    else
+      {:reply, {rendered, %{clipboard: nil, navigation: nil, slide: nil, select: nil}}, state}
+    end
   end
 
   def handle_call({:set_group_label, label, fid}, _from, state) do
@@ -1692,6 +1677,56 @@ defmodule Compos.Core.Editor do
     taken = other_frames_window_ids(state, f.id)
     {state, f} = restore_frame_tree(state, f, spec, active_buffer, bump_mru?, taken)
     changed(:ok, state, f.id)
+  end
+
+  defp build_render_state(fid, state) do
+    f = frame(state, fid)
+    {tree, rendered} = render_walk(f.tree, f.total_rows, f.win_rows, Map.get(f, :group_label), Map.get(f, :win_stacks, %{}))
+    state = put_frame(state, %{f | tree: tree})
+
+    {%{
+       frame: f.id,
+       frame_group: Map.get(f, :group_label),
+       frame_group_color: Map.get(f, :group_color),
+       tree: rendered,
+       active: f.active,
+       pending: f.pending,
+       # the next key is not plain text: a prefix waits for its key, a
+       # command reads the key itself, or a count is open. The browser
+       # paints no typed character until this clears (Compos.Ui.RopeSync).
+       key_hold:
+         f.pending != [] or Map.get(f, :key_capture) not in [nil, false] or
+           Map.get(f, :prefix_arg) not in [nil, false],
+       minibuffer: f.minibuffer && render_minibuffer(f.minibuffer, minibuf_of(f)),
+       transient: Map.get(f, :transient),
+       # a pending prefix has which-key rows; the client asks Scheme for
+       # them (which-key-rows) once its idle delay has passed, so a fast
+       # chord never pays for them
+       which_key: if(f.pending == [], do: nil, else: :pending),
+       completion: f.completion && render_completion(f.completion),
+       echo: f.echo,
+       workspace: workspace_context(),
+       modeline_extra: state.modeline_extra,
+       chrome: Map.get(state, :chrome, %{}),
+       faces: frame_faces(state, f),
+       styles: frame_styles(state, f)
+     }, state}
+  end
+
+  defp take_frame_effects(fid, state) do
+    {clipboard, clips} = Map.pop(state.clips, fid)
+    {navigation, navigations} = Map.pop(state.navigations, fid)
+    {slide, slides} = Map.pop(Map.get(state, :slides, %{}), fid)
+    {select, selects} = Map.pop(Map.get(state, :selects, %{}), fid)
+
+    state =
+      state
+      |> Map.put(:clips, clips)
+      |> Map.put(:navigations, navigations)
+      |> Map.put(:slides, slides)
+      |> Map.put(:selects, selects)
+
+    {%{clipboard: clipboard, navigation: navigation, slide: slide, select: select}, state}
   end
 
   # the render modes the client draws in an iframe
@@ -2910,6 +2945,8 @@ defmodule Compos.Core.Editor do
           else: nil
         ),
       preview_authored: Map.get(locals, "preview-authored") == true,
+      whitespace_mode: Map.get(locals, "whitespace-mode"),
+      preview_csv_files: Map.get(locals, "preview-csv-files"),
       # an app reloads when this number changes, and only then: a keystroke
       # must not restart the app you are typing at
       app_gen: Map.get(locals, "app-generation") || 0,

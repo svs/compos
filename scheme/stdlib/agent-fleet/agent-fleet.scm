@@ -114,7 +114,9 @@
                         (cons (string-append dir "/" id ".chat") acc))
                       acc)))))))
 
-(define (chats-archived-rows &optional limit)
+(define (chats-archived-rows &optional limit group)
+  ;; GROUP keeps the logs saved in that group's home: a list in a group
+  ;; shows only its own archived chats, as it shows only its own live ones
   (if (not (boundp (quote chat-log-files-newest)))
       '()
       ;; the newest closed logs, read until there are enough: the rest of
@@ -124,7 +126,11 @@
                                        (buffer-read-many
                                          (map car (cadr (buffer-rows '(hidden #t context-only #t))))
                                          '() '(chat-log-id))))))
-        (let loop ((paths (chat-log-files-newest)) (n 0) (out '()))
+        (let loop ((paths (let ((all (chat-log-files-newest)))
+                            (if (not group) all
+                                (let ((home (string-append (group-home-dir group) "/chats/")))
+                                  (filter (lambda (p) (string-prefix? home p)) all)))))
+                   (n 0) (out '()))
           (if (or (null? paths) (>= n (or limit chats-archived-limit)))
               (reverse out)
               (let* ((path (car paths))
@@ -1209,7 +1215,8 @@
     ;; conversations come under the live ones, and RET reads one back
     'extra-rows (lambda (buf)
                   (ibuffer-section buf "archived" "archived"
-                    (ibuffer-starred-first (chats-archived-rows (and (buffer-local-value 'mode-list-extra-only buf) 100))) "faint" #t))
+                    (ibuffer-starred-first (chats-archived-rows (and (buffer-local-value 'mode-list-extra-only buf) 100)
+                                                                (buffer-group buf))) "faint" #t))
     'text (lambda (b) (chat-list--read-text b))
     ;; only a saved conversation is a file: a row whose chat was killed
     ;; since the list was drawn names no file, and visiting its title

@@ -74,16 +74,17 @@
 
 ;; every ui/tabs block in BLOCKS, in the order they draw: each one's TABS
 (define (tab-bars--block-tabs blocks)
-  (let walk ((bs (if (list? blocks) blocks '())) (acc '()))
-    (cond ((null? bs) acc)
-          ((not (pair? (car bs))) (walk (cdr bs) acc))
-          (else
-            (let* ((b (car bs))
-                   (d (plist-get b 'anchor-data))
-                   (ts (and (pair? d) (symbol? (car d)) (plist-get d 'tabs)))
-                   (acc (if (pair? ts) (append acc (list ts)) acc))
-                   (kids (plist-get b 'children)))
-              (walk (cdr bs) (walk (if (list? kids) kids '()) acc)))))))
+  (reverse
+    (let walk ((bs (if (list? blocks) blocks '())) (acc '()))
+      (cond ((null? bs) acc)
+            ((not (pair? (car bs))) (walk (cdr bs) acc))
+            (else
+              (let* ((b (car bs))
+                     (d (plist-get b 'anchor-data))
+                     (ts (and (pair? d) (symbol? (car d)) (plist-get d 'tabs)))
+                     (acc (if (pair? ts) (cons ts acc) acc))
+                     (kids (plist-get b 'children)))
+                (walk (cdr bs) (walk (if (list? kids) kids '()) acc))))))))
 
 ;; every tab bar BUF shows, declared or drawn: its bars, then every ui/tabs
 ;; in its page and in a list's header line, each tab once

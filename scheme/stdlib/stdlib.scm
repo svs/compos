@@ -74,6 +74,9 @@
     (ibuffer)
     (peek)
     (mode-list)
+    ;; the notices that need you: notify!, the corner and M-x notifications;
+    ;; agent-fleet calls it, so it comes first
+    (notifications)
     (agent-fleet)
     (subagents)
     (workflows)

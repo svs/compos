@@ -1265,14 +1265,15 @@
         (reverse out)
         (loop (substring cs 1 (string-length cs)) (cons (substring cs 0 1) out)))))
 
-(define (llm-config--filter-command ch)
-  (string-append "llm-config--filter-" (if (equal? ch " ") "space" ch)))
-
-(for-each
-  (lambda (ch)
-    (define-command--raw (llm-config--filter-command ch)
-      (lambda () (llm-config--filter-set! (string-append (llm-config--filter) ch)))))
-  (cons " " *llm-config-filter-chars*))
+(define-command "llm-config-filter-char" "Append the pressed key to the preset filter"
+  (lambda ()
+    (let* ((keys (last-keys))
+           (k (cond ((string? keys) (car (reverse (string-split keys " "))))
+                    ((pair? keys) (car (reverse keys)))
+                    (else #f)))
+           (ch (if (equal? k "SPC") " " k)))
+      (when (and (string? ch) (= (string-length ch) 1))
+        (llm-config--filter-set! (string-append (llm-config--filter) ch))))))
 
 (define-command "llm-config-filter-back" "Take the last character off the preset filter"
   (lambda ()
@@ -1395,8 +1396,8 @@
   (append
     (if (llm-config--on-left?)
         (append
-          (map (lambda (ch) (list ch (llm-config--filter-command ch))) *llm-config-filter-chars*)
-          (list (list "SPC" (llm-config--filter-command " "))
+          (map (lambda (ch) (list ch "llm-config-filter-char")) *llm-config-filter-chars*)
+          (list (list "SPC" "llm-config-filter-char")
                 (list "DEL" "llm-config-filter-back")))
         (list (list "s" "llm-config-save-into")
               (list "S" "llm-config-save-bundle")

@@ -231,4 +231,24 @@ defmodule Compos.Ui.MobileLiveTest do
     hook(view, "rail", %{"frac" => 0.0})
     assert Compos.Core.Buffer.point(buf) == 0
   end
+
+  test "split frame renders only the active leaf in mobile view", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+    n = System.unique_integer([:positive])
+    b1 = "hh-split-a-#{n}"
+    b2 = "hh-split-b-#{n}"
+    {:ok, _} = Compos.Core.create_buffer(b1)
+    {:ok, _} = Compos.Core.create_buffer(b2)
+    Compos.Core.Buffer.insert(b1, "alpha-pane-text")
+    Compos.Core.Buffer.insert(b2, "beta-pane-text")
+    on_exit(fn -> for b <- [b1, b2], do: Compos.Core.kill_buffer(b) end)
+
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{b1}")})
+    {:ok, _} = Compos.Core.Session.eval("(split-window! 'h)")
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{b2}")})
+
+    html = render(view)
+    assert html =~ "beta-pane-text"
+    refute html =~ "alpha-pane-text"
+  end
 end

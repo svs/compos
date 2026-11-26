@@ -53,8 +53,8 @@
 
 ;; the servers the editor serves besides compos
 (define (tool-servers)
-  (fold (lambda (acc e) (if (member (cadr e) acc) acc (append acc (list (cadr e)))))
-        '() *tool-servers*))
+  (reverse (fold (lambda (acc e) (if (member (cadr e) acc) acc (cons (cadr e) acc)))
+                 '() *tool-servers*)))
 
 ;; the tools SERVER serves; compos when SERVER is #f
 (define (llm-tool-specs &optional server)
@@ -223,9 +223,10 @@
 ;; "did you mean" is that the next call works, and the arguments are half
 ;; of that
 (define (tool--format-suggestions entries)
-  (fold (lambda (acc e)
-          (string-append acc "\n  " (nth 2 e) " — " (cadr e)))
-        "" entries))
+  (string-join (map (lambda (e)
+                      (string-append "\n  " (nth 2 e) " — " (cadr e)))
+                    entries)
+               ""))
 
 ;; A near miss is the slip an agent makes most: the name without its !
 ;; or ?, or a plural. The fix is never applied for the caller: chat-stable-id
@@ -238,13 +239,14 @@
          (stem (if (member end '("!" "?")) (substring name 0 (- n 1)) name))
          (single (and (> (string-length stem) 2) (string-suffix? "s" stem)
                       (substring stem 0 (- (string-length stem) 1)))))
-    (fold (lambda (acc c)
-            (if (or (not c) (equal? c name) (member c acc)) acc (append acc (list c))))
-          '()
-          (list (string-append stem "!") (string-append stem "?") stem
-                (string-append stem "s") single
-                (and single (string-append single "!"))
-                (and single (string-append single "?"))))))
+    (reverse
+      (fold (lambda (acc c)
+              (if (or (not c) (equal? c name) (member c acc)) acc (cons c acc)))
+            '()
+            (list (string-append stem "!") (string-append stem "?") stem
+                  (string-append stem "s") single
+                  (and single (string-append single "!"))
+                  (and single (string-append single "?")))))))
 
 (define (tool--near-miss name)
   "the one bound procedure NAME misses by a ! or ? or a plural, else #f"
@@ -421,10 +423,11 @@
       (if (null? hits)
           " Find the real name with (apropos \"words\"). If it is syntax, eval-scheme-read does not allow it: run the code with eval-scheme."
           (string-append "\nclosest names:"
-                         (fold (lambda (acc e)
-                                 (string-append acc "\n  " (nth 2 e) " — " (cadr e)
-                                                " [" (eval-read--route (car e)) "]"))
-                               "" hits))))))
+                         (string-join (map (lambda (e)
+                                   (string-append "\n  " (nth 2 e) " — " (cadr e)
+                                                  " [" (eval-read--route (car e)) "]"))
+                                 hits)
+                            ""))))))
 
 ;; The name scan sees every name the code writes, but not a procedure the
 ;; code computes. A call whose procedure is an expression, a local, or the
@@ -1782,19 +1785,22 @@
   '(read))
 
 (define (catalog--add-unique value acc)
-  (if (member value acc) acc (append acc (list value))))
+  (if (member value acc) acc (cons value acc)))
 
 (define (catalog-facet key)
-  (fold (lambda (acc e)
-          (let ((v (plist-get e key)))
-            (if (not v)
-                acc
-                (if (equal? key 'effects)
-                    (fold (lambda (a x) (catalog--add-unique x a)) acc v)
-                    (catalog--add-unique v acc)))))
-        '() (catalog)))
+  (reverse
+    (fold (lambda (acc e)
+            (let ((v (plist-get e key)))
+              (if (not v)
+                  acc
+                  (if (equal? key 'effects)
+                      (fold (lambda (a x) (catalog--add-unique x a)) acc v)
+                      (catalog--add-unique v acc)))))
+          '() (catalog))))
 
 (category! 'discovery)
+;; lookups in memory: they read, they do not reach out or spend
+(effects! '(read))
 (public! 'catalog "(catalog) — every public catalog entry with package, namespace, domain and effects")
 (public! 'catalog-entry "(catalog-entry KIND NAME) — one catalog entry, or #f")
 (public! 'catalog-facet "(catalog-facet KEY) — distinct catalog values for kind, package, namespace, domain or effects")
@@ -2093,11 +2099,15 @@
         (else (append (if (symbol? (car x)) (list (symbol->string (car x))) '())
                       (apply append (map mcp-proxy--refs (eval-read--items x)))))))
 
+(defcustom 'permission-call-gate-enabled #f
+  "Arm the call-time permission gate around an agent's eval-scheme. Off: it wrapped the whole tool dispatch, so compos's own machinery (llm-tool-call) tripped the default effect rules and every agent eval was refused (2026-11-26). It stays off until it covers only the agent's own code."
+  'group 'agent)
+
 (define (mcp-proxy--gated thunk slug name args-json)
   "run THUNK, an eval-scheme call of the agent SLUG, under the call gate: the names a rule makes ask or deny raise when the eval reaches one the read pass did not judge; the ones it judged (the user answered the card) and the ones a rule allows outright run their insides unchecked"
   (let* ((buf (and slug (agent-info slug) (agent-buf slug)))
          (ctx (permission-context buf))
-         (gate (if (and (equal? name "eval-scheme") (boundp (quote with-call-gate)))
+         (gate (if (and permission-call-gate-enabled (equal? name "eval-scheme") (boundp (quote with-call-gate)))
                    (permission-call-gate ctx) '())))
     (if (null? gate)
         (thunk)
@@ -2261,8 +2271,24 @@
     (list verb (mcp-proxy--clip target 300))))
 
 (define (mcp-proxy--ask-title slug name args-json raw)
-  (let ((action (mcp-proxy--action slug name args-json raw)))
-    (string-append (car action) ": " (cadr action))))
+  ;; the card names what the rule engine asked for, and the rule: the old
+  ;; title took the first risky word anywhere in the text, so a payload that
+  ;; ran a shell edit and called event-publish! asked as "publish"
+  (let* ((buf (and slug (agent-info slug) (agent-buf slug)))
+         (hit (permission-decide-all (mcp-proxy--actions slug name args-json raw) (permission-context buf)))
+         (action (mcp-proxy--action slug name args-json raw)))
+    (if (and hit (member (car hit) '(ask deny)))
+        (let ((a (caddr hit)))
+          (string-append (if (equal? (plist-get a 'kind) 'shell)
+                             (string-append "shell: " (mcp-proxy--clip (or (plist-get a 'text) "") 200))
+                             (permission--str (plist-get a 'function)))
+                         "  (" (permission-describe-rule (cadr hit)) ")"))
+        (let ((code (and (equal? name "eval-scheme") (mcp-proxy--code args-json))))
+          (if (and buf (boundp (quote permission-outside-text?)) (permission-outside-text? buf))
+              ;; the outsider gate: a turn an event or a message started may
+              ;; not run what can send, spend or destroy without the user
+              (string-append "in a turn you did not start: " (mcp-proxy--clip (first-line (or code raw)) 200))
+              (string-append name ": " (mcp-proxy--clip (first-line (or code raw)) 200)))))))
 
 (define (mcp-proxy--ask slug name args-json author raw)
   (let ((token (eval-defer!)))

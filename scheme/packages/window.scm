@@ -536,7 +536,7 @@
 (define (window--history-set! win history &rest more)
   (let* ((shown (window--buffer-of win))
          (history (take (window--without shown (window--uniq (filter string? history))) 500)))
-    (set! window--saved-histories (remove (lambda (e) (equal? (car e) win)) window--saved-histories))
+    (set! window--saved-histories (alist-delete window--saved-histories win))
     (apply window-record-set! (cons win (cons 'history (cons history more))))
     (window--set-stack! win (+ 1 (length history)))))
 

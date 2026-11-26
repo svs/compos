@@ -444,13 +444,19 @@ is forgotten and that group falls back to creation order in the switcher."
          (drop (max 0 (- (length parts) n))))
     (string-join (list-tail parts drop) "/")))
 
+(define *groups-tabs-gen* 0)
+(define (groups--tabs-bump!)
+  (set! *groups-tabs-gen* (+ *groups-tabs-gen* 1))
+  (frame-chrome-set! "groups-gen" *groups-tabs-gen*))
+
 (define (group--set-name! id name)
   (set! *group-records*
     (map (lambda (record)
            (if (equal? (group-record-id record) id)
                (append (list (group-record-id record) name) (list-tail record 2))
                record))
-         *group-records*)))
+         *group-records*))
+  (groups--tabs-bump!))
 
 ;; give ID the shortest tail of PATH no other group wears. A group that
 ;; wears that tail for a path of its own lengthens by one segment too, so
@@ -506,6 +512,7 @@ is forgotten and that group falls back to creation order in the switcher."
               (when path? (group-assign-path-name! id clean))
               ;; the founding frame owns it; that counts only if the frame is isolated
               (group-frame-own! id (selected-frame))
+              (groups--tabs-bump!)
               (desktop-dirty!)
               id)))))
 
@@ -559,6 +566,8 @@ is forgotten and that group falls back to creation order in the switcher."
                           (group-record-settings record)))))
           *group-records*))))
       (desktop-dirty!)
+      (when (member field '(name color settings))
+        (groups--tabs-bump!))
       (when (member field '(name color))
         (group-frame-styles-refresh!)
         (modeline-groups-refresh!)))))
@@ -572,6 +581,7 @@ is forgotten and that group falls back to creation order in the switcher."
           (remove (lambda (record) (equal? (group-record-id record) id))
                   *group-records*))))
       (group-reshorten-path-names!)
+      (groups--tabs-bump!)
       (desktop-dirty!)
       (modeline-groups-refresh!))))
 
@@ -608,6 +618,7 @@ is forgotten and that group falls back to creation order in the switcher."
     (set! *group-next-id* (car saved))
     (set! *group-records* (group-record-colors-restore (car (cdr saved))))
     (group-migrate-path-names!)
+    (groups--tabs-bump!)
     (modeline-groups-refresh!)))
 
 (define *group-frame-context-keys* '(current-group previous-group pinned-group))
@@ -1250,10 +1261,9 @@ is forgotten and that group falls back to creation order in the switcher."
 (define (frame-name-set! frame name)
   ;; an empty name gives the frame back its id
   (set! *frame-names*
-    (append (if (and (string? name) (not (equal? name "")))
-                (list (list frame name))
-                '())
-            (remove (lambda (e) (equal? (car e) frame)) *frame-names*)))
+    (if (and (string? name) (not (equal? name "")))
+        (alist-put *frame-names* frame name)
+        (alist-delete *frame-names* frame)))
   (desktop-dirty!)
   (frame-name frame))
 
@@ -1445,6 +1455,7 @@ is forgotten and that group falls back to creation order in the switcher."
 ;; those facts for the width available in the bar.
 (define (frame-group-label-refresh!)
   (group-frame-style-set! (selected-frame) (frame-local 'current-group))
+  (groups--tabs-bump!)
   (modeline-groups-refresh!))
 
 ;; a reattached frame keeps its group in its frame-locals, but the Elixir

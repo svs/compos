@@ -1,7 +1,8 @@
 ;;; recipes.scm --- one recipe for every standard package: what it requires
 ;;; and the compos-api-version it needs.
 (agent-connectors :requires () :api 1)
-(agent-fleet :requires (mode-list chat-mode) :api 1)
+(notifications :requires (events tabulated-list) :api 1)
+(agent-fleet :requires (mode-list chat-mode notifications) :api 1)
 (agent-listen :requires (workflows) :api 1)
 (agent-machine :requires () :api 1)
 (agent-permissions :requires () :api 1)

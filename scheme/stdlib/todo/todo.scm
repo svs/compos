@@ -195,8 +195,9 @@
 ;; A worktree daemon keeps its own copy of ~/.compos under worktree-daemons/;
 ;; its todos.md files are stale copies of the user's, so `**` must not reach them.
 (define (todo--resolve)
-  (fold (lambda (acc f) (if (or (member f acc) (string-contains? f "/worktree-daemons/")) acc (append acc (list f))))
-        '() (fold (lambda (acc p) (append acc (todo--glob p))) '() todo-directories)))
+  (reverse
+    (fold (lambda (acc f) (if (or (member f acc) (string-contains? f "/worktree-daemons/")) acc (cons f acc)))
+          '() (apply append (map todo--glob todo-directories)))))
 
 (define *todo-files* #f)
 
@@ -603,10 +604,11 @@
 
 (define (todo-projects)
   "(todo-projects) — every project name"
-  (fold (lambda (acc p) (if (or (todo--blank? p) (member p acc)) acc (append acc (list p))))
-        (list todo-default-project)
-        (append (map todo--file-project (filter (lambda (f) (not (todo--group-path? f))) (todo--files)))
-                (map (lambda (t) (plist-get t 'project)) (todo--all)))))
+  (reverse
+    (fold (lambda (acc p) (if (or (todo--blank? p) (member p acc)) acc (cons p acc)))
+          (list todo-default-project)
+          (append (map todo--file-project (filter (lambda (f) (not (todo--group-path? f))) (todo--files)))
+                  (map (lambda (t) (plist-get t 'project)) (todo--all))))))
 
 (category! 'writing)
 (public! 'todo-get "(todo-get ID) — one task as a plist, or #f")
@@ -1107,8 +1109,9 @@
   ;; sections come in the order of their first task, so the most urgent leads
   (if (equal? (todo--grouping buf) "none")
       ts
-      (let* ((names (fold (lambda (acc t) (let ((n (todo--section-of buf t))) (if (member n acc) acc (append acc (list n)))))
-                          '() ts)))
+      (let* ((names (reverse
+                      (fold (lambda (acc t) (let ((n (todo--section-of buf t))) (if (member n acc) acc (cons n acc))))
+                            '() ts))))
         (apply append
           (map (lambda (n)
                  (cons (list 'kind "sep" 'id (string-append "sep:" n) 'title n)

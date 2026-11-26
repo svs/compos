@@ -64,14 +64,27 @@
 ;; A command the palette can draw: name, key and doc, in apropos hit shape.
 ;; the key a row shows: with vscode-mode on, the Cmd chord its map gives the
 ;; command (Cmd-Z for undo), ahead of the Emacs key the other maps put first
+(define *command-palette--vscode-keys* #f)
+
+(define (command-palette--vscode-keys)
+  ;; the vscode-mode keys as (COMMAND KEY), single keys only, read once for
+  ;; one palette build: a build asks for every command's key, and reading
+  ;; the whole keymap for each of them made the palette slow. A second old
+  ;; table is read again, so a rebound key shows on the next build.
+  (let ((now (monotonic-ms)) (c *command-palette--vscode-keys*))
+    (if (and c (< (- now (car c)) 1000))
+        (cdr c)
+        (let ((table (let loop ((bs (keymap-bindings "vscode-mode-map")) (out '()))
+                       (cond ((null? bs) (reverse out))
+                             ((string-contains? (car (car bs)) " ") (loop (cdr bs) out))
+                             ((assoc (cadr (car bs)) out) (loop (cdr bs) out))
+                             (else (loop (cdr bs) (cons (list (cadr (car bs)) (car (car bs))) out)))))))
+          (set! *command-palette--vscode-keys* (cons now table))
+          table))))
+
 (define (command-palette--key name)
   (let ((cmd (and (boundp 'vscode-mode) (symbol-value 'vscode-mode)
-                  (let loop ((bs (keymap-bindings "vscode-mode-map")))
-                    (cond ((null? bs) #f)
-                          ((and (equal? (cadr (car bs)) name)
-                                (not (string-contains? (car (car bs)) " ")))
-                           (car (car bs)))
-                          (else (loop (cdr bs))))))))
+                  (let ((hit (assoc name (command-palette--vscode-keys)))) (and hit (cadr hit))))))
     (or cmd (key-for-command name))))
 
 (define (command-palette--command-hit name)

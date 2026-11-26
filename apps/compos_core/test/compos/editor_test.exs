@@ -4194,4 +4194,47 @@ defmodule Compos.MinibufferEditingTest do
     press(["C-x", "1"])
     File.rm!(path)
   end
+
+  test "render_state_and_effects drains pending frame effects in one call" do
+    {:ok, f1} = Editor.attach_frame("f-effects-1", client: nil)
+    {:ok, f2} = Editor.attach_frame("f-effects-2", client: nil)
+    on_exit(fn ->
+      Editor.delete_frame(f1)
+      Editor.delete_frame(f2)
+    end)
+
+    buf = Editor.current_buffer(f1)
+    Buffer.set_local(buf, "whitespace-mode", true)
+    Buffer.set_local(buf, "preview-csv-files", ["/tmp/a.csv"])
+    on_exit(fn ->
+      if Buffer.exists?(buf) do
+        Buffer.set_local(buf, "whitespace-mode", false)
+        Buffer.set_local(buf, "preview-csv-files", false)
+      end
+    end)
+
+    Editor.put_clipboard("copied", f1)
+    Editor.navigate("/b/foo", f1)
+    Editor.slide("forward", f1)
+    Editor.select_request("move", "forward", "line", 2, f1)
+
+    # an unknown frame falls back to another frame without draining that frame's effects
+    {_fallback, no_effects} = Editor.render_state_and_effects("f-missing-effects")
+    assert no_effects == %{clipboard: nil, navigation: nil, slide: nil, select: nil}
+
+    {state, effects} = Editor.render_state_and_effects(f1)
+    assert state.frame == f1
+    assert state.tree.whitespace_mode == true
+    assert state.tree.preview_csv_files == ["/tmp/a.csv"]
+    assert effects == %{
+             clipboard: "copied",
+             navigation: "/b/foo",
+             slide: "forward",
+             select: {"move", "forward", "line", 2}
+           }
+
+    # effects are cleared after being drained
+    {_state2, effects2} = Editor.render_state_and_effects(f1)
+    assert effects2 == %{clipboard: nil, navigation: nil, slide: nil, select: nil}
+  end
 end

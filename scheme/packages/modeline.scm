@@ -1259,17 +1259,17 @@
 (define (name-format-expand format vals)
   (let* ((text (if (string? format) format ""))
          (n (string-length text)))
-    (let loop ((i 0) (out ""))
+    (let loop ((i 0) (parts '()))
       (if (>= i n)
-          out
+          (string-join (reverse parts) "")
           (let ((ch (substring text i (+ i 1))))
             (if (and (equal? ch "%") (< (+ i 1) n))
                 (let* ((key (substring text (+ i 1) (+ i 2)))
                        (e (assoc key vals)))
-                  (cond ((equal? key "%") (loop (+ i 2) (string-append out "%")))
-                        (e (loop (+ i 2) (string-append out (or (cadr e) ""))))
-                        (else (loop (+ i 2) (string-append out ch key)))))
-                (loop (+ i 1) (string-append out ch))))))))
+                  (cond ((equal? key "%") (loop (+ i 2) (cons "%" parts)))
+                        (e (loop (+ i 2) (cons (or (cadr e) "") parts)))
+                        (else (loop (+ i 2) (cons key (cons ch parts))))))
+                (loop (+ i 1) (cons ch parts))))))))
 
 ;; the same name as one string, for a tooltip and for a caller with no spans
 (define (name-text segments)

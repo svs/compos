@@ -1260,7 +1260,7 @@
 ;; name it counted, and the band under the heading stopped there.
 ;; the name of a section: this package's default, which a theme may
 ;; take over. It is a register of its own, so it is a colour of its own
-(defface! 'list-section-name 'inherit '("accent" "bold" "fixed-pitch"))
+(defface! 'list-section-name 'inherit '("accent" "bold"))
 
 (define (ibuffer-section-starred? label)
   (let ((n (string-length label)))
@@ -2666,7 +2666,7 @@
     (map (lambda (tag) (if (string? tag) (list 'tag tag) tag))
       (append (list (if chat? "chat-state" "buffer-state") "buffer-icon"
                     (if (ibuffer-heading? entry)
-                        (list 'tag "c-label" 'class "f-fixed-pitch f-bold")
+                        (list 'tag "c-label" 'class "f-bold")
                         (if chat? "chat-name" "buffer-name")))
         (map (lambda (f)
           (cond
@@ -2678,7 +2678,8 @@
 
 (define *ibuffer-opts*
   (list
-    'composml-root (lambda (buf) (list 'tag "buffers" 'attrs '(("face" "fixed-pitch"))))
+    ;; no face of its own: the rows draw in the font every list grid uses
+    'composml-root (lambda (buf) (list 'tag "buffers"))
     'composml-record (lambda (buf entry) (ibuffer-composml-record buf entry))
     ;; no composml-fields: the rows draw as the grid todo draws, a title,
     ;; a column header and cells

@@ -136,4 +136,16 @@ defmodule Compos.Ui.FrameTabsTest do
     assert has_element?(view, tab(last))
     assert has_element?(view, ".echo-bar .ml-tab-on", "tabs-5")
   end
+
+  test "renaming or deleting a group updates the cached tab rail", %{conn: conn, ids: ids} do
+    [first, second | _] = ids
+    {:ok, view, _html} = mount!(conn)
+    assert has_element?(view, tab(first))
+
+    eval!(~s{(group-record-update! "#{first}" 'name "renamed-tab")})
+    assert has_element?(view, tab(first), "renamed-tab")
+
+    eval!(~s{(group-record-delete! "#{second}")})
+    refute has_element?(view, tab(second))
+  end
 end

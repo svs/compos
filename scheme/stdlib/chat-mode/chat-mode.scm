@@ -194,9 +194,7 @@
   (let ((hit (assoc buf *llm-mode-hooks*)))
     (when hit
       (remove-on-change! (cadr hit))
-      (set! *llm-mode-hooks*
-        (remove (lambda (entry) (equal? (car entry) buf))
-                *llm-mode-hooks*)))))
+      (set! *llm-mode-hooks* (alist-delete *llm-mode-hooks* buf)))))
 
 (define (llm-mode--retire-thinking! buf response-id)
   (let* ((active-id (buffer-local-value 'llm-active-thinking buf))

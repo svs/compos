@@ -806,17 +806,17 @@ defmodule Compos.Ui.EditorLive do
   defp refresh_state(socket) do
     fid = socket.assigns[:frame]
     t0 = System.monotonic_time(:millisecond)
-    state = Compos.Core.Editor.render_state(fid)
+    {state, effects} = Compos.Core.Editor.render_state_and_effects(fid)
 
     # our frame was deleted out from under us (M-x delete-frame elsewhere,
     # RPC): render_state fell back to another frame — recreate ours fresh
     # under the same id so the client's stored id stays good
-    state =
+    {state, effects} =
       if fid && state.frame != fid do
         {:ok, ^fid} = Compos.Core.Editor.attach_frame(fid)
-        Compos.Core.Editor.render_state(fid)
+        Compos.Core.Editor.render_state_and_effects(fid)
       else
-        state
+        {state, effects}
       end
 
     state_ms = System.monotonic_time(:millisecond) - t0
@@ -889,13 +889,13 @@ defmodule Compos.Ui.EditorLive do
 
     # a command left text for this client's OS clipboard (copy-buffer-link)
     socket =
-      case fid && Compos.Core.Editor.take_clipboard(fid) do
+      case fid && effects.clipboard do
         text when is_binary(text) -> push_event(socket, "clipboard", %{text: text})
         _ -> socket
       end
 
     socket =
-      case fid && Compos.Core.Editor.take_navigation(fid) do
+      case fid && effects.navigation do
         url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
         _ -> socket
       end
@@ -904,7 +904,7 @@ defmodule Compos.Ui.EditorLive do
     # changes on each request, so the client sees a new one on the
     # element before the patch replaces the panes (strip-slide.js).
     socket =
-      case fid && Compos.Core.Editor.take_slide(fid) do
+      case fid && effects.slide do
         dir when is_binary(dir) ->
           assign(socket, slide: "#{dir}:#{System.unique_integer([:positive])}")
 
@@ -914,7 +914,7 @@ defmodule Compos.Ui.EditorLive do
 
     # a motion command asked the browser's layout to move the selection
     socket =
-      case fid && Compos.Core.Editor.take_select(fid) do
+      case fid && effects.select do
         {alter, dir, gran, count} ->
           push_event(socket, "select", %{
             alter: alter,
@@ -1071,10 +1071,11 @@ defmodule Compos.Ui.EditorLive do
     # placeholder misses and the card renders
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
-       leaf.hidden_lines, Map.get(leaf, :narrow_lines), :erlang.phash2(leaf.overlays),
+       leaf.hidden_lines, Map.get(leaf, :narrow_lines),
+       Map.get(leaf, :overlay_gen) || :erlang.phash2(leaf.overlays),
        Compos.Ui.Oembed.generation(),
-       Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode"),
-       csv_preview_file_key(leaf.buffer, rm)}
+       Map.get(leaf, :whitespace_mode),
+       csv_preview_file_key(leaf, rm)}
 
     {html, cache} =
       case cache[{:preview, leaf.id}] do
@@ -1155,8 +1156,15 @@ defmodule Compos.Ui.EditorLive do
     # only a tree with point marks, or one that follows point, needs point's line
     # (an entry cached before :follows existed reads as false)
     follows = Map.get(entry, :follows, false)
-    line = if entry.marks or follows, do: Compos.Core.Text.line_index(text, leaf.point) + 1, else: 0
-    nlines = if follows and line > 0, do: length(:binary.matches(text, "\n")) + 1, else: 0
+    line =
+      if entry.marks or follows,
+        do: Map.get(leaf, :line) || Compos.Core.Text.line_index(text, leaf.point) + 1,
+        else: 0
+
+    nlines =
+      if follows and line > 0,
+        do: Map.get(leaf, :total_lines) || length(:binary.matches(text, "\n")) + 1,
+        else: 0
 
     {Map.merge(leaf, %{
        lines: [],
@@ -1183,14 +1191,20 @@ defmodule Compos.Ui.EditorLive do
 
   # preview.scm keeps the csv files a Markdown page reads; a changed file
   # changes the key, so the page draws again.
-  defp csv_preview_file_key(_buffer, rm) when rm != "markdown", do: nil
+  defp csv_preview_file_key(_leaf, rm) when rm != "markdown", do: nil
 
-  defp csv_preview_file_key(buffer, "markdown") do
-    for path <- Compos.Core.Buffer.get_local(buffer, "preview-csv-files") || [] do
-      case File.stat(path) do
-        {:ok, stat} -> {path, stat.size, stat.mtime}
-        _ -> {path, nil}
-      end
+  defp csv_preview_file_key(leaf, "markdown") do
+    case Map.get(leaf, :preview_csv_files) do
+      files when is_list(files) and files != [] ->
+        for path <- files do
+          case File.stat(path) do
+            {:ok, stat} -> {path, stat.size, stat.mtime}
+            _ -> {path, nil}
+          end
+        end
+
+      _ ->
+        []
     end
   end
 
@@ -1624,9 +1638,10 @@ defmodule Compos.Ui.EditorLive do
   # ones and how many, and this asks again only when the frame's group,
   # the buffer order or a walk of the tabs moved: nothing per keystroke.
   defp frame_tabs(socket, state) do
-    key = {state.frame_group, Compos.Core.Recent.buffers(), chrome(state, "tabs-walk", "")}
+    walk = chrome(state, "tabs-walk", "")
+    key = {state.frame_group, Compos.Core.Recent.groups(), walk, chrome(state, "groups-gen", 0)}
 
-    if key == socket.assigns[:tabs_key] do
+    if walk == "" and key == socket.assigns[:tabs_key] do
       {socket.assigns[:tabs] || @no_tabs, key}
     else
       {fetch_tabs(socket.assigns[:frame]), key}

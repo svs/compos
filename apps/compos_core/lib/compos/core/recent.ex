@@ -140,7 +140,14 @@ defmodule Compos.Core.Recent do
   @doc "The group names, the most recent first."
   def groups do
     ready()
-    for {{:group, g}, seq} <- rows(), seq > 0, do: g
+
+    @table
+    |> :ets.match_object({{:group, :_}, :_})
+    |> Enum.filter(fn {_, seq} -> seq > 0 end)
+    |> Enum.sort_by(&elem(&1, 1), :desc)
+    |> Enum.map(fn {{:group, g}, _} -> g end)
+  rescue
+    ArgumentError -> []
   end
 
   @doc "Replace the order with ENTRIES, the most recent first. Tests use it."

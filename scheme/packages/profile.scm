@@ -86,7 +86,7 @@
     (set! *profile-site-counts*
           (cons (list key (+ 1 (if cell (nth 1 cell) 0)) (+ n (if cell (nth 2 cell) 0)))
                 (if cell
-                    (remove (lambda (c) (equal? (car c) key)) *profile-site-counts*)
+                    (alist-delete *profile-site-counts* key)
                     *profile-site-counts*)))))
 
 ;; the longest list the builtin was given is what it had to walk

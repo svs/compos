@@ -174,7 +174,7 @@
                   *catalog-keys*))
         (let ((key (catalog--key k (catalog--get e 'name) (catalog--get e 'qualified-name))))
           (set! *catalog-overrides*
-            (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
+            (alist-delete *catalog-overrides* key)))
         (set! *catalog*
           (remove-plists *catalog* 'kind k 'qualified-name (catalog--get e 'qualified-name)))
         (catalog--changed! #f)))
@@ -220,7 +220,7 @@
                (before (assoc key *catalog-overrides*)))
           (set! *catalog-overrides*
             (cons (cons key (catalog--merge (if before (cdr before) '()) meta))
-                  (remove (lambda (x) (equal? (car x) key)) *catalog-overrides*)))
+                  (alist-delete *catalog-overrides* key)))
           (set! *catalog*
             (cons updated
                   (remove-plists *catalog* 'kind (catalog--get old 'kind)
@@ -353,7 +353,7 @@
           (set-symbol-value! sym callable)
           (set! *command-functions*
                 (cons (list name callable entry adopted)
-                      (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
+                      (alist-delete *command-functions* name)))
           #t)
         #f)))
 
@@ -363,8 +363,10 @@
   (cond ((string? f) (if (command-function f) #t #f))
         ((symbol? f) (commandp (symbol->string f)))
         ((procedure? f)
-         (pair? (filter (lambda (r) (or (eq? (cadr r) f) (eq? (caddr r) f)))
-                        *command-functions*)))
+         (let loop ((rs *command-functions*))
+           (cond ((null? rs) #f)
+                 ((or (eq? (cadr (car rs)) f) (eq? (caddr (car rs)) f)) #t)
+                 (else (loop (cdr rs))))))
         (else #f)))
 
 ;; (define-command NAME [DOC] [SPEC] FN ['modes '(MODE ...)]): 'modes
@@ -408,8 +410,7 @@
         (define-command--raw name doc entry)
         (define-command--raw name entry))
     (when modes
-      (set! *command-modes*
-            (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*))))
+      (set! *command-modes* (alist-put *command-modes* name modes)))
     (when label (command-label! name label))
     (when (and public (not (member name *command-public*)))
       (set! *command-public* (cons name *command-public*)))
@@ -449,8 +450,7 @@
         (if adopted
             (set-symbol-value! sym adopted)
             (unbind-global! sym))))
-    (set! *command-functions*
-          (remove (lambda (r) (equal? (car r) name)) *command-functions*)))
+    (set! *command-functions* (alist-delete *command-functions* name)))
   name)
 
 ;;; --- public API registry -----------------------------------------------------
@@ -3138,9 +3138,9 @@
                     (lambda () (put initial)))))
     (set! *desktop-globals*
       (cons (list key get put reset)
-            (remove (lambda (e) (equal? (car e) key)) *desktop-globals*)))
+            (alist-delete *desktop-globals* key)))
     (when pending
-      (set! *desktop-pending* (remove (lambda (e) (equal? (car e) key)) *desktop-pending*))
+      (set! *desktop-pending* (alist-delete *desktop-pending* key))
       (put (cadr pending)))))
 
 ;; what the desktop writes
@@ -3343,7 +3343,7 @@
     (when e
       (set! *globalized-minor-modes*
         (cons (list global (nth 1 e) (nth 2 e) on?)
-              (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*))))))
+              (alist-delete *globalized-minor-modes* global))))))
 
 (define (globalized-minor-mode--apply! e buf)
   (let ((local (nth 1 e)) (eligible? (nth 2 e)))
@@ -3378,7 +3378,7 @@
 (define (define-globalized-minor-mode! global local eligible? &optional doc)
   (set! *globalized-minor-modes*
     (cons (list global local eligible? (globalized-minor-mode-on? global))
-          (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*)))
+          (alist-delete *globalized-minor-modes* global)))
   (define-command global (or doc (string-append "Toggle " local " in every buffer"))
     (lambda ()
       (if (globalized-minor-mode-on? global)
@@ -3433,7 +3433,7 @@
   (set-modeline-extra! (global-mode-string-segments)))
 
 (define (global-mode-string-set! key value)
-  (let ((rest (remove (lambda (e) (equal? (car e) key)) *global-mode-string*)))
+  (let ((rest (alist-delete *global-mode-string* key)))
     (set! *global-mode-string*
       (if (or (not value) (equal? value ""))
           rest
@@ -4456,7 +4456,7 @@
   (let ((old (assoc buf *font-lock-hooks*)))
     (when old
       (remove-on-change! (cadr old))
-      (set! *font-lock-hooks* (remove (lambda (e) (equal? (car e) buf)) *font-lock-hooks*)))
+      (set! *font-lock-hooks* (alist-delete *font-lock-hooks* buf)))
     (overlay-set! buf 'font-lock '())))
 
 (define-command "isearch-forward" "Do incremental search forward"
@@ -4598,7 +4598,7 @@
 ;; is not: no answer makes a .scm belong outside a Scheme root.
 (define (defwrite-rule! name reason confirmable? pred)
   (set! *write-rules*
-        (append (remove (lambda (r) (equal? (car r) name)) *write-rules*)
+        (append (alist-delete *write-rules* name)
                 (list (list name reason confirmable? pred))))
   name)
 
@@ -4805,7 +4805,7 @@
 (define (provide f)
   (unless (featurep f) (set! *features* (cons f *features*)))
   (let ((waiting (reverse (filter (lambda (e) (equal? (car e) f)) *after-load-thunks*))))
-    (set! *after-load-thunks* (remove (lambda (e) (equal? (car e) f)) *after-load-thunks*))
+    (set! *after-load-thunks* (alist-delete *after-load-thunks* f))
     (for-each (lambda (e) ((cadr e))) waiting))
   f)
 
@@ -4853,10 +4853,10 @@
 (define *autoloads* '())   ; ((NAME FILE) ...): NAME a symbol or a command name
 
 (define (autoload--note! name file)
-  (set! *autoloads* (cons (list name file) (remove (lambda (e) (equal? (car e) name)) *autoloads*))))
+  (set! *autoloads* (alist-put *autoloads* name file)))
 
 (define (autoload--forget! name)
-  (set! *autoloads* (remove (lambda (e) (equal? (car e) name)) *autoloads*)))
+  (set! *autoloads* (alist-delete *autoloads* name)))
 
 ;; the file an autoload stub would load for NAME, or #f when NAME is defined
 (define (autoload-file name)
@@ -6039,8 +6039,7 @@
                (pkg-modes (fold (lambda (acc e)
                                   (if (equal? (plist-get e 'kind) "mode")
                                       (let* ((p (plist-get e 'package)) (row (assoc p acc)))
-                                        (cons (list p (cons (plist-get e 'name) (if row (cadr row) '())))
-                                              (remove (lambda (r) (equal? (car r) p)) acc)))
+                                        (alist-put acc p (cons (plist-get e 'name) (if row (cadr row) '()))))
                                       acc))
                                 '() cat))
                (scopes (if (boundp 'app-command-scopes) (app-command-scopes names) '()))
@@ -6221,8 +6220,7 @@
 (effects! '(write))
 
 (define (command-modes! name modes)
-  (set! *command-modes*
-        (cons (list name modes) (remove (lambda (row) (equal? (car row) name)) *command-modes*)))
+  (set! *command-modes* (alist-put *command-modes* name modes))
   (set! *command-generation* (+ *command-generation* 1))
   name)
 
@@ -6693,7 +6691,7 @@
   (let ((here (editing--landing)))
     (when (and here (not (member here *editing-landing*)))
       (set! *editing-landing*
-        (cons here (remove (lambda (l) (equal? (car l) (car here))) *editing-landing*)))
+        (cons here (alist-delete *editing-landing* (car here))))
       (let ((buf (caddr here)))
         (when (and buf (buffer-exists? buf))
           (editing-state-off! buf))))))

@@ -30,6 +30,19 @@ defmodule Compos.Core.SchemeTask do
     root = {:scheme_task, id}
     Roots.hold(root, closure)
 
+    # a task an agent's eval starts runs under the same permission gate
+    closure =
+      case Compos.Scheme.Eval.current_call_gate() do
+        nil ->
+          closure
+
+        gate ->
+          inner = closure
+
+          {:builtin, "call-gated-task",
+           fn args, store -> Compos.Scheme.Eval.with_call_gate(gate, fn -> Compos.Scheme.Eval.apply_fn(inner, args, store) end) end}
+      end
+
     spec = %{
       id: {__MODULE__, id},
       start:

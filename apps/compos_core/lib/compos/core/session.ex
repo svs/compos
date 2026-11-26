@@ -1823,6 +1823,20 @@ defmodule Compos.Core.Session do
               else: Process.delete(:compos_edit_author)
           end
         end,
+      # (with-call-gate REFUSE TRUST THUNK) — the permission gate inside the
+      # interpreter (Eval.call_gate). REFUSE is ((NAME MESSAGE) ...): a lookup
+      # of NAME raises MESSAGE. TRUST is (NAME ...): a call to one of them runs
+      # its insides unchecked. The try/after restore is in with_call_gate.
+      {"with-call-gate",
+       "(with-call-gate REFUSE TRUST THUNK) — run THUNK; a lookup of a name in REFUSE, a list of (NAME MESSAGE), raises MESSAGE, except inside a call to a name in TRUST."} =>
+        fn [refuse, trust, thunk], store ->
+          gate = Compos.Scheme.Eval.call_gate(refuse || [], trust || [])
+          Compos.Scheme.Eval.with_call_gate(gate, fn -> Compos.Scheme.Eval.apply_fn(thunk, [], store) end)
+        end,
+      {"call-gate-armed?",
+       "(call-gate-armed?) — #t when this process runs under a call gate"} => fn [] ->
+        Compos.Scheme.Eval.current_call_gate() != nil
+      end,
       {"current-edit-author",
        "(current-edit-author) — the caller process's edit author string, or #f"} => fn [] ->
         Process.get(:compos_edit_author) || false

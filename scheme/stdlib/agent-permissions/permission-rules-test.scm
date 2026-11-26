@@ -32,3 +32,22 @@
                     "a wider chat rule loses to the policy's kind rule: the selector counts before the scope")
       (check-equal! (gives (permission-shell-action "rm -rf x" 'edit)) 'deny "a narrow deny beats a wide allow")
       (for-each (lambda (id) (permission-rule-remove! id)) ids))))
+
+(deftest 'a-function-reached-without-its-name-is-checked-when-it-is-called
+  "the read pass sees a name passed as a value; the call gate refuses one the eval builds at run time"
+  (lambda ()
+    (let* ((ctx (list 'group "grp:zz-gate" 'chat "chat:zz-gate" 'task #f))
+           (rid (permission-rule-add! (list 'function "buffer-kill!") (list 'chat "chat:zz-gate") 'ask "test"))
+           (gate (permission-call-gate ctx))
+           (named (lambda (code) (map (lambda (n) (permission-call-action n #f)) (mcp-proxy--refs (scheme-read code))))))
+      (buffer-create "zz-gate-probe")
+      (check-equal! (car (permission-decide-all (named "(map buffer-kill! (list 1))") ctx)) 'ask
+                    "a function passed to map asks before the eval runs")
+      (check-false! (with-call-gate gate '()
+                      (lambda () (ignore-errors (lambda () (eval (list (string->symbol "buffer-kill!") "zz-gate-probe")) #t))))
+                    "a name built at run time is refused when it is looked up")
+      (check-true! (buffer-exists? "zz-gate-probe") "and the buffer is still there")
+      (with-call-gate '() (list "buffer-kill!") (lambda () (buffer-kill! "zz-gate-probe")))
+      (check-false! (buffer-exists? "zz-gate-probe") "an approved call runs")
+      (check-false! (call-gate-armed?) "and the gate is off after")
+      (permission-rule-remove! rid))))

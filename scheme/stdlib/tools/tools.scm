@@ -2076,7 +2076,7 @@
           ((pair? forms)
            (let* ((cmds (mcp-proxy--shell-commands forms))
                   (kind (and (pair? cmds) (decide--shell-kind-seen code)))
-                  (names (let dedupe ((ns (mcp-proxy--calls forms)) (out '()))
+                  (names (let dedupe ((ns (mcp-proxy--refs forms)) (out '()))
                            (cond ((null? ns) (reverse out))
                                  ((member (car ns) out) (dedupe (cdr ns) out))
                                  (else (dedupe (cdr ns) (cons (car ns) out)))))))
@@ -2084,6 +2084,30 @@
              (append (map (lambda (n) (permission-call-action n #f)) names)
                      (map (lambda (c) (permission-shell-action c kind)) cmds))))
           (else (list (permission-tool-action name #f))))))
+
+(define (mcp-proxy--refs x)
+  "every global name the read payload X mentions outside quoted data: the heads of calls, and the names passed as values, so (map buffer-kill! xs) names buffer-kill!"
+  (cond ((symbol? x) (if (boundp x) (list (symbol->string x)) '()))
+        ((not (pair? x)) '())
+        ((equal? (car x) 'quote) '())
+        (else (append (if (symbol? (car x)) (list (symbol->string (car x))) '())
+                      (apply append (map mcp-proxy--refs (eval-read--items x)))))))
+
+(define (mcp-proxy--gated thunk slug name args-json)
+  "run THUNK, an eval-scheme call of the agent SLUG, under the call gate: the names a rule makes ask or deny raise when the eval reaches one the read pass did not judge; the ones it judged (the user answered the card) and the ones a rule allows outright run their insides unchecked"
+  (let* ((buf (and slug (agent-info slug) (agent-buf slug)))
+         (ctx (permission-context buf))
+         (gate (if (and (equal? name "eval-scheme") (boundp (quote with-call-gate)))
+                   (permission-call-gate ctx) '())))
+    (if (null? gate)
+        (thunk)
+        (let* ((code (mcp-proxy--code args-json))
+               (forms (and code (ignore-errors (lambda () (scheme-read code)))))
+               (named (if (pair? forms) (mcp-proxy--refs forms) '()))
+               (judged (filter (lambda (g) (member (car g) named)) gate)))
+          (with-call-gate (filter (lambda (g) (not (member (car g) named))) gate)
+                          (append (map car judged) (permission-call-trust ctx))
+                          thunk)))))
 
 (define (mcp-proxy--engine-verdict slug name args-json raw)
   "deny, ask or allow-always from the rule engine, or #f when no rule speaks; a notify rule allows and tells the chat"
@@ -2381,10 +2405,13 @@
              ;; same burst boundary as a chat tool call: the proxy call ends,
              ;; what it wrote is on disk
              (call (lambda ()
-                     (if (boundp (quote jj-with-burst))
-                         (jj-with-burst author
-                           (lambda () (mcp-proxy-dispatch name args-json)))
-                         (mcp-proxy-dispatch name args-json)))))
+                     (mcp-proxy--gated
+                       (lambda ()
+                         (if (boundp (quote jj-with-burst))
+                             (jj-with-burst author
+                               (lambda () (mcp-proxy-dispatch name args-json)))
+                             (mcp-proxy-dispatch name args-json)))
+                       slug name args-json))))
         (if (and buf (buffer-exists? buf))
             (mcp-proxy--in-chat-frame buf
               (lambda ()

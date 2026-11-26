@@ -46,6 +46,8 @@ defmodule Compos.Scheme.Eval do
   @sample_mask 0x3FF
   @default_depth 100_000
   @applies :compos_scheme_applies
+  @call_gate :compos_scheme_call_gate
+  @call_trust :compos_scheme_call_trust
 
   @doc """
   The nesting a Scheme program may reach before `Error` stops it.
@@ -282,9 +284,9 @@ defmodule Compos.Scheme.Eval do
 
   # --- run --------------------------------------------------------------------
 
-  defp run({:sym, name}, env, store), do: {Env.lookup(store, env, name), store}
+  defp run({:sym, name}, env, store), do: {gated(Env.lookup(store, env, name), name), store}
   defp run({:lvar, name}, {:lex, vars, _ref}, store), do: {:erlang.map_get(name, vars), store}
-  defp run({:gvar, name}, {:lex, _vars, ref}, store), do: {Env.lookup(store, ref, name), store}
+  defp run({:gvar, name}, {:lex, _vars, ref}, store), do: {gated(Env.lookup(store, ref, name), name), store}
 
   defp run({:gset, name, value}, {:lex, _vars, ref} = env, store) do
     {val, store} = run(value, env, store)
@@ -311,11 +313,13 @@ defmodule Compos.Scheme.Eval do
     {f, store} = run(op, env, store)
     {args, store} = run_args(arg_forms, env, store, [])
 
-    # an armed profiler times the call under the name it was called by;
-    # disarmed, this is one persistent_term read and the tail call stays
-    case Compos.Scheme.Profile.table() do
-      nil -> apply_fn(f, args, store)
-      table -> Compos.Scheme.Profile.call(table, name, fn -> apply_fn(f, args, store) end)
+    # a call the agent's permission was given for runs its insides unchecked
+    case Process.get(@call_gate) do
+      {_refuse, trust} when is_map_key(trust, name) ->
+        trusted(fn -> profiled_apply(f, args, store, name) end)
+
+      _ ->
+        profiled_apply(f, args, store, name)
     end
   end
 
@@ -397,6 +401,77 @@ defmodule Compos.Scheme.Eval do
 
   # a number, a string or a boolean evaluates to itself
   defp run(value, _env, store), do: {value, store}
+
+  # an armed profiler times the call under the name it was called by;
+  # disarmed, this is one persistent_term read and the tail call stays
+  defp profiled_apply(f, args, store, name) do
+    case Compos.Scheme.Profile.table() do
+      nil -> apply_fn(f, args, store)
+      table -> Compos.Scheme.Profile.call(table, name, fn -> apply_fn(f, args, store) end)
+    end
+  end
+
+  # --- the call gate -----------------------------------------------------------
+  #
+  # An agent's eval runs under a gate (with-call-gate): REFUSE maps each name
+  # that needs the user's permission to the refusal it raises, and TRUST holds
+  # the names whose calls the user approved. Looking up a refused name raises,
+  # so a function passed as a value, reached through apply or eval, or held
+  # in a variable cannot pass. Inside a trusted call the lookups are the
+  # trusted function's own work and pass. Unarmed, this is one Process.get.
+
+  @doc "The gate value for REFUSE, a list of (NAME MESSAGE), and TRUST, a list of names; nil when REFUSE is empty."
+  def call_gate([], _trust), do: nil
+
+  def call_gate(refuse, trust) do
+    {Map.new(refuse, fn [n, m | _] -> {to_string(n), to_string(m)} end),
+     Map.new(trust, fn n -> {to_string(n), true} end)}
+  end
+
+  @doc "Run FUN with the call gate GATE armed in this process, restoring the old gate after."
+  def with_call_gate(gate, fun) do
+    prev = Process.get(@call_gate)
+    prev_trust = Process.get(@call_trust)
+    if gate, do: Process.put(@call_gate, gate), else: Process.delete(@call_gate)
+    Process.delete(@call_trust)
+
+    try do
+      fun.()
+    after
+      if prev, do: Process.put(@call_gate, prev), else: Process.delete(@call_gate)
+      if prev_trust, do: Process.put(@call_trust, prev_trust), else: Process.delete(@call_trust)
+    end
+  end
+
+  @doc "The call gate armed in this process, or nil."
+  def current_call_gate, do: Process.get(@call_gate)
+
+  defp gated(value, name) do
+    case Process.get(@call_gate) do
+      nil ->
+        value
+
+      {refuse, _trust} ->
+        case refuse do
+          %{^name => message} ->
+            if Process.get(@call_trust, 0) > 0, do: value, else: raise(Error, message: message)
+
+          _ ->
+            value
+        end
+    end
+  end
+
+  defp trusted(fun) do
+    n = Process.get(@call_trust, 0)
+    Process.put(@call_trust, n + 1)
+
+    try do
+      fun.()
+    after
+      Process.put(@call_trust, n)
+    end
+  end
 
   @doc "Apply a Scheme callable to already-evaluated args."
   def apply_fn({:interposed, original, wrapper}, args, store) do

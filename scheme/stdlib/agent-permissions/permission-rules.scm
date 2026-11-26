@@ -58,7 +58,10 @@
   (permission-rules--ensure!)
   (registry-lookup 'permission-rule id #f))
 
+(define (permission-rules-version) (registry-lookup 'permission-meta 'version 0))
+
 (define (permission-rules--save!)
+  (registry-register! 'permission-meta 'version (+ 1 (permission-rules-version)))
   (raw-write-file! (permission-rules-file)
     (string-append ";; permission rules: M-x permissions edits them. One rule per line.\n"
                    (string-join (map value->string (permission-rules)) "\n")
@@ -321,6 +324,86 @@
             ""))
       (if (plist-get r 'lock) " (locked)" ""))))
 
+;;; --- the call gate ------------------------------------------------------
+;;; The names an agent's eval may not reach without the user's answer: every
+;;; catalog function or command a rule gives ask or deny when it is called,
+;;; with the refusal to raise. The interpreter checks them when the eval
+;;; looks one up (with-call-gate), so a function passed as a value, reached
+;;; through apply or eval, or held in a variable meets the same rules as a
+;;; call written out. Only rules that can match a call count; with none,
+;;; the gate is empty and nothing is armed.
+
+(define *permission-gated-effects* '("write" "destroy" "spend" "external" "execute" "unknown"))
+
+(define (permission--call-rule? r)
+  "#t when the rule R can match a call: no text or path facet, and its kind is call or unset"
+  (let ((sel (or (plist-get r 'selector) '())))
+    (and (not (plist-get sel 'text)) (not (plist-get sel 'path))
+         (member (permission--str (or (plist-get sel 'kind) "call")) '("call"))
+         #t)))
+
+(define (permission--gate-candidates rules)
+  "the names to judge: every function a rule names outright, and the stamped names that change something and match one of RULES; the action is built from the catalog row in hand, with no lookup per name"
+  (append
+    (apply append
+      (map (lambda (r) (let ((f (plist-get (plist-get r 'selector) 'function)))
+                         (if (and (string? f) (not (string-suffix? "*" f))) (list f) '())))
+           rules))
+    (apply append
+      (map (lambda (e)
+             (if (and (member (plist-get e 'kind) '("function" "command"))
+                      (pair? (filter (lambda (x) (member x *permission-gated-effects*)) (or (plist-get e 'effects) '()))))
+                 (let ((a (list 'kind 'call 'function (plist-get e 'name) 'package (plist-get e 'package)
+                                'domain (plist-get e 'domain) 'effects (plist-get e 'effects))))
+                   (if (pair? (filter (lambda (r) (permission--selector-match? (or (plist-get r 'selector) '()) a)) rules))
+                       (list (plist-get e 'name)) '()))
+                 '()))
+           (catalog)))))
+
+(define (permission--gate-refusal name rule)
+  (string-append "refused at call time: " name " " (if (equal? (plist-get rule 'gives) 'deny) "is denied" "needs your permission")
+                 " (" (permission-describe-rule rule) "). "
+                 (if (equal? (plist-get rule 'gives) 'deny)
+                     "M-x permissions changes the rule."
+                     "Write the call out by its name in the code, so the permission card can ask before the eval runs.")))
+
+(define (permission-call-gate ctx)
+  "((NAME REFUSAL) ...) for every name a call rule gives ask or deny in CTX; cached until the rules, the catalog or CTX change"
+  (let* ((rules (filter (lambda (r) (and (member (plist-get r 'gives) '(ask deny))
+                                         (not (permission--expired? r))
+                                         (permission--call-rule? r)
+                                         (permission--scope-match? (plist-get r 'scope) ctx)))
+                        (permission-rules)))
+         (key (list (permission-rules-version) (catalog-generation)
+                    (plist-get ctx 'group) (plist-get ctx 'chat) (plist-get ctx 'task)))
+         (hit (registry-lookup 'permission-gate-cache (value->string (cdr (cdr key))) #f)))
+    (cond ((null? rules) '())
+          ((and hit (equal? (car hit) key)) (cadr hit))
+          (else
+           (let loop ((ns (permission--gate-candidates rules)) (seen '()) (out '()))
+             (if (null? ns)
+                 (begin (registry-register! 'permission-gate-cache (value->string (cdr (cdr key))) (list key out)) out)
+                 (let ((n (car ns)))
+                   (if (member n seen)
+                       (loop (cdr ns) seen out)
+                       (let ((r (permission-decide (permission-call-action n #f) ctx)))
+                         (loop (cdr ns) (cons n seen)
+                               (if (and r (member (plist-get r 'gives) '(ask deny)))
+                                   (cons (list n (permission--gate-refusal n r)) out)
+                                   out)))))))))))
+
+(define (permission-call-trust ctx)
+  "the names a rule names outright and allows in CTX: a call to one runs its insides unchecked"
+  (apply append
+    (map (lambda (r) (let ((f (plist-get (plist-get r 'selector) 'function)))
+                       (if (and (string? f) (not (string-suffix? "*" f))
+                                (member (plist-get r 'gives) '(allow notify))
+                                (permission--call-rule? r)
+                                (not (permission--expired? r))
+                                (permission--scope-match? (plist-get r 'scope) ctx))
+                           (list f) '())))
+         (permission-rules))))
+
 ;;; --- passes -------------------------------------------------------------
 ;;; A pass is a chat rule that ends after some turns of its chat: 'expires
 ;;; (turns CHAT-ID END) holds while the chat has ended fewer than END turns.
@@ -439,5 +522,8 @@
 (public! 'permission-rule-set! "(permission-rule-set! ID KEY VALUE [BY]) — change one field of a rule")
 (public! 'permission-turns "(permission-turns CHAT-ID) — how many turns the chat ended since the editor started")
 (public! 'permission-pass-expires "(permission-pass-expires CHAT-ID TURNS) — the 'expires of a pass that lasts TURNS turns, this one included")
+(public! 'permission-call-gate "(permission-call-gate CTX) — ((NAME REFUSAL) ...): the names a call rule gives ask or deny in CTX")
+(public! 'permission-call-trust "(permission-call-trust CTX) — the names a rule allows outright in CTX")
+(public! 'permission-rules-version "(permission-rules-version) — a number every change of the rules raises")
 (public! 'permission-rules-migrate! "(permission-rules-migrate!) — make rules of the old permission stores, once")
 (public! 'permission-classify-later! "(permission-classify-later! NAME) — ask the model for an unstamped name's effects, off the lane")

@@ -41,13 +41,34 @@
 ;; from eval-scheme would walk around every permission the chat holds.
 ;; An agent's tool call runs under the edit author "agent:SLUG", which
 ;; the session restores when the call ends, even when it raises.
+(define (mcp--agent-eval?)
+  (let ((a (current-edit-author))) (and (string? a) (string-prefix? "agent:" a))))
+
+;; A chat may write the definitions: register an MCP server, define a
+;; preset, give it a prompt. Turning one on in a chat, connecting a server,
+;; and changing a definition that already exists stay the user's acts: a
+;; changed server command or preset would reach every chat that has it on.
 (define (mcp-refuse-agent! who)
-  (when (let ((a (current-edit-author))) (and (string? a) (string-prefix? "agent:" a)))
+  (when (mcp--agent-eval?)
     (error (string-append (symbol->string who)
-                          ": a chat cannot add MCP servers or presets; ask the user"))))
+                          ": a chat cannot connect MCP servers or turn presets on in a chat; ask the user"))))
+
+;; a definition named as a string or a symbol is the same definition
+(define (mcp--defined? table name)
+  (let ((s (if (symbol? name) (symbol->string name) name)))
+    (and (pair? (filter (lambda (e) (equal? (if (symbol? (car e)) (symbol->string (car e)) (car e)) s)) table)) #t)))
+
+(define (mcp-refuse-agent-change! who exists? &optional name)
+  ;; the chat that made a definition may keep working on it
+  (when (and exists? (mcp--agent-eval?)
+             (not (and name (equal? (registry-lookup 'mcp-made (list who name) #f) (current-edit-author)))))
+    (error (string-append (symbol->string who)
+                          ": a chat may define a new MCP server or preset, not change one that exists; ask the user, or pick a new name")))
+  (when (and name (mcp--agent-eval?) (not exists?))
+    (registry-register! 'mcp-made (list who name) (current-edit-author))))
 
 (define (mcp-register! name spec)
-  (mcp-refuse-agent! 'mcp-register!)
+  (mcp-refuse-agent-change! 'mcp-register! (mcp--defined? *mcp-registry* name) (value->string name))
   (set! *mcp-registry* (alist-put *mcp-registry* name spec))
   name)
 
@@ -110,7 +131,7 @@
   ;; OPTS is the prompt, then keys: 'focus (NAME ...) names what apropos ranks
   ;; first for a chat holding the preset; by default the preset's own name, so
   ;; an ats preset lifts the ats package and every ats- function
-  (mcp-refuse-agent! 'define-preset!)
+  (mcp-refuse-agent-change! 'preset (mcp--defined? *chat-presets* name) (value->string name))
   (let* ((prompt (and (pair? opts) (string? (car opts)) (car opts)))
          (keys (if prompt (cdr opts) opts)))
     (set! *chat-presets*
@@ -121,7 +142,7 @@
   name)
 
 (define (preset-prompt! name text)
-  (mcp-refuse-agent! 'preset-prompt!)
+  (mcp-refuse-agent-change! 'preset (mcp--defined? *chat-presets* name) (value->string name))
   (let ((e (assoc name *chat-presets*)))
     (set! *chat-presets*
           (alist-put *chat-presets* name

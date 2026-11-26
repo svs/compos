@@ -1,9 +1,10 @@
 defmodule Compos.Ui.MobileLiveTest do
   @moduledoc """
-  The handheld client, driven the way the phone drives it: every gesture
-  arrives as a key or a named event, and the page is read back as HTML.
-  Nothing here names a production binding; the chord test binds its own
-  key under <f9>.
+  The handheld client, driven the way the phone drives it: every tap
+  arrives as a named event, and the page is read back by what it names.
+  The selectors are ComposML's domain elements (modeline, window, line,
+  prompt, echo, tabs, list, item, minibuffer, completion) and their
+  state attributes, never a style class.
   """
 
   use ExUnit.Case
@@ -13,18 +14,50 @@ defmodule Compos.Ui.MobileLiveTest do
 
   @endpoint Compos.Ui.Endpoint
 
+  # The handheld's policy is the handheld package, which lives outside
+  # this tree. The page is a projection of what it answers, so the test
+  # answers for it: fixed rows, and taps that leave a message to read.
+  @policy ~S"""
+  (begin
+    (define (handheld-view buf)
+      (list "hh-test-group" #f
+            '(("buffers-title" "Buffers") ("groups-title" "Groups") ("commands-title" "Commands")
+              ("empty" "Nothing here") ("matchless" "No match") ("placeholder" "Ask"))
+            '()))
+    (define (handheld-groups . q)
+      (filter (lambda (r) (or (null? q) (string-contains? (cadr r) (car q))))
+              '(("hh-g1" "First" #t) ("hh-g2" "Second" #f))))
+    (define (handheld-buffers cur . q)
+      (list (list "this group" (list (list cur cur "fundamental" #t)))))
+    (define (handheld-commands buf)
+      (list (list "recent" '(("keyboard-quit" "Quit")))))
+    (define (handheld-search buf q)
+      (filter (lambda (r) (string-contains? (car r) q))
+              '(("keyboard-quit" "Quit") ("save-buffer" "Save the buffer"))))
+    (define (handheld-run-command! name) (message (string-append "ran " name)))
+    (define (handheld-group! id) (message (string-append "group " id)))
+    (define (handheld-buffer! name) (message (string-append "buffer " name)))
+    (define (handheld-compose! text) (message (string-append "sent " text)))
+    (define (handheld-chat!) (message "chat"))
+    (define (handheld-scrub! n)
+      (goto-char! (line-start-position (max 1 (min n (line-number-at-pos (buffer-size (current-buffer)))))))
+      n)
+    #t)
+  """
+
   defp hook(view, event, payload) do
     view |> element("#hh") |> render_hook(event, payload)
   end
 
-  # a chord goes through dispatch-keys, which queues the keys behind the
-  # event that asked for them; the page shows the result a moment later
-  defp eventually(view, selector, text, tries \\ 40) do
-    cond do
-      has_element?(view, selector, text) -> true
-      tries == 0 -> false
-      true -> Process.sleep(25); render(view); eventually(view, selector, text, tries - 1)
-    end
+  # a plain text buffer in the window, point at its start
+  defp lines_buffer(text) do
+    buf = "hh-lines-#{System.unique_integer([:positive])}"
+    {:ok, _} = Compos.Core.create_buffer(buf)
+    Compos.Core.Buffer.insert(buf, text)
+    on_exit(fn -> Compos.Core.kill_buffer(buf) end)
+    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{buf}")})
+    {:ok, _} = Compos.Core.Session.eval("(goto-char! 0)")
+    buf
   end
 
   setup do
@@ -32,144 +65,91 @@ defmodule Compos.Ui.MobileLiveTest do
     Compos.Core.Editor.completion_dismiss()
     Compos.Core.Editor.set_pending([])
     Compos.Core.Editor.set_total_rows(40)
+    {:ok, _} = Compos.Core.Session.eval(@policy)
     {:ok, _} = Compos.Core.Session.eval("(test-one-window!)")
     Compos.Core.Editor.set_window_buffer("hh-test-#{System.unique_integer([:positive])}")
     {:ok, conn: build_conn()}
   end
 
-  test "mounts one window with a modeline, a composer, a tab rail, and the chord key", %{conn: conn} do
-    {:ok, view, html} = live(conn, "/m")
-    assert has_element?(view, "#hh > .hh-modeline")
-    assert has_element?(view, "#hh > .hh-composer #composer")
-    assert has_element?(view, "#hh > .hh-tabs")
-    assert has_element?(view, "#chord-key")
-    assert html =~ "hh-test-"
-    refute has_element?(view, ".hh-fan")
-  end
-
-  test "the panel opens on the modifiers and the plain keys, and a cap presses its chord", %{conn: conn} do
+  test "the page names its modeline, its one window, the composer, and the bar's tabs", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
-    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
+    buf = Compos.Core.Editor.current_buffer()
 
-    # the root: a square for every modifier and every plain key, nothing
-    # latched, so there is nothing to go back to
-    hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "C-")
-    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "<f9>")
-    refute has_element?(view, "#keys-panel .hh-keys-back")
+    assert has_element?(view, "c-frame#hh > c-modeline c-buffer-name[modified]")
+    assert has_element?(view, ~s(c-frame#hh > c-window > c-buffer[buffer="#{buf}"]))
+    assert has_element?(view, "c-frame#hh > c-prompt input#composer")
+    assert has_element?(view, "c-frame#hh > c-prompt c-action#composer-send")
 
-    # a modifier or a prefix presses nothing: the caps become what it
-    # leaves to press, and the back control says where the panel stands
-    hook(view, "fan_tab", %{"t" => "<f9>"})
-    assert has_element?(view, "#keys-panel .hh-keys-back", "<f9>")
-    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "q")
-    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-cmd", "keyboard-quit")
+    for tab <- ~w(chat buffers groups commands) do
+      assert has_element?(view, "c-frame#hh > c-tabs > c-tab[data-nav='#{tab}']")
+    end
 
-    # back lets the step go: the root again
-    hook(view, "fan_back", %{})
-    refute has_element?(view, "#keys-panel .hh-keys-back")
-    assert has_element?(view, "#keys-panel .hh-keycap .hh-cap-key", "<f9>")
-
-    # a cap that ends a binding is the whole chord: the prefix and the key
-    # both go through
-    hook(view, "fan_tab", %{"t" => "<f9>"})
-    hook(view, "fan_run", %{"s" => "<f9>", "k" => "q", "c" => "keyboard-quit"})
-    refute has_element?(view, "#keys-panel")
-    assert has_element?(view, ".hh-echo", "Quit")
-    refute has_element?(view, ".hh-ml-pending")
+    refute has_element?(view, "c-list")
+    refute has_element?(view, "c-minibuffer")
   end
 
-  test "a modifier cap leads the grid, whatever the key sort says", %{conn: conn} do
+  test "a buffer's lines are lines, and the one at point is current", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> a" "keyboard-quit")})
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> C-b" "keyboard-quit")})
+    lines_buffer("one\ntwo\nthree\n")
+    # the phone's row count refreshes the page at once
+    hook(view, "viewport", %{"rows" => 40})
 
-    on_exit(fn ->
-      Compos.Core.Session.eval(~s{(global-unset-key "<f9> a")})
-      Compos.Core.Session.eval(~s{(global-unset-key "<f9> C-b")})
-    end)
-
-    # the rows sort by key, so "a" comes before "C-b"; the cap for the
-    # modifier still leads, because a modifier is what you reach for first
-    hook(view, "fan", %{"open" => true})
-    hook(view, "fan_tab", %{"t" => "<f9>"})
-
-    caps =
-      ~r{<c-text class="hh-cap-key[^"]*">([^<]*)</c-text>}
-      |> Regex.scan(render(view))
-      |> Enum.map(fn [_, key] -> key end)
-
-    assert ["C-" | rest] = caps
-    assert "a" in rest
+    assert has_element?(view, "c-buffer c-line[number='1'][current='true']", "one")
+    assert has_element?(view, "c-buffer c-line[number='2'][current='false']", "two")
   end
 
-  test "typing in the panel searches every command, and a match runs by name", %{conn: conn} do
+  test "the buffers tab opens a list of buffers with the shown one current; the tab closes it", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/m")
+    buf = Compos.Core.Editor.current_buffer()
+
+    hook(view, "nav", %{"to" => "buffers"})
+    assert has_element?(view, "c-tabs > c-tab[data-nav='buffers'][selected='true']")
+    assert has_element?(view, "c-list[data-sheet='buffers'] c-item[kind='buffer'][current='true'] c-label", buf)
+
+    hook(view, "nav", %{"to" => "buffers"})
+    refute has_element?(view, "c-list")
+    assert has_element?(view, "c-tabs > c-tab[data-nav='buffers'][selected='false']")
+  end
+
+  test "the commands list narrows by its filter, and RET hands the first command to the policy", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
 
-    {:ok, _} =
-      Compos.Core.Session.eval(
-        ~s{(define-command "zz-hh-search-target" "Search target for the handheld test" (lambda () (message "zz target ran")))}
-      )
+    hook(view, "nav", %{"to" => "commands"})
+    assert has_element?(view, "c-list[data-sheet='commands'] c-field[name='filter'] input")
+    assert has_element?(view, "c-list[data-sheet='commands'] c-headline", "recent")
 
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
-    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
+    hook(view, "sheet_filter", %{"value" => "save"})
+    assert has_element?(view, "c-list[data-sheet='commands'] c-item[kind='command'] c-label", "save-buffer")
+    assert has_element?(view, "c-list[data-sheet='commands'] c-item[kind='command'] c-hint", "Save the buffer")
+    refute has_element?(view, "c-list[data-sheet='commands'] c-item c-label", "keyboard-quit")
 
-    hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keycap")
+    hook(view, "sheet_filter", %{"value" => "nothing-matches-this"})
+    assert has_element?(view, "c-list[data-sheet='commands'] c-empty", "No match")
 
-    # a command no key reaches is found by a word of its doc, and M-x is its key
-    hook(view, "fan_filter", %{"q" => "search target handheld"})
-    assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-cmd", "zz-hh-search-target")
-    assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-box", "M-x")
-    refute has_element?(view, "#keys-panel [data-section='plain']")
-
-    # a bound command is found too
-    hook(view, "fan_filter", %{"q" => "keyboard-quit"})
-    assert has_element?(view, "#keys-panel [data-section='matches'] .hh-key-row .hh-key-cmd", "keyboard-quit")
-
-    # empty text is the caps again
-    hook(view, "fan_filter", %{"q" => "  "})
-    refute has_element?(view, "#keys-panel [data-section='matches']")
-    assert has_element?(view, "#keys-panel .hh-keycap")
-
-    # a tap on a match runs the command by name and closes the panel
-    hook(view, "fan_filter", %{"q" => "zz-hh-search"})
-    hook(view, "fan_run", %{"s" => "matches", "k" => "M-x", "c" => "zz-hh-search-target"})
-    refute has_element?(view, "#keys-panel")
-    assert has_element?(view, ".hh-echo", "zz target ran")
+    # RET in the filter takes the first row it leaves
+    hook(view, "sheet_filter", %{"key" => "Enter", "value" => "quit"})
+    refute has_element?(view, "c-list")
+    assert has_element?(view, "c-prompt c-echo", "ran keyboard-quit")
   end
 
-  test "the panel opens on the pending prefix's tab and does not press it twice", %{conn: conn} do
+  test "the groups tab lists the groups with the frame's current, and a picked one is handed to the policy", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
-    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
 
-    hook(view, "key", %{"k" => "<f9>"})
-    assert has_element?(view, ".hh-ml-pending", "<f9>-")
-    hook(view, "fan", %{"open" => true})
-    assert has_element?(view, "#keys-panel .hh-keys-back", "<f9>")
-    # the frame is the one holding it, so the panel offers to let it go
-    assert has_element?(view, "#keys-panel .hh-keys-release", "<f9>")
+    hook(view, "nav", %{"to" => "groups"})
+    assert has_element?(view, "c-list[data-sheet='groups'] c-headline", "Groups")
+    assert has_element?(view, "c-list[data-sheet='groups'] c-item[kind='group'][current='true'] c-label", "First")
+    assert has_element?(view, "c-list[data-sheet='groups'] c-item[kind='group'][current='true'] c-status", "here")
+    assert has_element?(view, "c-list[data-sheet='groups'] c-item[kind='group'][current='false'] c-label", "Second")
 
-    hook(view, "fan_run", %{"s" => "<f9>", "k" => "q"})
-    assert has_element?(view, ".hh-echo", "Quit")
-    refute has_element?(view, ".hh-ml-pending")
+    hook(view, "sheet_filter", %{"value" => "Sec"})
+    refute has_element?(view, "c-list[data-sheet='groups'] c-item c-label", "First")
+
+    hook(view, "pick", %{"kind" => "group", "id" => "hh-g2"})
+    refute has_element?(view, "c-list")
+    assert has_element?(view, "c-prompt c-echo", "group hh-g2")
   end
 
-  test "the release lets the frame's prefix go and keeps the panel open", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/m")
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> q" "keyboard-quit")})
-    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> q")}) end)
-
-    hook(view, "key", %{"k" => "<f9>"})
-    hook(view, "fan", %{"open" => true})
-    hook(view, "fan_release", %{})
-    assert has_element?(view, "#keys-panel")
-    refute has_element?(view, ".hh-ml-pending")
-  end
-
-  test "a prompt renders as a sheet and a tap on a row accepts it", %{conn: conn} do
+  test "a prompt is a minibuffer of completions, and a tap on one accepts it", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
 
     {:ok, _} =
@@ -177,62 +157,39 @@ defmodule Compos.Ui.MobileLiveTest do
         ~s{(minibuffer-read "Pick: " (list "alpha" "beta" "gamma") (lambda (s) (message (string-append "picked " s))))}
       )
 
-    html = render(view)
-    assert html =~ "hh-sheet"
+    render(view)
     assert has_element?(view, "#hh[data-mb='true']")
-    assert has_element?(view, ".hh-row", "beta")
+    assert has_element?(view, "c-minibuffer c-headline", "Pick")
+    assert has_element?(view, "c-minibuffer c-completions c-completion[selected='true'] c-label", "alpha")
+    assert has_element?(view, "c-minibuffer c-completions c-completion[selected='false'] c-label", "beta")
+    assert has_element?(view, "c-prompt c-label", "Pick:")
 
     hook(view, "cand", %{"i" => 2})
-    refute has_element?(view, ".hh-sheet")
-    assert has_element?(view, ".hh-echo", "picked gamma")
+    refute has_element?(view, "c-minibuffer")
+    assert has_element?(view, "c-prompt c-echo", "picked gamma")
   end
 
-  test "the composer sends a chord through the keymap and a command by name", %{conn: conn} do
+  test "the composer hands its line to the policy", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
-    {:ok, _} = Compos.Core.Session.eval(~s{(global-set-key "<f9> m" "keyboard-quit")})
-    on_exit(fn -> Compos.Core.Session.eval(~s{(global-unset-key "<f9> m")}) end)
-
-    hook(view, "compose", %{"text" => "<f9> m"})
-    assert eventually(view, ".hh-echo", "Quit")
-
-    hook(view, "compose", %{"text" => "M-x hh-no-such-command"})
-    assert has_element?(view, ".hh-echo", "No command named hh-no-such-command")
-  end
-
-  test "the tab rail is the groups: the current one opens its buffers, another one its chat", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/m")
-    buf = Compos.Core.Editor.current_buffer()
-    {:ok, g} = Compos.Core.Session.eval(~s{(group-ensure! "#{buf}")})
-    g = String.trim(g, "\"")
-    render(view)
-    assert has_element?(view, ".hh-tab.on")
-
-    # founding the group put the frame in it: a tap is the buffer prompt
-    hook(view, "tab", %{"buf" => g})
-    assert has_element?(view, "#hh[data-mb='true']")
-    hook(view, "key", %{"k" => "C-g"})
-    refute has_element?(view, "#hh[data-mb='true']")
-
-    # a second group takes the frame; the tap on the first is a switch
-    other = "hh-g2-#{System.unique_integer([:positive])}"
-    {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-group! (group-record-create! "#{other}"))})
-    render(view)
-    hook(view, "tab", %{"buf" => g})
-    # the chat draws as its block tree, the chat's own layout
-    assert has_element?(view, ~s(c-buffer.hh-blocks.agent-view))
+    assert has_element?(view, "c-prompt input#composer[placeholder='Ask']")
+    hook(view, "compose", %{"text" => "hello"})
+    assert has_element?(view, "c-prompt c-echo[error='false']", "sent hello")
   end
 
   test "the rail moves point to the line the drag names", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
-    buf = Compos.Core.Editor.current_buffer()
-    Compos.Core.Buffer.insert(buf, "one\ntwo\nthree\nfour\nfive\n")
-    hook(view, "rail", %{"frac" => 1.0})
-    assert Compos.Core.Buffer.line_of(buf, Compos.Core.Buffer.point(buf)) == 6
+    lines_buffer("one\ntwo\nthree\nfour\nfive\n")
+    hook(view, "viewport", %{"rows" => 40})
+    assert has_element?(view, "c-window > c-position[data-rail]")
+
     hook(view, "rail", %{"frac" => 0.0})
-    assert Compos.Core.Buffer.point(buf) == 0
+    assert has_element?(view, "c-line[number='1'][current='true']", "one")
+
+    hook(view, "rail", %{"frac" => 1.0})
+    assert has_element?(view, "c-line[number='6'][current='true']")
   end
 
-  test "split frame renders only the active leaf in mobile view", %{conn: conn} do
+  test "a split frame draws only the selected window", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/m")
     n = System.unique_integer([:positive])
     b1 = "hh-split-a-#{n}"
@@ -247,8 +204,9 @@ defmodule Compos.Ui.MobileLiveTest do
     {:ok, _} = Compos.Core.Session.eval("(split-window! 'h)")
     {:ok, _} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{b2}")})
 
-    html = render(view)
-    assert html =~ "beta-pane-text"
-    refute html =~ "alpha-pane-text"
+    render(view)
+    assert has_element?(view, "c-window", "beta-pane-text")
+    refute has_element?(view, "c-window", "alpha-pane-text")
+    assert [_] = Regex.scan(~r/<c-window[\s>]/, render(view))
   end
 end

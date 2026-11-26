@@ -12,7 +12,7 @@ Press `M-x` (`execute-extended-command`) and type a part of the name. The list g
 
 Every action in the editor is a command. When you forget a key, you can always use its name.
 
-To search by what a command does, use `s-P` (`command-palette`).
+To search by what a command does, use `s-p` (`command-palette`).
 
 ### How do I cancel what I started?
 
@@ -60,7 +60,7 @@ When the file changed on disk after you opened it, the editor asks before it wri
 
 ### How do I browse a directory?
 
-Press `C-x C-d` (`dired`) and choose a directory. Dired lists its files.
+Press `C-x d` (`dired`) and choose a directory. Dired lists its files.
 
 - `RET` (`dired-visit`) opens the file at point.
 - `^` (`dired-up`) opens the parent directory.
@@ -140,7 +140,7 @@ Press `C-x 3` (`split-window-right`) for two windows side by side, or `C-x 2` (`
 
 ### How do I get back the windows I had?
 
-Press `C-c <left>` (`winner-previous`). Each press restores an earlier arrangement of windows and buffers. `C-c <right>` (`winner-next`) goes forward again.
+Press `C-c <left>` (`winner-previous`). Each press puts back an earlier arrangement of the panes; the windows keep the buffers they show now. `C-c <right>` (`winner-next`) goes forward again.
 
 ### How do I read the other window without leaving this one?
 
@@ -162,7 +162,7 @@ Press `C-x g` (`group-switch`) and choose a group. The editor shows its buffers 
 
 ### How do I rename or close a group?
 
-Press `M-x group-rename` to give the current group a new name. `M-x group-kill` kills every buffer in the current group.
+Press `C-x C-g R` (`group-rename`) to give the current group a new name. `C-x C-g k` (`group-kill`) kills every buffer in the current group.
 
 ## Agents and chat
 
@@ -184,7 +184,7 @@ Select the text, then press `C-c r` (`chat-send-region`). The chat gets the regi
 
 ### How do I stop the agent?
 
-In the chat, press `M-x chat-abort`. The reply in progress stops, and the transcript keeps what arrived.
+In the chat, press `C-g` (`keyboard-quit`) while the agent works. The reply in progress stops, and the transcript keeps what arrived.
 
 `M-x chat-reset` clears the transcript and starts again.
 
@@ -201,29 +201,6 @@ When the agent wants to use a tool, the chat asks you.
 - `C-c C-y` (`agent-permission-allow`) allows it once.
 - `C-c C-a` (`agent-permission-always`) allows it and stops asking for that tool.
 - `C-c C-n` (`agent-permission-deny`) refuses.
-
-## Web, mail, and feeds
-
-### How do I read a web page?
-
-Press `M-x browse` and type a URL or some search words. The page opens as readable text in a buffer.
-
-- `RET` (`browse-follow`) follows the link at point.
-- `TAB` (`browse-next-link`) moves to the next link.
-- `l` (`browse-back`) goes back.
-- `o` (`browse-open-external`) opens the page in your real browser.
-
-`M-x browse-history` lists every page you read.
-
-### How do I read my mail?
-
-Press `M-x notmuch` to see the mailboxes, or `M-x mail` for the three-pane view. The mail comes from notmuch, so notmuch must index it first.
-
-In the mail list, `a` (`notmuch-archive`) archives a thread, and `r` (`notmuch-reply`) replies.
-
-### How do I follow a news feed?
-
-Press `M-x feeds-subscribe` and give a feed URL or a page that has one. `M-x feeds` lists the new items of every feed.
 
 ## Customizing
 

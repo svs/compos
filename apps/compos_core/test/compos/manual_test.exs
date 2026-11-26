@@ -17,7 +17,7 @@ defmodule Compos.ManualTest do
   test "the manual renders from a stock boot" do
     dir =
       if System.get_env("WRITE_MANUAL") == "1" do
-        Path.expand("../../../../docs/manual", __DIR__)
+        Path.expand("../../../../docs/FURTHER READING/manual", __DIR__)
       else
         Path.join(System.tmp_dir!(), "compos-manual-#{System.unique_integer([:positive])}")
       end

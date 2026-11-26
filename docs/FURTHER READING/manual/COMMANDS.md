@@ -4,20 +4,11 @@
 
 Every command that has a docstring, by domain. `M-x NAME` runs a command. The key column shows the stock global key; a mode can add its own keys.
 
-## anon
-
-| Command | Key | What it does |
-|---|---|---|
-| `anon-add` |  | Redact a text you type wherever anon shows it |
-| `anon-forget` |  | Forget every cached name, common word and email handle |
-| `anon-local-mode` |  | Toggle proper-noun redaction in this buffer |
-| `anon-mode` |  | Turn proper-noun redaction on in every buffer a window shows, or off everywhere |
-| `anon-selected` |  | Redact the selected text wherever anon shows it; with no selection, ask for one |
-
 ## buffers
 
 | Command | Key | What it does |
 |---|---|---|
+| `app-watch` |  | Follow this buffer's data as it changes, or hold it still |
 | `auto-revert-mode` |  | Follow file changes on disk in this frame, or stop |
 | `buffer-dashboard-refresh` |  | Rebuild this buffer's dashboard line and panel from scratch |
 | `buffer-detach` |  | Forget the current buffer's file; keep its text |
@@ -26,9 +17,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `buffer-log-refresh` |  | Redraw the revision list |
 | `buffer-log-show` |  | Show this revision beside the log, keeping focus here |
 | `buffer-magic-group` |  | Classify the current buffer with JEV and move it when a group matches |
+| `buffer-set-tab-color` |  | Give this buffer, or the buffer of the list row at point, a tab color; lists show its row in it |
 | `bury-buffer` |  | Put this buffer at the end of the buffer list; its window shows the one before |
 | `chat-load-config` |  | Run this group's chat hooks on this chat again |
 | `copy-buffer-link` | `C-c l` | Copy an compos:// link to this buffer and line to the clipboard |
+| `daemon-connect` |  | Connect to the compos at an address, such as vidura or user@host, and list it in M-x daemons |
 | `find-file` | `C-x C-f` | Visit a file, prompting with filename completion |
 | `frame-isolate` |  | Toggle whether this frame shows only its own groups and wears its own theme |
 | `frame-rename` |  | Name this frame; an empty name gives it back its id |
@@ -38,15 +31,18 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `group-cwd` |  | Set this group's working directory, and move its buffers there |
 | `group-describe` | `C-c d` | Ask the LLM to write this group's description |
 | `group-dissolve` |  | Dissolve a group; its members merge into the parent group when one exists |
+| `group-export` |  | Write this group as a folder another compos can import |
 | `group-from-visible` | `C-x C-g v` | Move the visible windows, chats included, to a group: pick one, or type a new name to found it from these windows |
-| `group-kill` |  | Kill every buffer in the current group; in the board, the marked groups |
+| `group-import` |  | Make a new group from a folder group-export wrote |
+| `group-kill` | `C-x C-g k` | Kill every buffer in the current group; in the board, the marked groups |
 | `group-members` | `C-x C-g b` | Open the switcher on this group's members |
 | `group-move` | `C-x C-g m` | Move the selected buffers, else this buffer, to one group |
 | `group-new` | `C-x C-g n` | Create and enter an empty group, or seed it with the selection |
 | `group-pin` | `C-x C-g p` | Toggle a frame pin that keeps the current group through window changes |
 | `group-reload-config` |  | Load this group's group.scm again into every buffer in it |
-| `group-rename` |  | Rename the current group; in the board, the group at point |
+| `group-rename` | `C-x C-g R` | Rename the current group; in the board, the group at point |
 | `group-revive` |  | Revive a killed group: its record, layout, and every member that still exists |
+| `group-send` |  | Send this group to the compos on another machine |
 | `group-send-to-frame` |  | Move this frame's group to another frame |
 | `group-switch-kill` |  | Kill the group under the highlight; outside the group prompt, kill the line |
 | `group-switch-move-buffer` |  | Move the buffer you came from into the group under the highlight |
@@ -98,6 +94,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `ibuffer-widen-group` |  | Show every group, keeping the text filter |
 | `listing-preview-dismiss` |  | Dismiss the peek; keep focus in its list |
 | `listing-preview-open-other` |  | Open the selected preview in another work window |
+| `mode-kill` |  | Kill every buffer of one major mode; the current buffer's mode is the default |
 | `mode-list` |  | List every buffer of one major mode |
 | `mode-list-toggle-groups` |  | Turn the sections off and on; off is one list, most recent first |
 | `mode-list-visit` |  | Show the buffer at point in its group; on a heading, open the section |
@@ -133,9 +130,14 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `agent-goto-attention` | `C-c a a` | Jump to the first thread needing attention: a permission or question first, then a chat that waits on you or is blocked |
 | `agent-interrupt-send` |  | Revive, cancel, or hard-reset the agent |
 | `agent-open` | `C-c a n` | Prompt for a task and spawn a new agent thread |
+| `agent-permission-3-turns` |  | Allow this kind of call for this turn and the next two |
 | `agent-permission-allow` |  | Allow the pending permission request once |
-| `agent-permission-always` |  | Allow and stop asking for this tool |
+| `agent-permission-always` |  | Allow this kind of call in this group from now on |
+| `agent-permission-chat` |  | Allow this kind of call in this chat from now on |
 | `agent-permission-deny` |  | Deny the pending permission request |
+| `agent-permission-everywhere` |  | Allow this kind of call in every chat from now on |
+| `agent-permission-for-task` |  | Allow this kind of call until this chat's task is done |
+| `agent-permission-turn` |  | Allow this kind of call until this turn ends |
 | `agent-send` |  | Send the input to the agent, reviving it if dead |
 | `agent-set-mode` |  | Switch the agent session's mode (plan, acceptEdits, ...) |
 | `agent-switch` |  | Reattach this thread to a new connector and model |
@@ -163,6 +165,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-delete-forward` |  | Delete forward, but never the input marker |
 | `chat-dismiss` |  | Hide this chat, optionally send a final instruction; it closes when the agent says it is done |
 | `chat-finder` |  | Find chats by a keyword in their content |
+| `chat-goto-todo-at-point` |  | Show the task the chat at point works as its own page; with several, ask which |
 | `chat-heal` |  | Repair this chat's record: drop tool calls and results that lost their other half |
 | `chat-history-next` |  | Recall the next thing you typed at a prompt |
 | `chat-history-previous` |  | Recall the previous thing you typed at a prompt |
@@ -190,10 +193,20 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `chat-set-subject-at-point` |  | Give the chat at point a subject |
 | `chat-show-prompt` |  | Show this chat's system prompt and its named composition |
 | `chat-show-skills` |  | Open Dired on the skills this chat can load |
+| `chat-surface-delete-backward` |  | Delete backward, but never into the transcript |
+| `chat-surface-delete-forward` |  | Delete forward, but never the input mark |
+| `chat-surface-history-next` |  | Recall the next thing you sent in this chat |
+| `chat-surface-history-previous` |  | Recall the previous thing you sent in this chat |
+| `chat-surface-next-entry` |  | Show the message after at the top |
+| `chat-surface-previous-entry` |  | Show the message before at the top |
+| `chat-surface-send` |  | Send what the input holds to this chat |
+| `chat-surface-to-bottom` |  | Go to the newest message of this chat, and keep to it |
+| `chat-surface-to-top` |  | Go to the first message of this chat |
 | `chat-switch-prompt` |  | Switch to a chat by its title; with a prefix, show it in another window |
 | `chat-title` |  | Set the current chat's title |
 | `chat-to-bottom` |  | Scroll this chat to the newest message |
 | `chat-to-top` |  | Scroll this chat to its first message |
+| `chat-toggle-star` |  | Star the chat at point, or the marked ones: a starred chat comes first in its group; again, unstar |
 | `chat-toggle-view` |  | Toggle between rich and plain chat transcript |
 | `chat-unqueue` |  | Remove the previewed queued message (or the newest one) and return it to the input |
 | `chat-unstick` |  | Clear a turn this chat shows as running when no runtime runs one |
@@ -212,15 +225,22 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `llm-ask` | `C-c q` | Ask the LLM from anywhere via the minibuffer |
 | `llm-companion-show` |  | Show this document's hidden chat in the other window |
 | `llm-costs` |  | Show LLM spend by day and model (the usage ledger) |
+| `llm-costs-refresh` |  | Read the usage ledger again |
 | `llm-mode-abort` |  | Cancel the inline reply and restore the prompt face |
-| `llm-models-refresh` |  | Ask every provider for its own model list |
 | `llm-pipe-region` | `M-\|` | Pipe the region through the LLM into \*llm\* |
 | `llm-set-model` | `C-c m` | Choose the model for C-RET and this buffer's chat |
 | `llm-set-preset` |  | Enable a tool preset (MCP servers) for this LLM session |
+| `llm-set-preset-once` |  | Enable a tool preset for the next turn of this LLM session only |
 | `llm-unset-preset` |  | Disable a tool preset for this LLM session |
 | `mcp-status` |  | Show MCP server connections |
-| `orchestrate-mode` |  | Stop or resume running this chat's todo tree; (orchestrate! ROOT) starts one |
-| `site-app-bulk-agents` |  | Hand the top rows to their pages' own chats, with one orchestrator to report |
+| `permissions` |  | Open every rule that decides what an agent may do |
+| `permissions-add` |  | Add a rule, such as: ask function todo-handover! in group |
+| `permissions-cycle` |  | Give the rule at point its next answer: allow, notify, ask, deny |
+| `permissions-lock` |  | Lock or unlock the rule at point: a locked rule only you change |
+| `permissions-refresh` |  | Read the rules again |
+| `permissions-revoke` |  | Take back the rule at point |
+| `permissions-show` |  | Show the rule at point as its own page beside the list |
+| `prompt-section-edit` |  | Edit the prompt file of the section at point |
 | `subagents` |  | List every spawned chat: parent, child, status, and the child's last line |
 | `subagents-one-shape` |  | Say that this table has one shape |
 | `subagents-refresh` |  | Read the spawn edges again |
@@ -233,23 +253,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `watchers-show` |  | Show the watcher at point as its own page beside the list |
 | `watchers-sweep` |  | Hand the watchers past due to an agent, which looks again and fixes broken pipes |
 | `watchers-task` |  | Show the task the watcher at point waits on |
-| `whatsapp` |  | Open the WhatsApp workspace |
-| `whatsapp-chat-refresh` |  | Refresh this WhatsApp conversation |
-| `whatsapp-feed-start` |  | Turn WhatsApp messages into events: the webhook and the sweep |
-| `whatsapp-feed-stop` |  | Stop turning WhatsApp messages into events |
-| `whatsapp-list` |  | Show the recent WhatsApp chat index |
-| `whatsapp-next-message` |  | Move to the next message |
-| `whatsapp-open` |  | Read the WhatsApp chat on this row |
-| `whatsapp-prev-message` |  | Move to the previous message |
-| `whatsapp-refresh` |  | Refresh recent WhatsApp chats |
-| `whatsapp-reply` |  | Reply to the selected message, or to the chat |
-| `whatsapp-show-current` |  | Prepare the WhatsApp conversation pane |
 
 ## chrome
 
 | Command | Key | What it does |
 |---|---|---|
-| `list-tabs` |  | Show the browser's open tabs in a buffer |
 | `refresh-frames` |  | Delete frames no browser tab shows |
 
 ## code
@@ -261,8 +269,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `code-mode` |  | Toggle the agent coding workspace in this buffer |
 | `definition-go` |  | Go to the definition the other window shows |
 | `definition-show` |  | Show the definition of the name at point in the other window; run again to go there; a link there is followed |
-| `drracket` |  | Open this file in DrRacket |
 | `imenu` | `s-i` | Jump to a definition in this buffer; an index of more than one kind has a tab for each |
+| `list-flag-D` |  | Flag the entry at point with D |
 | `lsp-diag-refresh` |  | Refresh the diagnostics list |
 | `lsp-diag-visit` |  | Visit the diagnostic on this row |
 | `lsp-diagnostics-list` |  | Show diagnostics as a list |
@@ -275,10 +283,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `lsp-references` |  | List the references to the symbol at point |
 | `lsp-show-diagnostic` |  | Echo the diagnostic at point |
 | `lsp-status` |  | Echo every language-server connection |
-| `racket-repl` |  | Go to the Racket REPL, starting one when there is none |
-| `racket-run` |  | Run this Racket file in a fresh REPL, like DrRacket's Run |
-| `racket-send-definition` |  | Send the definition at point to the Racket REPL |
-| `racket-send-region` |  | Send the region to the Racket REPL |
 | `repl` |  | Open a new Scheme REPL buffer |
 | `scheme-doc` |  | Echo the doc of the scheme name at point |
 | `scheme-goto-definition` |  | Go to the definition of the scheme name at point, or follow the link there |
@@ -300,16 +304,16 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `scheme-repl-self-insert` |  | Type at the prompt, wherever point stands |
 | `scheme-repl-send-defun` |  | Run the definition at point in the Scheme REPL you used last |
 | `scheme-repl-up` |  | Walk back through the history, or move up inside the form |
-| `workspace-cancel` |  | Cancel and remove this clean task workspace |
-| `workspace-chat` |  | Jump to the chat that owns this workspace |
-| `workspace-diff` |  | Diff this workspace against the primary branch |
-| `workspace-init` |  | Create or enter a task worktree in this browser frame |
-| `workspace-land` |  | Merge this workspace into the primary checkout |
-| `workspace-manage` |  | List and manage the project's task workspaces |
-| `workspace-manage-refresh` |  | Refresh the workspace management list |
-| `workspace-new` |  | Create a task workspace |
-| `workspace-rebase` |  | Open the workspace chat to handle a rebase |
-| `workspace-visit-files` |  | Open the selected workspace in dired |
+| `worktree-cancel` |  | Cancel and remove this clean task worktree |
+| `worktree-chat` |  | Jump to the chat that owns this worktree |
+| `worktree-diff` |  | Diff this worktree against the primary branch |
+| `worktree-init` |  | Create or enter a task worktree in this browser frame |
+| `worktree-land` |  | Merge this worktree into the primary checkout |
+| `worktree-manage` |  | List and manage the project's task worktrees |
+| `worktree-manage-refresh` |  | Refresh the worktree management list |
+| `worktree-new` |  | Create a task worktree |
+| `worktree-rebase` |  | Open the worktree chat to handle a rebase |
+| `worktree-visit-files` |  | Open the selected worktree in dired |
 
 ## commands
 
@@ -328,6 +332,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `keys-revert` |  | Take back your edit on this row |
 | `keys-scope` |  | Filter all bindings by keymap |
 | `keys-unbind` |  | Take the key on this row away |
+| `toggle-frame-fullscreen` |  | Toggle fullscreen; with vscode-keyboard-lock, the browser keys come to compos |
 | `vscode-close-buffer` |  | Close this buffer, asking when it has unsaved changes |
 | `vscode-focus-window-1` |  | Go to window 1, counting left to right |
 | `vscode-focus-window-2` |  | Go to window 2, counting left to right |
@@ -338,6 +343,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `vscode-focus-window-7` |  | Go to window 7, counting left to right |
 | `vscode-focus-window-8` |  | Go to window 8, counting left to right |
 | `vscode-focus-window-9` |  | Go to window 9, counting left to right |
+| `vscode-llm-advanced` |  | Change every part of this chat's LLM setup, the connectors last |
 | `vscode-mode` |  | Toggle the VSCode keys for the palette, files and windows |
 
 ## content-scale
@@ -351,11 +357,18 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `anchor-scale-save-level` |  | Save how this page's parts are zoomed as a named content level |
 | `content-scale-decrease` | `C-M--` | Show less of this buffer: one content level out |
 | `content-scale-increase` | `C-M-+` | Show more of this buffer: one content level in |
+| `content-scale-quit` |  | Quit this content view: show the text as it is |
 | `content-scale-refresh` |  | Draw this content level again |
 | `content-scale-reset` | `C-M-0` | Show this buffer as it is: content level 0 |
 | `content-scale-set` |  | Choose a content level for this buffer by name |
 | `content-scale-visit` |  | Return to the text at the place this line came from |
 | `summarize-selection` |  | Summarize the selected text into \*Summary\* |
+
+## customize
+
+| Command | Key | What it does |
+|---|---|---|
+| `describe-variable` |  | Display a variable's value and documentation |
 
 ## desktop
 
@@ -373,8 +386,16 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `client-memory` |  | Show the memory of each browser frame and its growth per hour |
 | `display-memory-mode` |  | Toggle the VM memory in the frame modeline |
 | `perf` |  | Show lane contention: the wait and the work of every lane |
+| `perf-key-hint` |  | Name the keys perf answers, in place of typing into the monitor |
 | `perf-pause` |  | Pause or resume the samples |
+| `perf-profile-key` |  | Show the Chrome profile whose number follows SPC |
 | `perf-refresh` |  | Sample the lanes now |
+| `perf-tab-browsers` |  | Show every browser tab and its memory, as the browsers list |
+| `perf-tab-compos` |  | Show the memory of this daemon and the processes that hold it |
+| `perf-tab-history` |  | Show the daemon memory over the last hours, from the history the sampler keeps |
+| `perf-tab-next` |  | Show the next perf tab |
+| `perf-tab-prev` |  | Show the previous perf tab |
+| `perf-tab-system` |  | Show the lanes and the host memory |
 | `profile` |  | Profile the next command and show where its time went |
 | `profile-cancel` |  | Disarm the profiler and drop any running trace |
 | `profile-flamegraph` |  | Show the last profile's Scheme call stacks as a flamegraph |
@@ -444,32 +465,26 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `paredit-slurp-forward` |  | Pull the next expression into this list |
 | `paredit-splice` |  | Remove the enclosing pair of delimiters |
 | `paredit-wrap-round` |  | Wrap the next expression in a pair |
+| `tree-edit-child` |  | Select the first node inside this one |
+| `tree-edit-lift` |  | Move this node out of its parent, before it |
+| `tree-edit-mode` |  | Toggle selecting and moving whole tree-sitter nodes |
+| `tree-edit-narrow` |  | Show only the selected node; C-x n w widens |
+| `tree-edit-next` |  | Select the next node at this level |
+| `tree-edit-parent` |  | Select the node around this one |
+| `tree-edit-prev` |  | Select the previous node at this level |
+| `tree-edit-sink` |  | Move this node into the next one, as its first part |
+| `tree-edit-swap-next` |  | Swap this node with the one after it |
+| `tree-edit-swap-prev` |  | Swap this node with the one before it |
 
 ## editing
 
 | Command | Key | What it does |
 |---|---|---|
-| `annotate-add` | `C-c ! a` | Annotate the region or this line |
-| `annotate-apply-fix` |  | Apply the suggested fix on this row |
-| `annotate-dismiss` |  | Dismiss the annotation on this row (this session) |
-| `annotate-list` |  | Show this buffer's annotations as a list |
-| `annotate-list-refresh` |  | Recompute this annotation list |
-| `annotate-margin` |  | Toggle the annotation margin |
-| `annotate-mode` |  | Toggle annotations in this buffer |
-| `annotate-next` |  | Go to the next annotation |
-| `annotate-prev` |  | Go to the previous annotation |
-| `annotate-reply` |  | Reply to the annotation on this row |
-| `annotate-resolve` |  | Resolve or reopen the annotation on this row |
-| `annotate-store-visit` |  | Visit this buffer's annotations file |
-| `annotate-suggest` |  | Ask an agent to suggest a fix for this row |
-| `annotate-tab-next` |  | Show the next annotation tab |
-| `annotate-tab-prev` |  | Show the previous annotation tab |
-| `annotate-visit` |  | Visit the annotation on this row |
 | `append-to-register` | `C-x r +` | Append the region's text to a register |
 | `beginning-of-buffer` | `M-<` | Move point to the beginning of the buffer |
 | `copy-to-register` | `C-x r s` | Save the region's text in a register |
 | `cua-mode` |  | Toggle Shift-selection in a buffer you are editing |
-| `cua-select-all` |  | Select the entire buffer |
+| `cua-select-all` | `s-a` | Select the entire buffer |
 | `cua-select-backward` |  | Extend the region one character left |
 | `cua-select-backward-word` |  | Extend the region one word left |
 | `cua-select-buffer-end` |  | Extend the region to the end of the buffer |
@@ -491,6 +506,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `point-to-register` | `C-x r SPC` | Save point and the buffer in a register |
 | `query-replace` | `M-%` | Replace literal text with confirmation |
 | `replace-string` |  | Replace every literal occurrence of text |
+| `undo-redo` | `C-?` | Redo the last change undo took back |
 | `view-register` | `C-x r v` | Say what a register holds |
 | `window-configuration-to-register` | `C-x r w` | Save the frame's windows in a register |
 
@@ -498,12 +514,38 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `dark-theme` |  | Switch to this theme's canonical dark variant |
+| `light-theme` |  | Switch to this theme's canonical light variant |
+| `load-theme` |  | Choose a color theme, previewing each as you move; RET keeps it |
 | `toggle-theme-monospace` |  | Draw all text in the theme's monospace font, or stop |
 
 ## files
 
 | Command | Key | What it does |
 |---|---|---|
+| `audio-edit-clean` |  | Write the cleaned copy, NAME-clean.wav, beside the file |
+| `audio-edit-refresh` |  | Read the file again and draw the page |
+| `audio-edit-step-compress` |  | Step the compression: off, light or strong |
+| `audio-edit-step-declick` |  | Step the pop and click remover: off, on or strong |
+| `audio-edit-step-deess` |  | Turn the de-esser on or off |
+| `audio-edit-step-gate` |  | Turn the hiss gate between words on or off |
+| `audio-edit-step-highpass` |  | Step the rumble cut: off, 60, 80 or 120 Hz |
+| `audio-edit-step-loudness` |  | Step the loudness target: off, -14, -16, -19 or -23 LUFS |
+| `audio-edit-step-mud` |  | Step the mid cut for a boxy sound: off, light or strong |
+| `audio-edit-step-noise` |  | Step the noise reduction: off, light, medium or strong |
+| `cap-clean-mic` |  | Clean every mic track with audio-edit's settings |
+| `cap-dir` |  | Open the Cap recordings app |
+| `cap-dir-dired` |  | List the Cap folder's files in Dired, instead of the app |
+| `cap-dir-open` |  | Open the recording on this row |
+| `cap-dir-pages-toggle` |  | Turn on or off opening the Cap folder from Dired as the app, and keep the choice |
+| `cap-dired` |  | List the recording folder's files in Dired |
+| `cap-export` |  | Write the screen with the mic, cleaned when there is a clean, as one mp4 |
+| `cap-open-in-cap` |  | Open the recording in the Cap app |
+| `cap-open-mic` |  | Open the mic track in audio-edit-mode, in the other window |
+| `cap-pages-toggle` |  | Turn on or off opening Cap recording folders as pages, and keep the choice |
+| `cap-refresh` |  | Read the recording again and draw the page |
+| `cap-watch-start` |  | Watch cap-watch-directory for new Cap recordings, transcribing, describing and titling each one |
+| `cap-watch-stop` |  | Stop watching for new Cap recordings |
 | `chat-changes` |  | Show what this chat changed: its jj changes, their state, and its diff |
 | `collect-accept` |  | Accept the candidate on this line |
 | `collect-next` |  | Move down; the preview follows |
@@ -515,7 +557,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `diff-show-history` |  | Show the previous commits tab |
 | `diff-toggle-all` |  | Fold all files, or unfold all files |
 | `diff-toggle-file` |  | Fold or unfold the file at point |
-| `dired` | `C-x C-d` | Prompt for a directory and open it in Dired |
+| `dired` | `C-x d` | Prompt for a directory and open it in Dired |
 | `dired-change-marks` |  | Change one mark character to another |
 | `dired-chmod` |  | Set the octal mode of the file at point or marked files |
 | `dired-copy` |  | Copy the file at point, or all marked files |
@@ -549,6 +591,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `dired-up` |  | Open the parent directory in Dired, where it was |
 | `dired-visit` |  | Open the file on this line in another window, the one of its own mode first. A directory opens here |
 | `dired-visit-in-group` |  | Visit this entry in the current group, or the Dired buffer's group |
+| `find-file-other-window` | `C-x 4 f` | Find a file and display it only in another window |
+| `gallery-mode` |  | Show this Dired as a grid of thumbnails, or as the table again |
+| `image-view-fit` |  | Fit the image to the buffer |
+| `image-view-reload` |  | Reload the image view |
+| `image-view-toggle-actual-size` |  | Toggle between fit-to-buffer and actual 1:1 size |
 | `jj-push` |  | Advance the tracked bookmark to the tip and push to git |
 | `jj-recheck` |  | Look for the jj binary again |
 | `json-pretty-print-buffer` |  | Indent the current JSON buffer without changing its values or key order |
@@ -560,6 +607,120 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `save-buffer` | `C-x C-s` | Save the current buffer to its file |
 | `scroll-other-window` | `C-M-v` | Scroll the next window up nearly a full screen |
 | `scroll-other-window-down` | `M-<up>` | Scroll the next window down nearly a full screen |
+| `tts-training` |  | Record voice samples and hear them cloned |
+| `tts-training-delete` |  | Delete the sample at point and its takes |
+| `tts-training-engine` |  | Step the engine: Pocket TTS, Chatterbox, both |
+| `tts-training-expression` |  | Step Chatterbox's expression: 0.3, 0.5, 0.7, 0.9 |
+| `tts-training-import` |  | Make a sample from a sound file |
+| `tts-training-record` |  | Record a new voice sample |
+| `tts-training-record-cancel` |  | Stop recording and throw it away |
+| `tts-training-record-mood` |  | Read the script of the next mood |
+| `tts-training-record-toggle` |  | Start recording, or stop and keep the sample |
+| `tts-training-refresh` |  | Read the samples again |
+| `tts-training-rename` |  | Rename the sample at point |
+| `tts-training-test` |  | Speak a line in the voice of the sample at point |
+| `video-edit-add-from-dired` |  | Add the marked files, or the file at point, to an open edit |
+| `video-edit-cut` |  | Split the piece on this line at a time you type, in the video's own time |
+| `video-edit-cut-clone` |  | Speak this cut's words in your cloned voice and lay the take in |
+| `video-edit-cut-fit` |  | Fit the video to the take that plays in this cut |
+| `video-edit-cut-forget` |  | Forget a spare take of this cut: it leaves the edit, its file stays |
+| `video-edit-cut-redraw` |  | Draw this cut's page again |
+| `video-edit-cut-use-1` |  | Make take 1 of this cut play |
+| `video-edit-cut-use-2` |  | Make take 2 of this cut play |
+| `video-edit-cut-use-3` |  | Make take 3 of this cut play |
+| `video-edit-cut-use-4` |  | Make take 4 of this cut play |
+| `video-edit-cut-use-5` |  | Make take 5 of this cut play |
+| `video-edit-cut-use-6` |  | Make take 6 of this cut play |
+| `video-edit-cut-use-7` |  | Make take 7 of this cut play |
+| `video-edit-cut-use-8` |  | Make take 8 of this cut play |
+| `video-edit-cut-use-9` |  | Make take 9 of this cut play |
+| `video-edit-delete-piece` |  | Hide the selected segment |
+| `video-edit-export` |  | Write the finished video to video-edit-export-directory |
+| `video-edit-go-to-cursor` |  | Move the timeline's playhead to the cursor's word and centre the transcript on it, without playing |
+| `video-edit-import` |  | Add a video or a Cap recording to the end of this edit |
+| `video-edit-new` |  | Start an edit of a video: NAME.vedit, with the whole video as one segment |
+| `video-edit-page-redraw` |  | Draw the page again from the edit |
+| `video-edit-page-to-edit` |  | Show the edit this page draws, in the other window |
+| `video-edit-preview` |  | Write a 720p preview of the whole edit and play it on the page |
+| `video-edit-redo` |  | Make again the change undo took back |
+| `video-edit-remove-pauses` |  | Cut every pause longer than video-edit-pause-seconds out of the edit |
+| `video-edit-rename-piece` |  | Name the selected segment |
+| `video-edit-select-next` |  | Select the next segment |
+| `video-edit-select-previous` |  | Select the previous segment |
+| `video-edit-show-page` |  | Show the edit's page, with a filmstrip and a waveform per segment, in the other window |
+| `video-edit-timeline` |  | Show the edit's timeline: play it live, skipping hidden clips, and mark clips |
+| `video-edit-timeline-accept-pause` |  | Keep the chosen pause: it is meant, never shown again |
+| `video-edit-timeline-beginning` |  | The beginning of the edit |
+| `video-edit-timeline-clear` |  | Let go of what is chosen |
+| `video-edit-timeline-cut` |  | Cut at the playhead, or cut out the chosen pause |
+| `video-edit-timeline-cut-detail` |  | Open the page of the chosen cut: its words and every take in it |
+| `video-edit-timeline-drop-source` |  | Take this video out of the edit |
+| `video-edit-timeline-end` |  | The end of the edit |
+| `video-edit-timeline-export-key` |  | Export the finished video |
+| `video-edit-timeline-fit-take` |  | Fit the video to the chosen take: it shows with a breath each side, the rest of its segment hides |
+| `video-edit-timeline-fix-all` |  | Fix every pause: cut each retake's first take, trim the rest to a breath |
+| `video-edit-timeline-frame-back` |  | Step a frame back |
+| `video-edit-timeline-frame-on` |  | Step a frame on |
+| `video-edit-timeline-go-1` |  | Go to bookmark 1 |
+| `video-edit-timeline-go-2` |  | Go to bookmark 2 |
+| `video-edit-timeline-go-3` |  | Go to bookmark 3 |
+| `video-edit-timeline-go-4` |  | Go to bookmark 4 |
+| `video-edit-timeline-go-5` |  | Go to bookmark 5 |
+| `video-edit-timeline-go-6` |  | Go to bookmark 6 |
+| `video-edit-timeline-go-7` |  | Go to bookmark 7 |
+| `video-edit-timeline-go-8` |  | Go to bookmark 8 |
+| `video-edit-timeline-go-9` |  | Go to bookmark 9 |
+| `video-edit-timeline-go-to-cursor` |  | Move the playhead to the cursor and centre the transcript on it, without playing |
+| `video-edit-timeline-hide` |  | Hide or show the segment |
+| `video-edit-timeline-import-key` |  | Add a video or a Cap recording |
+| `video-edit-timeline-line-down` |  | The transcript line below |
+| `video-edit-timeline-line-end` |  | The end of the line |
+| `video-edit-timeline-line-start` |  | The start of the line |
+| `video-edit-timeline-line-up` |  | The transcript line above |
+| `video-edit-timeline-mark-1` |  | Bookmark the chosen cut as 1 |
+| `video-edit-timeline-mark-2` |  | Bookmark the chosen cut as 2 |
+| `video-edit-timeline-mark-3` |  | Bookmark the chosen cut as 3 |
+| `video-edit-timeline-mark-4` |  | Bookmark the chosen cut as 4 |
+| `video-edit-timeline-mark-5` |  | Bookmark the chosen cut as 5 |
+| `video-edit-timeline-mark-6` |  | Bookmark the chosen cut as 6 |
+| `video-edit-timeline-mark-7` |  | Bookmark the chosen cut as 7 |
+| `video-edit-timeline-mark-8` |  | Bookmark the chosen cut as 8 |
+| `video-edit-timeline-mark-9` |  | Bookmark the chosen cut as 9 |
+| `video-edit-timeline-menu` |  | Open the menu of the chosen pause or cut |
+| `video-edit-timeline-mute` |  | Mute or unmute the segment |
+| `video-edit-timeline-next-point` |  | The next cut |
+| `video-edit-timeline-play` |  | Play or pause |
+| `video-edit-timeline-play-here` |  | Open the menu of the chosen pause or cut; with nothing chosen, play from the cursor |
+| `video-edit-timeline-previous-point` |  | The cut before |
+| `video-edit-timeline-project-file` |  | Show the project file |
+| `video-edit-timeline-record` |  | Re-record the segment |
+| `video-edit-timeline-remove` |  | Delete the chosen cut or take |
+| `video-edit-timeline-remove-key` |  | Delete the chosen cut or take |
+| `video-edit-timeline-rename` |  | Name the clip shown: the project calls it that |
+| `video-edit-timeline-save` |  | Save the edit |
+| `video-edit-timeline-scrub-back` |  | Scrub a second back |
+| `video-edit-timeline-scrub-on` |  | Scrub a second on |
+| `video-edit-timeline-select-down` |  | Move the chosen cut a line down, or the chosen take 1 s later |
+| `video-edit-timeline-select-up` |  | Move the chosen cut a line up, or the chosen take 1 s earlier |
+| `video-edit-timeline-select-word-back` |  | Move the chosen cut a word earlier, or the chosen take 0.1 s |
+| `video-edit-timeline-select-word-on` |  | Move the chosen cut a word later, or the chosen take 0.1 s |
+| `video-edit-timeline-source-earlier` |  | Move this video earlier |
+| `video-edit-timeline-source-later` |  | Move this video later |
+| `video-edit-timeline-whole` |  | Play the whole video, hidden parts too |
+| `video-edit-timeline-zoom-clip` |  | Zoom to the chosen segment |
+| `video-edit-timeline-zoom-in` |  | Zoom in around the playhead |
+| `video-edit-timeline-zoom-out` |  | Zoom out |
+| `video-edit-timeline-zoom-whole` |  | Show the whole video |
+| `video-edit-transcript` |  | Show the edit's transcript, writing it first when it is missing |
+| `video-edit-undo` |  | Take back the last change to the edit |
+| `video-transcript-clip` |  | Clip the marked words: they leave the video |
+| `video-transcript-cut` |  | Cut the video just before the word at point |
+| `video-transcript-delete` |  | Remove the marked words from the video, or step back a character when nothing is marked |
+| `video-transcript-goto` |  | Move the timeline's playhead to the word at point |
+| `video-transcript-refresh` |  | Draw the transcript again from the edit |
+| `video-transcript-rename` |  | Name the clip at point |
+| `video-transcript-toggle` |  | Turn the clip at point between hidden and shown |
+| `video-transcript-unclip` |  | Remove the clip at point: its words stay in the video |
 | `wdired-abort-changes` |  | Leave the name edit and rename nothing |
 | `wdired-finish-edit` |  | Rename the files whose names you changed |
 | `write-file` | `C-x C-w` | Write the buffer to a file; the buffer becomes that file's buffer |
@@ -573,33 +734,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `diff-stage` |  | Stage the hunk at point, or the current file |
 | `git-diff` |  | Show the diff for the directory you are in |
 | `worktree-mode` |  | Toggle the current buffer's worktree identity header |
-
-## google
-
-| Command | Key | What it does |
-|---|---|---|
-| `google` |  | Open Google Workspace |
-| `google-account` |  | Choose the default account for new Google buffers |
-| `google-compose` |  | Compose a mail draft for this Google account |
-| `google-connect` |  | Connect another Google account with native OAuth |
-| `google-disconnect` |  | Revoke a Google account connection |
-| `google-drive-copy` |  | Copy marked files, or the current file, to a Drive folder |
-| `google-drive-flag` |  | Flag this Google file for trash |
-| `google-drive-mkdir` |  | Create a folder in this Drive directory |
-| `google-drive-rename` |  | Rename the current file or move selected files to a folder |
-| `google-drive-sort` |  | Toggle Google file sorting between name and modification time |
-| `google-drive-trash` |  | Trash flagged files, otherwise marked files or the current file |
-| `google-drive-up` |  | Open the parent Google Drive directory |
-| `google-first-page` |  | Return to the first Google page |
-| `google-next-page` |  | Fetch the next Google page |
-| `google-operation` |  | Choose a Google API operation and prepare an editable request |
-| `google-read` |  | Read the selected Google item in compos |
-| `google-refresh` |  | Refresh the current Google page |
-| `google-save-mail-draft` |  | Prepare saving this message to Gmail drafts |
-| `google-search` |  | Search mail, events, or Drive files |
-| `google-send-mail` |  | Prepare sending this message through Gmail |
-| `google-service-open` |  | Open the selected Google application |
-| `google-submit` |  | Submit the reviewed Google request for its original account |
 
 ## groups
 
@@ -632,16 +766,16 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 |---|---|---|
 | `app-preview` | `C-c C-a` | Run the current buffer as an HTML app |
 | `app-reload` | `C-c C-r` | Reload every running app |
-| `command-palette` | `s-P` | Find a command by what it does |
+| `command-palette` | `s-p` | Find a command by what it does |
 | `digit-argument` | `M-0` | Add a digit to the next command's prefix argument |
-| `global-predict-mode` |  | Toggle local echo of typed text in every file buffer |
 | `goto-address-at-point` |  | Follow the URL or file path at point, else find the definition of the name there |
 | `goto-thing-at-point` | `M-.` | Follow the address at point, else go to the definition |
 | `insert-file-link` |  | Choose a file and insert a link to it at point, relative to this buffer's directory, in the mode's link syntax |
 | `keyboard-quit` | `C-g` | Quit the current operation: cancel the prompt, close the dashboard, or clear the mark |
 | `list-cycle-grouping` |  | Cycle through the grouping mechanisms declared by this list |
-| `list-cycle-sorting` |  | Cycle through the sorting mechanisms declared by this list |
-| `list-filter` |  | Narrow this list: pick a facet from the tabs when the list has them, else the rows that match what you type |
+| `list-cycle-sorting` |  | Sort by the next column; pressed twice at once, turn the order round |
+| `list-facets` |  | Narrow this list by a facet (group, project, status) from the tabs when the list has them, else search as / does |
+| `list-filter` |  | Search this list: keep the rows whose name or content matches what you type. / is the search key on every list |
 | `list-filter-pop` |  | Drop the most recent filter on this list |
 | `list-mark-all` |  | Mark every row this list shows; again unmarks them |
 | `list-next` |  | Move to the next row of this list |
@@ -654,6 +788,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `minibuffer-cycle-shape` |  | Show this prompt as the bottom bar, the panel, or the modal |
 | `minibuffer-delete-backward` |  | Delete the character before point, or the highlighted row of an empty prompt that allows it |
 | `minibuffer-delete-row` |  | Delete the highlighted row, in a prompt that allows it |
+| `minibuffer-leader` |  | Run the key typed after SPC as its Meta key |
 | `minibuffer-next-candidate` |  | Select the next minibuffer candidate |
 | `minibuffer-next-section` |  | Move to the next section in the list behind the prompt, else the next history entry |
 | `minibuffer-previous-candidate` |  | Select the previous minibuffer candidate |
@@ -661,7 +796,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `minibuffer-rail-enter` |  | Move the arrows into the list on the right of the palette, or to the next tab |
 | `minibuffer-rail-exit` |  | Leave the list on the right and go back to the candidates, or to the previous tab |
 | `minibuffer-regroup` |  | Cycle what a section is in the list behind the prompt |
-| `minibuffer-space` |  | Pick the row on an empty prompt, else type a space |
+| `minibuffer-space` |  | On an empty prompt, wait for a key and run it with Meta; else type a space |
 | `negative-argument` | `M--` | Negate the next command's prefix argument |
 | `next-history-element` |  | Put the next history item in the minibuffer |
 | `notifications` |  | Show the notices that need you, newest first |
@@ -670,7 +805,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `notifications-refresh` |  | Redraw the notices |
 | `notifications-toggle-all` |  | Show every notice that passed, or only the open ones |
 | `notifications-visit` |  | Go where the notice at point points |
-| `predict-mode` |  | Toggle local echo of typed text in the current buffer |
 | `previous-history-element` |  | Put the previous history item in the minibuffer |
 | `self-insert-command` | `!` | Insert the character you typed |
 | `transient-cancel-one` |  | Exit this transient, and tell it to change nothing |
@@ -729,15 +863,40 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `ai` | `C-l C-l` | Open the AI app: a chat's LLM setup, the prompts, the connectors and the local models |
+| `ai-apply` |  | Run the preset on this row in the chat |
+| `ai-backend` |  | Choose the backend of the chat, this group, or the Compos default |
+| `ai-clear-default` |  | Make this group follow the global default again |
+| `ai-default` |  | Make the connector on this row the one new chats use |
+| `ai-do` |  | Do the main thing of the row: pick a preset, apply, turn on or off, test, load or install |
+| `ai-effort` |  | Choose the reasoning effort of the chat, this group, or the Compos default |
+| `ai-global-default` |  | Make the chat's setup, or the preset on this row, what new chats start with where the group names none |
+| `ai-group-default` |  | Make the chat's setup, or the preset on this row, what new chats in this group start with |
+| `ai-install` |  | Install the connector's agent program, or a model on a model host |
+| `ai-key` |  | Add or change the API key of the connector on this row |
+| `ai-load` |  | Load the model on this row into its host's memory |
+| `ai-model` |  | Choose the model of the chat, this group, or the Compos default |
+| `ai-page` |  | Show the connector on this row in the connectors app, with every model |
+| `ai-pick-default` |  | Choose the preset the row's group, or the whole app, starts new chats with |
+| `ai-refresh` |  | Read every tab again: the setup, the prompts, the connectors and the model hosts |
+| `ai-save` |  | Save the chat's setup as a new preset |
+| `ai-scroll-line-down` |  | Scroll the page three lines down |
+| `ai-scroll-line-up` |  | Scroll the page three lines up |
+| `ai-sign-in` |  | Sign in to the connector on this row in a terminal |
+| `ai-test` |  | Test the connector on this row with a short message, and time the reply |
+| `ai-toggle` |  | Turn the prompt section on this row on or off in the chat |
+| `ai-tools` |  | Turn a tool or MCP server on or off for the chat, this group, or the Compos default |
+| `ai-uninstall` |  | Uninstall the model on this row from its host |
+| `ai-update-preset` |  | Write the chat's setup into the preset it runs |
+| `ai-visit` |  | Edit the prompt file on this row in the other window |
 | `chat-tools` |  | This chat's tool surface |
 | `group-llm` |  | Choose the preset this group's new chats start with |
-| `laya-server` |  | Start the laya daemon, or say where it stands |
-| `laya-server-stop` |  | Stop the laya daemon and free the weights |
-| `llm-catalog-refresh` |  | Fetch the newest model catalog and load it now |
+| `llm-catalog-refresh` |  | Refresh every model list: the published catalog, each provider's own, and each connector's |
 | `llm-catalog-status` |  | Say what the loaded model catalog is and how old it is |
 | `llm-companion-open` | `M-o` | Open this document's own chat, starting one when it has none; with a region, the region is the chat's only context |
 | `llm-config-apply-prompt-sections` |  | Apply all selected prompt sections |
 | `llm-config-filter-back` |  | Take the last character off the preset filter |
+| `llm-config-filter-char` |  | Append the pressed key to the preset filter |
 | `llm-config-forget-bundle` |  | Forget a saved preset |
 | `llm-config-new-preset` |  | Make a new preset: backend, model, effort, then a name |
 | `llm-config-open-presets` |  | Close this menu and manage the presets in the LLM Presets app |
@@ -787,47 +946,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `models-uninstall` |  | Uninstall the model on this line from the host |
 | `models-unserve` |  | Stop the daemon this line's host is |
 | `narrow-context-also` | `C-x n N` | Narrow the view and the LLM context to the same region or Morg section |
-| `needle-index` |  | Embed the catalog so a sentence can reach it |
-| `needle-server` |  | Start the Needle daemon, or say where it stands |
-| `needle-server-stop` |  | Stop the Needle daemon and free the weights |
-
-## mail
-
-| Command | Key | What it does |
-|---|---|---|
-| `mail` |  | Toggle mail in the group you are in: index, thread, chat |
-| `mail-abort` |  | Abandon this compose buffer |
-| `mail-feed-start` |  | Turn new mail into events: the webhook and the sweep |
-| `mail-feed-stop` |  | Stop turning new mail into events |
-| `mail-send` |  | Send this buffer as an email |
-| `notmuch-add-tag` |  | Add a tag to marked threads, or the thread at point (completes) |
-| `notmuch-archive-marked` |  | Archive all marked threads |
-| `notmuch-autotag` |  | Classify the marked threads, or the thread at point, with this mailbox's own tags; only untagged ones unless C-u |
-| `notmuch-autotag-new` |  | Classify each thread that came in since the last run, with this mailbox's own tags |
-| `notmuch-back` |  | Remove the last mail filter, or return to mailboxes |
-| `notmuch-delete-sender` |  | Trash every message in the mailbox from this thread's sender, with no unsubscribe attempt (works on a \*notmuch\* list row or an open notmuch-show buffer) |
-| `notmuch-filter-by-sender` |  | Narrow the search to this thread's sender |
-| `notmuch-filter-by-tag` |  | Choose a tag from the current results and add it to this search |
-| `notmuch-filter-marked` |  | Open the selected messages as a search |
-| `notmuch-like` |  | File this thread for the agent (+liked -inbox): the marked threads on a list row, or the thread at point, or the open thread |
-| `notmuch-mark-all` |  | Select the entire filtered inbox or search locally; again clears selection |
-| `notmuch-mark-toggle` |  | Toggle local selection of this thread, move down |
-| `notmuch-open-attachment` |  | Choose and open an attachment from the selected mail thread |
-| `notmuch-open-thread` |  | Open the thread at point beside the index and go to it |
-| `notmuch-purge-sender` |  | Purge this thread's sender: unsubscribe, trash every message from them, and block that one address out of the inbox for good. The block is the address alone, never the domain, because one address at a shared or hijacked domain says nothing about the rest of it (works on a \*notmuch\* list row or an open notmuch-show buffer) |
-| `notmuch-remove-all-tags` |  | Remove every tag from the marked threads, or the thread at point |
-| `notmuch-remove-tag` |  | Remove a tag from marked threads, or the thread at point (completes) |
-| `notmuch-reply` |  | Reply to the newest message of the thread at point |
-| `notmuch-show-archive` |  | Archive this thread and go back |
-| `notmuch-show-quit` |  | Close this thread's pane; it stays closed until you move to another thread |
-| `notmuch-show-reply` |  | Reply to the message at point |
-| `notmuch-show-toggle-view` |  | Switch between the HTML and text views |
-| `notmuch-tag-marked` |  | Apply tag changes to all marked threads |
-| `notmuch-trash` |  | Trash the marked threads, or the thread at point (+trash -inbox -unread) |
-| `notmuch-trash-marked` |  | Trash all marked threads |
-| `notmuch-unfilter-last` |  | Remove the most recently added notmuch filter |
-| `notmuch-unmark-all` |  | Clear local mail selection |
-| `notmuch-unsubscribe` |  | Try to unsubscribe from this thread's sender without deleting anything: RFC 8058 one-click POST when offered, else a plain GET, else a best-effort scan of the body (works on a \*notmuch\* list row or an open notmuch-show buffer) |
 
 ## mcp
 
@@ -891,28 +1009,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `bookmark-write` |  | Write bookmarks to another file |
 | `list-bookmarks` | `C-x r l` | Show the bookmark management table |
 
-## network
-
-| Command | Key | What it does |
-|---|---|---|
-| `irc` |  | List your IRC servers; RET connects |
-| `irc-channels-join` |  | Join the channel on this row |
-| `irc-channels-refresh` |  | Ask the server for this channel list again |
-| `irc-redraw` |  | Draw this server's transcripts again from the frames the connection kept |
-| `irc-send` |  | Send the line at the prompt: text to the channel, a /command to the client |
-| `irc-servers-add` |  | Add a server to the list |
-| `irc-servers-connect` |  | Connect to the server on this row and open its buffer |
-| `irc-servers-disconnect` |  | Disconnect the server on this row |
-| `irc-servers-refresh` |  | Redraw the server list |
-| `irc-servers-remove` |  | Remove the server on this row from the list |
-| `irc-toggle-verbose` |  | Show every line the server sends, or only what people say |
-
 ## other
 
 | Command | Key | What it does |
 |---|---|---|
 | `apropos-components` |  | Search UI components by words |
-| `ats` |  | Open SVS recruiting as a live website app |
 | `backward-char` | `C-b` | Move point one character backward |
 | `beginning-of-line` | `C-a` | Move point to the beginning of the line |
 | `buffer-rename` |  | Rename the current buffer without changing its file |
@@ -927,6 +1028,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `code-browse-prev` |  | Move to the previous node at this level |
 | `code-browse-toggle-fold` |  | Fold or unfold the node at point |
 | `code-goto-definition` |  | Go to the definition of the symbol at point, or follow the link there |
+| `compile` |  | Run a build command in the project without waiting; its errors become places to visit |
 | `completion-accept` |  | Insert the selected completion at point |
 | `completion-at-point` | `M-/` | Perform completion on the text around point |
 | `completion-delete-backward` |  | Delete the character before point and narrow the popup |
@@ -940,8 +1042,8 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `delete-backward-char` | `DEL` | Delete the character before point |
 | `delete-char` | `C-d` | Delete the character after point |
 | `delete-frame` |  | Delete the selected frame |
+| `demo-app` |  | Open the model app: house plants, a page per plant |
 | `describe-mode` | `C-h m` | Show this buffer's mode, its keys and what they do |
-| `describe-variable` |  | Display a variable's value and documentation |
 | `diff-clear-selection` |  | Clear the selected diff scope; ? will explain the whole diff |
 | `diff-next-file` |  | Move to the next file |
 | `diff-next-hunk` |  | Move to the next hunk |
@@ -960,22 +1062,17 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `eval-region` |  | Evaluate the region as Scheme |
 | `evil-local-mode` |  | Toggle Vim emulation in this buffer |
 | `evil-mode` |  | Toggle Vim emulation everywhere (files + \*scratch\*) |
-| `fast-code` |  | Turn an intent into Scheme and run it |
-| `fast-eval` |  | Show the fast-code eval as a table |
-| `fast-learned` |  | Show the functions fast-code learned |
-| `fast-palette-install` |  | Send unmatched palette input to fast-code |
-| `fast-toggle` |  | Toggle fast |
-| `fast-trace` |  | Show the last fast-code resolutions, stage by stage |
 | `focus-left` | `s-<left>` | Select the pane to the left, across the columns |
 | `focus-right` | `s-<right>` | Select the pane to the right, across the columns |
 | `forward-char` | `C-f` | Move point one character forward |
+| `frame-ui-scale-decrease` |  | Make this frame's text smaller |
+| `frame-ui-scale-increase` |  | Make this frame's text larger |
+| `frame-ui-scale-reset` |  | Give this frame the application's text size again |
 | `graveyard-sweep` |  | Delete graveyard entries older than graveyard-keep-days; the burial log stays |
-| `herdr` |  | Show the agents in this group's shells and what each is doing |
 | `history-sweep-redundant` |  | Delete history logs of dormant buffers whose checkpoint carries the text |
 | `hl-line-mode` |  | Toggle the highlight of the current line in this buffer |
-| `html-edit` |  | Edit this HTML file on its rendered page in the other window |
-| `image-generate` |  | Make an image from a prompt and show it |
-| `insta` |  | Open the Instagram feed app |
+| `insert-char` | `C-x 8 RET` | Insert a character by its code point, typed in hex (3bb, U+03BB) or #d955; a prefix N inserts it N times |
+| `insert-file` | `C-x i` | Insert the contents of a file at point; the buffer keeps its own file |
 | `kill-line` | `C-k` | Kill text from point to end of line |
 | `list-cycle-view` |  | Cycle this list's view: rendered, bare text, and the source under it |
 | `list-execute` |  | Run the flags in this list |
@@ -984,6 +1081,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `list-revert` |  | Fetch this list's rows again and redraw |
 | `list-tab-next` |  | Show the next tab of this list |
 | `list-tab-prev` |  | Show the previous tab of this list |
+| `list-tabs` |  | Show the browser's open tabs in a buffer |
 | `list-toggle-all-children` |  | Fold every row that has rows under it, or unfold them all |
 | `list-toggle-children` |  | Fold or unfold the rows under this row, or under its parent |
 | `list-toggle-detail` |  | Turn this list's detail on or off |
@@ -991,7 +1089,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `list-unmark` |  | Unmark the entry at point |
 | `list-unmark-all` |  | Drop every mark and flag in this list |
 | `load-file` |  | Load a Scheme file into the live session |
-| `load-theme` |  | Choose a color theme, previewing each as you move; RET keeps it |
 | `mcp-hub` | `C-c a m` | List every MCP server: status, tools, presets |
 | `mcp-hub-detail` |  | Show what the server on this line serves |
 | `mcp-hub-detail-log` |  | Show this server's frames |
@@ -1006,55 +1103,17 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `mcp-hub-stop` |  | Stop the MCP server on this line |
 | `mcp-hub-stop-all` |  | Stop every running MCP server |
 | `newline` | `S-RET` | Insert a newline at point |
+| `next-error` |  | Visit the next place the compilation output names |
 | `next-line` | `C-n` | Move point down one line |
 | `normal-mode` |  | Set the major mode the buffer's file name asks for |
-| `notmuch` |  | Open the mailboxes (saved searches) |
-| `notmuch-archive` |  | Archive the marked threads, or the thread at point (-inbox) |
-| `notmuch-edit-tags` |  | Edit tags of the thread at point (+tag -tag ...) |
-| `notmuch-filter` |  | Narrow this search with more terms (and) |
-| `notmuch-first-thread` |  | Jump to the newest thread |
-| `notmuch-hello-open` |  | Open the saved search at point |
-| `notmuch-hello-refresh` |  | Refresh the mailbox counts |
-| `notmuch-inbox` |  | Open the mail index on the default query |
-| `notmuch-jump` |  | Jump to a saved search (j, then its key) |
-| `notmuch-last-thread` |  | Jump to the oldest listed thread |
-| `notmuch-next` |  | Move down; the shown mail follows |
-| `notmuch-prev` |  | Move up; the shown mail follows |
-| `notmuch-preview` |  | Preview the thread at point in the other window |
-| `notmuch-quit` |  | Close mail: kill the view buffers, back to work |
-| `notmuch-refresh` |  | Re-run the search and refresh the listing |
-| `notmuch-search` |  | Prompt for a notmuch query and show it |
-| `notmuch-show-current` |  | Open the page of the index's current thread, if there is one |
-| `notmuch-smart-untag` |  | Remove the searched-for tag from this thread |
-| `notmuch-switch-host` |  | Read mail from another mailbox |
-| `notmuch-toggle-unread` |  | Toggle the unread tag on the thread at point |
-| `onboarding` |  | Learn compos with a guide: a chat, and a stage window beside it |
-| `org-ctrl-c-ctrl-c` |  | Toggle the checkbox at point and update cookies |
-| `org-cycle` |  | Toggle folding of the headline at point, else indent |
-| `org-demote` |  | Demote the headline at point, or indent the line |
-| `org-demote-subtree` |  | Demote the entire subtree at point |
-| `org-global-cycle` |  | Cycle global visibility: overview or show all |
-| `org-insert-heading-after-subtree` |  | Insert a headline after the subtree |
-| `org-meta-return` |  | Insert a new headline at the current level |
-| `org-move-subtree-down` |  | Move the subtree down past its next sibling |
-| `org-move-subtree-up` |  | Move the subtree up past its previous sibling |
-| `org-priority-down` |  | Decrease the priority of the current item |
-| `org-priority-up` |  | Increase the priority of the current item |
-| `org-promote` |  | Promote the headline at point, or de-dent the line |
-| `org-promote-subtree` |  | Promote the entire subtree at point |
-| `org-todo` |  | Cycle the TODO state of the headline at point |
-| `package-develop` |  | Load a package from a checkout of your own (empty: back to the clone) |
-| `package-freeze` |  | Pin every installed package at its current commit in packages.lock |
-| `package-install` |  | Clone a package from GitHub (user/repo) or a git url and load it |
-| `package-list` |  | Echo the installed packages |
-| `package-thaw` |  | Check every package out at its packages.lock pin |
+| `packages` |  | List every package by where it lives (packages, stdlib, core); load and unload them |
+| `packages-check-updates` |  | Fetch every installed package and name the ones with updates |
+| `previous-error` |  | Visit the previous place the compilation output names |
 | `previous-line` | `C-p` | Move point up one line |
+| `prompt-editor` |  | List the sections of this chat's system prompt, with the presets' prompts |
+| `quoted-insert` | `C-q` | Read the next key and insert its character, a control character included, N times |
+| `recompile` |  | Run the last compilation again, in its directory |
 | `site-chat-tab` |  | Go back to the browser tab this site chat was opened from |
-| `slides-deck-mode` |  | Link or unlink this deck and its slides |
-| `slides-demo` |  | Present the slides demo: every feature of a deck, each on its own slide |
-| `slides-edit` |  | Show the deck at the slide the presenter shows |
-| `slides-new` |  | Start a deck from the starter deck and present it |
-| `slides-present` |  | Present this Markdown buffer as slides in the other window |
 | `switch-to-tab` |  | Pick a browser tab and bring it to the front |
 | `tabs-key-1` |  | Take the tab of the row at point keyed 1 |
 | `tabs-key-2` |  | Take the tab of the row at point keyed 2 |
@@ -1084,6 +1143,16 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `package-develop` |  | Load a package from a checkout of your own (empty: back to the clone) |
+| `package-freeze` |  | Pin every installed package at its current commit in packages.lock |
+| `package-hold` |  | Hold a package at its commit, or let a held one update again |
+| `package-install` |  | Clone a package from GitHub (user/repo) or a git url, load it and add it to init.scm |
+| `package-list` |  | Echo the installed packages |
+| `package-pr` |  | Send a package's changes upstream as a pull request |
+| `package-rollback` |  | Put a package back at the commit before its last update and hold it there |
+| `package-thaw` |  | Check every package out at its packages.lock pin |
+| `package-update` |  | Update a package to the commit the release vouches for; an API break files a fix for your code |
+| `package-update-all` |  | Update every package that is not held to the commits the release vouches for |
 | `reload-file` |  | Reload a Scheme package into the live session |
 | `reload-scheme` |  | Rebind every Elixir primitive in the live session |
 
@@ -1097,6 +1166,9 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `opencode` |  | Open OpenCode for this group; with C-u, choose a group |
 | `shell` |  | Open this group's raw PTY shell; with C-u, a new one |
 | `tail-file` |  | Follow a file as it grows (local or /ssh: remote) |
+| `tail-filter` |  | Show only the lines that hold some text; empty shows every line |
+| `tail-filter-clear` |  | Show every line again |
+| `tail-filter-ts` |  | Show only the lines a tree-sitter query matches |
 | `term-scroll-down` |  | Show the newer output, one screen on |
 | `term-scroll-to-bottom` |  | Go back to the prompt |
 | `term-scroll-to-top` |  | Show the oldest output the terminal keeps |
@@ -1124,35 +1196,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `occur-ts-refresh` |  | Run this tree-sitter query again |
 | `occur-ts-visit` |  | Visit the tree-sitter capture on this row |
 
-## secrets
-
-| Command | Key | What it does |
-|---|---|---|
-| `doppler` | `C-c a d` | List and manage Doppler secret names |
-| `doppler-refresh` |  | Read the secrets again from Doppler, not the local copy |
-| `doppler-secret-add` |  | Add a secret to this Doppler config |
-| `doppler-secret-copy` |  | Copy the value of the secret at point |
-| `doppler-secret-set` |  | Replace the value of the secret at point |
-| `doppler-select-config` |  | Select the Doppler config to list |
-| `doppler-select-project` |  | Select the Doppler project and config to list |
-
-## sentry
-
-| Command | Key | What it does |
-|---|---|---|
-| `sentry` |  | List unresolved production issues from Sentry |
-| `sentry-ask-agent` |  | Send this issue to the Sentry group agent |
-| `sentry-detail-refresh` |  | Refresh this Sentry issue detail |
-| `sentry-events` |  | List safe event identifiers for this Sentry issue |
-| `sentry-events-refresh` |  | Refresh this Sentry event list |
-| `sentry-list-ask-agent` |  | Send the marked issues, or the one at point, to the Sentry group agent |
-| `sentry-list-open-web` |  | Open the marked issues, or the one at point, in Sentry |
-| `sentry-list-resolve` |  | Resolve the marked issues, or the one at point, after confirmation |
-| `sentry-open` |  | Show structured details for the Sentry issue on this row |
-| `sentry-open-web` |  | Open this issue in Sentry |
-| `sentry-refresh` |  | Refresh the Sentry issue list |
-| `sentry-resolve` |  | Resolve this issue in Sentry after confirmation |
-
 ## sessions
 
 | Command | Key | What it does |
@@ -1160,9 +1203,9 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `daemon-visit` |  | Switch this browser tab to the daemon at point |
 | `daemons` | `C-x D` | List daemons and switch this browser tab |
 | `daemons-refresh` |  | Refresh the daemon list |
-| `workspace-open-tab` |  | Open the workspace at point in a new browser tab |
-| `workspaces` |  | List workspaces and open one in a new browser tab |
-| `workspaces-refresh` |  | Refresh the workspace list |
+| `session-open-tab` |  | Open the daemon session at point in a new browser tab |
+| `sessions` |  | List daemon sessions and open one in a new browser tab |
+| `sessions-refresh` |  | Refresh the daemon session list |
 
 ## setup
 
@@ -1185,7 +1228,10 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
+| `build-info` |  | Say which compos runs: version and commit, or the checkout's jj change and git commit |
+| `compos-check-update` |  | Look for a newer compos release now |
 | `compos-home` |  | Open the Compos home page: setup until it is done, then the welcome page |
+| `compos-update` |  | Update the stable compos to the newest release: its Scheme alone when only Scheme changed, else the executable and a restart. Its first boot moves the packages to the commits the release vouches for |
 | `cron-list` |  | List the cron jobs |
 | `cron-refresh` |  | Redraw the job list |
 | `cron-remove` |  | Stop the job on this line and forget it |
@@ -1212,7 +1258,6 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `events-refresh` |  | Redraw the event log |
 | `events-show` |  | Show the whole event at point beside the list |
 | `events-topic` |  | Show only one topic family of the event log |
-| `find-file-other-window` | `C-x 4 f` | Find a file and display it only in another window |
 | `group-sandbox` |  | Choose the sandbox for this group's chats: on, off, or as every chat |
 | `messages-clear` |  | Clear the \*Messages\* log |
 | `messages-filter-group` |  | Filter \*Messages\* by source group |
@@ -1220,6 +1265,9 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `messages-filter-project` |  | Filter \*Messages\* by source project |
 | `messages-refresh` |  | Refresh the structured \*Messages\* list |
 | `messages-watch-list` |  | Say which message watches are in force |
+| `release-build-and-install` |  | Build the release from the checkout, install it as the stable compos, and restart it |
+| `release-hot-patch` |  | Load the Scheme changed since the stable compos's commit into it, and keep it in its overlay for its next boot |
+| `release-install` |  | Install the last release build as the stable compos and restart it |
 | `restart-daemon` |  | Save the desktop and restart the daemon |
 | `setup` |  | Set up Compos: choose a model and a search model, then learn with the guide |
 | `setup-ai-guide` |  | Read the first-run AI setup guide |
@@ -1236,13 +1284,22 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `setup-wizard-back` |  | Go to the previous setup step |
 | `setup-wizard-connectors` |  | Set up and test the model connectors |
 | `setup-wizard-decide-test` |  | Ask the decision model in use a test question |
+| `setup-wizard-learn` |  | Start the tutorial from setup |
 | `setup-wizard-next` |  | Go to the next setup step |
 | `setup-wizard-rescan` |  | Scan this machine for models again |
-| `sockets` | `C-c a s` | List every socket the daemon holds. To open a client connection to another program, use endpoint-register! |
-| `sockets-refresh` |  | Redraw the socket list |
-| `sockets-restart` |  | Restart the socket on this line |
-| `sockets-stop` |  | Stop the socket on this line |
-| `sockets-visit` |  | Visit the socket on this line |
+| `setup-wizard-row-action-2` |  | Run action 2 of the row the cursor is on |
+| `setup-wizard-row-action-3` |  | Run action 3 of the row the cursor is on |
+| `setup-wizard-row-action-4` |  | Run action 4 of the row the cursor is on |
+| `setup-wizard-row-action-5` |  | Run action 5 of the row the cursor is on |
+| `setup-wizard-row-action-6` |  | Run action 6 of the row the cursor is on |
+| `setup-wizard-row-action-7` |  | Run action 7 of the row the cursor is on |
+| `setup-wizard-row-action-8` |  | Run action 8 of the row the cursor is on |
+| `setup-wizard-row-action-9` |  | Run action 9 of the row the cursor is on |
+| `setup-wizard-row-do` |  | Run the first action of the row the cursor is on |
+| `setup-wizard-row-next` |  | Move to the next row of the setup table |
+| `setup-wizard-row-prev` |  | Move to the previous row of the setup table |
+| `setup-wizard-tab-next` |  | Show the next setup step, and choose nothing |
+| `setup-wizard-tab-prev` |  | Show the previous setup step, and choose nothing |
 | `view-messages` | `C-h e` | Display the structured \*Messages\* buffer |
 
 ## targets
@@ -1269,7 +1326,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `kill-region` | `C-w` | Kill the text between point and mark |
 | `kill-word` | `M-d` | Kill characters forward to the end of a word |
 | `pop-global-mark` | `C-x C-SPC` | Go back to the last mark set in any buffer |
-| `recenter-top-bottom` | `C-l` | Recenter point in the window |
+| `recenter-top-bottom` |  | Recenter point in the window |
 | `revert-buffer` |  | Re-read the current buffer's file from disk |
 | `scroll-down-command` | `M-v` | Scroll text downward nearly a full screen |
 | `scroll-up-command` | `C-v` | Scroll text upward nearly a full screen |
@@ -1293,18 +1350,12 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `modeline-expand` | `C-x ?` | Toggle this buffer's expanded modeline panel |
 | `preview-font-toggle` |  | Switch rendered preview pages between serif and monospace |
 | `preview-mode` | `C-c C-v` | Toggle rendered preview of the current buffer |
+| `preview-monospace` |  | Toggle monospace in rendered preview pages, for morg and every other preview |
 | `preview-newline` | `RET` | Insert one newline in a rendered page |
-| `preview-tab-left` |  | Show the raw tab; the client sends the arrow only in the movement state |
+| `preview-tab-next` |  | Show the preview tab; the client sends the arrow only in the movement state |
+| `preview-tab-prev` |  | Show the raw tab; the client sends the arrow only in the movement state |
 | `preview-tab-preview` |  | Show the rendered page |
 | `preview-tab-raw` |  | Show the page's source |
-| `preview-tab-right` |  | Show the preview tab; the client sends the arrow only in the movement state |
-| `screenshot-clear` |  | Remove every screenshot highlight |
-| `screenshot-frame` |  | Save a PNG of the whole editor, highlights included |
-| `screenshot-highlight` |  | Box a buffer's window, a component, or a CSS selector for the next shot |
-| `screenshot-path` |  | Show the path of the last screenshot |
-| `screenshot-pick` |  | Point at a component or window, then click to save a PNG of it |
-| `screenshot-target` |  | Save a PNG of a buffer's window, a component, or a CSS selector |
-| `screenshot-window` |  | Save a PNG of the selected window |
 | `tab-bars-detail-1` |  | Show tab 1 of the page's tab bar |
 | `tab-bars-detail-2` |  | Show tab 2 of the page's tab bar |
 | `tab-bars-detail-3` |  | Show tab 3 of the page's tab bar |
@@ -1321,143 +1372,24 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 
 | Command | Key | What it does |
 |---|---|---|
-| `browse` |  | Open a web page as readable text in a buffer |
-| `browse-back` |  | Go back to the previous page |
-| `browse-copy-url` |  | Copy the link at point, else the page URL |
-| `browse-cycle-view` |  | Cycle browse between monospace, serif, and Markdown source |
-| `browse-download` |  | Save the link at point, else the page, to the download directory |
-| `browse-follow` |  | Follow the link at point; on a folded run of site furniture, open or close it |
-| `browse-follow-new-tab` |  | Open the link at point in a new tab |
-| `browse-follow-other-window` |  | Open the link at point beside this page, as its child; point stays here |
-| `browse-forward` |  | Go forward to the page you came back from |
-| `browse-hard-refresh` |  | Refetch the current page while bypassing cached responses |
-| `browse-history` |  | List every page you read, newest first |
-| `browse-history-clear` |  | Forget every page |
-| `browse-history-forget` |  | Forget the page on this row |
-| `browse-history-open` |  | Open the page on this row |
-| `browse-history-open-external` |  | Open the page on this row in the real browser |
-| `browse-history-open-other-window` |  | Open the page on this row in another window |
-| `browse-history-refresh` |  | Read the history file again |
-| `browse-index-toggle` |  | Treat this page as an index of links that open beside it, or as a page |
-| `browse-learn-parser` |  | Learn this page's site parser again, replacing the one on disk |
-| `browse-list-tabs` |  | List the buffers of the page's group in the switcher |
-| `browse-next-link` |  | Move point to the next link |
-| `browse-next-tab` |  | Switch to the next browse tab |
-| `browse-open-external` |  | Open this page in the real browser |
-| `browse-other-window` |  | Open a web page as readable text in another window |
-| `browse-page` |  | Show the page itself, live, in this window |
-| `browse-prev-link` |  | Move point to the previous link |
-| `browse-prev-tab` |  | Switch to the previous browse tab |
-| `browse-refresh` |  | Fetch a page: this one again, or another |
-| `browse-toggle-reading` |  | Cycle the calm reading, the full reading and the page itself |
-| `browse-top` |  | Go to the root of this page's site |
-| `browse-up` |  | Go to the parent of this page's path |
-| `browse-view-source` |  | Show this page's html in a buffer |
-| `calm-mode` |  | Toggle the calm reading of this page |
-| `feeds` |  | Read your RSS and Atom feeds |
-| `feeds-open` |  | Read the item on this row beside the list |
-| `feeds-open-external` |  | Open the item on this row in the real browser |
-| `feeds-refresh` |  | Refetch every subscribed feed |
-| `feeds-subscribe` |  | Subscribe to a feed — a feed URL, or a page with one |
-| `feeds-unsubscribe` |  | Unsubscribe a feed |
 | `http` |  | Fetch a URL and show the answer in a buffer |
-| `reading-mode` |  | Toggle client-side reading motion on this page |
-| `site-app-agent` |  | Open the chat of this row's page, as M-o does on the page |
-| `site-app-detail` |  | Open the item on this website app row |
-| `site-app-detail-anchor-next` |  | Go to the next part of the page beside the list |
-| `site-app-detail-anchor-prev` |  | Go to the previous part of the page beside the list |
-| `site-app-detail-fold` |  | Fold or unfold the card at point |
-| `site-app-detail-follow` |  | Open the link at point: an item compos draws opens beside the list, anything else on the site |
-| `site-app-detail-key-a` |  | Press this page's button on a |
-| `site-app-detail-key-b` |  | Press this page's button on b |
-| `site-app-detail-key-c` |  | Press this page's button on c |
-| `site-app-detail-key-d` |  | Press this page's button on d |
-| `site-app-detail-key-e` |  | Press this page's button on e |
-| `site-app-detail-key-f` |  | Press this page's button on f |
-| `site-app-detail-key-h` |  | Press this page's button on h |
-| `site-app-detail-key-i` |  | Press this page's button on i |
-| `site-app-detail-key-j` |  | Press this page's button on j |
-| `site-app-detail-key-k` |  | Press this page's button on k |
-| `site-app-detail-key-l` |  | Press this page's button on l |
-| `site-app-detail-key-m` |  | Press this page's button on m |
-| `site-app-detail-key-n` |  | Press this page's button on n |
-| `site-app-detail-key-p` |  | Press this page's button on p |
-| `site-app-detail-key-r` |  | Press this page's button on r |
-| `site-app-detail-key-u` |  | Press this page's button on u |
-| `site-app-detail-key-v` |  | Press this page's button on v |
-| `site-app-detail-key-w` |  | Press this page's button on w |
-| `site-app-detail-key-x` |  | Press this page's button on x |
-| `site-app-detail-key-y` |  | Press this page's button on y |
-| `site-app-detail-key-z` |  | Press this page's button on z |
-| `site-app-detail-next` |  | Go to the next piece of this page |
-| `site-app-detail-next-tab` |  | Show this page's next tab |
-| `site-app-detail-open` |  | Open this page on the site |
-| `site-app-detail-prev` |  | Go to the previous piece of this page |
-| `site-app-detail-prev-tab` |  | Show this page's previous tab |
-| `site-app-detail-reload` |  | Read this page again from the site |
-| `site-app-detail-stage` |  | Ask for one of this tab's stages and show it |
-| `site-app-detail-stage-next` |  | Show this tab's next stage |
-| `site-app-detail-stage-prev` |  | Show this tab's previous stage |
-| `site-app-detail-tab-0` |  | Show this page's composed tab |
-| `site-app-detail-tab-1` |  | Show this page's first tab |
-| `site-app-detail-tab-2` |  | Show this page's second tab |
-| `site-app-detail-tab-3` |  | Show this page's third tab |
-| `site-app-detail-tab-4` |  | Show this page's fourth tab |
-| `site-app-detail-tab-5` |  | Show this page's fifth tab |
-| `site-app-detail-tab-next-beside` |  | Show the next tab of the page beside the list |
-| `site-app-detail-tab-prev-beside` |  | Show the previous tab of the page beside the list |
-| `site-app-filter-choose` |  | Ask for a status tab of this section and show it |
-| `site-app-filter-next` |  | Show the next status tab of this section |
-| `site-app-filter-prev` |  | Show the previous status tab of this section |
-| `site-app-refresh` |  | Read this website app tab again |
-| `site-app-sections` |  | Pick a section of this website app |
-| `site-app-tab-1` |  | Open section 1 of this website app |
-| `site-app-tab-2` |  | Open section 2 of this website app |
-| `site-app-tab-3` |  | Open section 3 of this website app |
-| `site-app-tab-4` |  | Open section 4 of this website app |
-| `site-app-tab-5` |  | Open section 5 of this website app |
-| `site-app-tab-6` |  | Open section 6 of this website app |
-| `site-app-tab-7` |  | Open section 7 of this website app |
-| `site-app-tab-8` |  | Open section 8 of this website app |
-| `site-app-tab-9` |  | Open section 9 of this website app |
-| `site-app-tabs` |  | Pick one of this buffer's tabs |
-
-## web-servers
-
-| Command | Key | What it does |
-|---|---|---|
-| `webhook-define` |  | Define a webhook endpoint that turns each request into an event, and keep it |
-| `webhook-delete` |  | Remove a webhook endpoint and forget it |
-| `webhooks` |  | List the webhook endpoints: define, edit, attach workflows |
-| `webhooks-attach-workflow` |  | Run a Scheme handler, as a workflow, on every request to the webhook on this line |
-| `webhooks-copy-url` |  | Copy the URL of the webhook on this line |
-| `webhooks-detach-workflow` |  | Stop the workflow on the webhook on this line |
-| `webhooks-edit` |  | Change the path, methods and token of the webhook on this line |
-| `webhooks-history` |  | Show the requests the webhook on this line took, newest first |
-| `webhooks-list` |  | Say every webhook endpoint and where it listens |
-| `webhooks-refresh` |  | Redraw the webhook list |
-| `webhooks-remove` |  | Remove the webhook on this line and forget it |
-| `webhooks-show` |  | Show the webhook at point as its own page beside the list: its config and its requests |
-| `webhooks-show-payload` |  | Show the payload of the request at point beside this page |
-| `webhooks-start` |  | Start the webhook server |
-| `webhooks-stop` |  | Stop the webhook server |
-| `webhooks-toggle-public` |  | Let the webhook on this line answer through the tunnel, or keep it local |
-| `webhooks-toggle-server` |  | Start the webhook server, or stop it |
 
 ## windows
 
 | Command | Key | What it does |
 |---|---|---|
-| `app-dismiss` |  | Put this app away: its windows leave the screen, its buffers keep running |
+| `app-dismiss` | `C-c D` | Choose an app on screen and put it away: its windows leave the screen, its buffers keep running |
 | `app-hide-detail-buffers` |  | Hide this app's pages: each of their windows goes back to what it showed before, or closes |
 | `app-layout` |  | Lay this app out: its lists in one window, its pages in another, the rest in a third |
-| `app-pull` |  | Pull this app into this group: every one of its buffers comes along |
-| `app-push` |  | Push this app to another group: every one of its buffers goes there |
+| `app-move-to-group` |  | Choose an app in this group and move it to another group: every one of its buffers goes there |
+| `app-pull-from-group` |  | Choose an app from another group and pull it into this group: every one of its buffers comes along |
 | `app-swap-windows` |  | Swap this app's listing and page windows between their panes |
 | `buffer-next-pane` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
 | `buffer-pop` |  | Move this buffer to a second window of its mode, beside this one; ibuffer's split action moves the marked buffers |
 | `buffer-previous-pane` |  | Move this buffer to the neighboring pane and reveal its previous buffer |
 | `caret-browsing-mode` |  | Toggle the text cursor while reading a dismissible buffer |
+| `column-add` |  | Add an empty column at the right edge; you stay where you are |
+| `column-remove` |  | Hide the rightmost column with its windows; pane-restore brings each pane back |
 | `consolidate` | `C-x C` | Give every major mode of this group one window: behind its pane, or on the layout ring |
 | `debug-last-window-movement` |  | Show the last change of this frame's windows: before, the action, after |
 | `debug-window-movements` |  | Show the last ten changes of this frame's windows, newest first |
@@ -1484,6 +1416,19 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `next-pane` |  | Select the next pane |
 | `other-window` | `C-x o` | Select another window in cyclic order |
 | `pane-add` |  | Add an empty pane beside this one, or under it when it is taller than wide or the row is full; you stay where you are |
+| `pane-card` |  | Bring up the empty pane's card over this pane: actions, layouts and the next step |
+| `pane-card-back` |  | Close the card: the pane shows what it showed before |
+| `pane-card-chat-new` |  | Start a new chat in this card's pane, even when a chat window is open elsewhere |
+| `pane-card-layout-next` |  | Show the next layout; RET keeps it, ESC goes back |
+| `pane-card-layout-previous` |  | Show the previous layout; RET keeps it, ESC goes back |
+| `pane-card-layout-revert` |  | Draw the frame as it was before the side arrows, else close the card |
+| `pane-card-ret` |  | Keep the layout on show, else do the card's next step |
+| `pane-clear` |  | Empty this pane: its windows wait behind the pane beside it, and Take window (b) brings one back |
+| `pane-home-back` |  | Go back to what this pane showed before its home page |
+| `pane-home-new-chat` |  | Start a new chat, or set up a model first when none can answer |
+| `pane-home-next` |  | Do the next step the pane card shows |
+| `pane-home-refresh` |  | Draw the home page again |
+| `pane-menu` |  | A home page for this pane: actions, layouts with previews, next steps and tutorials |
 | `pane-move-down` | `s-S-<down>` | Swap this pane's windows with the pane below |
 | `pane-move-left` | `s-S-<left>` | Swap this pane's windows with the pane to the left |
 | `pane-move-right` | `s-S-<right>` | Swap this pane's windows with the pane to the right |
@@ -1508,6 +1453,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `pane-previous-window` | `s-M-[` | Bring the previous window of this pane to the front |
 | `pane-remove` |  | Hide this pane with its windows; an empty pane goes. pane-restore brings it back |
 | `pane-restore` |  | Bring back the pane hidden last, with its windows; you stay where you are |
+| `pane-switch-buffer` |  | Switch buffer in this pane, the C-x b prompt opened on this group's tab |
 | `pane-take-window` |  | Move a window of this group into this pane |
 | `panes-adopt` |  | Read this frame as it stands into the window model, and lay it out from the model |
 | `panes-board-add-pane` |  | Add an empty pane after the pane on this row |
@@ -1529,6 +1475,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `panes-board-wider` |  | Give this pane more of the width |
 | `panes-board-zoom-in` |  | Zoom one level towards this row: a pane, a window |
 | `panes-board-zoom-out` |  | Zoom back out one level |
+| `panes-list` | `C-x w` | List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group |
 | `peek-keep` |  | Keep the peek as a normal window |
 | `peek-next` |  | Peek the next row of the list |
 | `peek-previous` |  | Peek the previous row of the list |
@@ -1545,6 +1492,11 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `split-window-below` | `C-x 2` | Split the window in two, one above the other |
 | `split-window-right` | `C-x 3` | Split the window in two, side by side |
 | `switch-window` | `C-x j` | Pick a window of this frame by name and go to it |
+| `unsplit` |  | Remove the split above or below this window; the other pane's windows wait behind this one |
+| `vscode-buffers` |  | Switch buffer, the same prompt as C-x b, shown as the modal |
+| `vscode-chats` |  | Choose a chat, in a modal |
+| `vscode-llm` | `C-l l` | Change this chat's preset or tools |
+| `vscode-windows` |  | Choose a layout, each one shows as you move to it; or a window of this group |
 | `window-eat` | `C-x e` | Eat the neighboring pane and take its space |
 | `window-flash-end` |  | Take the chat card off the window: the modifier of the cycle came up |
 | `window-kill-buffers` | `C-x K` | Kill every buffer in this window: the one it shows and its whole history |
@@ -1564,41 +1516,24 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `window-previous-pane` | `S-<left>` | Move this window to the front of the previous pane with its complete buffer stack |
 | `window-rename` |  | Give this window a name; an empty name goes back to the default |
 | `window-walk-end` |  | End a walk of the window's stack: the next walk starts on top again |
-| `windows-list` | `C-x w` | List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group |
 | `windows-list-close` |  | Close the window on this line |
 | `windows-list-consolidate` |  | Give every major mode one window, from the window on this line; visible panes keep their modes |
 | `windows-list-refresh` |  | Redraw the window list |
 | `windows-list-rename` |  | Name the window on this line |
 | `windows-list-ring` |  | List the windows of this frame's ring in one flat list, on screen and waiting |
 | `windows-list-visit` |  | Show the window on this line in the list's pane |
-| `winner-next` | `C-c <right>` | Switch to the next window and buffer arrangement |
-| `winner-previous` | `C-c <left>` | Switch to the previous window and buffer arrangement |
-| `winner-redo` |  | Walk forward to a later window and buffer arrangement |
-| `winner-undo` |  | Restore the previous window and buffer arrangement |
+| `winner-next` | `C-c <right>` | Go forward again to the pane arrangement winner-previous left (layout-redo) |
+| `winner-previous` | `C-c <left>` | Put back the previous pane arrangement; the windows keep the buffers they show now (layout-undo) |
+| `winner-redo` |  | Go forward again to the pane arrangement winner-undo left (layout-redo) |
+| `winner-undo` |  | Put back the previous pane arrangement; the windows keep the buffers they show now (layout-undo) |
 | `writing-layout` |  | Open the writing workspace layout |
 
 ## writing
 
 | Command | Key | What it does |
 |---|---|---|
-| `agenda-next` |  | Move point to the next entry |
-| `agenda-prev` |  | Move point to the previous entry |
-| `agenda-refresh` |  | Re-read the agenda files |
-| `agenda-today` |  | Return the agenda to the week that starts today |
-| `agenda-toggle-day` |  | Fold or unfold the day at point |
-| `agenda-toggle-view` |  | Toggle between the cards and the plain listing |
-| `agenda-visit` |  | Open the entry's file at its heading |
-| `agenda-week-next` |  | Show the next week |
-| `agenda-week-prev` |  | Show the previous week |
-| `chat-todo` |  | Turn this chat into a todo: assigned to it, in doing; a blank title takes the chat's title, with its running summary as the notes |
-| `copilot-mode` |  | Toggle copilot-mode: rewrites come as ghost text when you close a [note] |
+| `chat-todo` |  | This chat's task: show its page, and have the chat's agent bring the task up to date. A chat with no task asks to file one: assigned to the chat, in doing; a blank title takes the chat's title, with its running summary as the notes |
 | `count-words` |  | Display the number of words in the buffer |
-| `ghost-rewrite` |  | Rewrite the region, or the paragraph at point, as ghost text; [notes] in it say what to do. Again asks for more |
-| `ghost-rewrite-accept` |  | Take the rewrite shown |
-| `ghost-rewrite-next` |  | Show the next rewrite |
-| `ghost-rewrite-previous` |  | Show the previous rewrite |
-| `ghost-rewrite-quit` |  | Let the rewrites go |
-| `morg-agenda` | `C-c A` | Show the agenda: dated entries from your morg files |
 | `morg-babel` |  | Run the Morg code block at point and replace its result block |
 | `morg-backward-same-level` |  | Move to the previous heading at this level |
 | `morg-cycle` |  | Fold the heading or the code block at point, else indent |
@@ -1606,7 +1541,7 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `morg-forward-same-level` |  | Move to the next heading at this level |
 | `morg-global-cycle` |  | Cycle global visibility: overview or show all |
 | `morg-narrow` |  | Show only the Morg heading at point |
-| `morg-newline` |  | Close a freshly typed fence, or insert the newline RET means here |
+| `morg-newline` |  | Close a freshly typed fence, or insert the newline RET means here; at a folded heading or block, the new line goes after the folded part |
 | `morg-next-heading` |  | Move to the next heading |
 | `morg-next-landmark` |  | Move down to the next heading, paragraph, block or link, or one page when none is that near |
 | `morg-next-link` |  | Move to the next link |
@@ -1619,34 +1554,67 @@ Every command that has a docstring, by domain. `M-x NAME` runs a command. The ke
 | `morg-tangle` |  | Write all Morg blocks with :tangle PATH headers |
 | `morg-todo` |  | Cycle the TODO state of the heading or checkbox at point |
 | `morg-widen` |  | Show the complete Morg document |
-| `todo` |  | Show the todo list of the group you are in |
-| `todo-accept` |  | Mark the task todo: triage it, or approve it from review |
+| `todo` | `C-x t` | Show the todo list of the group you are in |
+| `todo-accept` |  | Mark the task todo: triage it, approve it from review, or reopen it |
+| `todo-actions` |  | Act on the task at point: change its state, edit it, open its chat or file |
 | `todo-add-note` |  | Add a note to the task |
 | `todo-assign` |  | Hand the task, or each marked task, to a new chat in the group that filed it, else the group you are in; one task goes to its chat in the chat pane, the chat it already has when it has one; C-u asks for the group |
-| `todo-attach-chat` |  | Attach another open chat to the task at point, beside the one it is assigned to |
-| `todo-attach-this-chat` |  | Attach the chat you are in to an open task |
-| `todo-new` |  | File a new task |
 | `todo-cycle-priority` |  | Cycle the task's priority: A, B, C, none |
+| `todo-detail-accept` |  | Mark the task todo: triage it, approve it from review, or reopen it; on Children, the sub-task at point |
+| `todo-detail-add-note` |  | Add a note to the task; on Children, the sub-task at point |
 | `todo-detail-agent` |  | Go to the agent working this task; start one in the group that filed it, else the group you are in, when none is live |
-| `todo-detail-attach-chat` |  | Attach another open chat to this task, beside the one it is assigned to |
-| `todo-detail-goto-chat` |  | Go to the chat working this task; with several, ask which |
+| `todo-detail-cancel` |  | Cancel the task; on Children, the sub-task at point |
+| `todo-detail-cycle-priority` |  | Cycle the task's priority: A, B, C, none; on Children, the sub-task at point |
+| `todo-detail-done` |  | Mark the task done; on Children, the sub-task at point |
+| `todo-detail-filter` |  | Search the todo list from a task's page, as / does on the list |
+| `todo-detail-inbox` |  | Send the task back to the inbox, to triage again; on Children, the sub-task at point |
+| `todo-detail-new-subtask` |  | File a new sub-task under this task |
+| `todo-detail-open-child` |  | Show the sub-task at point as its own page |
+| `todo-detail-parent` |  | Show the task this one is a sub-task of |
 | `todo-detail-refresh` |  | Read the task again |
-| `todo-detail-task-chat` |  | Open this task's chat, or start one titled with the task; the chat is also attached to the task's parent |
+| `todo-detail-set-deadline` |  | Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w; on Children, the sub-task at point |
+| `todo-detail-set-project` |  | Move the task to another project; a new name makes a new project. On Children, the sub-task at point |
+| `todo-detail-source` |  | Open the task's source beside it: its page, the issue, the link |
+| `todo-detail-start` |  | Start the task: in progress, and open its chat; on Children, the sub-task at point |
+| `todo-detail-tab-children` |  | Show the task's sub-tasks |
+| `todo-detail-tab-log` |  | Show the task's log |
+| `todo-detail-tab-next` |  | Show the next tab of the task: overview, children, log |
+| `todo-detail-tab-overview` |  | Show the task's status, notes and details |
+| `todo-detail-tab-prev` |  | Show the previous tab of the task |
+| `todo-detail-toggle-urgent` |  | Mark the task time-sensitive, or not; on Children, the sub-task at point |
 | `todo-detail-visit` |  | Open the task's file at its heading |
+| `todo-detail-wait` |  | Park the task as waiting; on Children, the sub-task at point |
+| `todo-dismiss` |  | Dismiss the task: close its page and the chats that work it; the state stays |
+| `todo-filter-by-assignee` |  | Keep the tasks of one assignee |
+| `todo-filter-by-content` |  | Keep the tasks whose title or notes have the text |
+| `todo-filter-by-group` |  | Keep the tasks of one group |
+| `todo-filter-by-priority` |  | Keep the tasks of one priority |
+| `todo-filter-by-project` |  | Keep the tasks of one project |
+| `todo-filter-by-state` |  | Keep the tasks in one state |
+| `todo-filter-by-tag` |  | Keep the tasks with one tag |
+| `todo-filter-by-title` |  | Keep the tasks whose title has the text |
+| `todo-filter-disable` |  | Drop every filter |
 | `todo-filter-project` |  | Show one project's tasks: pick it from the list; all shows every project |
-| `todo-goto-chat` |  | Go to the chat the task is assigned to; with several, ask which |
+| `todo-from-item` |  | File a task for the row at point, with the row as its source; a row that already has an open task shows that task instead |
+| `todo-handover` |  | Hand the task to a new chat: archive the chat working it, start a new one with the task as its brief |
 | `todo-mark-cancelled` |  | Cancel the task |
-| `todo-mark-doing` |  | Mark the task in progress |
+| `todo-mark-doing` |  | Mark the task in progress, and open its chat; marked tasks only change state |
 | `todo-mark-done` |  | Mark the task done |
+| `todo-mark-inbox` |  | Send the task back to the inbox, to triage again |
 | `todo-mark-waiting` |  | Park the task as waiting |
+| `todo-negate-filter` |  | Turn the newest filter into its opposite |
+| `todo-new` | `C-x C-t n` | File a new task, then show the list and the task's page beside it; RET files it in this group, C-RET asks for the group first; s starts it and opens its chat |
+| `todo-new-pick-group` |  | In the New Todo prompt, file the title in a group you choose |
+| `todo-new-subtask` |  | File a new sub-task under the task at point |
 | `todo-next-sort` |  | Cycle the order: status, urgency, deadline, created, active |
-| `todo-next-view` |  | Show the next status tab: open, inbox, review, doing, waiting, mine, overdue, closed, all |
+| `todo-next-view` |  | Show the next status tab: open, inbox, waiting, closed, all |
+| `todo-or-filter` |  | Join the two newest filters: keep a task either one keeps |
 | `todo-prev-view` |  | Show the previous status tab |
+| `todo-reap-chats` |  | Close every chat whose task is done or in the inbox; keep a chat an open task still uses, a running chat and the chat you are on |
 | `todo-refresh` |  | Re-read the todo files, and look again for new ones |
 | `todo-set-deadline` |  | Set the task's deadline: YYYY-MM-DD, today, tomorrow, +3d, 2w |
 | `todo-set-project` |  | Move the task, or the marked tasks, to another project; a new name makes a new project |
 | `todo-show` |  | Show the task as its own page beside the list |
-| `todo-task-chat` |  | Open the task's chat, or start one titled with the task; the chat is also attached to the task's parent |
 | `todo-toggle-urgent` |  | Mark the task time-sensitive, or not |
 | `todo-visit` |  | Open the task's file at its heading |
 | `write` |  | Enter the writing workspace |

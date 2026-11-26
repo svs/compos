@@ -5,4 +5,4 @@
 set -e
 cd "$(dirname "$0")/.."
 WRITE_MANUAL=1 mix test apps/compos_core/test/compos/manual_test.exs
-git status --short docs/manual
+git status --short "docs/FURTHER READING/manual"

@@ -48,6 +48,8 @@ body {
 }
 .hh-splash { display: flex; align-items: center; justify-content: center; height: 100%; opacity: .5; }
 .hh-spacer { flex: 1; }
+/* ComposML draws these inline by default; here they are rows of their own */
+.hh-echo, .hh-row-label, .hh-row-sub, .hh-empty, .hh-trow-desc { display: block; }
 
 /* ── the header: the group above, the buffer below ───────── */
 .hh-head {
@@ -239,5 +241,5 @@ body {
 .hh-detail-note { padding: 6px 14px; font-size: 10.5px; color: var(--faint); white-space: pre-line; }
 .hh-sheet-legend { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 4px; }
 .hh-legend { padding: 7px 10px; border: 1px solid var(--rule); font-size: 10.5px; color: var(--faint); }
-.hh-legend b { color: var(--indigo); font-weight: 600; }
+.hh-legend c-action-key { color: var(--indigo); font-weight: 600; }
 

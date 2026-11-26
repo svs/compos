@@ -355,11 +355,15 @@ defmodule Compos.Ui.MobileLive do
   def composml(%{state: nil} = assigns) do
     ~M"""
     <c-frame id="hh" class="hh splash" phx-hook="Handheld" data-boot={@boot_id}>
-      <c-group class="hh-splash">compos — connecting…</c-group>
+      <c-status class="hh-splash" state="connecting">compos — connecting…</c-status>
     </c-frame>
     """
   end
 
+  # The page names what it shows: the modeline, the one window and its
+  # buffer, the composer prompt and the echo area, the bar's tabs, and a
+  # sheet that is a list, a minibuffer, or a transient menu. Classes only
+  # style it; state is in attributes ("true"/"false" strings).
   def composml(assigns) do
     ~M"""
     <c-frame id="hh" class="hh" phx-hook="Handheld" data-boot={@boot_id} data-frame={@frame} data-mb={to_string(@state.minibuffer != nil)}>
@@ -368,16 +372,16 @@ defmodule Compos.Ui.MobileLive do
 
       <.head leaf={@leaf} view={@view} />
 
-      <c-group class="hh-body">
-        <c-group :if={rail?(@leaf, @view)} class="hh-rail" data-rail="1">
+      <c-window class="hh-body" win={@leaf && @leaf.id}>
+        <c-position :if={rail?(@leaf, @view)} class="hh-rail" data-rail="1" line={Map.get(@leaf, :line)}>
           <c-group class="hh-rail-mark" style={"top: #{rail_top(@leaf)}%"}></c-group>
-        </c-group>
+        </c-position>
         <.content leaf={@leaf} />
-      </c-group>
+      </c-window>
 
       <c-prompt class={"hh-composer #{if @state.minibuffer, do: "prompting"}"}>
         <c-group class="hh-input-row">
-          <c-text :if={@state.minibuffer} class="hh-prompt">{String.trim_trailing(@state.minibuffer.prompt, " ")}</c-text>
+          <c-label :if={@state.minibuffer} class="hh-prompt">{String.trim_trailing(@state.minibuffer.prompt, " ")}</c-label>
           <input
             id="composer"
             class="hh-input"
@@ -389,21 +393,21 @@ defmodule Compos.Ui.MobileLive do
             enterkeyhint="send"
             placeholder={placeholder(@view, @state)}
           />
-          <c-text id="composer-send" class="hh-send">{if @state.minibuffer, do: "OK", else: "Send"}</c-text>
+          <c-action id="composer-send" class="hh-send">{if @state.minibuffer, do: "OK", else: "Send"}</c-action>
         </c-group>
-        <c-group :if={echo(@state) != ""} class={"hh-echo #{if echo_error?(@state.echo), do: "err"}"}>{echo(@state)}</c-group>
+        <c-echo :if={echo(@state) != ""} class={"hh-echo #{if echo_error?(@state.echo), do: "err"}"} error={to_string(echo_error?(@state.echo))}>{echo(@state)}</c-echo>
       </c-prompt>
 
-      <c-group class="hh-nav">
-        <c-group class={"hh-nav-btn #{if @view.chat and @sheet == nil, do: "on"}"} data-nav="chat" phx-click="nav" phx-value-to="chat">
+      <c-tabs class="hh-nav">
+        <c-tab class={"hh-nav-btn #{if @view.chat and @sheet == nil, do: "on"}"} selected={to_string(@view.chat and @sheet == nil)} data-nav="chat" phx-click="nav" phx-value-to="chat">
           <c-text class="hh-nav-glyph">✎</c-text>
-          <c-text class="hh-nav-label">Chat</c-text>
-        </c-group>
-        <c-group :for={{to, glyph, label} <- nav_items()} class={"hh-nav-btn #{if @sheet == to, do: "on"}"} data-nav={to} phx-click="nav" phx-value-to={to}>
+          <c-label class="hh-nav-label">Chat</c-label>
+        </c-tab>
+        <c-tab :for={{to, glyph, label} <- nav_items()} class={"hh-nav-btn #{if @sheet == to, do: "on"}"} selected={to_string(@sheet == to)} data-nav={to} phx-click="nav" phx-value-to={to}>
           <c-text class="hh-nav-glyph">{glyph}</c-text>
-          <c-text class="hh-nav-label">{label}</c-text>
-        </c-group>
-      </c-group>
+          <c-label class="hh-nav-label">{label}</c-label>
+        </c-tab>
+      </c-tabs>
 
       <.pick_sheet :if={@sheet} sheet={@sheet} sections={@sheet_rows} filter={@filter} view={@view} />
 
@@ -420,10 +424,10 @@ defmodule Compos.Ui.MobileLive do
     ~M"""
     <c-modeline class="hh-head" phx-click="nav" phx-value-to="buffers">
       <c-group class="hh-head-main">
-        <c-text :if={@view.group != ""} class="hh-head-group">{@view.group}</c-text>
-        <c-buffer-name class="hh-head-name">{ml_name(@leaf)}</c-buffer-name>
+        <c-field :if={@view.group != ""} class="hh-head-group" name="group">{@view.group}</c-field>
+        <c-buffer-name class="hh-head-name" modified={to_string(dirty?(@leaf, @view))}>{ml_name(@leaf)}</c-buffer-name>
       </c-group>
-      <c-text :if={info(@leaf) != ""} class="hh-head-info">{info(@leaf)}</c-text>
+      <c-status :if={info(@leaf) != ""} class="hh-head-info">{info(@leaf)}</c-status>
       <c-text :if={dirty?(@leaf, @view)} class="hh-head-dirty">●</c-text>
       <c-text class="hh-head-chev">▾</c-text>
     </c-modeline>
@@ -454,7 +458,7 @@ defmodule Compos.Ui.MobileLive do
 
   defp content(%{leaf: %{render_mode: rm}} = assigns) when rm in ["html", "markdown"] do
     ~M"""
-    <c-buffer class="hh-content">
+    <c-buffer class="hh-content" buffer={@leaf.buffer}>
       <iframe
         :if={Map.has_key?(@leaf, :preview)}
         class="hh-preview"
@@ -469,7 +473,7 @@ defmodule Compos.Ui.MobileLive do
 
   defp content(%{leaf: %{render_mode: "file"}} = assigns) do
     ~M"""
-    <c-buffer class="hh-content">
+    <c-buffer class="hh-content" buffer={@leaf.buffer}>
       <iframe :if={Map.has_key?(@leaf, :file_url)} class="hh-preview" src={@leaf.file_url} sandbox="" title={@leaf.buffer}></iframe>
     </c-buffer>
     """
@@ -478,11 +482,11 @@ defmodule Compos.Ui.MobileLive do
   # lines: a tap moves point to the line, a tap on point's line opens it
   defp content(assigns) do
     ~M"""
-    <c-buffer class="hh-content hh-lines" id={"lines-#{@leaf.id}"}>
-      <c-group :for={ln <- Map.get(@leaf, :lines, [])} class={"hh-line #{if ln.current, do: "cur"}"} data-s={ln.start} phx-click="line" phx-value-n={ln.num}>
+    <c-buffer class="hh-content hh-lines" id={"lines-#{@leaf.id}"} buffer={@leaf.buffer}>
+      <c-line :for={ln <- Map.get(@leaf, :lines, [])} class={"hh-line #{if point_line?(ln, @leaf), do: "cur"}"} number={ln.num} current={to_string(point_line?(ln, @leaf))} data-s={ln.start} phx-click="line" phx-value-n={ln.num}>
         <c-text class="hh-line-text"><c-text :for={{txt, cls} <- ln.segs} class={cls}>{txt}</c-text><br :if={ln.segs == []} /></c-text>
-      </c-group>
-      <c-group :if={Map.get(@leaf, :lines, []) == []} class="hh-empty">{@leaf.buffer} · {@leaf.mode}</c-group>
+      </c-line>
+      <c-empty :if={Map.get(@leaf, :lines, []) == []} class="hh-empty">{@leaf.buffer} · {@leaf.mode}</c-empty>
     </c-buffer>
     """
   end
@@ -493,13 +497,13 @@ defmodule Compos.Ui.MobileLive do
     ~M"""
     <c-group class="hh-pick-layer">
       <c-group class="hh-sheet-scrim" phx-click="sheet_close"></c-group>
-      <c-group class="hh-sheet hh-pick" role="dialog" aria-modal="true" data-sheet={@sheet}>
-        <c-group class="hh-sheet-head">
-          <c-text class="hh-kicker">{copy(@view, @sheet <> "-title")}</c-text>
+      <c-list class="hh-sheet hh-pick" role="dialog" aria-modal="true" data-sheet={@sheet}>
+        <c-header class="hh-sheet-head">
+          <c-headline class="hh-kicker">{copy(@view, @sheet <> "-title")}</c-headline>
           <c-text class="hh-spacer"></c-text>
-          <c-text class="hh-sheet-quit" phx-click="sheet_close">Close</c-text>
-        </c-group>
-        <c-group class="hh-pick-filter">
+          <c-action class="hh-sheet-quit" phx-click="sheet_close">Close</c-action>
+        </c-header>
+        <c-field class="hh-pick-filter" name="filter">
           <input
             id={"pick-filter-#{@sheet}"}
             class="hh-input"
@@ -514,21 +518,21 @@ defmodule Compos.Ui.MobileLive do
             phx-keyup="sheet_filter"
             phx-debounce="120"
           />
-        </c-group>
+        </c-field>
         <c-group class="hh-sheet-rows">
           <%= for s <- @sections do %>
-            <c-group :if={s.title != "" and s.rows != []} class="hh-group-title">{s.title}</c-group>
-            <c-group :for={r <- s.rows} class={"hh-row #{if r.current, do: "on"}"} phx-click="pick" phx-value-kind={r.kind} phx-value-id={r.id}>
+            <c-headline :if={s.title != "" and s.rows != []} class="hh-group-title">{s.title}</c-headline>
+            <c-item :for={r <- s.rows} class={"hh-row #{if r.current, do: "on"}"} kind={r.kind} current={to_string(r.current)} phx-click="pick" phx-value-kind={r.kind} phx-value-id={r.id}>
               <c-group class="hh-row-main">
-                <c-group class="hh-row-label">{r.label}</c-group>
-                <c-group :if={r.sub != ""} class="hh-row-sub">{r.sub}</c-group>
+                <c-label class="hh-row-label">{r.label}</c-label>
+                <c-hint :if={r.sub != ""} class="hh-row-sub">{r.sub}</c-hint>
               </c-group>
-              <c-text :if={r.current} class="hh-row-here">here</c-text>
-            </c-group>
+              <c-status :if={r.current} class="hh-row-here">here</c-status>
+            </c-item>
           <% end %>
-          <c-group :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{empty_word(@view, @sheet, @filter)}</c-group>
+          <c-empty :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{empty_word(@view, @sheet, @filter)}</c-empty>
         </c-group>
-      </c-group>
+      </c-list>
     </c-group>
     """
   end
@@ -546,39 +550,39 @@ defmodule Compos.Ui.MobileLive do
     ~M"""
     <c-group class="hh-sheet-layer">
       <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
-      <c-group class="hh-sheet" role="dialog" aria-modal="true">
-        <c-group class="hh-sheet-head">
-          <c-text class="hh-kicker">{sheet_kicker(@state, @view)}</c-text>
+      <c-minibuffer class="hh-sheet" role="dialog" aria-modal="true">
+        <c-header class="hh-sheet-head">
+          <c-label class="hh-kicker">{sheet_kicker(@state, @view)}</c-label>
           <c-text class="hh-spacer"></c-text>
-          <c-text class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-text>
-        </c-group>
-        <c-group class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</c-group>
-        <c-group class="hh-sheet-hint">{sheet_hint(@mb, @view)}</c-group>
+          <c-action class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-action>
+        </c-header>
+        <c-headline class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</c-headline>
+        <c-hint class="hh-sheet-hint">{sheet_hint(@mb, @view)}</c-hint>
         <c-group class="hh-sheet-input">
           <c-text class="hh-prompt">›</c-text>
-          <c-text class="hh-mb-input"><%= with {pre, cur, post} <- @split do %>{pre}<c-cursor class="cursor">{cur}</c-cursor>{post}<% end %></c-text>
+          <c-input class="hh-mb-input"><%= with {pre, cur, post} <- @split do %>{pre}<c-cursor class="cursor">{cur}</c-cursor>{post}<% end %></c-input>
           <c-text class="hh-spacer"></c-text>
-          <c-text class="hh-count">{count_text(@mb)}</c-text>
+          <c-metric class="hh-count" name="matches">{count_text(@mb)}</c-metric>
         </c-group>
-        <c-group class="hh-sheet-rows">
+        <c-completions class="hh-sheet-rows">
           <%= for {c, i} <- Enum.with_index(@mb.candidates) do %>
             <%= if Map.get(c, :kind) == "separator" do %>
-              <c-group class="hh-sep">{c.label}</c-group>
+              <c-headline class="hh-sep">{c.label}</c-headline>
             <% else %>
-              <c-group class={"hh-row #{if c.selected, do: "on"}"} phx-click="cand" phx-value-i={i}>
+              <c-completion class={"hh-row #{if c.selected, do: "on"}"} selected={to_string(c.selected == true)} phx-click="cand" phx-value-i={i}>
                 <c-text class="hh-row-box">{if c.selected, do: "●", else: ""}</c-text>
                 <c-group class="hh-row-main">
-                  <c-group class="hh-row-label">{c.label}</c-group>
-                  <c-group :if={Map.get(c, :hint) not in [nil, ""]} class="hh-row-sub">{c.hint}</c-group>
+                  <c-label class="hh-row-label">{c.label}</c-label>
+                  <c-hint :if={Map.get(c, :hint) not in [nil, ""]} class="hh-row-sub">{c.hint}</c-hint>
                 </c-group>
-              </c-group>
+              </c-completion>
             <% end %>
           <% end %>
-        </c-group>
-        <c-group :if={@mb.legend != []} class="hh-sheet-legend">
-          <c-text :for={row <- @mb.legend} class="hh-legend"><b>{row.key}</b> {row.label}</c-text>
-        </c-group>
-      </c-group>
+        </c-completions>
+        <c-key-hints :if={@mb.legend != []} class="hh-sheet-legend">
+          <c-text :for={row <- @mb.legend} class="hh-legend"><c-action-key>{row.key}</c-action-key> {row.label}</c-text>
+        </c-key-hints>
+      </c-minibuffer>
     </c-group>
     """
   end
@@ -595,52 +599,53 @@ defmodule Compos.Ui.MobileLive do
     ~M"""
     <c-group class="hh-sheet-layer">
       <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
-      <c-group class="hh-sheet" role="dialog" aria-modal="true">
-        <c-group class="hh-sheet-head">
-          <c-text class="hh-kicker">{if @state.pending != [], do: Enum.join(@state.pending, " ") <> " · ", else: ""}transient</c-text>
+      <c-list class="hh-sheet" kind="transient" role="dialog" aria-modal="true">
+        <c-header class="hh-sheet-head">
+          <c-label class="hh-kicker">{if @state.pending != [], do: Enum.join(@state.pending, " ") <> " · ", else: ""}transient</c-label>
           <c-text class="hh-spacer"></c-text>
-          <c-text class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-text>
-        </c-group>
-        <c-group class="hh-sheet-title">{@t.title}</c-group>
-        <c-group :if={@t[:subtitle] not in [nil, ""]} class="hh-sheet-hint">{@t.subtitle}</c-group>
-        <c-group :if={@t[:chips] not in [nil, []]} class="hh-tchips">
-          <c-text :for={chip <- @t.chips} class={"hh-tchip #{if chip.active, do: "on"}"}>{chip.label}</c-text>
-        </c-group>
+          <c-action class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-action>
+        </c-header>
+        <c-headline class="hh-sheet-title">{@t.title}</c-headline>
+        <c-hint :if={@t[:subtitle] not in [nil, ""]} class="hh-sheet-hint">{@t.subtitle}</c-hint>
+        <c-tabs :if={@t[:chips] not in [nil, []]} class="hh-tchips">
+          <c-tab :for={chip <- @t.chips} class={"hh-tchip #{if chip.active, do: "on"}"} selected={to_string(chip.active == true)}>{chip.label}</c-tab>
+        </c-tabs>
         <c-group class="hh-sheet-rows">
           <%= for group <- @groups do %>
-            <c-group class="hh-group-title">{group.title}</c-group>
-            <c-group
+            <c-headline class="hh-group-title">{group.title}</c-headline>
+            <c-item
               :for={{item, i} <- group.items}
               class={"hh-trow #{if item.selected, do: "on"} #{item.behavior}"}
+              selected={to_string(item.selected == true)}
               phx-click="trow"
               phx-value-i={i}
             >
-              <c-text class="hh-tkey">{item.key}</c-text>
+              <c-action-key class="hh-tkey">{item.key}</c-action-key>
               <c-group class="hh-row-main">
-                <c-group class="hh-trow-desc">{item.description}</c-group>
-                <c-group :if={item.value != ""} class="hh-trow-value">{item.value}</c-group>
+                <c-label class="hh-trow-desc">{item.description}</c-label>
+                <c-value :if={item.value != ""} class="hh-trow-value">{item.value}</c-value>
               </c-group>
               <c-text class="hh-chev">›</c-text>
-            </c-group>
+            </c-item>
           <% end %>
           <c-group :if={@t[:detail]} class="hh-detail">
-            <c-group class="hh-group-title">{@t.detail.title}</c-group>
-            <c-group :for={row <- @t.detail.rows} class={"hh-detail-row #{row.tone}"}>
-              <c-text class="hh-detail-k">{row.k}</c-text>
-              <c-text class="hh-detail-v">{row.v}</c-text>
-            </c-group>
-            <c-group :if={@t.detail.note != ""} class="hh-detail-note">{@t.detail.note}</c-group>
+            <c-headline class="hh-group-title">{@t.detail.title}</c-headline>
+            <c-field :for={row <- @t.detail.rows} class={"hh-detail-row #{row.tone}"}>
+              <c-label class="hh-detail-k">{row.k}</c-label>
+              <c-value class="hh-detail-v">{row.v}</c-value>
+            </c-field>
+            <c-hint :if={@t.detail.note != ""} class="hh-detail-note">{@t.detail.note}</c-hint>
           </c-group>
         </c-group>
-        <c-group class="hh-sheet-legend">
+        <c-key-hints class="hh-sheet-legend">
           <%= if @t[:legend] not in [nil, []] do %>
-            <c-text :for={row <- @t.legend} class="hh-legend" phx-click="keys" phx-value-ks={row.key}><b>{row.key}</b> {row.label}</c-text>
+            <c-text :for={row <- @t.legend} class="hh-legend" phx-click="keys" phx-value-ks={row.key}><c-action-key>{row.key}</c-action-key> {row.label}</c-text>
           <% else %>
-            <c-text class="hh-legend" phx-click="key" phx-value-k="RET"><b>RET</b> invoke</c-text>
-            <c-text class="hh-legend" phx-click="key" phx-value-k="C-g"><b>C-g</b> quit</c-text>
+            <c-text class="hh-legend" phx-click="key" phx-value-k="RET"><c-action-key>RET</c-action-key> invoke</c-text>
+            <c-text class="hh-legend" phx-click="key" phx-value-k="C-g"><c-action-key>C-g</c-action-key> quit</c-text>
           <% end %>
-        </c-group>
-      </c-group>
+        </c-key-hints>
+      </c-list>
     </c-group>
     """
   end
@@ -649,6 +654,10 @@ defmodule Compos.Ui.MobileLive do
 
   defp rail?(nil, _view), do: false
   defp rail?(leaf, view), do: leaf.render_mode not in view.railless
+
+  # the line point is on. The desktop marks it with the client's caret;
+  # the phone draws no caret, so the window's point line marks it here
+  defp point_line?(ln, leaf), do: Map.get(ln, :current) == true or ln.num == Map.get(leaf, :line)
 
   defp ml_name(nil), do: ""
   defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name

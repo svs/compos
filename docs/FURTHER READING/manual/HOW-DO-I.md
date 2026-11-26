@@ -241,7 +241,7 @@ Press `M-x load-theme`. Move through the list to preview each theme. Press `RET`
 
 Press `M-x keys-bind`, choose the command, then type the key, for example `C-c z`. The binding applies everywhere and stays after a restart.
 
-`C-h B` (`keys`) lists every key. In that list, `b` (`keys-rebind`) gives the command on the row another key, and `u` (`keys-revert`) takes back your edit.
+`C-h B` (`keys`) lists every key. In that list, `b` (`keys-rebind`) gives the command on the row another key, and `r` (`keys-revert`) takes back your edit.
 
 ### How do I add my own code?
 

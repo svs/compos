@@ -10,8 +10,8 @@ Lists every package across four tabs (`all`, `packages`, `stdlib`, `core`; `<lef
 | --- | --- |
 | `l` | Load an unloaded package, or install an available package (clones, loads, adds `use-package` to `~/.compos/init.scm`) |
 | `k` | Unload a loaded package cleanly (runs its unload hook; core cannot unload) |
-| `d` | Uninstall an installed clone and remove it from `init.scm` |
-| `u` / `U` | Update package at point to the release pin / update all packages |
+| `d` / `x` | Flag an installed clone / uninstall the flagged clones and remove them from `init.scm` (`u` and `U` take flags back) |
+| `c` / `C` | Update package at point to the release pin / update all packages |
 | `h` / `r` | Hold package at its current commit / roll back to previous commit and hold |
 | `RET` or `v` | Visit the package's source file |
 | `o` / `P` | Open GitHub repo / send local clone changes upstream as a PR |

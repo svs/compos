@@ -10,10 +10,10 @@ Shows every active keybinding for the buffer you came from, ordered from nearest
 | --- | --- |
 | `RET` | Describe the key and its command |
 | `b` | Rebind the row's command to a new key (saved to `~/.compos/custom.scm`) |
-| `d` | Unbind the key |
+| `d` / `x` | Flag a key / unbind the flagged keys (`u` and `U` take flags back) |
 | `+` | Bind a command that currently has no key |
-| `u` | Revert one of your personal key edits |
-| `k` | Filter the list by keymap |
+| `r` | Revert one of your personal key edits |
+| `f` | Filter the list by keymap |
 | `/` / `g` / `q` | Search, refresh, or quit |
 
 ## `messages-mode` (`C-h e` or `M-x view-messages`)

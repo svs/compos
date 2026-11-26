@@ -223,26 +223,12 @@
                                   *models-default-port*))))))
 
 ;; every host the list asks: the ones a person kept, the default one
-;; first when it is not among them, then every daemon the endpoint
-;; registry holds, then every server added in M-x llm-connectors. Neither
-;; of the last two needs saving here, because its own package names it.
+;; first when it is not among them, and then every daemon the endpoint
+;; registry holds. A daemon needs no saving, because its package names it.
 (define (models-host-list)
   (let* ((hs (if (pair? models-hosts) models-hosts (list models-host)))
-         (hs (if (member models-host hs) hs (cons models-host hs)))
-         (hs (append hs (filter (lambda (h) (not (member h hs))) (*models-daemon-hosts*)))))
-    (append hs (filter (lambda (h) (not (member h hs))) (*models-endpoint-hosts*)))))
-
-;; A server you added as an endpoint in M-x llm-connectors is a model host
-;; too: one with an OpenAI-shaped address (ending /v1) shows here with the
-;; models it serves, so a server is declared once, not once per list.
-(define (models--endpoint-hosts)
-  (if (boundp 'llm-connectors-endpoints)
-      (filter (lambda (u) (and (string? u) (models--openai-url? u)))
-              (map (lambda (e) (and (pair? e) (pair? (cdr e)) (cadr e)))
-                   llm-connectors-endpoints))
-      '()))
-
-(define *models-endpoint-hosts* models--endpoint-hosts)
+         (hs (if (member models-host hs) hs (cons models-host hs))))
+    (append hs (filter (lambda (h) (not (member h hs))) (*models-daemon-hosts*)))))
 
 (define (models--local? host)
   (and (not (models--disk? host))

@@ -1915,13 +1915,14 @@
 ;; a task's chat goes where chats live: the pane already showing one, so
 ;; the list and its page stay put. Without a chat pane it takes this window
 (define (todo--show-chat! chat)
+  "show CHAT and focus it: where it already shows, else in a pane apart from this one that shows no chat, so it never covers the chat you type in"
   (let ((id (group-home-of chat)))
     (when (and id (not (equal? id (frame-group)))) (switch-to-group! id)))
-  (let ((shown (window-showing chat))
-        (pane (window-showing-mode "chat-mode" #f)))
-    (cond ((and shown (window-exists? shown)) (select-window! shown))
-          (pane (display-buffer-in-window! pane chat) (select-window! pane))
-          (else (switch-to-buffer! chat)))
+  (let* ((shown (window-showing chat))
+         (win (if (and shown (window-exists? shown))
+                  shown
+                  (panes-display-apart! chat (filter chat-buffer? (map cadr (window-list)))))))
+    (when win (select-window! win))
     chat))
 
 ;; one task as its own page beside the list. Its chat is the assignee, the

@@ -1,6 +1,6 @@
 ;;; worktrees.scm --- one git worktree per agent: create, list, review, land.
 ;;;
-;;; M-x workspace-manage pops *worktrees*: one line per workspace of the current
+;;; M-x worktree-manage pops *worktrees*: one line per worktree of the current
 ;;; project — branch, commits ahead of the base, dirty count, the owning
 ;;; agent thread and its status. RET opens the worktree in dired, `=`
 ;;; diffs it against the base branch, `c` creates one, `a` jumps to the
@@ -211,7 +211,7 @@
           " · " (number->string (plist-get state 'behind)) " behind"
           " · " (number->string (plist-get state 'dirty)) " dirty"
           " · " (number->string (plist-get state 'unsaved)) " unsaved"
-          " · M-x workspace-diff / workspace-rebase / workspace-land / workspace-cancel")
+          " · M-x worktree-diff / worktree-rebase / worktree-land / worktree-cancel")
         "WORKTREE · unavailable")))
 
 (define (worktree-mode--apply! buf)
@@ -224,7 +224,7 @@
 
 (register-minor-mode! "worktree-mode" worktree-mode--apply! worktree-mode--teardown!)
 (define *worktree-mode-doc*
-  "Automatic identity for buffers in a linked Git worktree. A persistent header and window treatment show whether the workspace is uncommitted, behind, unmerged, or ready to tear down.")
+  "Automatic identity for buffers in a linked Git worktree. A persistent header and window treatment show whether the worktree is uncommitted, behind, unmerged, or ready to tear down.")
 (define-command "worktree-mode" "Toggle the current buffer's worktree identity header"
   (lambda () (toggle-minor-mode! "worktree-mode")))
 (mode-doc! "worktree-mode" *worktree-mode-doc*)
@@ -316,13 +316,13 @@
             (branch (plist-get state 'branch)))
         (cond
           ((> (plist-get state 'unsaved) 0)
-           (message "workspace has unsaved buffers — save before teardown"))
+           (message "worktree has unsaved buffers — save before teardown"))
           ((> (plist-get state 'dirty) 0)
-           (message "workspace has uncommitted changes — commit before teardown"))
+           (message "worktree has uncommitted changes — commit before teardown"))
           ((> (worktree--dirty project) 0)
            (message "primary checkout has uncommitted changes — teardown refused"))
           ((not branch)
-           (message "workspace has no branch — teardown refused"))
+           (message "worktree has no branch — teardown refused"))
           (else
             (when (> (plist-get state 'behind) 0)
               (shell-command->string
@@ -331,7 +331,7 @@
               (if (or (not rebased)
                       (> (plist-get rebased 'dirty) 0)
                       (> (plist-get rebased 'behind) 0))
-                  (message "automatic rebase needs attention — workspace kept")
+                  (message "automatic rebase needs attention — worktree kept")
                   (begin
                     (when (> (plist-get rebased 'ahead) 0)
                       (shell-command->string
@@ -339,19 +339,19 @@
                         project))
                     (let ((landed (workspace--finish-state buf)))
                       (if (and landed (> (plist-get landed 'ahead) 0))
-                          (message "automatic merge needs attention — workspace kept")
+                          (message "automatic merge needs attention — worktree kept")
                           (begin
                             (shell-command->string
                               (string-append "git worktree remove " (sh-quote workspace))
                               project)
                             (if (file-directory? workspace)
-                                (message "worktree removal failed — workspace kept")
+                                (message "worktree removal failed — worktree kept")
                                 (begin
                                   (when (boundp (quote daemon-release-workspace!))
                                     (daemon-release-workspace! workspace))
                                   (workspace--retire! state)
                                   (message (string-append
-                                             "landed and tore down workspace "
+                                             "landed and tore down worktree "
                                              (plist-get state 'id)))))))))))))))))
 
 (define (workspace--offer-finish! buf state)
@@ -361,11 +361,11 @@
              (not (minibuffer-state)))
     (workspace--remember-finish! state)
     (y-or-n
-      (string-append "Land and teardown workspace " (plist-get state 'id)
+      (string-append "Land and teardown worktree " (plist-get state 'id)
                      "? Rebase runs automatically")
       (lambda () (workspace-land-and-teardown! buf))
       (lambda ()
-        (message (string-append "kept workspace " (plist-get state 'id)
+        (message (string-append "kept worktree " (plist-get state 'id)
                                 " · the red header remains"))))))
 
 (define (workspace-finish-reminder! buf slug)
@@ -373,7 +373,7 @@
     (when state
       (let ((notice
               (string-append
-                "workspace " (plist-get state 'id)
+                "worktree " (plist-get state 'id)
                 " · " (number->string (plist-get state 'dirty)) " dirty"
                 " · " (number->string (plist-get state 'unsaved)) " unsaved"
                 " · " (number->string (plist-get state 'ahead)) " ahead"
@@ -493,7 +493,7 @@
                    'behind (worktree--behind path
                              (or (buffer-local-value 'worktree-base buf) "HEAD")))))
       (or (workspace--finish-state (current-buffer))
-          (begin (message "this buffer is not in a task workspace") #f))))
+          (begin (message "this buffer is not in a task worktree") #f))))
 
 (define (workspace--refresh-state! state)
   (when state
@@ -501,7 +501,7 @@
     (when (buffer-exists? *worktrees-buffer*)
       (list-refresh! *worktrees-buffer*))))
 
-(define-command "workspace-manage" "List and manage the project's task workspaces"
+(define-command "worktree-manage" "List and manage the project's task worktrees"
   (lambda ()
     (let ((root (worktrees--root)))
       (if (not root)
@@ -511,7 +511,7 @@
             (buffer-set-local! *worktrees-buffer* 'worktree-root root)
             (list-mode-show! "worktrees-mode"))))))
 
-(define-command "workspace-visit-files" "Open the selected workspace in dired"
+(define-command "worktree-visit-files" "Open the selected worktree in dired"
   (lambda ()
     (let ((wt (worktree--current)))
       (when wt (dired-open (plist-get wt 'path)))))
@@ -519,7 +519,7 @@
 
 ;; the full "what this agent did" view: committed AND uncommitted work,
 ;; one diff against the base branch
-(define-command "workspace-diff" "Diff this workspace against the primary branch"
+(define-command "worktree-diff" "Diff this worktree against the primary branch"
   (lambda ()
     (let ((state (workspace--command-state)))
       (when state
@@ -533,17 +533,17 @@
                            (string-append "git diff " (sh-quote base)) path))))
           (if (equal? (string-trim text) "")
               (message "no differences against the primary branch")
-              (let ((out (string-append "*workspace diff: " label "*")))
+              (let ((out (string-append "*worktree diff: " label "*")))
                 (diff-show! out text)
                 ;; RET on a file card must open the workspace's copy.
                 (buffer-set-local! out 'diff-backend "git")
                 (buffer-set-local! out 'diff-root path)))))))
   'modes '(worktrees-mode))
 
-(define-command "workspace-new" "Create a task workspace"
+(define-command "worktree-new" "Create a task worktree"
   (lambda ()
     (let ((buf (current-buffer)))
-      (minibuffer-read "Workspace name: " '()
+      (minibuffer-read "Worktree name: " '()
         (lambda (name)
           (let ((name (string-trim name)))
             (cond ((equal? name "") (message "no name, no worktree"))
@@ -554,7 +554,7 @@
                                    (string-append "created " r)
                                    (car (cdr r)))))))))))))
 
-(define-command "workspace-chat" "Jump to the chat that owns this workspace"
+(define-command "worktree-chat" "Jump to the chat that owns this worktree"
   (lambda ()
     (let ((wt (worktree--current)))
       (when wt
@@ -568,7 +568,7 @@
                 (else (message "no chat for this worktree")))))))
   'modes '(worktrees-mode))
 
-(define-command "workspace-land" "Merge this workspace into the primary checkout"
+(define-command "worktree-land" "Merge this worktree into the primary checkout"
   (lambda ()
     (let ((state (workspace--command-state)))
       (when state
@@ -576,11 +576,11 @@
               (root (plist-get state 'project))
               (branch (plist-get state 'branch)))
           (cond ((equal? path root) (message "this is the primary checkout"))
-                ((not branch) (message "detached workspace — nothing to merge"))
+                ((not branch) (message "detached worktree — nothing to merge"))
                 ((> (plist-get state 'unsaved) 0)
-                 (message "workspace has unsaved buffers — save them first"))
+                 (message "worktree has unsaved buffers — save them first"))
                 ((> (plist-get state 'dirty) 0)
-                 (message "workspace has uncommitted changes — commit them first"))
+                 (message "worktree has uncommitted changes — commit them first"))
                 ((> (worktree--dirty root) 0)
                  (message "primary checkout has uncommitted changes — merge refused"))
                 (else
@@ -593,16 +593,16 @@
 
 (define (workspace--rebase-prompt state)
   (string-append
-    "Handle the rebase of this task workspace now.\n\n"
-    "Workspace: " (plist-get state 'workspace) "\n"
+    "Handle the rebase of this task worktree now.\n\n"
+    "Worktree: " (plist-get state 'workspace) "\n"
     "Primary checkout: " (plist-get state 'project) "\n"
     "Primary branch: " (plist-get state 'base) "\n\n"
-    "Inspect git status and the commit graph first. Rebase this workspace onto "
+    "Inspect git status and the commit graph first. Rebase this worktree onto "
     (plist-get state 'base)
     ". Resolve conflicts carefully, preserving the intent of both sides. "
-    "Run the relevant tests after resolving conflicts, verify that the workspace "
+    "Run the relevant tests after resolving conflicts, verify that the worktree "
     "is clean and no rebase is left in progress, then report exactly what changed. "
-    "Do not merge, land, or tear down the workspace. If a conflict cannot be "
+    "Do not merge, land, or tear down the worktree. If a conflict cannot be "
     "resolved without choosing user intent, use the ask tool with the concrete options."))
 
 (define (workspace--start-rebase-chat! state)
@@ -612,7 +612,7 @@
          (owner (and (boundp (quote daemon-workspace-owner))
                      (daemon-workspace-owner path))))
     (if (and owner (not (equal? (plist-get owner 'url) (editor-url))))
-        (message "open this workspace with M-x workspaces before rebasing it")
+        (message "open this worktree with M-x sessions before rebasing it")
         (let ((chat (group-chat path)))
           (unless (buffer-local-value 'workspace-root chat)
             (workspace--stamp! chat id path project))
@@ -620,9 +620,9 @@
           (group-chat-show! path)
           (let ((slug (or (agent-slug-of chat) (chat-ensure-runtime! chat))))
             (agent-send-msg! slug (workspace--rebase-prompt state))
-            (message (string-append "workspace rebase handed to " slug)))))))
+            (message (string-append "worktree rebase handed to " slug)))))))
 
-(define-command "workspace-rebase" "Open the workspace chat to handle a rebase"
+(define-command "worktree-rebase" "Open the worktree chat to handle a rebase"
   (lambda ()
     (let ((state (workspace--command-state)))
       (when state
@@ -630,11 +630,11 @@
               (root (plist-get state 'project))
               (branch (plist-get state 'branch)))
           (cond ((equal? path root) (message "this is the primary checkout"))
-                ((not branch) (message "detached workspace — nothing to rebase"))
+                ((not branch) (message "detached worktree — nothing to rebase"))
                 ((> (plist-get state 'unsaved) 0)
-                 (message "workspace has unsaved buffers — save them first"))
+                 (message "worktree has unsaved buffers — save them first"))
                 ((> (plist-get state 'dirty) 0)
-                 (message "workspace has uncommitted changes — commit them first"))
+                 (message "worktree has uncommitted changes — commit them first"))
                 (else (workspace--start-rebase-chat! state)))))))
   'modes '(worktrees-mode))
 
@@ -664,11 +664,11 @@
                 (workspace--retire! state))
               removed?)))))
 
-(define-command "workspace-manage-refresh" "Refresh the workspace management list"
+(define-command "worktree-manage-refresh" "Refresh the worktree management list"
   (lambda () (list-refresh! *worktrees-buffer*))
   'modes '(worktrees-mode))
 
-(define-command "workspace-cancel" "Cancel and remove this clean task workspace"
+(define-command "worktree-cancel" "Cancel and remove this clean task worktree"
   (lambda ()
     (let ((state (workspace--command-state)))
       (when state
@@ -677,14 +677,14 @@
           (if (equal? path project)
               (message "refusing to remove the primary checkout")
               (y-or-n
-                (string-append "Cancel workspace " (plist-get state 'id)
+                (string-append "Cancel worktree " (plist-get state 'id)
                                "? The branch is kept")
                 (lambda ()
                   (if (worktree--remove! (current-buffer) path)
-                      (message (string-append "cancelled workspace "
+                      (message (string-append "cancelled worktree "
                                               (plist-get state 'id)))
-                      (message "workspace was not removed")))
-                (lambda () (message "workspace kept")))))))))
+                      (message "worktree was not removed")))
+                (lambda () (message "worktree kept")))))))))
 
 (mode-icon! "worktrees-mode" "")
 
@@ -694,7 +694,7 @@
            "The project's git worktrees: branch, commits ahead of the base, "
            "dirty count, and the agent thread that owns each. RET opens one "
            "in dired; `=` diffs against the primary branch; `r` rebases onto "
-           "it; `L` merges into it. `d` flags a clean workspace for cancel, "
+           "it; `L` merges into it. `d` flags a clean worktree for cancel, "
            "and `x` confirms. Cancel keeps the branch and releases ownership.")
     'buffer *worktrees-buffer*
     'rows (lambda (buf) (worktree-rows buf))
@@ -703,7 +703,7 @@
                      (list "dirty" 7 'right) (list "owner" 12)
                      (list "path" #f)))
     'cells worktree-cells
-    'title (lambda (buf) "Workspace changes")
+    'title (lambda (buf) "Worktree changes")
     'meta worktree-meta
     'total (lambda (buf) (length (worktree-rows buf)))
     'footer (lambda (buf)
@@ -712,17 +712,17 @@
                 ("d" "cancel") ("x" "confirm")
                 ("/" "filter") ("g" "refresh") ("q" "quit")))
     'key (lambda (buf wt) (plist-get wt 'path))
-    'noun "workspace"
+    'noun "worktree"
     'markable? (lambda (buf wt)
                  (not (equal? (plist-get wt 'path)
                               (buffer-local-value 'worktree-root buf))))
     'flags (list (list "d" "D" "cancel"
                        (lambda (buf path) (worktree--remove! buf path))
                        #t))
-    'keys '(("RET" "workspace-visit-files") ("=" "workspace-diff")
-            ("c" "workspace-new") ("a" "workspace-chat")
-            ("r" "workspace-rebase") ("L" "workspace-land")
-            ("g" "workspace-manage-refresh")
+    'keys '(("RET" "worktree-visit-files") ("=" "worktree-diff")
+            ("c" "worktree-new") ("a" "worktree-chat")
+            ("r" "worktree-rebase") ("L" "worktree-land")
+            ("g" "worktree-manage-refresh")
             ("q" "quit-window"))))
 
 ;;; --- spawn wiring: an isolated thread gets its own worktree -------------------
@@ -911,12 +911,12 @@
                       (message (string-append "worktree failed: " (cadr made)))
                       buf))))))))
 
-(define-command "workspace-init"
+(define-command "worktree-init"
   "Create or enter a task worktree in this browser frame"
   (lambda ()
     (let ((target (worktree-init-buffer! (current-buffer))))
       (enable-minor-mode! target "code-mode")
-      (message (string-append "workspace "
+      (message (string-append "worktree "
                               (or (buffer-local-value 'workspace-id target) "unchanged")
                               " · one daemon · this frame")))))
 
@@ -990,19 +990,19 @@
                               opts)))))))))))
 
 (category! 'chat)
-(public! 'workspace-manage
-  "M-x workspace-manage — review, rebase, land, or cancel task workspaces")
+(public! 'worktree-manage
+  "M-x worktree-manage — review, rebase, land, or cancel task worktrees")
 (public! 'worktree-create "(worktree-create ROOT NAME) — add ROOT-worktrees/NAME on branch agent/NAME")
 (public! 'worktree-list "(worktree-list ROOT) — (path P branch B sha S) per worktree; first is the primary")
 (category! 'code)
 (effects! '(write external))
 (public! 'worktree-init-buffer!
-  "(worktree-init-buffer! BUF) — enter or create BUF's isolated coding workspace")
+  "(worktree-init-buffer! BUF) — enter or create BUF's isolated coding worktree")
 (public! 'worktree-init-needs-new?
-  "(worktree-init-needs-new? BUF) — true when workspace initialization would create a worktree")
+  "(worktree-init-needs-new? BUF) — true when worktree initialization would create a worktree")
 (public! 'workspace-finish-reminder!
   "(workspace-finish-reminder! BUF SLUG) — announce diff, rebase, land, and cancel after a turn")
 (public! 'workspace-name-from-chat!
-  "(workspace-name-from-chat! BUF NAME) — apply the LLM chat name to its project workspace")
+  "(workspace-name-from-chat! BUF NAME) — apply the LLM chat name to its project worktree")
 (public! 'workspace-llm-defaults-note!
-  "(workspace-llm-defaults-note! BUF) — make BUF's LLM settings the defaults for new workspace chats")
+  "(workspace-llm-defaults-note! BUF) — make BUF's LLM settings the defaults for new worktree chats")

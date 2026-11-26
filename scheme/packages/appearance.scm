@@ -375,7 +375,7 @@
   'group 'appearance
   'set (chrome-publisher "mode-line-format"))
 
-(define workspace-bar-help "M-x workspaces new tab · C-x D switch daemon")
+(define workspace-bar-help "M-x sessions new tab · C-x D switch daemon")
 (define frame-tabs-more-title "every group (M-x groups)")
 
 (frame-chrome-set! "echo-hints" (echo-hints-of echo-key-hints))

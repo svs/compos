@@ -656,7 +656,7 @@
                          'columns (lambda (buf) (list (list "" 2) (list "what" #f 'left panes-board--trim)))
                          'cells panes-board-narrow-cells))
     'cells panes-board-cells
-    'title (lambda (buf) (string-join (cons (if (equal? (panes-board-view buf) 'all) "Windows · All" "Windows · Group")
+    'title (lambda (buf) (string-join (cons (if (equal? (panes-board-view buf) 'all) "Panes · All" "Panes · Group")
                                             (panes-board-trail buf))
                                       " › "))
     'meta (lambda (buf) (let ((l (panes-board-layout)))
@@ -698,7 +698,7 @@
       (when i (list-goto-index! buf i)))
     buf))
 
-(define-command "windows-list" "List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group"
+(define-command "panes-list" "List this group's panes and their windows; - zooms out to every group, + zooms in, <left>/<right> switch to Group"
   (lambda () (panes-board-open! 'all (panes-board--id "g" (panes-board-here-group)))))
 
 ;; the board follows the frame while it is on screen
@@ -865,8 +865,8 @@
             (window-set-buffer! (active-window) buf)
             (list-refresh! buf))))))
 
-;; C-x w opens the board (windows-list above)
-(define-key "ctl-x-map" "w" "windows-list")
+;; C-x w opens the board (panes-list above)
+(define-key "ctl-x-map" "w" "panes-list")
 
 ;; The list follows the ring while it is on screen.
 (define (windows-list-follow!)

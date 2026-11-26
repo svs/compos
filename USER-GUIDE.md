@@ -166,7 +166,7 @@ compos uses tree-sitter grammars to understand source code structurally.
 - **Install grammars:** run `M-x ts-install-grammar` to add syntax colors, folding, and tree navigation for a language.
 - **Build and fix errors:** run `M-x compile` in the background; press `RET` on an error line or run `M-x next-error` from any buffer.
 - **Provenance:** press `C-x v l` (`buffer-log`) to view every accepted revision of a buffer along with who wrote it (you, the editor, a process, or a specific agent).
-- **Task worktrees:** run `M-x code-mode` to isolate an agent coding task in its own Git worktree, and manage, diff, rebase, or land worktrees in `M-x workspace-manage`.
+- **Task worktrees:** run `M-x code-mode` to isolate an agent coding task in its own Git worktree, and manage, diff, rebase, or land worktrees in `M-x worktree-manage`.
 
 ## Writing, Markdown, and notes
 

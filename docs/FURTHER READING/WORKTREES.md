@@ -15,7 +15,10 @@ isolation.
 ### Model
 
 - A **project** is the primary checkout. A **workspace** is one task
-  worktree of that project. One workspace serves one task.
+  worktree of that project. One workspace serves one task. The user sees
+  the word worktree (`M-x worktree-manage`); the code keeps `workspace-`
+  for its buffer locals. A daemon that serves one is a session
+  (`M-x sessions`).
 - A workspace for project `/x/proj` named `NAME` lives at
   `/x/proj-worktrees/NAME` on branch `agent/NAME`. Worktrees sit next
   to the root, never inside it: inside they would shadow project files
@@ -36,13 +39,13 @@ There are three ways in; all converge on the same stamp.
    `agent-worktree-isolation` defcustom. The defcustom is off by default. A thread that already carries a `cwd`, or a
    buffer outside any repository, stays alone. Reattach reuses the
    slug's existing worktree.
-2. **`workspace-init` / code-mode.** From a primary buffer it creates
+2. **`worktree-init` / code-mode.** From a primary buffer it creates
    the next free task workspace (`a1`, `a2`, …), opens the workspace's
    copy of the file, carries unsaved text into that copy, and points
    every window that showed the source at the copy. The primary buffer
    stays intact. From a buffer already inside a linked worktree it only
    stamps — isolation already exists.
-3. **`workspace-new`** in the `*worktrees*` list creates one by name.
+3. **`worktree-new`** in the `*worktrees*` list creates one by name.
 
 `worktree-create` must be idempotent against both leftovers: an
 existing directory is reused, and an existing `agent/NAME` branch is
@@ -78,7 +81,7 @@ records the owner. On stamp:
 - Otherwise the current daemon claims it.
 
 Removal releases the claim. Rebase refuses to run when another daemon
-owns the workspace ("open this workspace with M-x workspaces").
+owns the workspace ("open this worktree with M-x sessions").
 
 ### Working state
 
@@ -102,7 +105,7 @@ fingerprint** (sha + counts): a repeated clean state does not nag.
   worktree, release the daemon claim, and retire the buffers. Any
   failure keeps the workspace; no step may leave the primary checkout
   mid-merge (bug 2 today).
-  Today `L` (`workspace-land`) only merges. It does not rebase, remove,
+  Today `L` (`worktree-land`) only merges. It does not rebase, remove,
   or retire. Only the finish prompt runs the full sequence.
 - **Rebase** (`r`): the machine does not resolve conflicts. It opens
   the workspace's chat and hands the agent a rebase prompt: inspect,
@@ -133,11 +136,11 @@ conversation survives; the workspace identity does not.
 
 ### 1. Cancel breaks re-create
 
-`workspace-cancel` keeps branch `agent/NAME` as a recovery path. But
+`worktree-cancel` keeps branch `agent/NAME` as a recovery path. But
 `worktree-create` (`worktrees.scm:32`) always passes `-b`, and git
 refuses `-b` when the branch exists. A cancelled name can not come
 back. `worktree--next-task-name` (`:755`) checks only directories, so
-after you cancel `a1`, the next `workspace-init` picks `a1` again and
+after you cancel `a1`, the next `worktree-init` picks `a1` again and
 fails. Land-and-teardown sets the same trap: it never deletes the
 branch.
 
@@ -146,7 +149,7 @@ without `-b`.
 
 ### 2. A failed merge leaves the primary mid-merge
 
-`workspace-land-and-teardown!` (`:336`) and `workspace-land` (`:583`)
+`workspace-land-and-teardown!` (`:336`) and `worktree-land` (`:583`)
 run `git merge --no-ff` and only print a message on failure. A conflict
 leaves `MERGE_HEAD` in the primary checkout with no
 `git merge --abort`. The window is small — the primary must change
@@ -182,7 +185,7 @@ is modified.
 - `worktree--dirty` (`:73`) counts lines of merged stderr as dirty
   entries when git fails. An error reads as "N dirty". Guard on git's
   exit or on the porcelain shape.
-- `workspace-new` via M-x from a non-list buffer passes `#f` as root
+- `worktree-new` via M-x from a non-list buffer passes `#f` as root
   into `worktree-create` and crashes. It also accepts spaces and
   slashes in the name, which git rejects with a raw error. Guard the
   root and sanitize the name.

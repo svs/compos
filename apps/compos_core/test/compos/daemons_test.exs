@@ -34,7 +34,7 @@ defmodule Compos.DaemonsTest do
 
     on_exit(fn ->
       Compos.Core.kill_buffer("*daemons*")
-      Compos.Core.kill_buffer("*workspaces*")
+      Compos.Core.kill_buffer("*sessions*")
       Compos.Core.kill_buffer("*workspace-source*")
       File.rm(path)
       eval!("(daemon-register-current! #f)")
@@ -51,7 +51,7 @@ defmodule Compos.DaemonsTest do
     assert Editor.current_buffer() == "*daemons*"
     assert eval!(~s{(buffer-text "*daemons*")}) =~ "remote"
     assert eval!(~s{(buffer-text "*daemons*")}) =~ "current"
-    assert eval!(~s{(buffer-text "*daemons*")}) =~ "CURRENT  compos · workspace"
+    assert eval!(~s{(buffer-text "*daemons*")}) =~ "CURRENT  compos · session"
     assert eval!(~s{(buffer-local "*daemons*" 'mode-name)}) == ~s{"daemons-mode"}
 
     # Desktop restore re-runs the saved mode. It rebuilds the table and keys
@@ -159,7 +159,7 @@ defmodule Compos.DaemonsTest do
     File.write!(path, Jason.encode!([remote | current]))
 
     assert {:error, error} = Session.eval(~s{(daemon-claim-workspace! "#{workspace}")})
-    assert error =~ "workspace belongs to another daemon"
+    assert error =~ "this session belongs to another daemon"
   end
 
   test "a workspace can be assigned to its provisioned daemon" do
@@ -175,7 +175,7 @@ defmodule Compos.DaemonsTest do
     assert owner =~ workspace
   end
 
-  test "C-x w lists workspaces and RET opens the selected daemon in a new tab" do
+  test "M-x sessions lists daemon sessions and RET opens the selected daemon in a new tab" do
     stub_browser()
     workspace = "/tmp/workspace-tab-#{System.unique_integer([:positive])}"
 
@@ -189,21 +189,21 @@ defmodule Compos.DaemonsTest do
       ~s{(begin (buffer-create "*workspace-source*") (switch-to-buffer! "*workspace-source*"))}
     )
 
-    press(["C-x", "w"])
+    eval!(~s{(run-command "sessions")})
 
-    assert Editor.current_buffer() == "*workspaces*"
-    assert eval!(~s{(buffer-text "*workspaces*")}) =~ "compos"
-    assert eval!(~s{(buffer-text "*workspaces*")}) =~ "workspace prompts"
-    assert eval!(~s{(buffer-text "*workspaces*")}) =~ workspace
-    assert eval!(~s{(buffer-local "*workspaces*" 'mode-name)}) == ~s{"workspaces-mode"}
+    assert Editor.current_buffer() == "*sessions*"
+    assert eval!(~s{(buffer-text "*sessions*")}) =~ "compos"
+    assert eval!(~s{(buffer-text "*sessions*")}) =~ "workspace prompts"
+    assert eval!(~s{(buffer-text "*sessions*")}) =~ workspace
+    assert eval!(~s{(buffer-local "*sessions*" 'mode-name)}) == ~s{"sessions-mode"}
 
-    eval!(~s{(list-goto-first-entry "*workspaces*")})
+    eval!(~s{(list-goto-first-entry "*sessions*")})
     press("RET")
 
     assert_receive {:browser_frame, %{"op" => "open", "url" => "http://localhost:4208"}}
   end
 
-  test "C-x w starts a stopped worktree daemon before opening its tab" do
+  test "M-x sessions starts a stopped worktree daemon before opening its tab" do
     stub_browser()
 
     workspace =
@@ -227,8 +227,8 @@ defmodule Compos.DaemonsTest do
       ~s{(daemon-assign-workspace! "worktree-a2" "http://localhost:4208" "/tmp/a2-home" "#{workspace}")}
     )
 
-    press(["C-x", "w"])
-    eval!(~s{(list-goto-first-entry "*workspaces*")})
+    eval!(~s{(run-command "sessions")})
+    eval!(~s{(list-goto-first-entry "*sessions*")})
     press("RET")
 
     assert_receive {:daemon_started, ^workspace, "a2"}

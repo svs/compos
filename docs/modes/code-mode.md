@@ -4,13 +4,13 @@ compos isolates agent coding tasks in linked Git worktrees and gives you a dedic
 
 ## `code-mode` (`M-x code-mode`)
 
-Starts an agent coding workspace from the current source buffer.
+Starts an agent coding worktree from the current source buffer.
 
 - Asks before creating a new linked Git worktree at `<repo>-worktrees/<NAME>` on branch `agent/<NAME>`.
-- Opening a buffer already inside a worktree enters that workspace directly.
+- Opening a buffer already inside a worktree enters that worktree directly.
 - Every buffer inside a linked worktree wears `worktree-mode`, displaying its Git status (`UNCOMMITTED`, `NEEDS REBASE`, `UNMERGED`, or `READY TO TEARDOWN`).
 
-## `worktrees-mode` (`M-x workspace-manage`)
+## `worktrees-mode` (`M-x worktree-manage`)
 
 Lists all task worktrees for the current repository with branch, commits ahead, dirty count, and owning agent chat.
 
@@ -18,10 +18,10 @@ Lists all task worktrees for the current repository with branch, commits ahead, 
 | --- | --- |
 | `RET` | Open the worktree in Dired |
 | `=` | Open a diff against the primary branch (`diff-mode`) |
-| `r` | Hand a rebase to the workspace's agent chat |
+| `r` | Hand a rebase to the worktree's agent chat |
 | `L` | Merge (land) the worktree into the primary checkout |
-| `c` | Create a new workspace |
-| `a` | Jump to the workspace's chat |
+| `c` | Create a new worktree |
+| `a` | Jump to the worktree's chat |
 | `d`, then `x` | Flag a clean worktree for cancellation and confirm (branch stays for recovery) |
 | `g` / `q` | Refresh or quit |
 

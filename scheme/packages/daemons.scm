@@ -1,14 +1,15 @@
 ;;; daemons.scm — daemon registry and same-tab switching
 ;;;
-;;; A daemon owns complete workspaces. The browser frame can move between
-;;; daemons, but a workspace never has two daemon owners.
+;;; A daemon owns complete workspaces: the worktree or group it serves. The
+;;; user calls one a session (M-x sessions). The browser frame can move
+;;; between daemons, but a workspace never has two daemon owners.
 
 (require 'tabulated-list)
 
 (package! 'daemons 'sessions)
 
 (define *daemons-buffer* "*daemons*")
-(define *workspaces-buffer* "*workspaces*")
+(define *sessions-buffer* "*sessions*")
 
 (define (daemon--valid-entry? entry)
   (and (pair? entry)
@@ -61,7 +62,7 @@
         (if (equal? root "") #f root))))
 
 (define (daemon--context-label workspace)
-  (string-append (daemon-name) " · workspace "
+  (string-append (daemon-name) " · session "
                  (or workspace "none")))
 
 (define (daemon-register-current! workspace)
@@ -94,7 +95,7 @@
         (url (editor-url)))
     (cond
       ((and owner (not (equal? (plist-get owner 'url) url)))
-       (error "workspace belongs to another daemon"
+       (error "this session belongs to another daemon"
               workspace (plist-get owner 'name)))
       (else
         (let* ((current (daemon-register-current! workspace))
@@ -240,7 +241,7 @@
          (workspace (and current (plist-get current 'workspace))))
     (string-append "CURRENT  " (daemon--context-label workspace) " · "
                    (number->string (length (daemon-registry-entries)))
-                   " known · one workspace has one owner")))
+                   " known · one session has one owner")))
 
 (define (workspace--unique paths)
   (let loop ((rest paths) (seen '()))
@@ -313,7 +314,7 @@
     (daemon-register-current! (daemon--buffer-workspace (current-buffer)))
     (list-mode-show! "daemons-mode")))
 
-(define-command "workspace-open-tab" "Open the workspace at point in a new browser tab"
+(define-command "session-open-tab" "Open the daemon session at point in a new browser tab"
   (lambda ()
     (let ((row (list-current (current-buffer))))
       (if row
@@ -321,34 +322,34 @@
                            (plist-get row 'workspace))
                          (plist-get row 'url))))
             (tab-open url)
-            (message (string-append "opened workspace "
+            (message (string-append "opened session "
                                     (or (plist-get row 'project) "") " / "
                                     (or (plist-get row 'name) "")
                                     " in a new tab")))
-          (message "no workspace on this line"))))
-  'modes '(workspaces-mode))
+          (message "no session on this line"))))
+  'modes '(sessions-mode))
 
-(define-command "workspaces-refresh" "Refresh the workspace list"
-  (lambda () (list-refresh! *workspaces-buffer*))
-  'modes '(workspaces-mode))
+(define-command "sessions-refresh" "Refresh the daemon session list"
+  (lambda () (list-refresh! *sessions-buffer*))
+  'modes '(sessions-mode))
 
-(define-command "workspaces" "List workspaces and open one in a new browser tab"
+(define-command "sessions" "List daemon sessions and open one in a new browser tab"
   (lambda ()
     (daemon-register-current! (daemon--buffer-workspace (current-buffer)))
-    (list-mode-show! "workspaces-mode")))
+    (list-mode-show! "sessions-mode")))
 
 (mode-icon! "daemons-mode" "")
 
 (define-list-mode! "daemons-mode"
   (list
     'doc (string-append
-           "Every known daemon and its last workspace. RET switches this "
+           "Every known daemon and its last session. RET switches this "
            "browser tab. Each daemon restores its own frame and desktop.")
     'buffer *daemons-buffer*
     'rows daemon--rows
     'columns (lambda (buf)
                (list (list "" 1) (list "daemon" 18)
-                     (list "location" 12) (list "workspace" 28)
+                     (list "location" 12) (list "session" 28)
                      (list "status" 8) (list "url" #f)))
     'cells daemon--cells
     'title (lambda (buf)
@@ -366,33 +367,33 @@
     'keys '(("RET" "daemon-visit") ("g" "daemons-refresh")
             ("q" "quit-window"))))
 
-(mode-icon! "workspaces-mode" "")
+(mode-icon! "sessions-mode" "")
 
-(define-list-mode! "workspaces-mode"
+(define-list-mode! "sessions-mode"
   (list
     'doc (string-append
-           "Every workspace owned by a known daemon. RET opens its daemon in "
-           "a new browser tab. The new tab restores only that workspace context.")
-    'buffer *workspaces-buffer*
+           "Every session of a known daemon: the worktree or group it serves. RET opens its daemon in "
+           "a new browser tab. The new tab restores only that session.")
+    'buffer *sessions-buffer*
     'rows workspace--rows
     'columns (lambda (buf)
                (list (list "" 1) (list "project" 18)
-                     (list "workspace" 28) (list "daemon" 18)
+                     (list "session" 28) (list "daemon" 18)
                      (list "path" 42) (list "location" 18)
                      (list "url" #f)))
     'cells workspace--cells
-    'title (lambda (buf) "Workspaces  ·  RET opens a new tab")
+    'title (lambda (buf) "Sessions  ·  RET opens a new tab")
     'meta (lambda (buf)
             (string-append (number->string (length (workspace--rows buf)))
-                           " workspaces · one daemon per workspace"))
+                           " sessions · one daemon per session"))
     'total (lambda (buf) (length (workspace--rows buf)))
     'no-marks #t
     'footer (lambda (buf)
               '(("RET" "open new tab") ("/" "filter")
                 ("g" "refresh") ("q" "quit")))
     'key (lambda (buf row) (plist-get row 'workspace))
-    'noun "workspace"
-    'keys '(("RET" "workspace-open-tab") ("g" "workspaces-refresh")
+    'noun "session"
+    'keys '(("RET" "session-open-tab") ("g" "sessions-refresh")
             ("q" "quit-window"))))
 
 (define-key "ctl-x-map" "D" "daemons")
@@ -419,8 +420,8 @@
 (public! 'daemon-arrived!
   "(daemon-arrived!) — announce this daemon and the frame's restored workspace")
 (public! 'daemons "M-x daemons or C-x D — switch this tab to another daemon")
-(public! 'workspaces
-  "M-x workspaces — open a workspace in a new browser tab")
+(public! 'sessions
+  "M-x sessions — open a daemon session in a new browser tab")
 
 ;; Every running daemon announces itself. All local daemon homes share this
 ;; registry unless COMPOS_DAEMON_REGISTRY gives them another file.

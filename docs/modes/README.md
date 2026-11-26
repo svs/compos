@@ -42,7 +42,7 @@ Every buffer in compos wears one major mode and any number of minor modes. A mod
 
 | Mode | Open with | Covers |
 | --- | --- | --- |
-| [code-mode](code-mode.md) | `M-x code-mode`, `M-x workspace-manage` | Isolated agent coding workspaces, Git worktrees, and interactive diff review (`diff-mode`) |
+| [code-mode](code-mode.md) | `M-x code-mode`, `M-x worktree-manage` | Isolated agent coding in Git worktrees, and interactive diff review (`diff-mode`) |
 | [prog-mode](prog-mode.md) | Open any source file, `M-x code-browse` | Tree-sitter languages, structural browsing, `tree-edit-mode`, `lsp-mode`, and `occur-ts-mode` |
 | [buffer-log-mode](buffer-log-mode.md) | `C-x v l`, `M-x buffer-log` | Buffer provenance: every accepted revision with actor, operation, and diff |
 | [term-mode](term-mode.md) | `M-x term`, `M-x shell`, `M-x repl`, `M-x tail-file` | Raw PTY terminals, comint shells, live file tailing, and the live Scheme REPL |

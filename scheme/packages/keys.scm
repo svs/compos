@@ -25,7 +25,7 @@
 ;;; process for the whole session, not one per request. Change a secret
 ;;; in Doppler and the editor keeps the old value until key-forget!.
 
-(defgroup 'keys "Secrets: the key chain (environment, files, Doppler).")
+(defgroup 'secrets "Secrets: the key chain (environment, files, Doppler). Key bindings are under M-x keys.")
 
 ;;; --- the sources --------------------------------------------------------------
 
@@ -47,7 +47,7 @@
 ;; the seam: one function from a name to a value or #f, set by user config
 (defcustom 'secret-provider #f
   "A function from a secret name to its value or #f, asked after the environment and the key files. User config sets it; #f ends the chain."
-  'group 'keys)
+  'group 'secrets)
 
 (define (key--from-provider var)
   (if (procedure? secret-provider)

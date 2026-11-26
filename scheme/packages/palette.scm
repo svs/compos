@@ -467,8 +467,8 @@
    "webhook-delete" "buffer-next-pane" "buffer-previous-pane" "delete-frame"
    "next-pane" "previous-pane" "quit-window" "reset-layout" "winner-redo"
    "winner-undo" "debug-last-window-movement" "debug-window-movements"
-   "window-rename" "workspace-cancel" "workspace-init" "workspace-manage"
-   "workspace-new" "count-words" "write" "writing-layout"))
+   "window-rename" "worktree-cancel" "worktree-init" "worktree-manage"
+   "worktree-new" "count-words" "write" "writing-layout"))
 
 ;; commands whose package has no mode of its own; they work in these
 (command-modes! "chat-compact" '(chat-mode))

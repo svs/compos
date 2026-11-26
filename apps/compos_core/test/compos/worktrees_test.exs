@@ -147,7 +147,7 @@ defmodule Compos.WorktreesTest do
 
     # the command resolves the project from the current buffer
     eval!(
-      ~s{(begin (delete-other-windows!) (visit "#{root}/a.txt") (run-command "workspace-manage"))}
+      ~s{(begin (delete-other-windows!) (visit "#{root}/a.txt") (run-command "worktree-manage"))}
     )
 
     text = eval!(~s{(buffer-text "*worktrees*")})
@@ -164,8 +164,8 @@ defmodule Compos.WorktreesTest do
     File.write!("#{root}-worktrees/t3/a.txt", "changed\n")
     eval!(~s{(daemon-claim-workspace! "#{root}-worktrees/t3")})
     press(["="])
-    assert eval!(~s{(buffer-exists? "*workspace diff: t3*")}) == "#t"
-    assert eval!(~s{(buffer-text "*workspace diff: t3*")}) =~ "a.txt"
+    assert eval!(~s{(buffer-exists? "*worktree diff: t3*")}) == "#t"
+    assert eval!(~s{(buffer-text "*worktree diff: t3*")}) =~ "a.txt"
 
     # dirty refuses removal (x asks first — answer yes, the action refuses)
     eval!(~s{(switch-to-buffer! "*worktrees*")})
@@ -182,10 +182,10 @@ defmodule Compos.WorktreesTest do
     assert eval!(~s{(daemon-workspace-owner "#{root}-worktrees/t3")}) == "#f"
     assert sh!("git branch --list agent/t3", root) =~ "agent/t3"
   after
-    Compos.Core.kill_buffer("*workspace diff: t3*")
+    Compos.Core.kill_buffer("*worktree diff: t3*")
   end
 
-  test "workspace-land merges a committed branch into the primary" do
+  test "worktree-land merges a committed branch into the primary" do
     root = scratch_repo()
     eval!(~s{(worktree-create "#{root}" "t4")})
     wt = "#{root}-worktrees/t4"
@@ -193,7 +193,7 @@ defmodule Compos.WorktreesTest do
     sh!("git add . && git -c user.email=t@t -c user.name=t commit -q -m b", wt)
 
     eval!(
-      ~s{(begin (delete-other-windows!) (visit "#{root}/a.txt") (run-command "workspace-manage"))}
+      ~s{(begin (delete-other-windows!) (visit "#{root}/a.txt") (run-command "worktree-manage"))}
     )
 
     eval!(~s{(list-goto-first-entry "*worktrees*")})
@@ -203,7 +203,7 @@ defmodule Compos.WorktreesTest do
     assert File.exists?(Path.join(root, "b.txt"))
   end
 
-  test "workspace-rebase opens its chat and delegates the hard rebase" do
+  test "worktree-rebase opens its chat and delegates the hard rebase" do
     root = scratch_repo()
     eval!(~s{(worktree-create "#{root}" "t5")})
     wt = "#{root}-worktrees/t5"
@@ -217,8 +217,8 @@ defmodule Compos.WorktreesTest do
     {_, 1} = System.cmd("git", ["merge-base", "--is-ancestor", "main", "HEAD"], cd: wt)
 
     eval!(~s{(visit "#{wt}/a.txt")})
-    eval!(~s{(run-command "workspace-diff")})
-    assert eval!(~s{(buffer-text "*workspace diff: t5*")}) =~ "feature.txt"
+    eval!(~s{(run-command "worktree-diff")})
+    assert eval!(~s{(buffer-text "*worktree diff: t5*")}) =~ "feature.txt"
 
     eval!(~s{(visit "#{wt}/a.txt")})
 
@@ -231,7 +231,7 @@ defmodule Compos.WorktreesTest do
           (buffer-set-local! (current-buffer) 'test-rebase-slug slug)
           (buffer-set-local! (current-buffer) 'test-rebase-prompt prompt)
           'sent))
-      (run-command "workspace-rebase")
+      (run-command "worktree-rebase")
       (set! chat-ensure-runtime! old-runtime)
       (set! agent-send-msg! old-send))
     """)
@@ -241,7 +241,7 @@ defmodule Compos.WorktreesTest do
     assert eval!(~s{(buffer-local "#{chat}" 'test-rebase-slug)}) == ~s{"rebase-test-agent"}
 
     prompt = eval!(~s{(buffer-local "#{chat}" 'test-rebase-prompt)})
-    assert prompt =~ "Rebase this workspace onto main"
+    assert prompt =~ "Rebase this worktree onto main"
     assert prompt =~ "Resolve conflicts carefully"
     assert prompt =~ "Run the relevant tests"
     assert prompt =~ "use the ask tool"
@@ -251,7 +251,7 @@ defmodule Compos.WorktreesTest do
     {_, 1} = System.cmd("git", ["merge-base", "--is-ancestor", "main", "HEAD"], cd: wt)
     refute File.exists?(Path.join(wt, "main.txt"))
   after
-    Compos.Core.kill_buffer("*workspace diff: t5*")
+    Compos.Core.kill_buffer("*worktree diff: t5*")
 
     Compos.Core.list_buffers()
     |> Enum.filter(&String.starts_with?(&1, "*chat:"))
@@ -283,7 +283,7 @@ defmodule Compos.WorktreesTest do
     assert eval!(~s{(buffer-local "#{root}/a.txt" 'window-class)}) =~ "workspace-pending"
 
     eval!(~s{(workspace-finish-reminder! "#{root}/a.txt" "s1")})
-    assert Editor.snapshot().echo =~ "workspace s1"
+    assert Editor.snapshot().echo =~ "worktree s1"
     assert Editor.snapshot().echo =~ "commit to get the land-and-teardown prompt"
 
     slug = eval!(~s{(execute* "" '(connector "api" isolated #f))}) |> String.trim("\"")
@@ -292,7 +292,7 @@ defmodule Compos.WorktreesTest do
     eval!(~s{(workspace--stamp! "#{chat}" "s1" "#{root}-worktrees/s1" "#{root}")})
     Editor.set_echo("")
     eval!(~s{(agent-handle-event "#{slug}" '(type turn-end stop-reason "end_turn"))})
-    assert Editor.snapshot().echo =~ "workspace s1"
+    assert Editor.snapshot().echo =~ "worktree s1"
     assert eval!(~s{(buffer-local "#{chat}" 'header-line)}) =~ "WORKTREE s1"
 
     # an explicit cwd wins
@@ -343,12 +343,12 @@ defmodule Compos.WorktreesTest do
     eval!(~s{(visit "#{path}")})
     eval!(~s{(workspace-finish-reminder! "#{path}" "finish")})
 
-    assert Editor.snapshot().minibuffer.prompt =~ "Land and teardown workspace finish"
+    assert Editor.snapshot().minibuffer.prompt =~ "Land and teardown worktree finish"
     press(["y"])
 
     refute File.dir?(workspace)
     assert File.read!(Path.join(root, "feature.txt")) == "feature\n"
-    assert Editor.snapshot().echo =~ "landed and tore down workspace finish"
+    assert Editor.snapshot().echo =~ "landed and tore down worktree finish"
     assert eval!(~s{(daemon-workspace-owner "#{workspace}")}) == "#f"
   end
 end

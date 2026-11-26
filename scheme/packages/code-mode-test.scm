@@ -80,7 +80,7 @@
       (when (and id (group-record-by-id id)) (group-record-delete! id)))
     (buffer-kill! t--cm-buf)))
 
-(deftest 'the-shared-policy-lets-a-code-workspace-chat-restart-the-daemon
+(deftest 'the-shared-policy-lets-a-code-worktree-chat-restart-the-daemon
   "the grant is the buffer's, so only this workspace's chat gets it"
   (lambda ()
     (let* ((buf (t--cm-on!))
@@ -305,7 +305,7 @@
 
           ;; a second task is a sibling workspace with its own group and chat
           (switch-to-buffer! path)
-          (run-command "workspace-init")
+          (run-command "worktree-init")
           (let* ((second (current-buffer))
                  (second-workspace (buffer-local-value 'workspace-root second)))
             (check-equal! second-workspace (string-append root "-worktrees/a2")

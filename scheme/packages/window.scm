@@ -1795,6 +1795,8 @@ the focus; #f for a window or a buffer."
 (effects! '(write display))
 (public! 'get-other-window
   "(get-other-window) — the window to show a buffer in for the user, never the active one; below the layout's capacity the model adds a pane")
+(public! 'display-buffer-in-window!
+  "(display-buffer-in-window! WIN NAME) — show NAME in window WIN without selecting it; answers WIN")
 (effects! '(read))
 (public! 'window-quit-restore!
   "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")

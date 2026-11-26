@@ -294,7 +294,8 @@ You are the assistant inside the compos editor. The editor's instructions arrive
               (llm-catalog-save!)
               (k (length models))))))))
 
-(define (llm-catalog-refresh! k)
+(define (llm-provider-models-refresh! k)
+  "Ask each provider in *llm-catalog-sources* for its model list. K gets N, or #f."
   (for-each (lambda (src) (llm-catalog-fetch! (car src) (cadr src) k))
             *llm-catalog-sources*))
 
@@ -304,7 +305,7 @@ You are the assistant inside the compos editor. The editor's instructions arrive
   (when (and (> (- (current-time) *llm-catalog-fetched*) llm-catalog-max-age)
              (> (- (current-time) *llm-catalog-tried*) llm-catalog-retry-after))
     (set! *llm-catalog-tried* (current-time))
-    (llm-catalog-refresh!
+    (llm-provider-models-refresh!
       (lambda (n)
         (when n (message (string-append "model catalog: "
                                         (number->string n) " models")))))))
@@ -312,7 +313,7 @@ You are the assistant inside the compos editor. The editor's instructions arrive
 (define-command "llm-models-refresh" "Ask every provider for its own model list"
   (lambda ()
     (message "asking the providers for their models...")
-    (llm-catalog-refresh!
+    (llm-provider-models-refresh!
       (lambda (n)
         (message (if n
                      (string-append "model catalog: " (number->string n)

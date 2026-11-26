@@ -619,6 +619,14 @@
                ((and (minor-mode-on? source "index-mode") (boundp 'browse-beside!))
                 (browse-beside! url source))
                (else (browse url)))))
+      ;; a page that asks for it (mail: its buttons need the reader's
+      ;; login) opens web links in the group's own browser window
+      ((and (or (string-prefix? "http://" href)
+                (string-prefix? "https://" href))
+            (eq? (buffer-local-value 'preview-web-links source) 'browser)
+            (boundp 'tab-open))
+       (tab-open href)
+       (message (string-append "opened in the browser: " href)))
       ((and (or (string-prefix? "http://" href)
                 (string-prefix? "https://" href))
             (boundp 'browse))

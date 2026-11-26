@@ -2651,7 +2651,7 @@
     (list 'tag (if (equal? (list-mode-of buf) "chat-list-mode") "chat-entry" "buffer") 'layout "columns"
           'attrs (append (list (list "name" entry)
                                (list "modified" (if (ibuffer-row-modified? entry) "true" "false"))
-                               (list "marked" (if (assoc entry (list-marks buf)) "true" "false")))
+                               (list "marked" (if (equal? (list-mark-of buf entry) " ") "false" "true")))
             ;; only a row that sits under a heading says so, so the style
             ;; rules can ask for the attribute itself and never a value
             (if (ibuffer-row-in-section? buf entry) (list (list "level" "1")) '())

@@ -1253,6 +1253,13 @@
                        (list (list (string-byte-length "Chats ") (string-byte-length "⚡")
                                    (if (buffer-local-value 'chats-watch buf) "chat-watch-on" "chat-watch-off"))))
         'noun "chat"
+        ;; a chat row keys by its chat id, never its title: a title
+        ;; changes, and a mark stays on the chat it was put on
+        'key (lambda (buf b)
+               (if (and (string? b) (buffer-known? b)
+                        (equal? (buffer-local-value 'mode-name b) "chat-mode"))
+                   (chat-stable-id! b)
+                   ((plist-get *ibuffer-opts* 'key) buf b)))
         ;; a chat's transcript size is not what you pick a chat by
         'hide-fields '(size)
         'show-fields '(cost turn)

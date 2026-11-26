@@ -182,3 +182,38 @@
       (undefine-command "zz-command-test-add")
       (check-true! (eq? (symbol-value 'zz-command-test-add) f) "undefine leaves the function")
       (check-false! (commandp "zz-command-test-add") "and it is no command"))))
+
+(deftest 'command-rows-cache-survives-unrelated-buffer-keymaps
+  "adding a keymap for another buffer does not invalidate command-rows--key"
+  (lambda ()
+    (let* ((buf (command-test-buffer! "x"))
+           (before (command-rows--key buf)))
+      (define-key "zz-command-test-unrelated-buf-map" "<f9> z" "forward-char")
+      (check-equal! (command-rows--key buf) before
+                    "an unrelated keymap leaves the cache key unchanged")
+      (buffer-kill! "zz-command-test-buf"))))
+
+(deftest 'commands-out-of-scope-checks-derived-modes-and-minor-maps
+  "active modes include major mode parents and buffer minor maps"
+  (lambda ()
+    (define-mode "zz-parent-scope-mode" (lambda () #t))
+    (define-mode "zz-child-scope-mode" (lambda () #t) 'parent "zz-parent-scope-mode")
+    (define-command "zz-parent-only-cmd" "Test: parent scope" (lambda () #t)
+      'modes '(zz-parent-scope-mode))
+    (define-command "zz-minor-only-cmd" "Test: minor scope" (lambda () #t)
+      'modes '(zz-minor-scope-mode))
+    (let ((buf (command-test-buffer! "x")))
+      (check-false! (command-applicable? "zz-parent-only-cmd" buf) "hidden in fundamental-mode")
+      (check-false! (command-applicable? "zz-minor-only-cmd" buf) "hidden without minor map")
+      (with-current-buffer buf (lambda () (set-mode! "zz-child-scope-mode")))
+      (check-true! (command-applicable? "zz-parent-only-cmd" buf) "offered in derived child mode")
+      (define-key "zz-minor-scope-mode-map" "<f9> m" "zz-minor-only-cmd")
+      (let ((prev (buffer-minor-maps buf)))
+        (buffer-minor-maps! buf (cons "zz-minor-scope-mode-map" prev))
+        (check-true! (command-applicable? "zz-minor-only-cmd" buf) "offered when minor map is active")
+        (buffer-minor-maps! buf prev))
+      (buffer-kill! "zz-command-test-buf"))
+    (undefine-command "zz-parent-only-cmd")
+    (undefine-command "zz-minor-only-cmd")
+    (test-forget-catalog! "mode" "zz-parent-scope-mode")
+    (test-forget-catalog! "mode" "zz-child-scope-mode")))

@@ -411,8 +411,7 @@ defmodule Compos.Core.Session do
   # command at the top of M-x instead of among the d's.
   def command_names do
     Compos.Core.SchemeAPI.commands_table()
-    |> :ets.tab2list()
-    |> Enum.map(&elem(&1, 0))
+    |> :ets.select([{{:"$1", :_, :_}, [], [:"$1"]}])
     |> Enum.sort_by(&String.downcase/1)
   end
 

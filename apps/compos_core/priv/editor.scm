@@ -6009,12 +6009,24 @@
 (define (command--map-commands m)
   (filter string? (map cadr (or (ignore-errors (lambda () (keymap-bindings m))) '()))))
 
-;; is MODE, a mode name, on in BUF: its major mode or one it derives from,
-;; or a keymap BUF uses
-(define (command--mode-on? mode buf maps)
-  (let ((m (if (symbol? mode) (symbol->string mode) mode)))
-    (or (buffer-derived-mode? buf m)
-        (member (string-append m "-map") maps))))
+;; every mode name active in BUF, as strings: its major mode, every parent it
+;; derives from, and each map in MAPS whose name ends in "-map"
+(define (command--active-modes buf maps)
+  (let* ((chain (let loop ((m (and (buffer-exists? buf) (buffer-local-value 'mode-name buf))) (seen '()))
+                  (if (or (not m) (member m seen))
+                      seen
+                      (loop (mode-parent m) (cons m seen)))))
+         (from-maps (filter (lambda (x) x)
+                            (map (lambda (n)
+                                   (let ((k (string-length n)))
+                                     (if (and (> k 4) (equal? (substring n (- k 4) k) "-map"))
+                                         (substring n 0 (- k 4))
+                                         #f)))
+                                 maps))))
+    (append chain from-maps)))
+
+(define (command--mode-in? mode active)
+  (member (if (symbol? mode) (symbol->string mode) mode) active))
 
 ;; kept across a reload of this file: packages mark their commands once
 (define *command-public* (if (boundp '*command-public*) *command-public* '()))
@@ -6047,45 +6059,54 @@
                              (map car scopes)
                              (if (boundp '*app-entries*) *app-entries* '())
                              (command--map-commands "global")))
-               (rows (filter (lambda (e)
-                               (let ((n (plist-get e 'name)))
-                                 (and (equal? (plist-get e 'kind) "command")
-                                      (not (equal? (plist-get e 'namespace) "core"))
-                                      (plist-get e 'package)
-                                      (not (string-suffix? "-mode" n))
-                                      (not (command-internal? n)))))
-                             cat))
-               (keep (names-less (map (lambda (e) (plist-get e 'name)) rows) open))
-               (private (map (lambda (n)
-                               (let* ((e (find (lambda (e) (equal? (plist-get e 'name) n)) rows))
-                                      (row (assoc (plist-get e 'package) pkg-modes)))
-                                 (list n (if row (cadr row) '()))))
-                             keep)))
+               (tagged (sort (append
+                               (map (lambda (g) (list g 0)) open)
+                               (filter (lambda (x) x)
+                                       (map (lambda (e)
+                                              (let ((n (plist-get e 'name)))
+                                                (and (equal? (plist-get e 'kind) "command")
+                                                     (not (equal? (plist-get e 'namespace) "core"))
+                                                     (plist-get e 'package)
+                                                     (not (string-suffix? "-mode" n))
+                                                     (not (command-internal? n))
+                                                     (list n 1 (plist-get e 'package)))))
+                                            cat)))))
+               (private (let loop ((rs tagged) (last #f) (out '()))
+                          (cond ((null? rs) (reverse out))
+                                ((equal? (cadr (car rs)) 0) (loop (cdr rs) (car (car rs)) out))
+                                ((equal? (car (car rs)) last) (loop (cdr rs) last out))
+                                (else
+                                 (let* ((r (car rs))
+                                        (row (assoc (caddr r) pkg-modes)))
+                                   (loop (cdr rs) (car r)
+                                         (cons (list (car r) (if row (cadr row) '())) out))))))))
           (set! *command--private* (list key private))
           private))))
 
-(define (command--private-out buf names open maps)
+(define (command--private-out names open active)
   (if (and (boundp 'command-public-only) command-public-only)
-      (map car (remove (lambda (row)
-                         (or (member (car row) open)
-                             (any (lambda (m) (command--mode-on? m buf maps)) (cadr row))))
-                       (command--private-rows names)))
+      (names-less
+        (map car (remove (lambda (row)
+                           (any (lambda (m) (command--mode-in? m active)) (cadr row)))
+                         (command--private-rows names)))
+        open)
       '()))
 
 (define (commands-out-of-scope buf &optional names)
   (if (and (boundp 'command-mode-scoping) (not command-mode-scoping))
       '()
       (let* ((maps (or (ignore-errors (lambda () (buffer-keymaps buf))) '()))
+             (active (command--active-modes buf maps))
              (open (apply append (map command--map-commands
                                       (append (list "global") (global-minor-maps) maps))))
              ;; no modes is everywhere
              (named (map car (remove (lambda (row)
                                        (or (null? (cadr row))
-                                           (any (lambda (m) (command--mode-on? m buf maps)) (cadr row))))
+                                           (any (lambda (m) (command--mode-in? m active)) (cadr row))))
                                      *command-modes*))))
         ;; an app's commands are offered in the app alone (apps.scm)
         (append named
-                (command--private-out buf (or names (command-names)) open maps)
+                (command--private-out (or names (command-names)) open active)
                 (if (boundp 'app-commands-out-of-scope) (app-commands-out-of-scope buf open names) '())))))
 
 (define (command-applicable? name &optional buf)
@@ -6138,16 +6159,12 @@
         (set! *command-tiers* (list (length names) sorted))
         sorted)))
 
-(define (command--name<? a b)
-  ;; sort's own order, so the walk below agrees with it
-  (and (not (equal? a b)) (equal? (car (sort (list a b))) a)))
-
 (define (command--with-tiers names tiers)
   ;; NAMES sorted, TIERS sorted by name: one walk gives each name its tier;
   ;; a command the catalog does not know is a package's
   (let loop ((ns names) (ts tiers) (acc '()))
     (cond ((null? ns) acc)
-          ((or (null? ts) (command--name<? (car ns) (car (car ts))))
+          ((or (null? ts) (string<? (car ns) (car (car ts))))
            (loop (cdr ns) ts (cons (list 1 (string-length (car ns)) (car ns)) acc)))
           ((equal? (car ns) (car (car ts)))
            (loop (cdr ns) (cdr ts) (cons (list (cadr (car ts)) (string-length (car ns)) (car ns)) acc)))
@@ -6183,10 +6200,10 @@
           (map (lambda (m) (if (equal? (car m) own) (list 'own (cadr m)) m))
                (remove (lambda (m) (member (car m) es)) (keymap--ladder buf ro))))
         (plist-put facts 'minor-maps (remove (lambda (m) (member m es)) (or minor '())))
-        (length (keymap-names))
         (buffer-local-value 'mode-name buf)
         ro
         *command-generation*
+        (if (boundp 'catalog-generation) (catalog-generation) 0)
         (if (boundp '*app-entries*) (length *app-entries*) 0)
         (if (boundp '*list-modes*) (length *list-modes*) 0)
         (length (hook-functions 'candidate-face))
@@ -6204,11 +6221,11 @@
         (begin
           (unless (eq? kept mine)
             (set! *command-rows-cache*
-              (take (alist-put (alist-delete *command-rows-cache* buf) buf kept) 8)))
+              (take (alist-put (alist-delete *command-rows-cache* buf) buf kept) 16)))
           (cdr kept))
         (let ((rows (annotate 'command (command-candidates))))
           (set! *command-rows-cache*
-            (take (alist-put (alist-delete *command-rows-cache* buf) buf (cons key rows)) 8))
+            (take (alist-put (alist-delete *command-rows-cache* buf) buf (cons key rows)) 16))
           rows))))
 (public! 'command-rows
   "(command-rows) -- the M-x rows for the current buffer, as the palette and M-x show them; kept per buffer until its keymaps, mode or the command table change")

@@ -567,14 +567,15 @@
 (define (app-commands-out-of-scope buf open &optional names)
   "(app-commands-out-of-scope BUF OPEN [NAMES]) -- the app commands M-x leaves out in BUF: those of every app none of whose modes is on there, less the commands in OPEN"
   ;; the mode chain of BUF is walked once, not once for each app mode
-  (let ((chain (let loop ((m (buffer-local-value 'mode-name buf)) (seen '()))
-                 (if (or (not m) (member m seen)) seen (loop (mode-parent m) (cons m seen))))))
-    (apply append
-           (map (lambda (scope)
-                  (if (any (lambda (m) (member m chain)) (cadr scope))
-                      '()
-                      (filter (lambda (c) (not (member c open))) (caddr scope))))
-                (app-command-scopes names)))))
+  (let* ((chain (let loop ((m (and (buffer-exists? buf) (buffer-local-value 'mode-name buf))) (seen '()))
+                  (if (or (not m) (member m seen)) seen (loop (mode-parent m) (cons m seen)))))
+         (raw (apply append
+                     (map (lambda (scope)
+                            (if (any (lambda (m) (member m chain)) (cadr scope))
+                                '()
+                                (caddr scope)))
+                          (app-command-scopes names)))))
+    (names-less raw open)))
 
 ;; commands that open an app from anywhere, though their names put them in it
 (for-each app-entry!

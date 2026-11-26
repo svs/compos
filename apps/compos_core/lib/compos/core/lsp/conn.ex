@@ -41,13 +41,10 @@ defmodule Compos.Core.LSP.Conn do
   use GenServer, restart: :temporary
   require Logger
 
-  alias Compos.Core.JsonRpc
-  alias Compos.Core.{Buffer, Events, Session}
+  alias Compos.Core.{Buffer, Conn, Events, JsonRpc, Session}
   alias Compos.Core.LSP
   alias Compos.Core.LSP.Pos
 
-  @log_max 200
-  @log_line 4_000
   @flush_ms 150
 
   def start_link({key, spec}) do
@@ -56,25 +53,13 @@ defmodule Compos.Core.LSP.Conn do
     )
   end
 
-  def status(pid) do
-    GenServer.call(pid, :status, 5_000)
-  catch
-    :exit, _ -> :busy
-  end
+  def status(pid), do: Conn.call(pid, :status, :busy)
 
   @doc "Everything the status view shows: server_info, caps, docs."
-  def detail(pid) do
-    GenServer.call(pid, :detail, 5_000)
-  catch
-    :exit, _ -> nil
-  end
+  def detail(pid), do: Conn.call(pid, :detail, nil)
 
   @doc "The frame log, oldest first: [%{at, dir, text}]."
-  def log(pid) do
-    GenServer.call(pid, :log, 5_000)
-  catch
-    :exit, _ -> []
-  end
+  def log(pid), do: Conn.call(pid, :log, [])
 
   @doc "Send a request; CB receives {:ok, result} | {:error, msg}. CB must be cheap."
   def request(pid, method, params, cb), do: GenServer.cast(pid, {:request, method, params, cb})
@@ -123,28 +108,12 @@ defmodule Compos.Core.LSP.Conn do
   end
 
   @impl true
-  def handle_continue(:connect, %{spec: %{"command" => cmd} = spec} = state) do
-    case System.find_executable(cmd) do
-      nil ->
-        {:noreply, fail_boot(state, "command not found: #{cmd}")}
+  def handle_continue(:connect, %{spec: %{"command" => _} = spec} = state) do
+    case Conn.spawn(spec, cd: state.root, label: "lsp") do
+      {:error, msg} ->
+        {:noreply, fail_boot(state, msg)}
 
-      exe ->
-        env =
-          for {k, v} <- spec["env"] || %{} do
-            {String.to_charlist(k), String.to_charlist(to_string(v))}
-          end
-
-        with {:error, text} <- Compos.Core.SpawnDir.check(state.root, "lsp #{exe}"), do: raise(text)
-
-        port =
-          Port.open({:spawn_executable, exe}, [
-            :binary,
-            :exit_status,
-            args: spec["args"] || [],
-            env: env,
-            cd: state.root
-          ])
-
+      {:ok, port, _exe} ->
         state = %{state | port: port}
         {:noreply, send_req(state, "initialize", initialize_params(state), :initialize)}
     end
@@ -168,7 +137,7 @@ defmodule Compos.Core.LSP.Conn do
      }, state}
   end
 
-  def handle_call(:log, _from, state), do: {:reply, Enum.reverse(state.log), state}
+  def handle_call(:log, _from, state), do: {:reply, Conn.entries(state), state}
 
   @impl true
   def handle_cast({:request, method, params, cb}, state) do
@@ -300,17 +269,9 @@ defmodule Compos.Core.LSP.Conn do
 
   @impl true
   def terminate(reason, state) do
-    status = if state.status == :error, do: :error, else: :stopped
+    Conn.leave(state, LSP, state.key, reason)
 
-    LSP.remember(state.key, %{
-      status: status,
-      reason: reason_text(reason),
-      log: Enum.reverse(state.log)
-    })
-
-    LSP.notify(state.key, status)
-
-    if state.port && port_alive?(state.port) do
+    if Conn.port_alive?(state.port) do
       os = Port.info(state.port, :os_pid)
       Port.close(state.port)
 
@@ -325,10 +286,6 @@ defmodule Compos.Core.LSP.Conn do
 
     :ok
   end
-
-  defp reason_text(:normal), do: ""
-  defp reason_text(:shutdown), do: ""
-  defp reason_text(reason), do: inspect(reason)
 
   # --- protocol --------------------------------------------------------------
 
@@ -640,30 +597,10 @@ defmodule Compos.Core.LSP.Conn do
 
   defp transmit(state, _msg), do: state
 
-  defp safe_cb(cb, result) do
-    cb.(result)
-  rescue
-    e -> Logger.warning("lsp callback failed: #{Exception.message(e)}")
-  end
+  defp safe_cb(cb, result), do: Conn.safe_cb(cb, result, "lsp")
 
-  # --- framing ---------------------------------------------------------------
-
-  @doc false
   # --- misc ------------------------------------------------------------------
 
-  defp log(state, dir, msg) do
-    entry = %{at: System.system_time(:millisecond), dir: dir, text: log_text(msg)}
-    %{state | log: Enum.take([entry | state.log], @log_max)}
-  end
-
-  defp log_text(msg) when is_binary(msg), do: String.slice(msg, 0, @log_line)
-  defp log_text(msg), do: msg |> Jason.encode!() |> String.slice(0, @log_line)
-
-  defp fail_boot(state, msg) do
-    Session.message("lsp: #{state.name} failed — #{msg}")
-    send(self(), :stop_conn)
-    %{log(state, :note, "failed — #{msg}") | status: :error}
-  end
-
-  defp port_alive?(port), do: Port.info(port) != nil
+  defp log(state, dir, msg), do: Conn.log(state, dir, msg)
+  defp fail_boot(state, msg), do: Conn.fail_boot(state, "lsp", msg)
 end

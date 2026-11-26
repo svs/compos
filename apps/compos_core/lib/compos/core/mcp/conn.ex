@@ -34,12 +34,10 @@ defmodule Compos.Core.MCP.Conn do
   use GenServer, restart: :temporary
   require Logger
 
-  alias Compos.Core.{JsonRpc, MCP, Session}
+  alias Compos.Core.{Conn, JsonRpc, MCP, Session}
 
   @protocol "2025-06-18"
   @call_timeout 120_000
-  @log_max 200
-  @log_line 4_000
 
   def start_link({name, spec}) do
     GenServer.start_link(__MODULE__, {name, spec},
@@ -47,11 +45,7 @@ defmodule Compos.Core.MCP.Conn do
     )
   end
 
-  def status(pid) do
-    GenServer.call(pid, :status, 5_000)
-  catch
-    :exit, _ -> :busy
-  end
+  def status(pid), do: Conn.call(pid, :status, :busy)
 
   @doc "Call a tool; returns {:ok, text} | {:error, msg}."
   def call_tool(pid, tool, args) do
@@ -61,25 +55,14 @@ defmodule Compos.Core.MCP.Conn do
   end
 
   @doc "Status plus the counts the hub lists: %{status, type, resources, prompts}."
-  def summary(pid) do
-    GenServer.call(pid, :summary, 5_000)
-  catch
-    :exit, _ -> %{status: :busy, type: :unknown, resources: 0, prompts: 0}
-  end
+  def summary(pid),
+    do: Conn.call(pid, :summary, %{status: :busy, type: :unknown, resources: 0, prompts: 0})
 
   @doc "Everything the hub's detail view shows: server_info, resources, prompts."
-  def detail(pid) do
-    GenServer.call(pid, :detail, 5_000)
-  catch
-    :exit, _ -> nil
-  end
+  def detail(pid), do: Conn.call(pid, :detail, nil)
 
   @doc "The frame log, oldest first: [%{at, dir, text}]."
-  def log(pid) do
-    GenServer.call(pid, :log, 5_000)
-  catch
-    :exit, _ -> []
-  end
+  def log(pid), do: Conn.call(pid, :log, [])
 
   @impl true
   def init({name, spec}) do
@@ -115,25 +98,12 @@ defmodule Compos.Core.MCP.Conn do
     {:noreply, send_req(state, "initialize", initialize_params(), :initialize)}
   end
 
-  def handle_continue(:connect, %{spec: %{"command" => cmd} = spec} = state) do
-    case System.find_executable(cmd) do
-      nil ->
-        {:noreply, fail_boot(state, "command not found: #{cmd}")}
+  def handle_continue(:connect, %{spec: %{"command" => _} = spec} = state) do
+    case Conn.spawn(spec) do
+      {:error, msg} ->
+        {:noreply, fail_boot(state, msg)}
 
-      exe ->
-        env =
-          for {k, v} <- spec["env"] || %{} do
-            {String.to_charlist(k), String.to_charlist(resolve_value(v))}
-          end
-
-        port =
-          Port.open({:spawn_executable, exe}, [
-            :binary,
-            :exit_status,
-            args: spec["args"] || [],
-            env: env
-          ])
-
+      {:ok, port, _exe} ->
         state = %{state | transport: {:stdio, port}}
         {:noreply, send_req(state, "initialize", initialize_params(), :initialize)}
     end
@@ -166,7 +136,7 @@ defmodule Compos.Core.MCP.Conn do
      }, state}
   end
 
-  def handle_call(:log, _from, state), do: {:reply, Enum.reverse(state.log), state}
+  def handle_call(:log, _from, state), do: {:reply, Conn.entries(state), state}
 
   def handle_call({:call_tool, tool, args}, from, state) do
     {:noreply, send_req(state, "tools/call", %{name: tool, arguments: args}, {:reply, from})}
@@ -226,27 +196,15 @@ defmodule Compos.Core.MCP.Conn do
   # (status, reason, frames) behind for MCP.last/1
   @impl true
   def terminate(reason, state) do
-    status = if state.status == :error, do: :error, else: :stopped
-
-    MCP.remember(state.name, %{
-      status: status,
-      reason: reason_text(reason),
-      log: Enum.reverse(state.log)
-    })
-
-    MCP.notify(state.name, status)
+    Conn.leave(state, MCP, state.name, reason)
 
     case state.transport do
-      {:stdio, port} -> if port_alive?(port), do: Port.close(port)
+      {:stdio, port} -> Conn.close_port(port)
       _ -> :ok
     end
 
     :ok
   end
-
-  defp reason_text(:normal), do: ""
-  defp reason_text(:shutdown), do: ""
-  defp reason_text(reason), do: inspect(reason)
 
   # --- protocol -------------------------------------------------------------
 
@@ -424,30 +382,12 @@ defmodule Compos.Core.MCP.Conn do
   defp store_session(state, _), do: state
 
   defp resolve_headers(headers),
-    do: for({k, v} <- headers, do: {k, resolve_value(v)})
+    do: for({k, v} <- headers, do: {k, to_string(v)})
 
   defp transport_type(%{transport: {:stdio, _}}), do: :stdio
   defp transport_type(%{transport: {:http, _, _, _}}), do: :http
   defp transport_type(_), do: :unknown
 
-  # newest first while it lives here (cheap prepend), reversed on the way out
-  defp log(state, dir, msg) do
-    entry = %{at: System.system_time(:millisecond), dir: dir, text: log_text(msg)}
-    %{state | log: Enum.take([entry | state.log], @log_max)}
-  end
-
-  defp log_text(msg) when is_binary(msg), do: String.slice(msg, 0, @log_line)
-  defp log_text(msg), do: msg |> Jason.encode!() |> String.slice(0, @log_line)
-
-  defp resolve_value(v), do: to_string(v)
-
-  # mark failed, tell the user, and stop on the next message — callable from
-  # any context (handle_continue, the reduce over stdio lines, http tasks)
-  defp fail_boot(state, msg) do
-    Session.message("mcp: #{state.name} failed — #{msg}")
-    send(self(), :stop_conn)
-    %{log(state, :note, "failed — #{msg}") | status: :error}
-  end
-
-  defp port_alive?(port), do: Port.info(port) != nil
+  defp log(state, dir, msg), do: Conn.log(state, dir, msg)
+  defp fail_boot(state, msg), do: Conn.fail_boot(state, "mcp", msg)
 end

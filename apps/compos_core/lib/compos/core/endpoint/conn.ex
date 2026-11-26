@@ -44,10 +44,8 @@ defmodule Compos.Core.Endpoint.Conn do
   use GenServer, restart: :temporary
   require Logger
 
-  alias Compos.Core.{Endpoint, Session}
+  alias Compos.Core.{Conn, Endpoint, JsonRpc, Session}
 
-  @log_max 200
-  @log_line 4_000
   @default_ask_timeout 30_000
 
   def start_link({name, spec}) do
@@ -56,25 +54,13 @@ defmodule Compos.Core.Endpoint.Conn do
     )
   end
 
-  def status(pid) do
-    GenServer.call(pid, :status, 5_000)
-  catch
-    :exit, _ -> :busy
-  end
+  def status(pid), do: Conn.call(pid, :status, :busy)
 
   @doc "Everything the status view shows: status, transport, framing, queue depth."
-  def detail(pid) do
-    GenServer.call(pid, :detail, 5_000)
-  catch
-    :exit, _ -> nil
-  end
+  def detail(pid), do: Conn.call(pid, :detail, nil)
 
   @doc "The frame log, oldest first: [%{at, dir, text}]."
-  def log(pid) do
-    GenServer.call(pid, :log, 5_000)
-  catch
-    :exit, _ -> []
-  end
+  def log(pid), do: Conn.call(pid, :log, [])
 
   @doc "Write one frame. Fire and forget."
   def send_frame(pid, text), do: GenServer.cast(pid, {:send, text})
@@ -113,26 +99,14 @@ defmodule Compos.Core.Endpoint.Conn do
   # --- connect --------------------------------------------------------------
 
   @impl true
-  def handle_continue(:connect, %{spec: %{"command" => cmd} = spec} = state) do
-    case System.find_executable(cmd) do
-      nil ->
-        {:noreply, fail_boot(state, "command not found: #{cmd}")}
+  def handle_continue(:connect, %{spec: %{"command" => _} = spec} = state) do
+    flags = if spec["stderr"] == "merge", do: [:stderr_to_stdout], else: []
 
-      exe ->
-        env =
-          for {k, v} <- spec["env"] || %{} do
-            {String.to_charlist(k), String.to_charlist(to_string(v))}
-          end
+    case Conn.spawn(spec, cd: spec["cd"], label: "endpoint", flags: flags) do
+      {:error, msg} ->
+        {:noreply, fail_boot(state, msg)}
 
-        with {:error, text} <- Compos.Core.SpawnDir.check(spec["cd"], "endpoint #{exe}"),
-             do: raise(text)
-
-        opts =
-          [:binary, :exit_status, args: spec["args"] || [], env: env] ++
-            if(spec["cd"], do: [cd: spec["cd"]], else: []) ++
-            if(spec["stderr"] == "merge", do: [:stderr_to_stdout], else: [])
-
-        port = Port.open({:spawn_executable, exe}, opts)
+      {:ok, port, exe} ->
         args = Enum.join(spec["args"] || [], " ")
 
         {:noreply,
@@ -186,7 +160,7 @@ defmodule Compos.Core.Endpoint.Conn do
      }, state}
   end
 
-  def handle_call(:log, _from, state), do: {:reply, Enum.reverse(state.log), state}
+  def handle_call(:log, _from, state), do: {:reply, Conn.entries(state), state}
 
   @impl true
   def handle_cast({:send, text}, state), do: {:noreply, transmit(state, text)}
@@ -237,26 +211,14 @@ defmodule Compos.Core.Endpoint.Conn do
 
   @impl true
   def terminate(reason, state) do
-    status = if state.status == :error, do: :error, else: :stopped
-
-    Endpoint.remember(state.name, %{
-      status: status,
-      reason: reason_text(reason),
-      log: Enum.reverse(state.log)
-    })
-
-    Endpoint.notify(state.name, status)
+    Conn.leave(state, Endpoint, state.name, reason)
     close(state.transport)
     :ok
   end
 
-  defp close({:exec, port}), do: if(Port.info(port) != nil, do: Port.close(port), else: :ok)
+  defp close({:exec, port}), do: Conn.close_port(port)
   defp close({:tcp, sock}), do: :gen_tcp.close(sock)
   defp close(_), do: :ok
-
-  defp reason_text(:normal), do: ""
-  defp reason_text(:shutdown), do: ""
-  defp reason_text(reason), do: inspect(reason)
 
   # --- framing --------------------------------------------------------------
 
@@ -275,7 +237,7 @@ defmodule Compos.Core.Endpoint.Conn do
     {Enum.reject(frames, &(&1 == "")), rest}
   end
 
-  def unframe(:content_length, buf), do: content_length_frames(buf, [])
+  def unframe(:content_length, buf), do: JsonRpc.split_content_length_raw(buf)
 
   def unframe({:length, o}, buf), do: length_frames(buf, o, [])
 
@@ -319,41 +281,6 @@ defmodule Compos.Core.Endpoint.Conn do
   defp decode_length(bin, :big), do: :binary.decode_unsigned(bin, :big)
   defp decode_length(bin, :little), do: :binary.decode_unsigned(bin, :little)
 
-  defp content_length_frames(buf, acc) do
-    case String.split(buf, "\r\n\r\n", parts: 2) do
-      [headers, rest] ->
-        case content_length(headers) do
-          nil ->
-            {Enum.reverse(acc), rest}
-
-          len when byte_size(rest) >= len ->
-            <<body::binary-size(len), tail::binary>> = rest
-            content_length_frames(tail, [body | acc])
-
-          _ ->
-            {Enum.reverse(acc), buf}
-        end
-
-      _ ->
-        {Enum.reverse(acc), buf}
-    end
-  end
-
-  defp content_length(headers) do
-    headers
-    |> String.split(["\r\n", "\n"])
-    |> Enum.find_value(fn line ->
-      case String.split(line, ":", parts: 2) do
-        [k, v] ->
-          if String.downcase(String.trim(k)) == "content-length",
-            do: String.trim(v) |> Integer.parse() |> then(fn {n, _} -> n; _ -> nil end)
-
-        _ ->
-          nil
-      end
-    end)
-  end
-
   defp enframe(:raw, text), do: text
 
   # Only the caller knows the header layout of the message it built, so a
@@ -361,8 +288,7 @@ defmodule Compos.Core.Endpoint.Conn do
   defp enframe({:length, _}, text), do: text
   defp enframe({:delimiter, d}, text), do: text <> d
 
-  defp enframe(:content_length, text),
-    do: "Content-Length: #{byte_size(text)}\r\n\r\n" <> text
+  defp enframe(:content_length, text), do: JsonRpc.frame_content_length(text)
 
   defp framing_of(spec) do
     case spec["framing"] do
@@ -484,24 +410,7 @@ defmodule Compos.Core.Endpoint.Conn do
   defp transport_type(%{transport: {:tcp, _}}), do: :tcp
   defp transport_type(_), do: :unknown
 
-  # newest first while it lives here (cheap prepend), reversed on the way out
-  defp log(state, dir, text) do
-    entry = %{at: System.system_time(:millisecond), dir: dir, text: String.slice(text, 0, @log_line)}
-    %{state | log: Enum.take([entry | state.log], @log_max)}
-  end
-
-  defp safe_cb(cb, result) when is_function(cb, 1) do
-    cb.(result)
-  rescue
-    e -> Logger.error("endpoint callback: #{Exception.message(e)}")
-  end
-
-  defp safe_cb(_, _), do: :ok
-
-  defp fail_boot(state, msg) do
-    Session.message("endpoint: #{state.name} failed — #{msg}")
-    state = fail_all(state, msg)
-    send(self(), :stop_conn)
-    %{log(state, :note, "failed — #{msg}") | status: :error}
-  end
+  defp log(state, dir, text), do: Conn.log(state, dir, text)
+  defp safe_cb(cb, result), do: Conn.safe_cb(cb, result, "endpoint")
+  defp fail_boot(state, msg), do: state |> fail_all(msg) |> Conn.fail_boot("endpoint", msg)
 end

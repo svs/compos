@@ -16,33 +16,43 @@ defmodule Compos.Core.JsonRpc do
   @doc "Every complete JSON frame in BUF and the tail. A line that is not JSON is chatter on stdout and is dropped."
   def decode_lines(buf) do
     {lines, rest} = split_lines(buf)
+    {decode_all(lines), rest}
+  end
 
-    frames =
-      Enum.flat_map(lines, fn line ->
-        case Jason.decode(line) do
-          {:ok, frame} -> [frame]
-          {:error, _} -> []
-        end
-      end)
-
-    {frames, rest}
+  defp decode_all(texts) do
+    Enum.flat_map(texts, fn text ->
+      case Jason.decode(text) do
+        {:ok, frame} -> [frame]
+        {:error, _} -> []
+      end
+    end)
   end
 
   @doc "One frame as wire bytes: the JSON and a newline."
   def encode(frame), do: [Jason.encode!(frame), "\n"]
 
   @doc "One frame as LSP wire bytes: a Content-Length header, a blank line, the JSON."
-  def encode_content_length(frame) do
-    json = Jason.encode!(frame)
-    ["Content-Length: ", Integer.to_string(byte_size(json)), "\r\n\r\n", json]
-  end
+  def encode_content_length(frame), do: frame_content_length(Jason.encode!(frame))
+
+  @doc "TEXT as one Content-Length frame: the header, a blank line, the bytes."
+  def frame_content_length(text),
+    do: ["Content-Length: ", Integer.to_string(byte_size(text)), "\r\n\r\n", text]
 
   @doc """
   Every complete Content-Length frame in BUF, decoded, and the tail. The
   LSP base protocol; a bare `\\n\\n` after the header is tolerated, and a
   frame that is not JSON is dropped.
   """
-  def split_content_length(buf, acc \\ []) do
+  def split_content_length(buf) do
+    {bodies, rest} = split_content_length_raw(buf)
+    {decode_all(bodies), rest}
+  end
+
+  @doc """
+  Every complete Content-Length body in BUF, as bytes, and the tail. A
+  header with no length is dropped and the split goes on after it.
+  """
+  def split_content_length_raw(buf, acc \\ []) do
     case header_split(buf) do
       nil ->
         {Enum.reverse(acc), buf}
@@ -50,16 +60,11 @@ defmodule Compos.Core.JsonRpc do
       {header, rest} ->
         case content_length(header) do
           nil ->
-            split_content_length(rest, acc)
+            split_content_length_raw(rest, acc)
 
           len when byte_size(rest) >= len ->
-            body = binary_part(rest, 0, len)
-            tail = binary_part(rest, len, byte_size(rest) - len)
-
-            case Jason.decode(body) do
-              {:ok, msg} -> split_content_length(tail, [msg | acc])
-              _ -> split_content_length(tail, acc)
-            end
+            <<body::binary-size(len), tail::binary>> = rest
+            split_content_length_raw(tail, [body | acc])
 
           _ ->
             {Enum.reverse(acc), buf}

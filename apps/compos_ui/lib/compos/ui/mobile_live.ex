@@ -16,9 +16,11 @@ defmodule Compos.Ui.MobileLive do
   import Compos.Ui.ComposML, only: [sigil_M: 2]
 
   alias Compos.Core.{Editor, Events, Input, Session}
-  alias Compos.Ui.EditorLive
+  alias Compos.Ui.{EditorLive, LiveShared}
 
   @empty_view %{group: "", chat: false, copy: %{}, railless: []}
+
+  @window_events LiveShared.window_events()
 
   # the sheets the bar opens, in the bar's order after the chat
   @sheets ["buffers", "groups", "commands"]
@@ -177,60 +179,11 @@ defmodule Compos.Ui.MobileLive do
 
   # ── the transcript's own events, as the desktop handles them ──────
 
-  def handle_event("ui_cmd", %{"win" => win} = params, socket) do
-    with {id, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Editor.set_active(id)
-        Session.call_named("ui-command!", [params["cmd"] || false, params["buf"] || false])
-      end)
+  def handle_event(event, params, socket) when event in @window_events do
+    case LiveShared.window_event(event, params, socket.assigns.frame) do
+      :refresh -> {:noreply, socket |> drain() |> refresh()}
+      :quiet -> {:noreply, socket}
     end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # the reader's place in a followed block list, as the editor keeps it
-  def handle_event("follow_place", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
-      when is_boolean(stick) and is_integer(top) do
-    if Compos.Core.Buffer.exists?(buf) do
-      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: false
-      offset = if is_integer(params["offset"]), do: params["offset"], else: 0
-      Compos.Core.Buffer.set_local(buf, "follow-place", [not stick, top, anchor, offset])
-    end
-
-    {:noreply, socket}
-  end
-
-  def handle_event("block_click", %{"win" => win, "id" => id}, socket) do
-    with {wid, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Editor.set_active(wid)
-        Compos.Core.SchemeAPI.block_click(Editor.current_buffer(), id)
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  def handle_event("preview_link", %{"win" => win, "href" => href}, socket)
-      when is_binary(href) and byte_size(href) <= 2000 do
-    with {id, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Session.call_named("preview-follow-link!", [id, href])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  def handle_event("preview_link_to_group", %{"win" => win, "href" => href}, socket)
-      when is_binary(href) and byte_size(href) <= 2000 do
-    with {id, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Session.call_named("link-follow-to-group", [id, href])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
   end
 
   def handle_event(_event, _params, socket), do: {:noreply, socket}
@@ -238,21 +191,11 @@ defmodule Compos.Ui.MobileLive do
   @impl true
   def handle_info({:frame_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
+  def handle_info({:buffer_display, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info(_msg, socket), do: {:noreply, socket}
 
-  defp drain(socket) do
-    receive do
-      {:frame_change, _} -> drain(socket)
-      {:editor_change, _} -> drain(socket)
-      {:buffer_change, _, _} -> drain(socket)
-    after
-      0 -> socket
-    end
-  end
-
-
-  # ── state ──────────────────────────────────────────────────────────
+  defp drain(socket), do: LiveShared.drain(socket)
 
   defp call(socket, name, args) do
     Input.run(socket.assigns.frame, fn -> Session.call_named(name, args) end)
@@ -262,19 +205,11 @@ defmodule Compos.Ui.MobileLive do
 
   defp refresh(socket) do
     fid = socket.assigns.frame
-    {state, effects} = Editor.render_state_and_effects(fid)
-
-    {state, effects} =
-      if fid && state.frame != fid do
-        {:ok, ^fid} = Editor.attach_frame(fid)
-        Editor.render_state_and_effects(fid)
-      else
-        {state, effects}
-      end
+    {state, effects} = LiveShared.frame_state(fid)
 
     caret_owner = if state.minibuffer, do: nil, else: state.active
 
-    raw_leaf = find_leaf(state.tree, state.active) || first_leaf(state.tree)
+    raw_leaf = LiveShared.find_leaf(state.tree, state.active) || LiveShared.first_leaf(state.tree)
 
     {leaf, cache} =
       if raw_leaf do
@@ -296,15 +231,7 @@ defmodule Compos.Ui.MobileLive do
       if connected?(socket) do
         visible = if leaf, do: MapSet.new([leaf.buffer]), else: MapSet.new()
 
-        socket.assigns.subscribed
-        |> MapSet.difference(visible)
-        |> Enum.each(&Events.unsubscribe/1)
-
-        visible
-        |> MapSet.difference(socket.assigns.subscribed)
-        |> Enum.each(&Events.subscribe/1)
-
-        visible
+        LiveShared.resubscribe(socket.assigns.subscribed, visible)
       else
         socket.assigns.subscribed
       end
@@ -415,14 +342,6 @@ defmodule Compos.Ui.MobileLive do
   defp str(false), do: ""
   defp str(nil), do: ""
   defp str(x), do: to_string(x)
-
-  defp find_leaf(%{type: :leaf, id: id} = leaf, id), do: leaf
-  defp find_leaf(%{type: :split, children: kids}, id), do: Enum.find_value(kids, &find_leaf(&1, id))
-  defp find_leaf(_, _), do: nil
-
-  defp first_leaf(%{type: :leaf} = leaf), do: leaf
-  defp first_leaf(%{type: :split, children: [kid | _]}), do: first_leaf(kid)
-  defp first_leaf(_), do: nil
 
   defp line_param(params) do
     case Integer.parse(to_string(params["line"] || "")) do
@@ -781,17 +700,7 @@ defmodule Compos.Ui.MobileLive do
 
   defp count_text(_), do: ""
 
-  defp mb_split(%{input: input, point: point}) when is_binary(input) and is_integer(point) do
-    point = point |> min(byte_size(input)) |> max(0)
-    rest = binary_part(input, point, byte_size(input) - point)
-
-    case String.next_grapheme(rest) do
-      nil -> {binary_part(input, 0, point), " ", ""}
-      {g, post} -> {binary_part(input, 0, point), g, post}
-    end
-  end
-
-  defp mb_split(mb), do: {Map.get(mb, :input, ""), " ", ""}
+  defp mb_split(mb), do: LiveShared.mb_split(mb, " ")
 
   @impl true
   def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)

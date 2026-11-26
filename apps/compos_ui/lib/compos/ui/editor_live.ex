@@ -13,7 +13,9 @@ defmodule Compos.Ui.EditorLive do
 
   alias Compos.Core.{Events, Input}
   alias Compos.Scheme.Text
-  alias Compos.Ui.{AppServer, LocalFile, LocalImage}
+  alias Compos.Ui.{AppServer, LiveShared, LocalFile, LocalImage}
+
+  @window_events LiveShared.window_events()
 
   # the frame tab rail before Scheme has answered, and when it cannot
   @no_tabs %{tabs: [], more: 0}
@@ -228,19 +230,12 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  def handle_event("ui_cmd", %{"win" => win} = params, socket) do
-    with {id, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Editor.set_active(id)
-
-        Compos.Core.Session.call_named("ui-command!", [
-          params["cmd"] || false,
-          params["buf"] || false
-        ])
-      end)
+  # a window's own events, shared with the handheld (LiveShared)
+  def handle_event(event, params, socket) when event in @window_events do
+    case LiveShared.window_event(event, params, socket.assigns.frame) do
+      :refresh -> {:noreply, socket |> drain() |> refresh()}
+      :quiet -> {:noreply, socket}
     end
-
-    {:noreply, socket |> drain() |> refresh()}
   end
 
   # a click on an element of the prompt's own HTML that names a row:
@@ -267,36 +262,6 @@ defmodule Compos.Ui.EditorLive do
     Input.run(socket.assigns.frame, fn ->
       Compos.Core.Session.call_named("run-command", ["groups"])
     end)
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # the reader's place in a followed block list: a runtime mirror, so a
-  # page refresh keeps the place. Stored inverted: a cleared local follows.
-  # A report made before a newer step ('follow-seq) is stale: it would undo
-  # the step, so it is dropped.
-  def handle_event("follow_place", %{"buf" => buf, "stick" => stick, "top" => top} = params, socket)
-      when is_boolean(stick) and is_integer(top) do
-    if Compos.Core.Buffer.exists?(buf) and
-         params["seq"] in [nil, Compos.Core.Buffer.get_local(buf, "follow-seq") || 0] do
-      anchor = if is_integer(params["anchor"]), do: params["anchor"], else: false
-      offset = if is_integer(params["offset"]), do: params["offset"], else: 0
-      Compos.Core.Buffer.set_local(buf, "follow-place", [not stick, top, anchor, offset])
-    end
-
-    {:noreply, socket}
-  end
-
-  # clicking a block that carries a click id. The id is the mode's own
-  # word; the view hands it back and knows nothing else. diff-mode
-  # registered the handler with block-on-click!.
-  def handle_event("block_click", %{"win" => win, "id" => id}, socket) do
-    with {wid, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Editor.set_active(wid)
-        Compos.Core.SchemeAPI.block_click(Compos.Core.Editor.current_buffer(), id)
-      end)
-    end
 
     {:noreply, socket |> drain() |> refresh()}
   end
@@ -493,31 +458,6 @@ defmodule Compos.Ui.EditorLive do
   # hook sends the text node split at the caret, how many times that text
   # comes before it on the page, and which way the key moves. Scheme finds
   # the spot in the source.
-  # a click on a link in a rendered page. The frame never follows the link
-  # itself: the href comes here and Scheme says what it means (a help page's
-  # source link, a URL for the reader).
-  def handle_event("preview_link", %{"win" => win, "href" => href}, socket)
-      when is_binary(href) and byte_size(href) <= 2000 do
-    with id when is_integer(id) <- safe_int(win) do
-      Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Session.call_named("preview-follow-link!", [id, href])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  def handle_event("preview_link_to_group", %{"win" => win, "href" => href}, socket)
-      when is_binary(href) and byte_size(href) <= 2000 do
-    with id when is_integer(id) <- safe_int(win) do
-      Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Session.call_named("link-follow-to-group", [id, href])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
   def handle_event("preview_goto_pos", %{"win" => win, "pos" => pos} = p, socket)
       when is_integer(pos) do
     with id when is_integer(id) <- safe_int(win) do
@@ -706,16 +646,7 @@ defmodule Compos.Ui.EditorLive do
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
 
   # coalesce bursts: drain all queued change notifications, render once
-  defp drain(socket) do
-    receive do
-      {:frame_change, _} -> drain(socket)
-      {:editor_change, _} -> drain(socket)
-      {:buffer_change, _, _} -> drain(socket)
-      {:buffer_display, _} -> drain(socket)
-    after
-      0 -> socket
-    end
-  end
+  defp drain(socket), do: LiveShared.drain(socket)
 
   # timed as two halves: the editor state read (a call into the Editor
   # server, which waits when a command holds it) and the decoration of
@@ -806,18 +737,8 @@ defmodule Compos.Ui.EditorLive do
   defp refresh_state(socket) do
     fid = socket.assigns[:frame]
     t0 = System.monotonic_time(:millisecond)
-    {state, effects} = Compos.Core.Editor.render_state_and_effects(fid)
-
-    # our frame was deleted out from under us (M-x delete-frame elsewhere,
-    # RPC): render_state fell back to another frame — recreate ours fresh
-    # under the same id so the client's stored id stays good
-    {state, effects} =
-      if fid && state.frame != fid do
-        {:ok, ^fid} = Compos.Core.Editor.attach_frame(fid)
-        Compos.Core.Editor.render_state_and_effects(fid)
-      else
-        {state, effects}
-      end
+    # a frame deleted under us comes back under the same id (LiveShared)
+    {state, effects} = LiveShared.frame_state(fid)
 
     state_ms = System.monotonic_time(:millisecond) - t0
 
@@ -857,21 +778,7 @@ defmodule Compos.Ui.EditorLive do
         visible = state.tree |> event_buffers() |> MapSet.new()
 
         # a buffer that left the window set stops feeding this client (S15)
-        socket.assigns.subscribed
-        |> MapSet.difference(visible)
-        |> Enum.each(fn name ->
-          Events.unsubscribe(name)
-          Events.unsubscribe_display(name)
-        end)
-
-        visible
-        |> MapSet.difference(socket.assigns.subscribed)
-        |> Enum.each(fn name ->
-          Events.subscribe(name)
-          Events.subscribe_display(name)
-        end)
-
-        visible
+        LiveShared.resubscribe(socket.assigns.subscribed, visible)
       else
         socket.assigns.subscribed
       end
@@ -1739,17 +1646,7 @@ defmodule Compos.Ui.EditorLive do
 
   # cursor sits at the minibuffer's point (it's a real buffer): split the
   # input into before-point, the grapheme under the cursor, and the rest
-  defp mb_split(%{input: input, point: point}) do
-    point = point |> min(byte_size(input)) |> max(0)
-    rest = binary_part(input, point, byte_size(input) - point)
-
-    case String.next_grapheme(rest) do
-      nil -> {binary_part(input, 0, point), " ", ""}
-      {g, post} -> {binary_part(input, 0, point), g, post}
-    end
-  end
-
-  defp mb_split(mb), do: {mb.input, " ", ""}
+  defp mb_split(mb), do: LiveShared.mb_split(mb, "\u00A0")
 
   # Keep the DOM geometry in lockstep with Editor.render_minibuffer/2.  The
   # renderer includes `geometry` so a LiveView patch does not have to infer a

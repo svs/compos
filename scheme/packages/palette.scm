@@ -406,7 +406,7 @@
 ;; define-command's 'public #t, or bound in the global map. Move a mark to
 ;; its definition when you touch the package.
 (command-public!
- '("llm-models-refresh" "chat-finder" "chats-start-all" "chats-stop-all"
+ '("chat-finder" "chats-start-all" "chats-stop-all"
    "chats-watch" "chats-kill-runtime" "agents-deny" "group-sandbox"
    "agent-switch" "chat-open-children" "amazon" "amazon-search" "anon-add"
    "anon-forget" "app-watch" "text-scale-reset" "text-scale-reset-all"
@@ -433,7 +433,7 @@
    "graveyard-sweep" "history-sweep-redundant" "html-edit" "http"
    "image-generate" "insta" "replace-string" "jev" "jev-apropos" "chat-changes"
    "jj-push" "jj-recheck" "laya-server" "laya-server-stop" "chat-tools"
-   "group-llm" "llm-catalog-refresh" "llm-catalog-status" "llm-prompt-sections"
+   "group-llm" "llm-prompt-sections"
    "lsp-diagnostics-list" "lsp-hover" "lsp-status" "chat-tool-list"
    "mcp-status" "llm-set-preset" "llm-set-preset-once" "llm-unset-preset"
    "list-migrations" "mode-list" "buffer-switcher" "local-models"

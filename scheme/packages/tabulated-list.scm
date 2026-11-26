@@ -2510,9 +2510,19 @@
                    " "))))
 
 (define (list-grid-flex buf)
-  ;; one flag per fitted column: #t for the one declared without a width
-  (let ((declared (let ((d (list-declared-columns buf))) (if (pair? d) (car d) '()))))
-    (map (lambda (c) (not (list-col-width c))) declared)))
+  ;; one flag per fitted column: #t for the one that takes the spare width.
+  ;; That is the column declared without a width; when every column has
+  ;; one, it is the first column the list trims to fit (a TRIM procedure,
+  ;; as ibuffer's and chat-list's name column), since its width is only a
+  ;; character estimate and the grid can give it the real room
+  (let* ((declared (let ((d (list-declared-columns buf))) (if (pair? d) (car d) '())))
+         (open (map (lambda (c) (not (list-col-width c))) declared)))
+    (if (member #t open) open
+        (let loop ((cs declared) (found #f) (out '()))
+          (if (null? cs) (reverse out)
+              (let ((hit (and (not found) (pair? (cdr (car cs))) (pair? (cddr (car cs)))
+                              (pair? (cdddr (car cs))) (procedure? (cadddr (car cs))))))
+                (loop (cdr cs) (or found hit) (cons (and hit #t) out))))))))
 
 (define (list-grid-row buf row)
   (let* ((cols (car (list-column-lines buf)))

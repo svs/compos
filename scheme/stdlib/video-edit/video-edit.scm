@@ -96,24 +96,6 @@
                 (list a b (if (and (> (length w) 3) (equal? (cadddr w) "shown")) 'shown 'hidden)
                       (and name (not (equal? name "")) name)))))))
 
-(define (video-edit-structure buf)
-  "(video-edit-structure BUF) -- each source of BUF with what is under it: ((PATH CLIPS CUTS DUBS) ...). CUTS are times. CLIPS are the hidden segments, worked out from the cuts: a cut marked hidden hides its segment, to the next cut or the end; each is (START END hidden NAME LINE TEXT), LINE and TEXT the cut's own. A dub is (START END FILE LINE TEXT)."
-  (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1) (acc '()))
-    (if (null? ls)
-        (reverse (map video-edit--finish-source acc))
-        (let ((src (video-edit--source (car ls))) (clip (video-edit--clip (car ls)))
-              (cut (video-edit--cut-info (car ls))) (dub (video-edit--dub (car ls))))
-          (cond (src (loop (cdr ls) (+ n 1) (cons (list src '() '() '()) acc)))
-                ((and (pair? acc) (or clip cut dub))
-                 (let ((s (car acc)))
-                   (loop (cdr ls) (+ n 1)
-                         (cons (list (car s)
-                                     (if clip (cons (append clip (list n (car ls))) (cadr s)) (cadr s))
-                                     (if cut (cons (append cut (list n (car ls))) (caddr s)) (caddr s))
-                                     (if dub (cons (append dub (list n (car ls))) (cadddr s)) (cadddr s)))
-                               (cdr acc)))))
-                (else (loop (cdr ls) (+ n 1) acc)))))))
-
 (define (video-edit--finish-source s)
   "a source as read, (PATH CLIP-LINES CUT-INFOS DUBS), made into (PATH CLIPS CUTS DUBS)"
   (let* ((path (car s))
@@ -235,15 +217,6 @@
     (video-edit--refresh-views! buf)
     r))
 
-(define (video-edit-add-clip! buf path a b state name)
-  "(video-edit-add-clip! BUF PATH A B STATE NAME) -- hide A..B of the source PATH: cut it at A and B and mark the segments between hidden; NAME goes on the cut at A. A shown mark is a cut with a name."
-  (if (equal? state 'hidden)
-      (video-edit--set-hidden! buf path a b #t name)
-      (begin (video-edit--ensure-cut! buf path a)
-             (when (and (string? name) (not (equal? name "")))
-               (let ((c (let find ((cs (video-edit--cut-lines buf path))) (cond ((null? cs) #f) ((< (abs (- (car (car cs)) a)) 0.02) (car cs)) (else (find (cdr cs)))))))
-                 (when c (video-edit--set-line-text! buf (cadddr c) (list-ref c 4) (video-edit--cut-text (car c) (cadr c) name (video-edit--cut-muted? (list-ref c 4))))))))))
-
 (define (video-edit--cut-lines buf path)
   "PATH's cut lines in BUF, by time: (TIME HIDDEN? NAME LINE TEXT)"
   (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1) (here #f) (acc '()))
@@ -259,44 +232,6 @@
       (let ((start (line-start-position line)))
         (buffer-delete-range! buf start (length (string-bytes old)))
         (buffer-insert! buf start new)))))
-
-(define (video-edit--hidden-at? buf path t)
-  "is the segment of PATH that holds T hidden?"
-  (let loop ((cs (video-edit--cut-lines buf path)) (h #f))
-    (cond ((null? cs) h)
-          ((<= (car (car cs)) (+ t 0.001)) (loop (cdr cs) (cadr (car cs))))
-          (else h))))
-
-(define (video-edit--muted-at? buf path t)
-  "is the segment of PATH that holds T muted?"
-  (let loop ((cs (video-edit--cut-lines buf path)) (m #f))
-    (cond ((null? cs) m)
-          ((<= (car (car cs)) (+ t 0.001)) (loop (cdr cs) (video-edit--cut-muted? (list-ref (car cs) 4))))
-          (else m))))
-
-(define (video-edit-toggle-muted! buf path a b)
-  "(video-edit-toggle-muted! BUF PATH A B) -- A..B of PATH all muted: give it its sound back; else mute it. Answers #t when it muted."
-  (let* ((d (or (video-edit--dur path) b))
-         (inside (lambda () (filter (lambda (c) (and (>= (car c) (- a 0.02)) (< (car c) (- b 0.02)))) (video-edit--cut-lines buf path))))
-         (all-muted (and (video-edit--muted-at? buf path (+ a 0.01)) (let all ((xs (inside))) (or (null? xs) (and (video-edit--cut-muted? (list-ref (car xs) 4)) (all (cdr xs))))))))
-    (video-edit--ensure-cut! buf path (max 0 a))
-    (when (< b (- d 0.02)) (video-edit--ensure-cut! buf path b))
-    (for-each (lambda (c) (video-edit--set-line-text! buf (cadddr c) (list-ref c 4) (video-edit--cut-text (car c) (cadr c) (caddr c) (not all-muted))))
-              (reverse (inside)))
-    (not all-muted)))
-
-(define (video-edit-add-cut! buf path t)
-  "(video-edit-add-cut! BUF PATH T) -- cut the source PATH at T: the segment there becomes two, both as it was"
-  (let ((hidden (video-edit--hidden-at? buf path t)) (muted (video-edit--muted-at? buf path t)))
-    (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1))
-      (cond ((null? ls) #f)
-            ((equal? (video-edit--source (car ls)) path)
-             (with-current-buffer buf
-               (lambda ()
-                 (let ((pos (line-start-position (+ n 1))))
-                   (buffer-insert! buf (if (> pos 0) pos (buffer-size buf)) (string-append (video-edit--cut-text t hidden #f muted) "\n")))))
-             #t)
-            (else (loop (cdr ls) (+ n 1)))))))
 
 (define (video-edit--ensure-cut! buf path t)
   (unless (let find ((cs (video-edit--cut-lines buf path))) (and (pair? cs) (or (< (abs (- (car (car cs)) t)) 0.02) (find (cdr cs)))))
@@ -314,41 +249,6 @@
             (unless (and (eq? (cadr c) hidden) (equal? nm (caddr c)))
               (video-edit--set-line-text! buf (cadddr c) (list-ref c 4) (video-edit--cut-text (car c) hidden nm (video-edit--cut-muted? (list-ref c 4))))))))
       (reverse (video-edit--cut-lines buf path)))))
-
-(define (video-edit-remove-cut! buf path t)
-  "(video-edit-remove-cut! BUF PATH T) -- remove PATH's cut nearest T, within half a second"
-  (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1) (here #f))
-    (if (null? ls) #f
-        (let ((s (video-edit--source (car ls))) (c (video-edit--cut (car ls))))
-          (cond (s (loop (cdr ls) (+ n 1) (equal? s path)))
-                ((and here c (< (abs (- c t)) 0.5))
-                 (with-current-buffer buf
-                   (lambda () (let ((start (line-start-position n)) (len (length (string-bytes (car ls)))))
-                                (buffer-delete-range! buf start (min (+ len 1) (- (buffer-size buf) start))))))
-                 #t)
-                (else (loop (cdr ls) (+ n 1) here)))))))
-
-(define (video-edit-add-dub! buf path a b file)
-  "(video-edit-add-dub! BUF PATH A B FILE) -- lay the take FILE over A..B of the source PATH, under its source line"
-  (let loop ((ls (string-split (buffer-text buf) "\n")) (n 1))
-    (cond ((null? ls) #f)
-          ((equal? (video-edit--source (car ls)) path)
-           (with-current-buffer buf
-             (lambda ()
-               (let ((pos (line-start-position (+ n 1))))
-                 (buffer-insert! buf (if (> pos 0) pos (buffer-size buf))
-                   (string-append "dub " (video-edit-format-time-fine a) " " (video-edit-format-time-fine b) " " (abbreviate-file-name file) "\n")))))
-           #t)
-          (else (loop (cdr ls) (+ n 1))))))
-
-(define (video-edit-remove-dub! buf path a)
-  "(video-edit-remove-dub! BUF PATH A) -- take out PATH's take that starts nearest A; the original sound plays there again"
-  (let ((s (let loop ((ss (video-edit-structure buf))) (cond ((null? ss) #f) ((equal? (car (car ss)) path) (car ss)) (else (loop (cdr ss)))))))
-    (let ((d (and s (let loop ((ds (cadddr s))) (cond ((null? ds) #f) ((< (abs (- (car (car ds)) a)) 0.05) (car ds)) (else (loop (cdr ds))))))))
-      (and d
-           (with-current-buffer buf
-             (lambda () (let ((start (line-start-position (list-ref d 3))) (len (length (string-bytes (list-ref d 4)))))
-                          (buffer-delete-range! buf start (min (+ len 1) (- (buffer-size buf) start))) #t)))))))
 
 (define (video-edit--takes-dir buf)
   "where the takes of the edit BUF are kept: a folder beside the edit file"
@@ -393,36 +293,6 @@
       (lambda (o)
         (video-edit--status! buf "Take transcribed")
         (video-edit--refresh-views! buf)))))
-
-(define (video-edit-move-cut! buf path from to)
-  "(video-edit-move-cut! BUF PATH FROM TO) -- move PATH's cut at FROM to TO; its segment's state and name are on its line and go with it"
-  (let ((c (let find ((cs (video-edit--cut-lines buf path))) (cond ((null? cs) #f) ((< (abs (- (car (car cs)) from)) 0.02) (car cs)) (else (find (cdr cs)))))))
-    (when c (video-edit--set-line-text! buf (cadddr c) (list-ref c 4) (video-edit--cut-text to (cadr c) (caddr c) (video-edit--cut-muted? (list-ref c 4)))))))
-
-(define (video-edit-toggle-hidden! buf path a b)
-  "(video-edit-toggle-hidden! BUF PATH A B) -- A..B of PATH all hidden: show it; else hide it. Answers #t when it hid."
-  (let* ((cs (video-edit--cut-lines buf path))
-         (inside (filter (lambda (c) (and (>= (car c) (- a 0.02)) (< (car c) (- b 0.02)))) cs))
-         (all-hidden (and (video-edit--hidden-at? buf path (+ a 0.01)) (let all ((xs inside)) (or (null? xs) (and (cadr (car xs)) (all (cdr xs))))))))
-    (video-edit--set-hidden! buf path a b (not all-hidden) #f)
-    (not all-hidden)))
-
-(define (video-edit-set-clip! buf clip state name)
-  "(video-edit-set-clip! BUF CLIP STATE NAME) -- a hidden segment from video-edit-structure: STATE hidden keeps it hidden, anything else shows it; NAME names its cut"
-  (let ((line (list-ref clip 4)) (old (list-ref clip 5)))
-    (if (video-edit--cut-info old)
-        (video-edit--set-line-text! buf line old (video-edit--cut-text (car clip) (equal? state 'hidden) name (video-edit--cut-muted? old)))
-        ;; an old clip line, from before cuts carried their state
-        (with-current-buffer buf
-          (lambda ()
-            (let ((start (line-start-position line)) (len (length (string-bytes old))))
-              (buffer-delete-range! buf start (min (+ len 1) (- (buffer-size buf) start)))))))))
-
-(define (video-edit--setting buf key default)
-  (let loop ((ls (string-split (buffer-text buf) "\n")))
-    (if (null? ls) default
-        (let ((w (string-split (string-trim (car ls)) " ")))
-          (if (and (= (length w) 2) (equal? (car w) key)) (cadr w) (loop (cdr ls)))))))
 
 (define (video-edit--size buf) (or (string->number (video-edit--setting buf "size" "2160")) 2160))
 (define (video-edit--clean? buf) (equal? (video-edit--setting buf "audio" "clean") "clean"))
@@ -887,22 +757,6 @@
   (let* ((lines (append (car hb) (apply append (cdr hb))))
          (lines (let trim ((r (reverse lines))) (if (and (pair? r) (equal? (car r) "")) (trim (cdr r)) (reverse r)))))
     (video-edit--set-text! buf (string-append (string-join lines "\n") "\n"))))
-
-(define (video-edit-move-source! buf i dir)
-  "(video-edit-move-source! BUF I DIR) -- move source I of BUF one place earlier (DIR -1) or later (DIR 1)"
-  (let* ((hb (video-edit--blocks buf)) (bs (cdr hb)) (n (length bs)) (j (+ i dir)))
-    (when (and (>= i 0) (>= j 0) (< i n) (< j n))
-      (let ((x (list-ref bs i)) (y (list-ref bs j)))
-        (video-edit--set-blocks! buf
-          (cons (car hb)
-                (let loop ((k 0) (r bs))
-                  (if (null? r) '()
-                      (cons (cond ((= k i) y) ((= k j) x) (else (car r))) (loop (+ k 1) (cdr r)))))))))))
-
-(define (video-edit-remove-source! buf i)
-  "(video-edit-remove-source! BUF I) -- take source I, its clips and cuts, out of BUF"
-  (let ((hb (video-edit--blocks buf)))
-    (video-edit--set-blocks! buf (cons (car hb) (let loop ((bs (cdr hb)) (k 0)) (cond ((null? bs) '()) ((= k i) (cdr bs)) (else (cons (car bs) (loop (cdr bs) (+ k 1))))))))))
 
 (define (video-edit-add-source! buf path &optional done)
   "(video-edit-add-source! BUF PATH [DONE]) -- add the video PATH, or the Cap recording PATH joined into one video, at the end of BUF; DONE runs after"
@@ -2106,7 +1960,6 @@ A take said again after the pause is a retake: its first words match words just 
   (let ((b (current-buffer)))
     (buffer-set-local! b 'imenu-index-function
       (if (equal? (buffer-local-value 'mode-name b) "video-edit-timeline-mode") 'video-edit--timeline-imenu-rows 'video-edit--imenu-rows))))
-
 
 ;; ---- edits from before cuts carried their state: their clip lines become cuts
 (define (video-edit-migrate-to-cuts! buf)

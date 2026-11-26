@@ -875,12 +875,6 @@
                   (list "o" "on the site")
                   (list "q" "quit")))))
 
-;; the page a detail shows, by its minor mode
-(define (site-app-detail-page buf)
-  (let ((spec (site-app-spec (site-app-get buf 'name)))
-        (kind (site-app-get buf 'detail-kind)))
-    (and spec kind (site-app-find (lambda (p) (equal? (plist-get p 'detail-kind) kind)) (site-app-pages spec)))))
-
 ;; keys a page adds of the app's own, beside its buttons: 'detail-extra-keys ((KEY COMMAND LABEL) ...)
 (define (site-app-detail-extra-keys buf)
   (let ((page (site-app-detail-page buf)))
@@ -1775,7 +1769,7 @@
   (let ((id (site-app-detail-active buf)))
     (lambda () (unless (equal? (site-app-detail-active buf) id) (site-app-detail-select! buf id)))))
 
-(define (site-app-one-line s)
+(define (site-app-imenu-line s)
   ;; a doc imenu can choose by: one line, cut short
   (let ((t (string-join (filter (lambda (w) (not (equal? w ""))) (string-split (string-replace (or s "") "\n" " ") " ")) " ")))
     (if (> (string-length t) 90) (string-append (substring t 0 89) "…") t)))
@@ -1814,12 +1808,12 @@
                             " · ")))
                 (loop (cdr os) (cdr es)
                       (if (equal? (string-trim name) "") acc
-                          (cons (list (line-number-at-pos (car os)) noun name (site-app-one-line doc)) acc))))))))))
+                          (cons (list (line-number-at-pos (car os)) noun name (site-app-imenu-line doc)) acc))))))))))
 
 (define (site-app-imenu-tidy rows)
   ;; every entry has a kind, part unless it says, and a one-line doc
   (map (lambda (r)
-         (append (list (car r) (if (equal? (cadr r) "") "part" (cadr r)) (caddr r) (site-app-one-line (cadddr r)))
+         (append (list (car r) (if (equal? (cadr r) "") "part" (cadr r)) (caddr r) (site-app-imenu-line (cadddr r)))
                  (list-tail r 4)))
        rows))
 

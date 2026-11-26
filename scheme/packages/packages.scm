@@ -626,19 +626,24 @@
         (message "No package here")
         (window-set-buffer! (get-other-window) (visit file (buffer-group (current-buffer)))))))
 
+(define (packages--uninstall-key! buf key)
+  "x on a row flagged D: uninstall that clone"
+  (let ((row (find (lambda (r) (equal? (plist-get r 'id) key)) (list-source-entries buf))))
+    (and row (packages-uninstall! row))))
+
 (define-list-mode! "packages-mode"
   (list
     'doc (string-append
            "Every package by where it lives: packages (scheme/packages, the installed clones and your own), stdlib (scheme/stdlib) and core (priv and scheme/core). "
            "The tabs across the top are all, packages, stdlib and core; left and right step them. "
            "A row shows whether the package is loaded, its tier from PACKAGES.md, how many packages it requires and how many require it, its git state and open PRs, and its tier breaks. "
-           "Below what is here, available lists what the sources offer: packages-sources holds the GitHub orgs, users and OWNER/REPO repos to read, compos-dev by default; a adds a source of your own and R removes one. Packages init.scm or packages.lock name and this machine lacks show there too. l on an available package installs it: clones, loads, adds its use-package line to init.scm; d uninstalls an installed clone: drops that line and its pin and trashes the clone; o opens the repo on GitHub. "
+           "Below what is here, available lists what the sources offer: packages-sources holds the GitHub orgs, users and OWNER/REPO repos to read, compos-dev by default; a adds a source of your own and R removes one. Packages init.scm or packages.lock name and this machine lacks show there too. l on an available package installs it: clones, loads, adds its use-package line to init.scm; d flags an installed clone and x uninstalls the flagged ones: drops that line and its pin and trashes the clone; o opens the repo on GitHub. "
            "l loads the package at point and k unloads it: its FEATURE-unload-function runs, its commands, catalog entries and names go, and the feature is forgotten. Core cannot be unloaded. "
            "Moving the point shows the package's page beside the list. RET or v visits the source, P sends a clone's changes upstream as a PR, "
            "g scans again and fetches every clone: the git column shows the commit and how far it is ahead or behind, the updates column says up to date or how many commits a clone is behind, and the echo names the ones behind (M-x packages-check-updates does the same from anywhere). "
-           "Packages follow the compos release: u updates the package at point to the commit the release vouches for (a package of your own source to its newest), U updates every package, h holds one at its commit so updates skip it, and r rolls one back to the commit before its last update and holds it there; the updates column says held, release pin when the release vouches for another commit, N behind or up to date. "
+           "Packages follow the compos release: c updates the package at point to the commit the release vouches for (a package of your own source to its newest), C updates every package, h holds one at its commit so updates skip it, and r rolls one back to the commit before its last update and holds it there; the updates column says held, release pin when the release vouches for another commit, N behind or up to date. "
            "An update never stops at a break: when it drops public names or raises the package's :major, the uses in your own code become a todo with the fix plan, and a chat starts on it for your review. "
-           "/ narrows the rows (state:loaded, state:update, state:up-to-date, state:held, tier:core, breaks:NAME), q quits.")
+           "/ narrows the rows (state:loaded, state:update, state:up-to-date, state:held, tier:core, breaks:NAME), u and U take flags back, q quits.")
     'buffer *packages-buffer*
     'transient #f
     'plain #t
@@ -653,7 +658,8 @@
     'separator? (lambda (buf row) (packages--sep? row))
     'section? (lambda (buf row) (packages--sep? row))
     'section-label (lambda (buf row) (plist-get row 'title))
-    'markable? (lambda (buf row) #f)
+    'markable? (lambda (buf row) (equal? (plist-get row 'tier) "installed"))
+    'flags (list (list "d" "D" "uninstall" packages--uninstall-key! #t))
     'filters (list (list "state:" (lambda (b e) (if (packages--sep? e) "" (string-append (if (packages-loaded? e) "loaded" "unloaded") (if (packages-update? e) " update" (if (equal? (packages--updates-text e) "up to date") " up-to-date" "")) (if (plist-get e 'held) " held" "")))) "loaded, unloaded, update, up-to-date or held")
                    (list "tier:" (lambda (b e) (or (plist-get e 'tier) "")) "the package's tier")
                    (list "breaks:" (lambda (b e) (if (packages--sep? e) "" (packages--break-text e))) "a package it breaks the tier rules with"))
@@ -667,11 +673,14 @@
     'title (lambda (buf) (string-append "Packages  ·  " (number->string (length (packages-tier-breaks))) " tier breaks"))
     'total (lambda (buf) (length (filter (lambda (r) (not (packages--sep? r))) (list-entries buf))))
     'noun "package"
-    'footer (lambda (buf) '(("u" "update") ("U" "update all") ("h" "hold") ("l" "load/install") ("k" "unload") ("d" "uninstall") ("o" "github") ("a" "add source") ("v" "source") ("P" "send upstream") ("/" "filter") ("g" "scan again") ("q" "quit")))
-    'keys '(("RET" "packages-source") ("u" "packages-update") ("U" "packages-update-all") ("h" "packages-hold") ("r" "packages-rollback") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("c" "update") ("C" "update all") ("h" "hold") ("l" "load/install") ("k" "unload") ("d" "flag uninstall") ("x" "uninstall flagged") ("o" "github") ("a" "add source") ("v" "source") ("P" "send upstream") ("/" "filter") ("g" "refresh") ("q" "quit")))
+    'keys '(("RET" "packages-source") ("c" "packages-update") ("C" "packages-update-all") ("h" "packages-hold") ("r" "packages-rollback") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh") ("q" "quit-window"))))
+;; u, U and d are the list's own: unmark, unmark all, flag. A hot reload
+;; keeps the old bindings of the mode map, so drop them here.
+(for-each (lambda (k) (keymap-unset! (mode-keymap "packages-mode") k)) '("u" "U"))
 
 (define-mode "packages-detail-mode" (lambda () (buffer-set-read-only! (current-buffer) #t)))
-(mode-keys! "packages-detail-mode" '(("u" "packages-update") ("U" "packages-update-all") ("h" "packages-hold") ("r" "packages-rollback") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
+(mode-keys! "packages-detail-mode" '(("c" "packages-update") ("C" "packages-update-all") ("h" "packages-hold") ("r" "packages-rollback") ("l" "packages-load") ("k" "packages-unload") ("a" "packages-add-source") ("R" "packages-remove-source") ("d" "packages-uninstall") ("o" "packages-open-repo") ("v" "packages-source") ("P" "packages-pr") ("g" "packages-refresh")))
 (define-command "packages-refresh" "Scan the packages again, then fetch the clones and their open PRs"
   (lambda ()
     (set! packages--scan-cache #f)

@@ -344,14 +344,23 @@
                                             " · " (keys--seq e) " is free"))))))))))
   'modes '(keys-mode))
 
+(define (keys--unbind-entry! e)
+  (if (equal? (keys--cmd e) "(unbound)") #f
+      (begin (keys--record! (list (list (keys--owner e) (keys--owner-seq e) #f (keys--cmd e)))) #t)))
+
+(define (keys--unbind-key! buf key)
+  "x on a row flagged D: take that key away"
+  (let ((e (find (lambda (e) (equal? (string-append (keys--map e) " " (keys--seq e)) key))
+                 (list-source-entries buf))))
+    (and e (keys--unbind-entry! e))))
+
 (define-command "keys-unbind" "Take the key on this row away"
   (lambda ()
     (let ((e (keys--current)))
       (cond
         ((not e) (message "no key here"))
-        ((equal? (keys--cmd e) "(unbound)") (message "already unbound"))
+        ((not (keys--unbind-entry! e)) (message "already unbound"))
         (else
-          (keys--record! (list (list (keys--owner e) (keys--owner-seq e) #f (keys--cmd e))))
           (keys--redraw!)
           (message (string-append (keys--seq e) " runs nothing now"))))))
   'modes '(keys-mode))
@@ -402,9 +411,9 @@
            "first, with the map each one comes from. A key a nearer map "
            "answers first reads as shadowed, and your own edits read as "
            "yours. RET describes the key, `b` gives its command another "
-           "key, `d` takes the key away, `+` binds a command that has no "
-           "key, `u` takes back an edit of yours, `k` filters the list by "
-           "keymap, `/` searches and `g` reads the "
+           "key, `d` flags a key and `x` takes the flagged keys away, `+` binds a "
+           "command that has no key, `r` takes back an edit of yours, `f` "
+           "filters the list by keymap, `/` searches and `g` reads the "
            "keymaps again. An edit lasts: customize keeps it in "
            "custom.scm, and the next session binds it again.")
     'buffer *keys-buffer*
@@ -420,17 +429,18 @@
     'meta keys--meta
     'total (lambda (buf) (length (list-entries buf)))
     'footer (lambda (buf)
-              '(("RET" "describe") ("b" "rebind") ("d" "unbind")
-                ("+" "bind") ("u" "revert") ("k" "keymap filter")
+              '(("RET" "describe") ("b" "rebind") ("d" "flag unbind")
+                ("x" "unbind flagged") ("+" "bind") ("r" "revert") ("f" "keymap filter")
                 ("/" "filter") ("g" "refresh") ("q" "quit")))
     'key (lambda (buf e) (string-append (keys--map e) " " (keys--seq e)))
+    'flags (list (list "d" "D" "unbind" keys--unbind-key! #f))
     'keys '(("RET" "keys-describe") ("b" "keys-rebind")
-            ("d" "keys-unbind") ("+" "keys-bind")
-            ("u" "keys-revert") ("k" "keys-scope")
+            ("+" "keys-bind")
+            ("r" "keys-revert") ("f" "keys-scope")
             ("g" "keys-refresh") ("q" "quit-window"))))
 
 ;; Remove the old scope key when hotload rebuilds this mode.
-(keymap-unset! (mode-keymap "keys-mode") "s")
+(for-each (lambda (k) (keymap-unset! (mode-keymap "keys-mode") k)) '("s" "k" "u"))
 
 ;; C-h b describes the bindings as a page; C-h B is the same keys as a
 ;; list you can edit.

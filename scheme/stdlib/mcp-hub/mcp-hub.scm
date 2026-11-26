@@ -386,10 +386,12 @@
     'footer (lambda (buf)
               '(("RET" "detail") ("s" "start") ("k" "stop") ("r" "restart")
                 ("l" "log") ("/" "filter") ("g" "refresh") ("q" "quit")))
-    'keys '(("RET" "mcp-hub-detail") ("d" "mcp-hub-detail") ("s" "mcp-hub-start")
+    'keys '(("RET" "mcp-hub-detail") ("s" "mcp-hub-start")
             ("k" "mcp-hub-stop") ("r" "mcp-hub-restart") ("S" "mcp-hub-start-all")
             ("K" "mcp-hub-stop-all") ("R" "mcp-hub-restart-all")
             ("l" "mcp-hub-log") ("g" "mcp-hub-refresh") ("q" "quit-window"))))
+;; RET is the detail; a hot reload keeps the old d of the mode map
+(keymap-unset! (mode-keymap "mcp-hub-mode") "d")
 
 (define-command "mcp-hub" "List every MCP server: status, tools, presets"
   (lambda () (list-mode-show! "mcp-hub-mode")))

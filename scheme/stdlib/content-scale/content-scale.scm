@@ -400,6 +400,10 @@
       (content-scale-set! buf 0)
       (content-scale--say buf))))
 
+(define-command "content-scale-quit" "Quit this content view: show the text as it is"
+  (lambda () (run-command "content-scale-reset"))
+  'modes '(content-scale-view-mode))
+
 (define-command "content-scale-set" "Choose a content level for this buffer by name"
   (lambda ()
     (let* ((buf (content-scale-source (current-buffer)))
@@ -434,7 +438,7 @@
 
 (define-key "content-scale-view-mode-map" "RET" "content-scale-visit")
 (define-key "content-scale-view-mode-map" "g" "content-scale-refresh")
-(define-key "content-scale-view-mode-map" "q" "content-scale-reset")
+(define-key "content-scale-view-mode-map" "q" "content-scale-quit")
 (define-key "content-scale-view-mode-map" "-" "content-scale-decrease")
 (define-key "content-scale-view-mode-map" "+" "content-scale-increase")
 (define-key "content-scale-view-mode-map" "=" "content-scale-increase")

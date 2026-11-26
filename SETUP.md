@@ -347,10 +347,10 @@ Check: `(browser-connected?)` returns `#t`. If it returns `#f`, stay on this ste
 
 compos ships core features built in, while mail, web browsing, Google Workspace, calendar, feeds, and other apps ship as packages in the [compos-dev](https://github.com/compos-dev) GitHub organization. Do not install all packages, and do not leave the user with none.
 
-1. Read the available packages: call `(package-manager-fetch! K)` to fetch the catalog, then read `(package-manager-rows)` (each row is a plist with `name`, `status`, and `description`).
+1. Read the available packages: call `(packages-fetch-sources! K)` to fetch the catalog; K gets the rows (each row is a plist with `name`, `repo`, and `description`).
 2. Ask the person what they want to use compos for: mail, web browsing, calendar and meetings, notes and tasks, coding, or messaging.
 3. Recommend a short starter pack with one line per package explaining why it fits, and note external requirements (such as `notmuch` for mail or a Google account for Google Workspace).
-4. Install only the packages the person accepts with `(package-manager-install! NAME)`. That call clones the package, loads it, and adds its `use-package` line to `~/.compos/init.scm`.
+4. Install only the packages the person accepts with `(package-install! NAME)`. That call clones the package, loads it, and adds its `use-package` line to `~/.compos/init.scm`.
 
 Check: `(package-installed)` lists every package the person accepted. Tell them they can manage packages later in `M-x packages`.
 

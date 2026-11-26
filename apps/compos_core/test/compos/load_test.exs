@@ -78,7 +78,7 @@ defmodule Compos.LoadTest do
     # the dev harnesses. palette-eval is not one: palette.scm loads it. The ones with commands reach M-x through their
     # ;;;###autoload cookies, which the harvest at the end of init.scm installs.
     opt_in =
-      ~w(title housekeeping packages package-manager decide-eval drive-eval test-browser)
+      ~w(title housekeeping packages decide-eval drive-eval test-browser)
       |> Enum.map(&(&1 <> ".scm"))
 
     libraries = Enum.flat_map(packages, fn pkg -> pkg |> locate.() |> File.read!() |> requires() end)

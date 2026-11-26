@@ -109,12 +109,12 @@ Check: `(decide "The sky is blue." (list 'q (decide-noul "Is the sky blue?")) 'p
 
 The person gets little out of compos without its packages: mail, the web, Google, calendar, org and the rest each ship as their own package in the [compos-dev](https://github.com/compos-dev) GitHub org. Do not install them all, and do not install none.
 
-1. Read the list: `(package-manager-fetch! K)` reads every package repo of the org with its one-line description; K gets the rows. `(package-manager-rows)` answers them after that, each a plist with `name`, `status` and `description`.
+1. Read the list: `(packages-fetch-sources! K)` reads every package repo of the org with its one-line description; K gets the rows, each a plist with `name`, `repo` and `description`.
 2. Ask the person what they will use compos for: mail, browsing, calendar and meetings, notes and tasks, code, messaging.
 3. Suggest a starter pack from the rows: a short list, each package with one line on why it fits what they said. Mark what a package needs outside compos, such as notmuch for mail or a Google account for Google.
-4. Install the ones the person accepts with `(package-manager-install! NAME)`. It clones the package, loads it and adds its `use-package` line to `init.scm`.
+4. Install the ones the person accepts with `(package-install! NAME)`. It clones the package, loads it and adds its `use-package` line to `init.scm`.
 
-Check: `(package-installed)` names every package the person accepted. They can add or remove more later in `M-x package-manager`.
+Check: `(package-installed)` names every package the person accepted. They can add or remove more later in `M-x packages`.
 
 ## 9. Hand over to the person
 

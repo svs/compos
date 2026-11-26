@@ -701,6 +701,7 @@
       (string-append "gh repo view " source " --json name,description,isArchived")
       (string-append "gh repo list " source " --limit 500 --json name,description,isArchived")))
 
+;;;###autoload
 (define (packages-fetch-sources! . k)
   "(packages-fetch-sources! [K]) -- read what every source in packages-sources offers with gh, in a task; cache it and redraw the list; K gets the rows"
   (shell-command->string

@@ -101,7 +101,7 @@ Boot means: the daemon starts, the browser draws a frame, the user opens, edits 
 - Kernel and buffers: advice, build-identity, custom, db, dismiss, emacs-names, events, format, holds, messages, migrations, scratch, title, watchers, cron, daemons, minibuffer, tree, buffer-relations, tramp (the file primitives that dired and the editor call)
 - Windows and panes: panes, panes-mode, panes-history, popper, window, window-log, window-names, window-settings, groups, group-config, tab-bars
 - Input and UI: appearance, capf, completion, keymaps, keys, modeline, palette, prompts, switch, tabulated-list, transient, detail, components, apps
-- Packages: package (the manager), package-manager (install and uninstall), package-update (updates follow the release and fail forward), packages (the app), http (the manager fetches recipes)
+- Packages: package (the manager: install, uninstall, packages.lock), package-update (updates follow the release and fail forward), packages (the app and its sources), http (the manager fetches recipes)
 
 ### 2. Standard (`scheme/stdlib`) - quality of life
 

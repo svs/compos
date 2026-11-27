@@ -444,11 +444,16 @@
 
 ;; A write to a todo file redraws every list and task page that shows it, so a
 ;; task an agent moves moves on screen too. A hidden one waits for its window.
+;; The redraw waits for this many ms of quiet: a list of a few hundred tasks
+;; takes seconds to draw on the UI lane, and agents write in bursts, so a
+;; short wait redrew it once per write and froze the keys (vidura, 2026-11-27).
+(define todo-redraw-quiet-ms 1500)
+
 (define (todo--detail-buffers)
   (filter (lambda (b) (equal? (buffer-local-value 'mode-name b) "todo-detail-mode")) (buffer-list)))
 
 (define (todo--changed!)
-  (debounce! 'todo-changed 150
+  (debounce! 'todo-changed todo-redraw-quiet-ms
     (lambda (_)
       (for-each (lambda (b) (if (window-showing b) (list-refresh! b) (buffer-mark-dirty! b 'todo-list)))
                 (filter app-watching? (todo--buffers)))
@@ -2578,11 +2583,32 @@
                 (cons (list topic sig) (filter (lambda (s) (not (equal? (car s) topic))) *todo-chat-sigs*)))
           #t))))
 
+;; A chat's state on the cards redraws a shown list at most once in this
+;; many ms. Busy agents change state every few seconds, and each redraw of
+;; a few hundred cards holds the UI lane for half a second or more.
+(define todo-cards-redraw-every-ms 10000)
+
+;; ((BUF (LAST-MS PENDING?)) ...), as alist-put keeps it
+(define *todo-cards-redraws* '())
+
+(define (todo--cards-redraw-soon! b)
+  (let* ((e (assoc b *todo-cards-redraws*))
+         (last (if e (car (cadr e)) 0))
+         (pending (and e (cadr (cadr e)))))
+    (unless pending
+      (let ((wait (max 250 (- (+ last todo-cards-redraw-every-ms) (monotonic-ms)))))
+        (set! *todo-cards-redraws* (alist-put *todo-cards-redraws* b (list last #t)))
+        (debounce! (string->symbol (string-append "todo-cards:" b)) wait
+          (lambda (_)
+            (set! *todo-cards-redraws* (alist-put *todo-cards-redraws* b (list (monotonic-ms) #f)))
+            (when (buffer-exists? b) (list-redraw! b)))
+          #f)))))
+
 (define (todo--on-chat-event e)
   (when (todo--chat-changed? (plist-get e 'topic))
     (for-each (lambda (b)
                 (if (window-showing b)
-                    (debounce! (string->symbol (string-append "todo-cards:" b)) 250 (lambda (_) (list-redraw! b)) #f)
+                    (todo--cards-redraw-soon! b)
                     (buffer-mark-dirty! b 'todo-cards)))
               (todo--buffers))))
 

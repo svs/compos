@@ -1389,6 +1389,10 @@
         (begin (panes-apply! (panes-set-focus (panes-swap-panes l pid to) to)) #t)
         (begin (message "No pane that way") #f))))
 
+(defcustom 'pane-shift-merge-same-mode #f
+  "When on, S-<arrow> puts the moved window on top of a window of the same mode in the next pane, not as a new window in that pane."
+  'group 'windows 'type 'boolean)
+
 (define (panes--shift-window! dir)
   "S-<arrow>: the focused window moves to the front of the pane DIR of
    it (left, right, up or down), and that pane takes the focus. With

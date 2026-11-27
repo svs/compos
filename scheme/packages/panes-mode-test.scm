@@ -189,3 +189,25 @@
         (let ((gen (catalog-generation)))
           (panes--tile-preview '(1 1 1) #f)
           (check-equal! (catalog-generation) gen "the catalog generation stays the same"))))))
+
+(deftest 'a-command-run-from-an-empty-pane-shows-its-buffer-in-that-pane
+  "a buffer displayed while the selection stands in an empty pane fills that pane, even when its mode has a window in another pane"
+  (lambda ()
+    (with-fresh-group "zz-panes-empty-cmd"
+      (lambda (id)
+        (let ((a (pmt-buffer! "zz-pe-a" "zz-a-mode"))
+              (c (pmt-buffer! "zz-pe-c" "zz-c-mode"))
+              (a2 (pmt-buffer! "zz-pe-a2" "zz-a-mode")))
+          (unwind-protect
+            (lambda ()
+              (let* ((l (pmt-two-panes! id a c))
+                     (added (panes-add-empty-pane l #f))
+                     (drawn (panes-apply! (car added)))
+                     (blank (plist-get (panes-pane drawn (cadr added)) 'blank)))
+                (select-window! blank)
+                (display-buffer a2)
+                (check-equal! (map cadr (window-list)) (list a c a2)
+                              "the empty pane shows the buffer; the zz-a-mode window keeps its own")
+                (check-equal! (window-buffer (active-window)) a2
+                              "the selection stays in that pane")))
+            (lambda () (pmt-done! (list a c a2)))))))))

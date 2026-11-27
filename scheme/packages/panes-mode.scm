@@ -592,12 +592,37 @@
         l
         (panes-adopt!))))
 
+(define (panes--fill-empty! buf)
+  "When the selection stands in an empty pane, BUF fills that pane: a
+   command run from an empty pane works in that pane, wherever its
+   mode's window is. The blank window becomes the pane's window and
+   keeps its id, as panes--show-follows! does. Answers the window's
+   handle, or #f when the selection is not in an empty pane."
+  (let* ((win (active-window))
+         ;; the blank buffer and hidden buffers are not a pane's work
+         (pid (and win (string? buf) (not (string-prefix? " " buf))
+                   (panes--empty-pane-of win)))
+         (l (and pid (panes-layout))))
+    (and l (panes-pane l pid)
+         (let* ((made (panes-add-window (panes-drop-buffer l buf) pid buf (panes--buffer-mode buf)))
+                (after (panes--update-pane (panes-set-handle (car made) (cadr made) win) pid
+                         (lambda (p) (panes--put p 'blank #f))))
+                ;; the window took the blank window's id: WIN is its key now
+                (drawn (panes-apply! (panes-focus-window after win))))
+           (window-log-note! "panes" "fill empty pane" buf "->" win)
+           (or (panes-handle drawn win) win)))))
+
 (define (panes-place! buf kind)
   "BUF shows where panes-show-buffer says: its mode's window, else a
    new window in the pane the user is in. A visit (KIND visit) stays
    in the user's pane (panes-visit-buffer) and gives that window the focus; a display leaves the focus. panes-apply!
    draws and stores the layout, and the window log notes KIND. Answers
-   the window's handle, or #f."
+   the window's handle, or #f. From an empty pane, BUF fills that pane
+   (panes--fill-empty!)."
+  (or (panes--fill-empty! buf) (panes--place-by-mode! buf kind)))
+
+(define (panes--place-by-mode! buf kind)
+  "panes-place! when the selection is not in an empty pane."
   (let* ((layout (panes--ensure-layout!))
          (mode (panes--buffer-mode buf))
          (pane (panes--selected-pane layout))
@@ -631,7 +656,12 @@
    else its mode's window in another pane, else a new window at the
    front of that pane. With STAY, BUF never leaves that pane: no other
    pane's window takes it. The focus stays. NOTE goes to the window log.
+   From an empty pane, BUF fills that pane instead (panes--fill-empty!).
    Answers the window's handle."
+  (or (panes--fill-empty! buf) (panes--show-in-pane-by-mode! to buf note stay)))
+
+(define (panes--show-in-pane-by-mode! to buf note &optional stay)
+  "panes--show-in-pane! when the selection is not in an empty pane."
   (let* ((mode (panes--buffer-mode buf))
          (l (car to)) (pid (cadr to))
          (same (or (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l pid))
@@ -1361,15 +1391,19 @@
 
 (define (panes--shift-window! dir)
   "S-<arrow>: the focused window moves to the front of the pane DIR of
-   it (left, right, up or down), and that pane takes the focus. A move
-   never makes a pane: at the edge, a message and #f. A pane it leaves
-   empty stays, and shows the empty pane. #t when it moved."
+   it (left, right, up or down), and that pane takes the focus. With
+   pane-shift-merge-same-mode on, a window of the same mode in that
+   pane takes the moved stack on top of its own instead. A move never
+   makes a pane: at the edge, a message and #f. A pane it leaves empty
+   stays, and shows the empty pane. #t when it moved."
   (let* ((l (panes--ensure-layout!))
          (key (panes-key-of-handle l (active-window)))
-         (to (and key (panes--pane-toward l dir))))
-    (if (not to)
-        (begin (message "No pane that way") #f)
-        (begin (panes-apply! (panes-set-focus (panes-move-window l key to) to)) #t))))
+         (to (and key (panes--pane-toward l dir)))
+         (mode (and to pane-shift-merge-same-mode (panes-window-mode l key)))
+         (same (and mode (find (lambda (k) (equal? (panes-window-mode l k) mode)) (panes-pane-keys l to)))))
+    (cond ((not to) (message "No pane that way") #f)
+          (same (panes-apply! (panes-focus-window (panes-merge-window l key same) same)) #t)
+          (else (panes-apply! (panes-set-focus (panes-move-window l key to) to)) #t))))
 
 ;;; --- motion between panes ------------------------------------------------------
 ;;; The panes are one row: left and previous are the pane before, right and

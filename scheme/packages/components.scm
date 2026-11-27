@@ -929,7 +929,10 @@ c-header.c-group { padding: 10px 14px; }
           (when i
             (list-goto-index! buf i)
             (let ((click (list-opt buf 'on-click)))
-              (when click (click buf (nth i (list-entries buf))))))
+              (if click
+                  (click buf (nth i (list-entries buf)))
+                  ;; no click of its own: a click opens the row, as RET does
+                  (with-current-buffer buf (lambda () (list-mouse-open buf))))))
           #t)
         #f)))
 

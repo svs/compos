@@ -50,6 +50,7 @@
 (require 'components)
 ;; the hand keys and / over an index's and a detail's tab bars
 (require 'tab-bars)
+(require 'phone)
 ; the detail window: an app registers how it names a kept detail at load,
 ; so this comes before every app that opens rows into one
 (require 'detail)

@@ -31,11 +31,14 @@ defmodule Compos.Ui.MobileLayouts do
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
         <meta name="boot-id" content={@boot_id} />
+        <meta name="assets" content={@css_v <> "/" <> @js_v} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="compos" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="theme-color" content="#efece2" />
         <title>{@page_title}</title>
-        <link rel="manifest" href="/logo/manifest" />
+        <link rel="manifest" href="/logo/manifest/phone" />
         <link rel="icon" href="/logo" />
         <link rel="apple-touch-icon" href="/logo" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -56,8 +59,9 @@ defmodule Compos.Ui.MobileLayouts do
   end
 
   # the boot and the file's own time: a saved change to the file reaches
-  # the phone at its next load, with no restart
-  defp file_version(boot, file) do
+  # the phone at once (MobileLive sends it, the page reloads), with no restart
+  @doc "the version of static FILE in this boot: it changes when the file does"
+  def file_version(boot, file) do
     path = Application.app_dir(:compos_ui, ["priv", "static", file])
 
     case File.stat(path, time: :posix) do

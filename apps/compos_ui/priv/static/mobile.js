@@ -62,29 +62,15 @@ const Hooks = {
   },
   Handheld: {
     mounted() {
-      this.push = (ev, payload) => this.pushEvent(ev, payload);
       this.remember();
       this.bootCheck();
       this.viewport();
-      this.dock();
-      this.resizeH = () => { this.viewport(); this.dock(); };
+      this.resizeH = () => this.viewport();
       window.addEventListener("resize", this.resizeH);
       this.handleEvent("navigate", ({ url }) => { window.location.href = url; });
-      this.bindRail();
-      this.bindComposer();
+      this.bind();
     },
-    updated() {
-      this.remember();
-      this.bootCheck();
-      this.dock();
-      this.bindRail();
-      this.bindComposer();
-      if (this.el.dataset.mb !== this.mbWas) {
-        this.mbWas = this.el.dataset.mb;
-        const input = document.getElementById("composer");
-        if (input) { input.value = ""; this.last = ""; this.arm(); }
-      }
-    },
+    updated() { this.remember(); this.bootCheck(); this.bind(); },
     destroyed() { window.removeEventListener("resize", this.resizeH); },
 
     // the frame this tab holds, so a reload comes back to it
@@ -92,102 +78,67 @@ const Hooks = {
       const f = this.el.dataset.frame;
       if (f) { try { sessionStorage.setItem("compos-frame-m", f); } catch (e) {} }
     },
-    // a daemon restart changes the boot id; this page belongs
-    // to the old one and reloads
+    // a daemon restart changes the boot id: this page reloads
     bootCheck() {
       const meta = document.querySelector('meta[name="boot-id"]');
       const boot = meta && meta.getAttribute("content");
-      if (boot && this.el.dataset.boot && boot !== this.el.dataset.boot) window.location.reload();
+      if (boot && this.el.dataset.boot && boot !== this.el.dataset.boot) { window.location.reload(); return; }
+      // a saved stylesheet or script: this page holds the old ones
+      const assets = document.querySelector('meta[name="assets"]');
+      const have = assets && assets.getAttribute("content");
+      if (have && this.el.dataset.assets && have !== this.el.dataset.assets) window.location.reload();
     },
-    // how tall the composer and the bar are: a prompt's sheet stops
-    // above both, so the field stays under the thumb; a sheet of rows
-    // stops above the bar alone
-    dock() {
-      const c = this.el.querySelector(".hh-composer");
-      const n = this.el.querySelector(".hh-nav");
-      const nh = n ? n.offsetHeight : 0;
-      const h = (c ? c.offsetHeight : 0) + nh;
-      // on the document, not the frame: a patch writes the frame's own
-      // attributes again and an inline style there would not survive it
-      const root = document.documentElement.style;
-      if (h && h !== this.dockH) { this.dockH = h; root.setProperty("--dock-h", h + "px"); }
-      if (nh && nh !== this.navH) { this.navH = nh; root.setProperty("--nav-h", nh + "px"); }
-    },
+    // the rows the one window has room for
     viewport() {
-      // the window's own height when it is drawn, else the screen less the chrome
       const body = this.el.querySelector(".hh-body");
-      const h = body && body.clientHeight > 0 ? body.clientHeight - 26 : window.innerHeight - 200;
+      const h = body && body.clientHeight > 0 ? body.clientHeight : window.innerHeight - 160;
       const rows = Math.max(8, Math.floor(h / 19.5));
-      if (rows !== this.rows) { this.rows = rows; this.push("viewport", { rows }); }
+      if (rows !== this.rows) { this.rows = rows; this.pushEvent("viewport", { rows }); }
     },
+    bind() { this.bindComposer(); this.bindPrompt(); },
 
-    // ── the rail: a drag is point ──────────────────────────
-    bindRail() {
-      const rail = this.el.querySelector("[data-rail]");
-      if (!rail || rail.dataset.bound) return;
-      rail.dataset.bound = "1";
-      const scrub = (e) => {
-        const r = rail.getBoundingClientRect();
-        const frac = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
-        const now = Date.now();
-        if (this.railAt && now - this.railAt < 60) { this.railNext = frac; return; }
-        this.railAt = now;
-        this.push("rail", { frac });
-      };
-      rail.addEventListener("pointerdown", (e) => { e.preventDefault(); rail.setPointerCapture(e.pointerId); this.scrubbing = true; scrub(e); });
-      rail.addEventListener("pointermove", (e) => { if (this.scrubbing) scrub(e); });
-      const stop = () => {
-        this.scrubbing = false;
-        if (this.railNext != null) { this.push("rail", { frac: this.railNext }); this.railNext = null; }
-      };
-      rail.addEventListener("pointerup", stop);
-      rail.addEventListener("pointercancel", stop);
-    },
-
-    // ── the composer: one field, three registers ───────────
-    // While a prompt is up the field feeds the minibuffer one
-    // key at a time, so the prompt narrows as the user types.
-    // Otherwise RET sends the line to Scheme, which decides.
-    arm() {
-      const input = document.getElementById("composer");
-      const send = document.getElementById("composer-send");
-      if (send) send.classList.toggle("armed", !!(input && input.value));
-    },
+    // the composer: RET or Send sends the line to the chat on show
     bindComposer() {
       const input = document.getElementById("composer");
       const send = document.getElementById("composer-send");
       if (!input || input.dataset.bound) return;
       input.dataset.bound = "1";
-      this.last = "";
+      const arm = () => { if (send) send.classList.toggle("armed", !!input.value.trim()); };
       const submit = () => {
-        if (this.el.dataset.mb === "true") { this.push("key", { k: "RET" }); return; }
         const text = input.value;
         if (!text.trim()) return;
         input.value = "";
-        this.last = "";
-        this.arm();
-        this.push("compose", { text });
+        arm();
+        this.pushEvent("compose", { text });
       };
+      input.addEventListener("input", arm);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); submit(); } });
+      if (send) send.addEventListener("click", submit);
+    },
+
+    // a prompt's field: each change goes to the prompt as keys, so its
+    // rows narrow as you type; RET takes, Escape cancels
+    bindPrompt() {
+      const input = document.getElementById("mb-input");
+      if (!input || input.dataset.bound) return;
+      input.dataset.bound = "1";
+      let last = input.value || "";
       input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); submit(); }
-        else if (e.key === "Escape") { e.preventDefault(); this.push("key", { k: "C-g" }); }
-        else if (this.el.dataset.mb === "true" && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab")) {
-          e.preventDefault(); this.push("key", { k: keyOf(e.key) });
-        }
+        if (e.key === "Enter") { e.preventDefault(); this.pushEvent("key", { k: "RET" }); }
+        else if (e.key === "Escape") { e.preventDefault(); this.pushEvent("key", { k: "C-g" }); }
+        else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") { e.preventDefault(); this.pushEvent("key", { k: keyOf(e.key) }); }
       });
       input.addEventListener("input", () => {
-        this.arm();
-        if (this.el.dataset.mb !== "true") return;
-        const now = input.value, was = this.last || "";
+        const now = input.value;
         let common = 0;
-        while (common < now.length && common < was.length && now[common] === was[common]) common++;
+        while (common < now.length && common < last.length && now[common] === last[common]) common++;
         const ks = [];
-        for (let i = common; i < was.length; i++) ks.push("DEL");
+        for (let i = common; i < last.length; i++) ks.push("DEL");
         for (const ch of Array.from(now.slice(common))) ks.push(keyOf(ch));
-        this.last = now;
-        if (ks.length) this.push("keys", { ks });
+        last = now;
+        if (ks.length) this.pushEvent("keys", { ks });
       });
-      if (send) send.addEventListener("click", submit);
+      setTimeout(() => input.focus(), 50);
     }
   }
 };

@@ -1,15 +1,13 @@
 defmodule Compos.Ui.MobileLive do
   @moduledoc """
-  The handheld client: one column, one window, and no chords.
+  The phone client: one buffer at a time, no keys.
 
-  A second client of the same payload the desktop draws. It attaches a
-  frame, reads `Compos.Core.Editor.render_state/1`, and draws the frame's
-  selected window. The bar at the bottom reaches the group's chat, its
-  buffers, the groups, and the commands; each of the last three is a sheet
-  of rows to tap. The composer is the chat's input. A prompt or a
-  transient the editor opens is a sheet too. Nothing here is editor
-  logic: `handheld.scm` decides what every tap does and what each sheet
-  lists.
+  It attaches a frame of its own, reads `Compos.Core.Editor.render_state/1`,
+  and draws the frame's one window. The bar at the bottom has four places:
+  the chats, a new chat, the buffers and the groups. The composer under a
+  chat sends to it. A prompt the editor opens is a sheet of rows to tap.
+  `phone.scm` answers every list and does every tap; this module only
+  draws.
   """
 
   use Phoenix.LiveView
@@ -18,12 +16,13 @@ defmodule Compos.Ui.MobileLive do
   alias Compos.Core.{Editor, Events, Input, Session}
   alias Compos.Ui.{EditorLive, LiveShared}
 
-  @empty_view %{group: "", chat: false, copy: %{}, railless: []}
-
   @window_events LiveShared.window_events()
 
-  # the sheets the bar opens, in the bar's order after the chat
-  @sheets ["buffers", "groups", "commands"]
+  # the places of the bar that open a list
+  @sheets ["chats", "buffers", "groups"]
+
+  @titles %{"chats" => "Chats", "buffers" => "Buffers", "groups" => "Groups"}
+  @hints %{"chats" => "Find a chat", "buffers" => "Find a buffer", "groups" => "Find a group"}
 
   @impl true
   def mount(params, _session, socket) do
@@ -35,7 +34,8 @@ defmodule Compos.Ui.MobileLive do
         subscribed: MapSet.new(),
         line_cache: %{},
         boot_id: :persistent_term.get(:compos_boot_id, "dev"),
-        view: @empty_view,
+        group: "",
+        chat: false,
         view_key: nil,
         sheet: nil,
         sheet_rows: [],
@@ -43,15 +43,13 @@ defmodule Compos.Ui.MobileLive do
       )
 
     if connected?(socket) do
-      requested = get_connect_params(socket)["frame"]
-      {:ok, fid} = Editor.attach_frame(requested)
+      {:ok, fid} = Editor.attach_frame(get_connect_params(socket)["frame"])
       Events.subscribe_frame(fid)
       Input.run(fid, fn -> Session.call_named("frame-attached!", []) end)
+      Input.run(fid, fn -> Session.call_named("phone-attach!", []) end)
 
       if buffer = params["buffer"] do
-        Input.run(fid, fn ->
-          Session.call_named("open-buffer-link!", [buffer, line_param(params)])
-        end)
+        Input.run(fid, fn -> Session.call_named("phone-show!", [buffer]) end)
       end
 
       {:ok, socket |> assign(frame: fid) |> refresh()}
@@ -62,30 +60,17 @@ defmodule Compos.Ui.MobileLive do
 
   # ── input ──────────────────────────────────────────────────────────
 
-  # a key from a sheet: a prompt's RET or C-g, a transient's own key
+  # the composer: the line goes to the chat on show
   @impl true
-  def handle_event("key", %{"k" => spec}, socket) when is_binary(spec) do
-    Input.dispatch(socket.assigns.frame, spec)
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # keys in order through the same queue: the composer feeding a prompt
-  def handle_event("keys", %{"ks" => specs}, socket) when is_list(specs) or is_binary(specs) do
-    specs = if is_binary(specs), do: String.split(specs, " ", trim: true), else: specs
-    Enum.each(specs, fn k -> if is_binary(k), do: Input.dispatch(socket.assigns.frame, k) end)
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # the composer: the line goes to the group's chat
   def handle_event("compose", %{"text" => text}, socket) when is_binary(text) do
-    call(socket, "handheld-compose!", [text])
-    {:noreply, socket |> close_sheet() |> drain() |> refresh()}
+    call(socket, "phone-send!", [shown(socket) || false, text])
+    {:noreply, socket |> drain() |> refresh()}
   end
 
-  # the bar: the chat at once, or a sheet; the open sheet's own button
-  # closes it again
-  def handle_event("nav", %{"to" => "chat"}, socket) do
-    call(socket, "handheld-chat!", [])
+  # the bar opens a list, and the open list's own place closes it again;
+  # New chat at the top of the chats starts one at once
+  def handle_event("nav", %{"to" => "new"}, socket) do
+    call(socket, "phone-new-chat!", [])
     {:noreply, socket |> close_sheet() |> drain() |> refresh()}
   end
 
@@ -95,75 +80,54 @@ defmodule Compos.Ui.MobileLive do
         do: close_sheet(socket),
         else: socket |> assign(sheet: sheet, filter: "") |> load_sheet()
 
-    {:noreply, refresh(socket)}
+    {:noreply, socket}
   end
 
-  def handle_event("sheet_close", _p, socket), do: {:noreply, socket |> close_sheet() |> refresh()}
+  def handle_event("sheet_close", _p, socket), do: {:noreply, close_sheet(socket)}
 
-  # RET in the sheet's filter takes the first row it leaves
+  # the list's filter: Scheme narrows the rows; RET takes the first row
   def handle_event("sheet_filter", %{"key" => "Enter", "value" => q}, socket) when is_binary(q) do
     socket = socket |> assign(filter: q) |> load_sheet()
 
     case Enum.flat_map(socket.assigns.sheet_rows, & &1.rows) do
-      [r | _] -> handle_event("pick", %{"kind" => r.kind, "id" => r.id}, socket)
-      [] -> {:noreply, refresh(socket)}
+      [r | _] -> handle_event("pick", %{"id" => r.id}, socket)
+      [] -> {:noreply, socket}
     end
   end
 
-  # the sheet's filter: Scheme narrows the rows
   def handle_event("sheet_filter", %{"value" => q}, socket) when is_binary(q) do
-    {:noreply, socket |> assign(filter: q) |> load_sheet() |> refresh()}
+    {:noreply, socket |> assign(filter: q) |> load_sheet()}
   end
 
-  # a tap on a row of a sheet
-  def handle_event("pick", %{"kind" => kind, "id" => id}, socket) when is_binary(id) do
-    case kind do
-      "group" -> call(socket, "handheld-group!", [id])
-      "buffer" -> call(socket, "handheld-buffer!", [id])
-      "command" -> call(socket, "handheld-run-command!", [id])
+  # a tap on a row of a list
+  def handle_event("pick", %{"id" => id}, socket) when is_binary(id) do
+    case socket.assigns.sheet do
+      "groups" -> call(socket, "phone-group!", [id])
+      s when s in ["chats", "buffers"] -> call(socket, "phone-show!", [id])
       _ -> :ok
     end
 
     {:noreply, socket |> close_sheet() |> drain() |> refresh()}
   end
 
-  # a tap on a menu row: Scheme selects it and invokes it, as RET does
-  def handle_event("trow", %{"i" => i}, socket) do
-    with {i, ""} <- Integer.parse(to_string(i)), do: call(socket, "handheld-transient-tap!", [i])
+  # a key from a prompt's sheet: its RET, its cancel, a menu's own key
+  def handle_event("key", %{"k" => spec}, socket) when is_binary(spec) do
+    Input.dispatch(socket.assigns.frame, spec)
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # a tap on a line: point goes there; on point's own line it opens
-  def handle_event("line", %{"n" => n}, socket) do
-    with {n, ""} <- Integer.parse(to_string(n)), do: call(socket, "handheld-tap-line!", [n])
+  # the prompt's field: what was typed, as keys in order
+  def handle_event("keys", %{"ks" => specs}, socket) when is_list(specs) do
+    Enum.each(specs, fn k -> if is_binary(k), do: Input.dispatch(socket.assigns.frame, k) end)
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # the point rail: a fraction of the buffer becomes a line number here,
-  # and Scheme moves point to it
-  def handle_event("rail", %{"frac" => frac}, socket) when is_number(frac) do
-    leaf = socket.assigns.leaf
-
-    if leaf do
-      total = max(Compos.Core.Buffer.line_of(leaf.buffer, byte_size(leaf.text)) || 1, 1)
-      frac = frac |> max(0.0) |> min(1.0)
-      n = round(frac * (total - 1)) + 1
-      call(socket, "handheld-scrub!", [n])
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # a tap on a prompt candidate: move the selection there and accept.
-  # The rows are the frame's own slice, so the distance is relative to
-  # the selected row and no new primitive is needed.
+  # a tap on a prompt's row: the selection moves there and RET takes it
   def handle_event("cand", %{"i" => i}, socket) do
     with mb when is_map(mb) <- socket.assigns.state.minibuffer,
          {i, ""} <- Integer.parse(to_string(i)) do
-      rows = mb.candidates
-      sel = Enum.find_index(rows, &Map.get(&1, :selected)) || 0
+      sel = Enum.find_index(mb.candidates, &Map.get(&1, :selected)) || 0
       key = if i > sel, do: "C-n", else: "C-p"
-
       for _ <- 1..abs(i - sel)//1, do: Input.dispatch(socket.assigns.frame, key)
       Input.dispatch(socket.assigns.frame, "RET")
     end
@@ -171,14 +135,14 @@ defmodule Compos.Ui.MobileLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # the client's row count for the one window it draws
+  # the rows the one window has room for
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Editor.set_total_rows(rows, socket.assigns.frame)
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # ── the transcript's own events, as the desktop handles them ──────
-
+  # the window's own events (block clicks, links, the chat's place), as
+  # the desktop handles them
   def handle_event(event, params, socket) when event in @window_events do
     case LiveShared.window_event(event, params, socket.assigns.frame) do
       :refresh -> {:noreply, socket |> drain() |> refresh()}
@@ -201,26 +165,24 @@ defmodule Compos.Ui.MobileLive do
     Input.run(socket.assigns.frame, fn -> Session.call_named(name, args) end)
   end
 
+  defp shown(socket), do: socket.assigns.leaf && socket.assigns.leaf.buffer
+
   defp close_sheet(socket), do: assign(socket, sheet: nil, sheet_rows: [], filter: "")
 
   defp refresh(socket) do
     fid = socket.assigns.frame
     {state, effects} = LiveShared.frame_state(fid)
-
     caret_owner = if state.minibuffer, do: nil, else: state.active
-
     raw_leaf = LiveShared.find_leaf(state.tree, state.active) || LiveShared.first_leaf(state.tree)
 
     {leaf, cache} =
-      if raw_leaf do
-        EditorLive.decorate_tree(raw_leaf, socket.assigns.line_cache, state.faces, caret_owner)
-      else
-        {nil, %{}}
-      end
+      if raw_leaf,
+        do: EditorLive.decorate_tree(raw_leaf, socket.assigns.line_cache, state.faces, caret_owner),
+        else: {nil, %{}}
 
     leaf_id = leaf && leaf.id
 
-    # the phone draws one window: only its cache entries live on
+    # one window: only its cache entries live on
     cache =
       Map.filter(cache, fn
         {{_kind, id}, _} -> id == leaf_id
@@ -230,27 +192,15 @@ defmodule Compos.Ui.MobileLive do
     subscribed =
       if connected?(socket) do
         visible = if leaf, do: MapSet.new([leaf.buffer]), else: MapSet.new()
-
         LiveShared.resubscribe(socket.assigns.subscribed, visible)
       else
         socket.assigns.subscribed
       end
 
-    {view, view_key} = view_for(socket, state, leaf)
-
-    # a prompt or a transient owns the screen: a sheet of ours closes under it
-    sheet = if state.minibuffer || state.transient, do: nil, else: socket.assigns.sheet
-
     socket =
-      assign(socket,
-        state: state,
-        leaf: leaf,
-        line_cache: cache,
-        subscribed: subscribed,
-        view: view,
-        view_key: view_key,
-        sheet: sheet
-      )
+      socket
+      |> assign(state: state, leaf: leaf, line_cache: cache, subscribed: subscribed)
+      |> header(state, leaf)
 
     case fid && effects.navigation do
       url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
@@ -258,181 +208,116 @@ defmodule Compos.Ui.MobileLive do
     end
   end
 
-  # what the header names. One call per change of the shown buffer, its
-  # mode, or the group; nothing per keystroke.
-  defp view_for(socket, state, leaf) do
-    key = {leaf && leaf.buffer, leaf && leaf.mode, state.frame_group}
+  # the header's group and whether the buffer is a chat: one call when the
+  # buffer or the group changes, none per keystroke
+  defp header(socket, state, leaf) do
+    key = {leaf && leaf.buffer, state.frame_group}
 
     if key == socket.assigns.view_key do
-      {socket.assigns.view, key}
+      socket
     else
-      {fetch_view(socket, leaf && leaf.buffer), key}
-    end
-  end
-
-  defp fetch_view(socket, buf) do
-    case call(socket, "handheld-view", [buf || false]) do
-      {:ok, [group, chat, copy, railless]} ->
-        %{group: str(group), chat: chat == true, railless: Enum.map(list(railless), &str/1),
-          copy: Map.new(list(copy), fn [k, v] -> {str(k), str(v)} end)}
-
-      _ -> @empty_view
+      case call(socket, "phone-view", [(leaf && leaf.buffer) || false]) do
+        {:ok, [group, chat]} -> assign(socket, group: str(group), chat: chat == true, view_key: key)
+        _ -> assign(socket, group: "", chat: false, view_key: key)
+      end
     end
   rescue
-    _ -> @empty_view
+    _ -> assign(socket, group: "", chat: false)
   end
 
-  # a sheet's rows, from Scheme: ((TITLE ROWS) ...), a row being
-  # %{kind, id, label, sub, current}
+  # a list's rows, from Scheme, as ((TITLE ROWS) ...); a row is
+  # %{id, label, sub, current}
   defp load_sheet(%{assigns: %{sheet: nil}} = socket), do: socket
 
   defp load_sheet(socket) do
-    buf = socket.assigns.leaf && socket.assigns.leaf.buffer
-    assign(socket, sheet_rows: fetch_sheet(socket, socket.assigns.sheet, buf, socket.assigns.filter))
+    assign(socket, sheet_rows: fetch_sheet(socket, socket.assigns.sheet, socket.assigns.filter))
   rescue
     _ -> assign(socket, sheet_rows: [])
   end
 
-  defp fetch_sheet(socket, "groups", _buf, q) do
-    rows =
-      for [id, label, cur] <- ok_list(call(socket, "handheld-groups", [q])) do
-        %{kind: "group", id: str(id), label: str(label), sub: "", current: cur == true}
-      end
+  defp fetch_sheet(socket, "chats", q),
+    do: [%{title: "", rows: rows(call(socket, "phone-chats", [q, shown(socket) || false]))}]
 
-    [%{title: "", rows: rows}]
-  end
+  defp fetch_sheet(socket, "groups", q),
+    do: [%{title: "", rows: rows(call(socket, "phone-groups", [q]))}]
 
-  defp fetch_sheet(socket, "buffers", buf, q) do
-    for [title, rows] <- ok_list(call(socket, "handheld-buffers", [buf || false, q])) do
-      rows =
-        for [name, label, sub, cur] <- list(rows) do
-          %{kind: "buffer", id: str(name), label: str(label), sub: str(sub), current: cur == true}
-        end
-
-      %{title: str(title), rows: rows}
+  defp fetch_sheet(socket, "buffers", q) do
+    for [title, rs] <- ok_list(call(socket, "phone-buffers", [q, shown(socket) || false])) do
+      %{title: str(title), rows: rows({:ok, rs})}
     end
   end
 
-  defp fetch_sheet(socket, "commands", buf, q) do
-    if String.trim(q) == "" do
-      for [title, rows] <- ok_list(call(socket, "handheld-commands", [buf || false])) do
-        %{title: str(title), rows: command_rows(rows)}
-      end
-    else
-      [%{title: "matches", rows: command_rows(ok_list(call(socket, "handheld-search", [buf || false, q])))}]
-    end
-  end
-
-  defp fetch_sheet(_socket, _sheet, _buf, _q), do: []
-
-  defp command_rows(rows) do
-    for [name, doc] <- list(rows) do
-      %{kind: "command", id: str(name), label: str(name), sub: str(doc), current: false}
+  defp rows(answer) do
+    for [id, label, sub, cur] <- ok_list(answer) do
+      %{id: str(id), label: str(label), sub: str(sub), current: cur == true}
     end
   end
 
   defp ok_list({:ok, x}) when is_list(x), do: x
   defp ok_list(_), do: []
 
-  defp list(x) when is_list(x), do: x
-  defp list(_), do: []
-
   defp str(x) when is_binary(x), do: x
   defp str({:sym, s}), do: to_string(s)
-  defp str(false), do: ""
-  defp str(nil), do: ""
+  defp str(x) when x in [false, nil], do: ""
   defp str(x), do: to_string(x)
-
-  defp line_param(params) do
-    case Integer.parse(to_string(params["line"] || "")) do
-      {n, ""} when n > 0 -> n
-      _ -> false
-    end
-  end
 
   # ── render ─────────────────────────────────────────────────────────
 
   def composml(%{state: nil} = assigns) do
     ~M"""
     <c-frame id="hh" class="hh splash" phx-hook="Handheld" data-boot={@boot_id}>
-      <c-status class="hh-splash" state="connecting">compos — connecting…</c-status>
+      <c-status class="hh-splash" state="connecting">compos · connecting</c-status>
     </c-frame>
     """
   end
 
-  # The page names what it shows: the modeline, the one window and its
-  # buffer, the composer prompt and the echo area, the bar's tabs, and a
-  # sheet that is a list, a minibuffer, or a transient menu. Classes only
-  # style it; state is in attributes ("true"/"false" strings).
   def composml(assigns) do
     ~M"""
-    <c-frame id="hh" class="hh" phx-hook="Handheld" data-boot={@boot_id} data-frame={@frame} data-mb={to_string(@state.minibuffer != nil)}>
+    <c-frame id="hh" class="hh" phx-hook="Handheld" data-boot={@boot_id} data-assets={assets(@boot_id)} data-frame={@frame}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(Compos.Ui.FaceCSS.css(@state.faces)) %></style>
       <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
 
-      <.head leaf={@leaf} view={@view} />
+      <c-modeline class="hh-head">
+        <c-field :if={@group != ""} class="hh-head-group" name="group">{@group}</c-field>
+        <c-buffer-name class="hh-head-name">{name(@leaf)}</c-buffer-name>
+      </c-modeline>
 
       <c-window class="hh-body" win={@leaf && @leaf.id}>
-        <c-position :if={rail?(@leaf, @view)} class="hh-rail" data-rail="1" line={Map.get(@leaf, :line)}>
-          <c-group class="hh-rail-mark" style={"top: #{rail_top(@leaf)}%"}></c-group>
-        </c-position>
         <.content leaf={@leaf} />
       </c-window>
 
-      <c-prompt class={"hh-composer #{if @state.minibuffer, do: "prompting"}"}>
-        <c-group class="hh-input-row">
-          <c-label :if={@state.minibuffer} class="hh-prompt">{String.trim_trailing(@state.minibuffer.prompt, " ")}</c-label>
-          <input
-            id="composer"
-            class="hh-input"
-            type="text"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="sentences"
-            spellcheck="true"
-            enterkeyhint="send"
-            placeholder={placeholder(@view, @state)}
-          />
-          <c-action id="composer-send" class="hh-send">{if @state.minibuffer, do: "OK", else: "Send"}</c-action>
-        </c-group>
-        <c-echo :if={echo(@state) != ""} class={"hh-echo #{if echo_error?(@state.echo), do: "err"}"} error={to_string(echo_error?(@state.echo))}>{echo(@state)}</c-echo>
+      <c-prompt :if={@chat} class="hh-composer">
+        <input id="composer" class="hh-input" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" enterkeyhint="send" placeholder="Message" />
+        <c-action id="composer-send" class="hh-send">Send</c-action>
       </c-prompt>
 
+      <c-echo :if={echo(@state) != ""} class="hh-echo">{echo(@state)}</c-echo>
+
       <c-tabs class="hh-nav">
-        <c-tab class={"hh-nav-btn #{if @view.chat and @sheet == nil, do: "on"}"} selected={to_string(@view.chat and @sheet == nil)} data-nav="chat" phx-click="nav" phx-value-to="chat">
-          <c-text class="hh-nav-glyph">✎</c-text>
-          <c-label class="hh-nav-label">Chat</c-label>
-        </c-tab>
-        <c-tab :for={{to, glyph, label} <- nav_items()} class={"hh-nav-btn #{if @sheet == to, do: "on"}"} selected={to_string(@sheet == to)} data-nav={to} phx-click="nav" phx-value-to={to}>
-          <c-text class="hh-nav-glyph">{glyph}</c-text>
+        <c-tab :for={{to, glyph, label} <- nav_items()} class={"hh-nav-btn #{if on?(to, @sheet, @chat), do: "on"}"} selected={to_string(on?(to, @sheet, @chat))} data-nav={to} phx-click="nav" phx-value-to={to}>
+          <svg class="hh-nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={glyph} /></svg>
           <c-label class="hh-nav-label">{label}</c-label>
         </c-tab>
       </c-tabs>
 
-      <.pick_sheet :if={@sheet} sheet={@sheet} sections={@sheet_rows} filter={@filter} view={@view} />
-
-      <.sheet :if={@state.minibuffer || (@state.transient && @state.transient[:groups])} state={@state} view={@view} />
+      <.pick :if={@sheet} sheet={@sheet} sections={@sheet_rows} filter={@filter} />
+      <.prompt :if={@state.minibuffer} mb={@state.minibuffer} />
+      <.menu :if={!@state.minibuffer && @state.transient && @state.transient[:groups]} t={@state.transient} />
     </c-frame>
     """
   end
 
-  defp nav_items, do: [{"buffers", "☰", "Buffers"}, {"groups", "◫", "Groups"}, {"commands", "⌘", "Commands"}]
+  defp nav_items,
+    do: [
+      # each icon one stroked path on a 24 grid: a speech bubble, a page
+      # with lines, four squares
+      {"chats", "M4 5h16v11H9l-5 4z", "Chats"},
+      {"buffers", "M6 3h9l3 3v15H6zM9 10h6M9 14h6M9 18h4", "Buffers"},
+      {"groups", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z", "Groups"}
+    ]
 
-  # the header: the group above, the buffer below. A tap lists the
-  # group's buffers.
-  defp head(assigns) do
-    ~M"""
-    <c-modeline class="hh-head" phx-click="nav" phx-value-to="buffers">
-      <c-group class="hh-head-main">
-        <c-field :if={@view.group != ""} class="hh-head-group" name="group">{@view.group}</c-field>
-        <c-buffer-name class="hh-head-name" modified={to_string(dirty?(@leaf, @view))}>{ml_name(@leaf)}</c-buffer-name>
-      </c-group>
-      <c-status :if={info(@leaf) != ""} class="hh-head-info">{info(@leaf)}</c-status>
-      <c-text :if={dirty?(@leaf, @view)} class="hh-head-dirty">●</c-text>
-      <c-text class="hh-head-chev">▾</c-text>
-    </c-modeline>
-    """
-  end
+  defp on?("chats", nil, true), do: true
+  defp on?(to, sheet, _chat), do: to == sheet
 
   defp content(%{leaf: nil} = assigns) do
     ~M"""
@@ -440,11 +325,11 @@ defmodule Compos.Ui.MobileLive do
     """
   end
 
-  # a block tree draws with the editor's own block renderer. The composer
-  # below is the handheld's input, so the tree's caret input stays empty.
+  # a block tree (a chat, a list, a page) draws with the editor's own
+  # block renderer; the composer is the input, so the tree's own input hides
   defp content(%{leaf: %{render_mode: "blocks"}} = assigns) do
     ~M"""
-    <c-buffer class={"hh-content hh-blocks #{hh_root_class(@leaf)}"} buffer={@leaf.buffer}>
+    <c-buffer class={"hh-content hh-blocks #{root_class(@leaf)}"} buffer={@leaf.buffer}>
       <EditorLive.blk
         :for={b <- Map.get(@leaf, :blk, [])}
         b={b}
@@ -459,14 +344,7 @@ defmodule Compos.Ui.MobileLive do
   defp content(%{leaf: %{render_mode: rm}} = assigns) when rm in ["html", "markdown"] do
     ~M"""
     <c-buffer class="hh-content" buffer={@leaf.buffer}>
-      <iframe
-        :if={Map.has_key?(@leaf, :preview)}
-        class="hh-preview"
-        id={"prev-#{@leaf.id}"}
-        srcdoc={@leaf.preview}
-        sandbox="allow-same-origin"
-        title={@leaf.buffer}
-      ></iframe>
+      <iframe :if={Map.has_key?(@leaf, :preview)} class="hh-preview" id={"prev-#{@leaf.id}"} srcdoc={@leaf.preview} sandbox="allow-same-origin" title={@leaf.buffer}></iframe>
     </c-buffer>
     """
   end
@@ -479,237 +357,124 @@ defmodule Compos.Ui.MobileLive do
     """
   end
 
-  # lines: a tap moves point to the line, a tap on point's line opens it
+  # text: read only
   defp content(assigns) do
     ~M"""
     <c-buffer class="hh-content hh-lines" id={"lines-#{@leaf.id}"} buffer={@leaf.buffer}>
-      <c-line :for={ln <- Map.get(@leaf, :lines, [])} class={"hh-line #{if point_line?(ln, @leaf), do: "cur"}"} number={ln.num} current={to_string(point_line?(ln, @leaf))} data-s={ln.start} phx-click="line" phx-value-n={ln.num}>
+      <c-line :for={ln <- Map.get(@leaf, :lines, [])} class="hh-line" number={ln.num}>
         <c-text class="hh-line-text"><c-text :for={{txt, cls} <- ln.segs} class={cls}>{txt}</c-text><br :if={ln.segs == []} /></c-text>
       </c-line>
-      <c-empty :if={Map.get(@leaf, :lines, []) == []} class="hh-empty">{@leaf.buffer} · {@leaf.mode}</c-empty>
+      <c-empty :if={Map.get(@leaf, :lines, []) == []} class="hh-empty">{@leaf.buffer}</c-empty>
     </c-buffer>
     """
   end
 
-  # a sheet of rows to tap: the group's buffers, the groups, or the
-  # commands. The field on top narrows it; RET there takes the first row.
-  defp pick_sheet(assigns) do
+  # a list to tap: chats, buffers or groups; the field narrows it and RET
+  # there takes the first row
+  defp pick(assigns) do
+    assigns = assign(assigns, title: @titles[assigns.sheet], hint: @hints[assigns.sheet])
+
     ~M"""
-    <c-group class="hh-pick-layer">
-      <c-group class="hh-sheet-scrim" phx-click="sheet_close"></c-group>
-      <c-list class="hh-sheet hh-pick" role="dialog" aria-modal="true" data-sheet={@sheet}>
+    <c-group class="hh-layer">
+      <c-group class="hh-scrim" phx-click="sheet_close"></c-group>
+      <c-list class="hh-sheet" role="dialog" aria-modal="true" data-sheet={@sheet}>
         <c-header class="hh-sheet-head">
-          <c-headline class="hh-kicker">{copy(@view, @sheet <> "-title")}</c-headline>
-          <c-text class="hh-spacer"></c-text>
+          <c-headline class="hh-sheet-title">{@title}</c-headline>
           <c-action class="hh-sheet-quit" phx-click="sheet_close">Close</c-action>
         </c-header>
-        <c-field class="hh-pick-filter" name="filter">
-          <input
-            id={"pick-filter-#{@sheet}"}
-            class="hh-input"
-            type="search"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            enterkeyhint="go"
-            placeholder={copy(@view, @sheet <> "-hint")}
-            value={@filter}
-            phx-keyup="sheet_filter"
-            phx-debounce="120"
-          />
+        <c-field class="hh-filter" name="filter">
+          <input id={"filter-#{@sheet}"} class="hh-input" type="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" placeholder={@hint} value={@filter} phx-keyup="sheet_filter" phx-debounce="150" />
         </c-field>
-        <c-group class="hh-sheet-rows">
+        <c-group class="hh-rows">
+          <c-item :if={@sheet == "chats" and @filter == ""} class="hh-row hh-row-new" data-nav="new" phx-click="nav" phx-value-to="new">
+            <c-label class="hh-row-label">+ New chat</c-label>
+          </c-item>
           <%= for s <- @sections do %>
-            <c-headline :if={s.title != "" and s.rows != []} class="hh-group-title">{s.title}</c-headline>
-            <c-item :for={r <- s.rows} class={"hh-row #{if r.current, do: "on"}"} kind={r.kind} current={to_string(r.current)} phx-click="pick" phx-value-kind={r.kind} phx-value-id={r.id}>
-              <c-group class="hh-row-main">
-                <c-label class="hh-row-label">{r.label}</c-label>
-                <c-hint :if={r.sub != ""} class="hh-row-sub">{r.sub}</c-hint>
-              </c-group>
-              <c-status :if={r.current} class="hh-row-here">here</c-status>
+            <c-headline :if={s.title != "" and s.rows != []} class="hh-section">{s.title}</c-headline>
+            <c-item :for={r <- s.rows} class={"hh-row #{if r.current, do: "on"}"} current={to_string(r.current)} phx-click="pick" phx-value-id={r.id}>
+              <c-label class="hh-row-label">{r.label}</c-label>
+              <c-hint :if={r.sub != ""} class="hh-row-sub">{r.sub}</c-hint>
             </c-item>
           <% end %>
-          <c-empty :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{empty_word(@view, @sheet, @filter)}</c-empty>
+          <c-empty :if={Enum.all?(@sections, &(&1.rows == []))} class="hh-empty">{if @filter == "", do: "Nothing here", else: "Nothing matches"}</c-empty>
         </c-group>
       </c-list>
     </c-group>
     """
   end
 
-  # the words come from handheld.scm, by key
-  defp copy(view, key), do: Map.get(view.copy, key, "")
-
-  defp empty_word(view, "commands", ""), do: copy(view, "commands-empty")
-  defp empty_word(view, _sheet, ""), do: copy(view, "empty")
-  defp empty_word(view, _sheet, _q), do: copy(view, "matchless")
-
-  defp sheet(%{state: %{minibuffer: mb}} = assigns) when is_map(mb) do
-    assigns = assign(assigns, mb: mb, split: mb_split(mb))
-
+  # a prompt of the editor: its question, a field, and its rows to tap
+  defp prompt(assigns) do
     ~M"""
-    <c-group class="hh-sheet-layer">
-      <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
+    <c-group class="hh-layer hh-prompt-layer">
+      <c-group class="hh-scrim" phx-click="key" phx-value-k="C-g"></c-group>
       <c-minibuffer class="hh-sheet" role="dialog" aria-modal="true">
         <c-header class="hh-sheet-head">
-          <c-label class="hh-kicker">{sheet_kicker(@state, @view)}</c-label>
-          <c-text class="hh-spacer"></c-text>
-          <c-action class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-action>
+          <c-headline class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</c-headline>
+          <c-action class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">Cancel</c-action>
         </c-header>
-        <c-headline class="hh-sheet-title">{String.trim_trailing(@mb.prompt, ": ")}</c-headline>
-        <c-hint class="hh-sheet-hint">{sheet_hint(@mb, @view)}</c-hint>
-        <c-group class="hh-sheet-input">
-          <c-text class="hh-prompt">›</c-text>
-          <c-input class="hh-mb-input"><%= with {pre, cur, post} <- @split do %>{pre}<c-cursor class="cursor">{cur}</c-cursor>{post}<% end %></c-input>
-          <c-text class="hh-spacer"></c-text>
-          <c-metric class="hh-count" name="matches">{count_text(@mb)}</c-metric>
-        </c-group>
-        <c-completions class="hh-sheet-rows">
+        <c-field class="hh-filter" name="answer">
+          <input id="mb-input" class="hh-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" value={Map.get(@mb, :input, "")} />
+          <c-action class="hh-send armed" phx-click="key" phx-value-k="RET">OK</c-action>
+        </c-field>
+        <c-completions class="hh-rows">
           <%= for {c, i} <- Enum.with_index(@mb.candidates) do %>
-            <%= if Map.get(c, :kind) == "separator" do %>
-              <c-headline class="hh-sep">{c.label}</c-headline>
-            <% else %>
-              <c-completion class={"hh-row #{if c.selected, do: "on"}"} selected={to_string(c.selected == true)} phx-click="cand" phx-value-i={i}>
-                <c-text class="hh-row-box">{if c.selected, do: "●", else: ""}</c-text>
-                <c-group class="hh-row-main">
-                  <c-label class="hh-row-label">{c.label}</c-label>
-                  <c-hint :if={Map.get(c, :hint) not in [nil, ""]} class="hh-row-sub">{c.hint}</c-hint>
-                </c-group>
-              </c-completion>
-            <% end %>
+            <c-headline :if={Map.get(c, :kind) == "separator"} class="hh-section">{c.label}</c-headline>
+            <c-completion :if={Map.get(c, :kind) != "separator"} class={"hh-row #{if c.selected, do: "on"}"} selected={to_string(c.selected == true)} phx-click="cand" phx-value-i={i}>
+              <c-label class="hh-row-label">{c.label}</c-label>
+              <c-hint :if={Map.get(c, :hint) not in [nil, ""]} class="hh-row-sub">{c.hint}</c-hint>
+            </c-completion>
           <% end %>
         </c-completions>
-        <c-key-hints :if={@mb.legend != []} class="hh-sheet-legend">
-          <c-text :for={row <- @mb.legend} class="hh-legend"><c-action-key>{row.key}</c-action-key> {row.label}</c-text>
-        </c-key-hints>
       </c-minibuffer>
     </c-group>
     """
   end
 
-  defp sheet(%{state: %{transient: t}} = assigns) do
-    # each row's place over every group, the index the menu selects by
-    {groups, _} =
-      Enum.map_reduce(t.groups, 0, fn g, i ->
-        {%{g | items: Enum.with_index(g.items, i)}, i + length(g.items)}
-      end)
-
-    assigns = assign(assigns, t: t, groups: groups)
-
+  # a menu of the editor: a row runs its own key
+  defp menu(assigns) do
     ~M"""
-    <c-group class="hh-sheet-layer">
-      <c-group class="hh-sheet-scrim" phx-click="key" phx-value-k="C-g"></c-group>
-      <c-list class="hh-sheet" kind="transient" role="dialog" aria-modal="true">
+    <c-group class="hh-layer hh-prompt-layer">
+      <c-group class="hh-scrim" phx-click="key" phx-value-k="C-g"></c-group>
+      <c-list class="hh-sheet" kind="menu" role="dialog" aria-modal="true">
         <c-header class="hh-sheet-head">
-          <c-label class="hh-kicker">{if @state.pending != [], do: Enum.join(@state.pending, " ") <> " · ", else: ""}transient</c-label>
-          <c-text class="hh-spacer"></c-text>
-          <c-action class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">C-g</c-action>
+          <c-headline class="hh-sheet-title">{@t.title}</c-headline>
+          <c-action class="hh-sheet-quit" phx-click="key" phx-value-k="C-g">Cancel</c-action>
         </c-header>
-        <c-headline class="hh-sheet-title">{@t.title}</c-headline>
-        <c-hint :if={@t[:subtitle] not in [nil, ""]} class="hh-sheet-hint">{@t.subtitle}</c-hint>
-        <c-tabs :if={@t[:chips] not in [nil, []]} class="hh-tchips">
-          <c-tab :for={chip <- @t.chips} class={"hh-tchip #{if chip.active, do: "on"}"} selected={to_string(chip.active == true)}>{chip.label}</c-tab>
-        </c-tabs>
-        <c-group class="hh-sheet-rows">
-          <%= for group <- @groups do %>
-            <c-headline class="hh-group-title">{group.title}</c-headline>
-            <c-item
-              :for={{item, i} <- group.items}
-              class={"hh-trow #{if item.selected, do: "on"} #{item.behavior}"}
-              selected={to_string(item.selected == true)}
-              phx-click="trow"
-              phx-value-i={i}
-            >
-              <c-action-key class="hh-tkey">{item.key}</c-action-key>
-              <c-group class="hh-row-main">
-                <c-label class="hh-trow-desc">{item.description}</c-label>
-                <c-value :if={item.value != ""} class="hh-trow-value">{item.value}</c-value>
-              </c-group>
-              <c-text class="hh-chev">›</c-text>
+        <c-group class="hh-rows">
+          <%= for g <- @t.groups do %>
+            <c-headline :if={g.title not in [nil, ""]} class="hh-section">{g.title}</c-headline>
+            <c-item :for={item <- g.items} class="hh-row" phx-click="key" phx-value-k={item.key}>
+              <c-label class="hh-row-label">{item.description}</c-label>
+              <c-hint :if={item.value not in [nil, ""]} class="hh-row-sub">{item.value}</c-hint>
             </c-item>
           <% end %>
-          <c-group :if={@t[:detail]} class="hh-detail">
-            <c-headline class="hh-group-title">{@t.detail.title}</c-headline>
-            <c-field :for={row <- @t.detail.rows} class={"hh-detail-row #{row.tone}"}>
-              <c-label class="hh-detail-k">{row.k}</c-label>
-              <c-value class="hh-detail-v">{row.v}</c-value>
-            </c-field>
-            <c-hint :if={@t.detail.note != ""} class="hh-detail-note">{@t.detail.note}</c-hint>
-          </c-group>
         </c-group>
-        <c-key-hints class="hh-sheet-legend">
-          <%= if @t[:legend] not in [nil, []] do %>
-            <c-text :for={row <- @t.legend} class="hh-legend" phx-click="keys" phx-value-ks={row.key}><c-action-key>{row.key}</c-action-key> {row.label}</c-text>
-          <% else %>
-            <c-text class="hh-legend" phx-click="key" phx-value-k="RET"><c-action-key>RET</c-action-key> invoke</c-text>
-            <c-text class="hh-legend" phx-click="key" phx-value-k="C-g"><c-action-key>C-g</c-action-key> quit</c-text>
-          <% end %>
-        </c-key-hints>
       </c-list>
     </c-group>
     """
   end
 
-  # ── small helpers ──────────────────────────────────────────────────
-
-  defp rail?(nil, _view), do: false
-  defp rail?(leaf, view), do: leaf.render_mode not in view.railless
-
-  # the line point is on. The desktop marks it with the client's caret;
-  # the phone draws no caret, so the window's point line marks it here
-  defp point_line?(ln, leaf), do: Map.get(ln, :current) == true or ln.num == Map.get(leaf, :line)
-
-  defp ml_name(nil), do: ""
-  defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name
-  defp ml_name(leaf), do: leaf.buffer
-
-  defp info(%{modeline_info: info}) when is_binary(info), do: info
-  defp info(_leaf), do: ""
-
-  defp dirty?(nil, _view), do: false
-  defp dirty?(leaf, view), do: not view.chat and leaf.modified == true and leaf.read_only != true
-
-  defp echo(%{echo: echo}) when is_binary(echo), do: echo
-  defp echo(_state), do: ""
-
-  defp rail_top(nil), do: 0
-
-  defp rail_top(leaf) do
-    total = max(Compos.Core.Buffer.line_of(leaf.buffer, byte_size(leaf.text)) || 1, 1)
-    line = max(Map.get(leaf, :line) || 1, 1)
-    if total <= 1, do: 0, else: round((line - 1) / (total - 1) * 100)
+  # the page's stylesheet and script as this boot serves them: a page
+  # that loaded older ones reloads (mobile.js bootCheck)
+  defp assets(boot) do
+    Compos.Ui.MobileLayouts.file_version(boot, "mobile.css") <> "/" <>
+      Compos.Ui.MobileLayouts.file_version(boot, "mobile.js")
   end
 
-  defp placeholder(view, %{minibuffer: mb}) when is_map(mb), do: copy(view, "narrow")
-  defp placeholder(view, _state), do: copy(view, "placeholder")
+  defp name(nil), do: ""
+  defp name(%{modeline_name: n}) when is_binary(n) and n != "", do: n
+  defp name(leaf), do: leaf.buffer
 
-  defp hh_root_class(leaf) do
+  defp echo(%{echo: e}) when is_binary(e), do: e
+  defp echo(_), do: ""
+
+  defp root_class(leaf) do
     case Map.get(leaf, :blk_root) do
       %{class: c} when is_binary(c) -> c
       _ -> ""
     end
   end
-
-  defp echo_error?(echo) when is_binary(echo),
-    do: echo == "Quit" or String.ends_with?(echo, "is undefined") or String.starts_with?(echo, "No ")
-
-  defp echo_error?(_), do: false
-
-  defp sheet_kicker(%{pending: [_ | _] = pending}, _view), do: Enum.join(pending, " ")
-  defp sheet_kicker(%{minibuffer: %{style: style}}, _view) when is_binary(style), do: style
-  defp sheet_kicker(_, view), do: copy(view, "kicker")
-
-  defp sheet_hint(%{style: s}, view) when s in ["question", "filter"], do: copy(view, "prompt-" <> s)
-  defp sheet_hint(%{completing: true}, view), do: copy(view, "prompt-completing")
-  defp sheet_hint(_, view), do: copy(view, "prompt")
-
-  defp count_text(%{total: total, sel: sel}) when is_integer(total) and total > 0 do
-    "#{min((sel || 0) + 1, total)}/#{total}"
-  end
-
-  defp count_text(_), do: ""
-
-  defp mb_split(mb), do: LiveShared.mb_split(mb, " ")
 
   @impl true
   def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)

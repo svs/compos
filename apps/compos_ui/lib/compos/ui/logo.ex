@@ -75,7 +75,15 @@ defmodule Compos.Ui.Logo do
 
   # This daemon's web app manifest: the static one, with the icon above.
   # Each daemon is its own origin, so each installs as its own app.
-  get "/manifest" do
+  get "/manifest", do: send_manifest(conn, %{})
+
+  # the phone's app: it opens on /m and stays there
+  get "/manifest/phone" do
+    send_manifest(conn, %{"id" => "/m", "start_url" => "/m", "scope" => "/m", "name" => "compos phone",
+      "display" => "standalone", "display_override" => ["standalone"]})
+  end
+
+  defp send_manifest(conn, overrides) do
     manifest =
       Application.app_dir(:compos_ui, "priv/static/manifest.webmanifest")
       |> File.read!()
@@ -88,6 +96,7 @@ defmodule Compos.Ui.Logo do
           "purpose" => "any"
         }
       ])
+      |> Map.merge(overrides)
 
     conn
     |> put_resp_content_type("application/manifest+json", nil)

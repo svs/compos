@@ -249,12 +249,20 @@
              (equal? mode "dired-mode")
              (and (assoc mode *list-modes*) #t)))))
 
+;; a live report redraws itself every tick and holds no links to follow:
+;; painting it is lane work for nothing (*perf* gave ~4 jobs a tick)
+(define goto-address-skip-modes '("perf-mode" "telemetry-mode"))
+
+(define (goto-address--report? buf)
+  (and (member (buffer-local-value 'mode-name buf) goto-address-skip-modes) #t))
+
 ;; text a reader sees: not a hidden buffer, not a process transcript,
-;; not a listing
+;; not a listing, not a live report
 (define (goto-address--eligible? buf)
   (and (not (string-prefix? " " buf))
        (not (process-running? buf))
-       (not (goto-address--listing? buf))))
+       (not (goto-address--listing? buf))
+       (not (goto-address--report? buf))))
 
 ;; a rule whose buffer died removes with an error; the entry is stale
 ;; either way, so the error says nothing a caller can use

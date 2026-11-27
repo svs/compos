@@ -2270,6 +2270,30 @@
                        (else args-json))))
     (list verb (mcp-proxy--clip target 300))))
 
+;; why the outsider gate asks: the calls in CODE whose effects can send,
+;; spend or destroy, as " — apropos: external". The card shows the first
+;; line of the code only, and the call that asked is often further down.
+(define (mcp-proxy--outsider-reason code)
+  (let* ((forms (and code (ignore-errors (lambda () (scheme-read code)))))
+         (calls (if (and (pair? forms) (boundp (quote permission-send-effects?)))
+                    (mcp-proxy--calls forms)
+                    '()))
+         (hits (filter (lambda (n)
+                         (let ((e (catalog-entry (quote function) n)))
+                           (and e (permission-send-effects? (plist-get e (quote effects))))))
+                       calls))
+         (names (fold (lambda (acc n) (if (member n acc) acc (append acc (list n)))) '() hits)))
+    (cond ((pair? (mcp-proxy--shell-commands (if (pair? forms) forms '()))) " - it runs a shell command")
+          ((pair? names)
+           (string-append " - "
+             (string-join
+               (map (lambda (n)
+                      (string-append n ": "
+                        (string-join (plist-get (catalog-entry (quote function) n) (quote effects)) " ")))
+                    names)
+               ", ")))
+          (else ""))))
+
 (define (mcp-proxy--ask-title slug name args-json raw)
   ;; the card names what the rule engine asked for, and the rule: the old
   ;; title took the first risky word anywhere in the text, so a payload that
@@ -2287,7 +2311,9 @@
           (if (and buf (boundp (quote permission-outside-text?)) (permission-outside-text? buf))
               ;; the outsider gate: a turn an event or a message started may
               ;; not run what can send, spend or destroy without the user
-              (string-append "in a turn you did not start: " (mcp-proxy--clip (first-line (or code raw)) 200))
+              (string-append "in a turn you did not start"
+                             (mcp-proxy--outsider-reason code)
+                             ": " (mcp-proxy--clip (first-line (or code raw)) 200))
               (string-append name ": " (mcp-proxy--clip (first-line (or code raw)) 200)))))))
 
 (define (mcp-proxy--ask slug name args-json author raw)

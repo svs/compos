@@ -12,6 +12,7 @@ defmodule Compos.Core.Desktop do
   alias Compos.Core.{Editor, Events, Session, WindowSpec}
 
   @debounce 1_500
+  @locals_debounce 30_000
 
   # The desktop must never wait on the Session for long. The Session runs one
   # form at a time, so a slow shell command or agent turn parks every caller
@@ -153,6 +154,15 @@ defmodule Compos.Core.Desktop do
     {result, state} = do_restore(state)
     {:reply, result, state}
   end
+
+  # A buffer's locals change all the time (a live report such as *perf*
+  # stores its sample every tick) and the desktop holds none of them, but a
+  # Scheme global may move with them. So a locals change asks for a save
+  # later, and never pushes back a save that is already on its way.
+  defp on_info({:editor_change, :locals}, %{timer: nil} = state),
+    do: {:noreply, %{state | timer: Process.send_after(self(), :flush, @locals_debounce)}}
+
+  defp on_info({:editor_change, :locals}, state), do: {:noreply, state}
 
   defp on_info({:editor_change, _}, state) do
     if state.timer, do: Process.cancel_timer(state.timer)

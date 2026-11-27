@@ -164,11 +164,28 @@
 
 ;; the Scheme an eval-scheme call carries: its code, or the code inside
 ;; the JSON arguments of the MCP proxy
+(define (permission--raw-json raw)
+  (and (string? raw) (string-prefix? "{" (string-trim raw))
+       (ignore-errors (lambda () (json-parse raw)))))
+
+;; the code of an eval call: the arguments themselves, or, in the tool call
+;; Claude Code sends over ACP, its rawInput
 (define (permission-eval-code raw)
-  (if (and (string? raw) (string-prefix? "{" (string-trim raw))
-           (boundp (quote mcp-proxy--code)))
-      (or (mcp-proxy--code raw) raw)
-      raw))
+  (let* ((j (permission--raw-json raw))
+         (input (and (pair? j) (plist-get j 'rawInput)))
+         (code (or (and (pair? j) (plist-get j 'code))
+                   (and (pair? input) (plist-get input 'code)))))
+    (if (string? code) code raw)))
+
+;; the tool a request names. Claude Code titles an MCP call "compos:
+;; eval-scheme"; its tool call carries the real name, mcp__compos__eval-scheme
+(define (permission-tool-name title raw)
+  (let* ((j (permission--raw-json raw))
+         (name (and (pair? j) (plist-get j 'name))))
+    (if (and (string? name)
+             (or (member name *permission-eval-tools*) (member name *permission-read-eval-tools*)))
+        name
+        title)))
 
 (define (permission-shell-text title kind raw)
   "the text decide's deny-list reads: a shell line whole, the shell commands of an eval-scheme payload, #f for any other call"
@@ -202,6 +219,7 @@
 
 (define (permission-may-send? title kind raw)
   "#t when the call can send, spend or destroy: a shell line, an eval-scheme payload that runs a shell command, calls a function with such an effect or does not read, a tool or command with such an effect or none on record"
+  (let ((title (permission-tool-name title raw)))
   (cond ;; eval-scheme-read refuses any code that writes, so it never sends
         ((member title *permission-read-eval-tools*) #f)
         ((member title *permission-eval-tools*)
@@ -223,7 +241,7 @@
            (or (not e) (permission-send-effects? (plist-get e 'effects)))))
         ;; the adapter's own kinds: delete destroys, fetch goes out, and
         ;; other says nothing of what it does
-        (else (and (member kind '("delete" "fetch" "other")) #t))))
+        (else (and (member kind '("delete" "fetch" "other")) #t)))))
 
 ;; (permit? BUF TITLE KIND RAW) -> allow-always | ask | reject: the one
 ;; permission decision. Every lane asks it: the ACP request, the direct

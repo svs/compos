@@ -585,15 +585,34 @@
 
 ;; review first (it waits on a human), then doing, todo, inbox, waiting;
 ;; within a state by priority, deadline, age
+(define (todo--sort-key t)
+  "T's place in the status order: state, then priority, deadline, creation."
+  (list (todo--rank (plist-get t 'state) '("review" "doing" "todo" "inbox" "waiting" "done" "cancelled"))
+        (todo--rank (or (plist-get t 'priority) "B") '("A" "B" "C"))
+        (todo--date-num (plist-get t 'deadline))
+        (or (plist-get t 'created) "")))
+
 (define (todo--sort ts)
-  (map cadr
-       (sort (map (lambda (t)
-                    (list (list (todo--rank (plist-get t 'state) '("review" "doing" "todo" "inbox" "waiting" "done" "cancelled"))
-                                (todo--rank (or (plist-get t 'priority) "B") '("A" "B" "C"))
-                                (todo--date-num (plist-get t 'deadline))
-                                (or (plist-get t 'created) ""))
-                          t))
-                  ts))))
+  (map cadr (sort (map (lambda (t) (list (todo--sort-key t) t)) ts))))
+
+(define (todo--sort-trees ts)
+  "TS, already in status order with parents pulled in, regrouped so each
+   tree of the list stays together and the trees go in the order of the
+   most urgent task in each. A done parent pulled in for an open child no
+   longer puts its tree out of place. Inside a tree the order stays."
+  (let* ((ids (map (lambda (t) (plist-get t 'id)) ts))
+         (by-id (map (lambda (t) (list (plist-get t 'id) t)) ts))
+         (root-of (lambda (t)
+                    (let loop ((t t) (n 0))
+                      (let ((pid (plist-get t 'parent)))
+                        (if (and pid (member pid ids) (< n 50))
+                            (loop (cadr (assoc pid by-id)) (+ n 1))
+                            (plist-get t 'id))))))
+         (roots (fold (lambda (acc t) (let ((r (root-of t))) (if (member r acc) acc (append acc (list r))))) '() ts))
+         (members (lambda (r) (filter (lambda (t) (equal? (root-of t) r)) ts)))
+         (best (lambda (r) (car (sort (map todo--sort-key (members r))))))
+         (ordered (map caddr (sort (map (lambda (r i) (list (best r) i r)) roots (iota (length roots)))))))
+    (apply append (map members ordered))))
 
 (define (todo-list &optional spec)
   "(todo-list [SPEC]) — tasks, most urgent first. SPEC keys: state (one or a list), all, project, assignee (none = unassigned), tag, text, due-before, overdue, ready, parent, source (a prefix). Without state or all, only open tasks."
@@ -1094,7 +1113,9 @@
     (reverse out)))
 
 (define (todo--rows buf)
-  (list-keep buf (todo--sections buf (todo--with-parents (todo--resort (todo-list (todo--view-spec buf)) (todo--sort-by buf))))))
+  (let* ((by (todo--sort-by buf))
+         (ts (todo--with-parents (todo--resort (todo-list (todo--view-spec buf)) by))))
+    (list-keep buf (todo--sections buf (if (equal? by "status") (todo--sort-trees ts) ts)))))
 
 ;;; `<` cycles what a section is; a section heading is a row of kind sep
 (define *todo-groupings* '("none" "group" "project" "status"))

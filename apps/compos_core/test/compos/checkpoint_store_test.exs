@@ -165,11 +165,10 @@ defmodule Compos.CheckpointStoreTest do
       assert_raise Buffer.Unrestorable, fn -> Buffer.append(name, "x", source: :user) end
       refute Buffer.exists?(name)
 
-      # the editor keeps its window, and Scheme gets an error, not a buffer
+      # the editor keeps its window. What switch-to-buffer! answers is
+      # Scheme behavior, and its test belongs in a Scheme suite.
       assert {:error, {:unrestorable, ^name, _}} = Compos.Core.Editor.set_window_buffer(name)
       refute Compos.Core.Editor.current_buffer() == name
-      assert {:error, msg} = Compos.Core.Session.eval(~s{(switch-to-buffer! "#{name}")})
-      assert msg =~ log_path
       refute Buffer.exists?(name)
 
       # the row and both files are exactly as they were

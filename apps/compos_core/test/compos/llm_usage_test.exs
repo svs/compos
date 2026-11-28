@@ -17,8 +17,8 @@ defmodule Compos.LLMUsageTest do
   end
 
   test "output and input limits come from the catalog, per provider" do
-    assert ModelCatalog.max_tokens("deepseek:deepseek-chat") == 384_000
-    assert ModelCatalog.context_limit("deepseek:deepseek-chat") == 1_000_000
+    assert ModelCatalog.max_tokens("deepseek:deepseek-v4-flash") == 393_216
+    assert ModelCatalog.context_limit("deepseek:deepseek-v4-flash") == 1_048_576
     assert ModelCatalog.context_limit("anthropic:claude-sonnet-5") == 1_000_000
     assert ModelCatalog.max_tokens("no-such-model") == nil
   end
@@ -47,10 +47,10 @@ defmodule Compos.LLMUsageTest do
   end
 
   test "an adapter's provider/model id prices as provider:model" do
-    assert ModelCatalog.price("opencode/claude-sonnet-5") ==
-             ModelCatalog.price("opencode:claude-sonnet-5")
+    assert ModelCatalog.price("anthropic/claude-sonnet-5") ==
+             ModelCatalog.price("anthropic:claude-sonnet-5")
 
-    assert ModelCatalog.price("opencode/claude-sonnet-5") != nil
+    assert ModelCatalog.price("anthropic/claude-sonnet-5") != nil
     assert ModelCatalog.price("no-such-provider/no-such-model") == nil
   end
 

@@ -11,7 +11,7 @@ defmodule Compos.UsageShapeTest do
 
   use ExUnit.Case, async: true
 
-  alias Compos.Core.{LLM, LLMDb}
+  alias Compos.Core.{LLM, LLMUsage}
 
   # the request plan's word on the usage shape (llm-request-plan); which
   # provider has which shape is tested in llm-gate-test.scm
@@ -62,7 +62,7 @@ defmodule Compos.UsageShapeTest do
     u = LLM.usage_strings(Map.put(openai_usage(), :total_cost, 0.0042), @openai_shape)
 
     assert u["cost"] == 0.0042
-    assert LLMDb.cost("openai:gpt-5.6-luna", u) == 0.0042
+    assert LLMUsage.cost("openai:gpt-5.6-luna", u) == 0.0042
   end
 
   test "the hit rate the editor reports is now the real one" do

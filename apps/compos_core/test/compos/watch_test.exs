@@ -86,6 +86,8 @@ defmodule Compos.WatchTest do
     send(ctx.server, {:file_event, pid, {Path.join(ctx.real, rel), [:modified]}})
   end
 
+  # The subscription is global: the editor's own watcher reports too, on
+  # roots such as the temp folder. Every refute names this test's root.
   # swallow events until the mailbox stays empty for longer than the debounce
   # window, so the next assertion starts from real silence
   defp quiet do
@@ -106,11 +108,11 @@ defmodule Compos.WatchTest do
     event(ctx, pid, "c.txt")
 
     assert_receive {:fs_changed, ^root}, @settle
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
 
     event(ctx, pid, "d.txt")
     assert_receive {:fs_changed, ^root}, @settle
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
   end
 
   test "a long stream of writes still refreshes before it ends", ctx do
@@ -132,17 +134,17 @@ defmodule Compos.WatchTest do
 
   # a repository is a deep watch: the diff buffer follows the whole tree
   test "git's object churn is silent, the index and the refs are not", ctx do
-    {_root, pid} = watch_quietly(ctx, deep: true)
+    {root, pid} = watch_quietly(ctx, deep: true)
 
     event(ctx, pid, "sub/.git/objects/aa/bbccdd")
     event(ctx, pid, ".git/objects/ee/ff0011")
     event(ctx, pid, ".git/index.lock")
     event(ctx, pid, ".git/COMMIT_EDITMSG")
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
 
     for path <- [".git/index", ".git/HEAD", ".git/refs/heads/main", "sub/.git/index"] do
       event(ctx, pid, path)
-      assert_receive {:fs_changed, _}, @settle, "expected #{path} to make the tree stale"
+      assert_receive {:fs_changed, ^root}, @settle, "expected #{path} to make the tree stale"
       quiet()
     end
   end
@@ -171,7 +173,7 @@ defmodule Compos.WatchTest do
       at_home.(rel)
     end
 
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
 
     for rel <- ["init.scm", "custom.scm", "packages/mine.scm", "groups/g1/group.scm", "notes/todo.md"] do
       at_home.(rel)
@@ -185,7 +187,7 @@ defmodule Compos.WatchTest do
 
     event(ctx, pid, "sub/deep.txt")
     event(ctx, pid, "sub/deeper/deep.txt")
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
 
     event(ctx, pid, "top.txt")
     assert_receive {:fs_changed, ^root}, @settle
@@ -203,7 +205,7 @@ defmodule Compos.WatchTest do
     assert Watch.watching(ctx.server) == [root]
 
     event(ctx, pid, "sub/deep.txt")
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
 
     event(ctx, pid, "top.txt")
     assert_receive {:fs_changed, ^root}, @settle
@@ -248,9 +250,10 @@ defmodule Compos.WatchTest do
   end
 
   test "an event for an unwatched backend is ignored", ctx do
+    root = ctx.real
     send(ctx.server, {:file_event, self(), {Path.join(ctx.real, "a.txt"), [:modified]}})
 
-    refute_receive {:fs_changed, _}, @settle
+    refute_receive {:fs_changed, ^root}, @settle
     assert Watch.watching(ctx.server) == []
   end
 

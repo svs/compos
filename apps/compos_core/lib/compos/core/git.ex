@@ -272,10 +272,16 @@ defmodule Compos.Core.Git do
         hunk -> hunk.end_byte
       end
 
+    # git names a binary change in the header and gives it no hunks
+    binary? =
+      hunk_ranges == [] and
+        (String.contains?(patch_head, "\nBinary files ") or
+           String.contains?(patch_head, "GIT binary patch"))
+
     %{
       file_a: strip_ab(old_file || command_old),
       file_b: strip_ab(new_file || command_new),
-      binary?: false,
+      binary?: binary?,
       patch_head: patch_head,
       start_byte: base,
       end_byte: end_byte,

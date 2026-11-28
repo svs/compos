@@ -120,7 +120,7 @@ defmodule Compos.MarkdownTest do
     end
 
     test "every node's range slices cleanly out of the source" do
-      text = File.read!(Path.join(__DIR__, "../../../../docs/groups.md")) |> binary_part(0, 4000)
+      text = File.read!(Path.join(__DIR__, "../../../../docs/02. CONCEPTS.md")) |> binary_part(0, 4000)
       {:ok, tree} = Markdown.parse(text)
 
       walk = fn walk, nodes ->

@@ -34,10 +34,21 @@ defmodule Compos.Ui.BlockList do
         socket
       end
 
+    # The list's element is new with each instance of the component. A
+    # stream reset removes only the items of the stream that reset, so a
+    # new instance (after the socket rejoins) that reused the element
+    # left the old instance's items in it, emptied, above the new ones.
+    fresh? = not Map.has_key?(socket.assigns, :list_id)
+
+    socket =
+      if fresh?,
+        do: assign(socket, :list_id, "#{prefix}-g#{System.unique_integer([:positive])}"),
+        else: socket
+
     socket =
       socket
       |> assign(base_assigns)
-      |> sync_stream(first?, prefix, items, new_keys, assigns.buf, assigns.b.tag)
+      |> sync_stream(first? or fresh?, prefix, items, new_keys, assigns.buf, assigns.b.tag)
       |> assign(
         prev_keys: new_keys,
         prev_parts: new_parts,
@@ -102,7 +113,7 @@ defmodule Compos.Ui.BlockList do
     <c-list class="block-list-root">
     <.dynamic_tag
       tag_name={@b.tag}
-      id={@id}
+      id={@list_id}
       class={@b.class}
       phx-update="stream"
       data-block-list="true"

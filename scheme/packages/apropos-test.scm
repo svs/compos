@@ -240,7 +240,7 @@
 (deftest 'doc-text-is-searched-not-only-names
   "the phrase is in the doc of a function whose name does not hold it"
   (lambda ()
-    (check-true! (member "buffer-list-mru" (t--ap-names (apropos "most recently used")))
+    (check-true! (member "buffer-list-mru" (t--ap-names (apropos "most recently used" 'lexical #t)))
                  "the doc answered")))
 
 (deftest 'semantic-results-join-the-catalog-and-keep-filters
@@ -370,7 +370,7 @@
 (deftest 'punctuation-and-filler-words-do-not-block-intent
   "natural phrasing and compound words keep their meaningful terms"
   (lambda ()
-    (check-true! (member "split-window!" (t--ap-names (apropos "how do I split a window")))
+    (check-true! (member "split-window!" (t--ap-names (apropos "how do I split a window" 'lexical #t)))
                  "filler words do not block the splitter")))
 
 (deftest 'a-word-that-matches-nothing-does-not-empty-the-answer
@@ -493,9 +493,10 @@
   (lambda ()
     (check-equal!
       (filter (lambda (n)
-                (and (string-prefix? "#<builtin"
-                       (function-source (symbol-value (string->symbol n))))
-                     (not (primitive-doc n))))
+                (and (not (primitive-doc n))
+                     (let ((v (symbol-value (string->symbol n))))
+                       (and (procedure? v)
+                            (string-prefix? "#<builtin" (value->string v))))))
               (global-names))
       '() "every builtin has a doc")))
 

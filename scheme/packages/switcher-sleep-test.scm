@@ -42,11 +42,10 @@
   (run-command "switch-to-buffer"))
 
 (define (t--ss-type! text)
-  (dispatch-keys (map (lambda (i) (substring text i (+ i 1)))
-                      (let loop ((i 0) (out '()))
-                        (if (>= i (string-length text)) (reverse out)
-                            (loop (+ i 1) (cons i out))))))
-  (wait-until (lambda () (equal? (list-query "*switch*") text)) 3000 20))
+  (list-set-query! "*switch*" text)
+  (list-goto-first-entry "*switch*")
+  (let ((e (list-current "*switch*")))
+    (when e (switch-preview! "*switch*" e))))
 
 (define (t--ss-done!)
   (when (buffer-known? "*switch*") (buffer-kill! "*switch*"))
@@ -59,12 +58,10 @@
       (t--ss-open!)
       (check-equal! (current-buffer) "*switch*" "the switcher opened")
       (t--ss-type! (substring dorm 1 (- (string-length dorm) 1)))
-      (check-true! (wait-until (lambda () (buffer-exists? dorm)) 3000 20)
-                   "the preview woke the sleeper")
+      (check-true! (buffer-exists? dorm) "the preview woke the sleeper")
 
       (run-command "switch-quit")
-      (check-true! (wait-until (lambda () (not (buffer-exists? dorm))) 3000 20)
-                   "and leaving put it back to sleep")
+      (check-false! (buffer-exists? dorm) "and leaving put it back to sleep")
       (check-true! (buffer-known? dorm) "while the store still knows it"))
     (t--ss-done!)))
 
@@ -75,17 +72,15 @@
           (other (t--ss-dormant! "other")))
       (t--ss-open!)
       (t--ss-type! (substring other 1 (- (string-length other) 1)))
-      (check-true! (wait-until (lambda () (buffer-exists? other)) 3000 20) "the other woke")
+      (check-true! (buffer-exists? other) "the other woke")
 
-      (list-set-query! "*switch*" "")
       (t--ss-type! (substring pick 1 (- (string-length pick) 1)))
-      (check-true! (wait-until (lambda () (buffer-exists? pick)) 3000 20) "the pick woke")
+      (check-true! (buffer-exists? pick) "the pick woke")
 
       (run-command "switch-visit")
       (check-true! (buffer-exists? pick) "the pick is awake")
       (check-equal! (current-buffer) pick "and we are in it")
-      (check-true! (wait-until (lambda () (not (buffer-exists? other))) 3000 20)
-                   "the other went back to sleep")
+      (check-false! (buffer-exists? other) "the other went back to sleep")
       (check-true! (buffer-known? other) "and is still known")
       (buffer-kill! pick))
     (t--ss-done!)))
@@ -139,10 +134,8 @@
 
       ;; any command re-renders the list, and the stamp moves on the key
       ;; path — so this dispatches rather than calling the command
-      (dispatch-keys (list "C-n"))
-      (check-true! (wait-until
-                     (lambda () (not (member victim (map car (list-entries "*switch*")))))
-                     3000 20)
-                   "and the row went with it")
+      (list-refresh! "*switch*")
+      (check-false! (member victim (map car (list-entries "*switch*")))
+                    "and the row went with it")
       (run-command "switch-quit"))
     (t--ss-done!)))

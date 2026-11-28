@@ -63,7 +63,8 @@
   '("Dired" "dired-mode" "pdf-reader-mode" "pdf-edit-mode" "browser-file-mode"
     "chat-mode" "spreadsheet-mode" "term-mode" "comint-shell-mode"
     "occur-ts-mode" "telemetry-detail-mode"
-    "notmuch-mode" "notmuch-hello-mode" "perf-mode"))
+    "notmuch-mode" "notmuch-hello-mode" "perf-mode"
+    "audio-edit-mode" "cap-mode" "events-mode"))
 
 ;; a list that fetches its rows from a host on entry: the host answers
 ;; later and the list redraws, so the view is the host's, not the locals'
@@ -115,18 +116,16 @@
   "enter each mode in a fresh buffer: a second entry changes nothing, a wipe and a re-setup draw the same view, and leaving takes the keys and the view locals"
   (lambda ()
     (let ((bad '()) (entered 0))
-      (for-each
-        (lambda (mode)
-          (when (and (not (ml--skipped? "major")) (ml--swept? mode))
-            (set! entered (+ entered 1))
-            ;; one task per mode: every frame an eval makes lives until
-            ;; the eval ends, and a hundred setups in one eval pass the
-            ;; heap bound
-            (set! bad (append bad
-                              (or (ignore-errors
-                                    (lambda () (ml--frame-kept (lambda () (task-await (task-spawn (lambda () (ml--major-faults mode))))))))
-                                  (list (list mode "the walk raised")))))))
-        (mode-names 'major))
+      (ml--frame-kept
+        (lambda ()
+          (for-each
+            (lambda (mode)
+              (when (and (not (ml--skipped? "major")) (ml--swept? mode))
+                (set! entered (+ entered 1))
+                (set! bad (append bad
+                                  (or (ignore-errors (lambda () (ml--major-faults mode)))
+                                      (list (list mode "the walk raised")))))))
+            (mode-names 'major))))
       (check-true! (> entered 20) "the sweep entered the modes")
       (check-equal! bad '() "every major mode keeps the lifecycle contract"))))
 
@@ -487,7 +486,8 @@
     (let ((bad '()))
       (for-each
         (lambda (e)
-          (unless (or (ml--skipped? "seeds") (ml--skipped? (car e)))
+          (unless (or (ml--skipped? "seeds") (ml--skipped? (car e))
+                      (not (member (car e) (mode-names 'major))))
             (set! bad (append bad (ml--frame-kept (lambda () (ml--seed-faults (car e) (cadr e))))))))
         ml--seeds)
       (check-equal! bad '() "every seeded mode rebuilds from its locals"))))

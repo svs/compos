@@ -96,6 +96,35 @@ defmodule Compos.Ui.BlockListStreamTest do
     refute html5 =~ "First block"
   end
 
+  # A rejoin makes a new list component whose stream has a new ref, and a
+  # stream reset removes only the items of its own ref: the old items stayed
+  # in the reused element as empty boxes. A new instance draws a new element.
+  test "a new mount draws the list in a new element; updates keep it", %{conn: conn} do
+    {buf, p1} = make_list_buf("*blist-stream-4*")
+    list_id = fn html ->
+      [_, id] = Regex.run(~r/<c-transcript[^>]*\sid="([^"]+)"/, html)
+      id
+    end
+
+    {:ok, view1, html1} = live(conn, "/b/" <> URI.encode_www_form(buf))
+    id1 = list_id.(html1)
+
+    Buffer.append(buf, "Second block\n", source: :editor)
+    p2 = Buffer.byte_size(buf)
+    Buffer.set_local(buf, "render-blocks", [
+      pl(tag: "c-transcript", class: "ag-scroll", isolate: true, follow: true, anchor: "t",
+        children: [
+          pl(tag: "c-agent", class: "ag-prose", range: [0, p1], format: "markdown"),
+          pl(tag: "c-agent", class: "ag-prose", range: [p1, p2], format: "markdown")
+        ])
+    ])
+    assert list_id.(render(view1)) == id1
+
+    {:ok, _view2, html2} = live(build_conn(), "/b/" <> URI.encode_www_form(buf))
+    assert html2 =~ "Second block"
+    refute list_id.(html2) == id1
+  end
+
   test "blocks mode snapshot skips full rope flattening and overlays" do
     {buf, _p1} = make_list_buf("*blist-stream-2*")
     Buffer.insert(buf, "tail")

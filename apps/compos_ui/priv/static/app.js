@@ -204,7 +204,6 @@
   // the text before it. No counting back to a line mark, and nothing
   // to be wrong by: markup the renderer took out is not in the run.
   const utf8 = new TextEncoder();
-  const PREVIEW_UTF8 = utf8;
   const CARET_RE = /<span class="pt"><\/span>/g;
 
   // The caret at a soft wrap. Point is the first byte of the lower
@@ -1279,7 +1278,7 @@
         for (const run of d.querySelectorAll("span.s[data-s]")) {
           const start = parseInt(run.dataset.s, 10);
           if (!Number.isFinite(start) || start > at) continue;
-          const len = PREVIEW_UTF8.encode(run.textContent).length;
+          const len = utf8.encode(run.textContent).length;
           if (at <= start + len) { target = run; within = at - start; }
         }
         if (!target) return false;
@@ -1292,7 +1291,7 @@
         let bytes = 0;
         const text = node.textContent;
         while (chars < text.length && bytes < within) {
-          bytes += PREVIEW_UTF8.encode(text[chars]).length;
+          bytes += utf8.encode(text[chars]).length;
           chars += 1;
         }
         if (bytes !== within) return false;
@@ -2300,6 +2299,10 @@
       mounted() {
         if (this.bootCheck()) return;
         Telem.attach(this);
+        // every page-level listener below goes with this hook: destroyed()
+        // aborts the controller and so removes them all at once
+        this.listeners = new AbortController();
+        const signal = this.listeners.signal;
         this.handleEvent("navigate", ({url}) => window.location.assign(url));
         keysHook = this;
         // the release of Cmd ends a walk of a window's stack
@@ -2325,8 +2328,8 @@
             if (document.querySelector("c-tabs.ml-tabs[data-walk]")) this.pushEvent("group_tab_walk_end", {});
           }, TAB_WALK_SETTLE_MS);
         };
-        window.addEventListener("keydown", this.tabWalkH, true);
-        window.addEventListener("keyup", this.tabWalkH, true);
+        window.addEventListener("keydown", this.tabWalkH, { capture: true, signal });
+        window.addEventListener("keyup", this.tabWalkH, { capture: true, signal });
         // the release of the last modifier ends a cycle of a pane's
         // windows: the chat card over the window goes (window-flash.scm)
         this.flashEndH = (e) => {
@@ -2334,7 +2337,7 @@
           if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey) return;
           if (document.querySelector(".window-flash")) this.pushEvent("window_flash_end", {});
         };
-        window.addEventListener("keyup", this.flashEndH, true);
+        window.addEventListener("keyup", this.flashEndH, { capture: true, signal });
         this.whichKeyHeld = new Set();
         this.whichKeyQuery = "";
         this.whichKeyFiltering = false;
@@ -2622,7 +2625,7 @@
           if (sel) payload.sel = sel.slice(0, 20000);
           Telem.push(this, "key", payload);
         };
-        window.addEventListener("keydown", this.handler);
+        window.addEventListener("keydown", this.handler, { signal });
         this.keyupH = (e) => {
           if (e.target.closest && e.target.closest(".terminal-view")) return;
           const modifier = WHICH_KEY_MODIFIERS[e.key];
@@ -2631,7 +2634,7 @@
             this.applyWhichKeyFilter();
           }
         };
-        window.addEventListener("keyup", this.keyupH);
+        window.addEventListener("keyup", this.keyupH, { signal });
 
         // system clipboard: Cmd-V fires a native paste event (cmd
         // keys pass through keySpec untouched)
@@ -2663,7 +2666,7 @@
           // browser has, as bytes; a caret says there is none
           this.pushEvent("paste", { text, seq: composPredict.barrier(), ...this.selBytes(true) });
         };
-        window.addEventListener("paste", this.pasteH);
+        window.addEventListener("paste", this.pasteH, { signal });
 
         // --- the editable surface --------------------------------
         // A DOM position inside a line, as the source byte it names:
@@ -2928,7 +2931,7 @@
             text: text || ""
           });
         };
-        window.addEventListener("beforeinput", this.beforeInputH, true);
+        window.addEventListener("beforeinput", this.beforeInputH, { capture: true, signal });
         // A chord with Option starts a macOS dead-key composition
         // even when its keydown was prevented: M-x opened the prompt,
         // and the composition then ended with a character, which
@@ -2950,8 +2953,8 @@
             from: -1, to: -1, text: e.data || ""
           });
         };
-        window.addEventListener("compositionstart", this.compStartH, true);
-        window.addEventListener("compositionend", this.compEndH, true);
+        window.addEventListener("compositionstart", this.compStartH, { capture: true, signal });
+        window.addEventListener("compositionend", this.compEndH, { capture: true, signal });
         // The selection of the active editable surface as a byte range
         // of the text version it shows: {win, v, from, to}. A caret gives
         // from = to when CARET is true, and no range otherwise. {} when
@@ -2982,8 +2985,8 @@
           if (e.type === "cut") this.pushEvent("cut", { ...p, seq: composPredict.barrier() });
           else this.pushEvent("copy", p);
         };
-        window.addEventListener("copy", this.clipH);
-        window.addEventListener("cut", this.clipH);
+        window.addEventListener("copy", this.clipH, { signal });
+        window.addEventListener("cut", this.clipH, { signal });
         // After a patch the active editable takes focus and the DOM
         // caret stands on the server's cursor, so the next intent
         // targets the byte the server means. A prompt, a panel, or
@@ -3119,7 +3122,7 @@
               performance.now() - (this._motionAt || 0) < 1200);
           }, 150);
         };
-        document.addEventListener("selectionchange", this.selChangeH);
+        document.addEventListener("selectionchange", this.selChangeH, { signal });
         // Pointer gestures: a drag moves with a button down, a click ends on
         // pointerup. Capture phase, so a handler that stops the
         // event still stamps it.
@@ -3128,7 +3131,7 @@
           this._gestureAt = performance.now();
         };
         ["pointerdown", "pointerup", "pointermove", "touchstart", "touchend"]
-          .forEach((t) => window.addEventListener(t, this.gestureH, true));
+          .forEach((t) => window.addEventListener(t, this.gestureH, { capture: true, signal }));
         this.syncEditable();
         // the selection of the active editable surface, as bytes
         // KEEP: a keyboard motion leaves the mark alone (Emacs: the
@@ -3307,7 +3310,7 @@
           this.pushEvent("mouse", pos ? { win, line: pos.line, col: pos.col } : { win });
           if (pos && e.detail <= 1) this.pushEvent("mouse_click", { win });
         };
-        window.addEventListener("mouseup", this.mouseH);
+        window.addEventListener("mouseup", this.mouseH, { signal });
 
         // viewport geometry: overall estimate for split math, plus
         // exact per-window rows (line height varies per buffer)
@@ -3339,7 +3342,6 @@
         // measure runs after paint, never on the key path, and is
         // sent only when it changed, like win_rows.
         this.lastWrapMaps = "";
-        const wrapUtf8 = new TextEncoder();
         // the text nodes that are the source's own bytes. The cursor
         // placeholder and the completion popup are chrome.
         const sourceTextNodes = (root, doc) => {
@@ -3411,7 +3413,7 @@
           }
           return { starts, top };
         };
-        const byteAt = (text, i) => wrapUtf8.encode(text.slice(0, i)).length;
+        const byteAt = (text, i) => utf8.encode(text.slice(0, i)).length;
         // one screen of margin above and below what is visible: a
         // move at the edge still has rows to land on, and the scroll
         // that follows brings a fresh measure
@@ -3574,7 +3576,7 @@
           clearTimeout(this._rt);
           this._rt = setTimeout(this.sendViewport, 150);
         };
-        window.addEventListener("resize", this.resizeH);
+        window.addEventListener("resize", this.resizeH, { signal });
 
         // Any client's JS failure lands in *Messages*: a webview
         // has no extension and often no open inspector, and an
@@ -3591,8 +3593,8 @@
           } catch (_) {}
 
         };
-        window.addEventListener("error", this.jsErrH);
-        window.addEventListener("unhandledrejection", this.jsErrH);
+        window.addEventListener("error", this.jsErrH, { signal });
+        window.addEventListener("unhandledrejection", this.jsErrH, { signal });
 
         // the system's light or dark appearance, for theme-follow-system
         if (window.composAppearance) window.composAppearance.watch(this);
@@ -3646,7 +3648,7 @@
             }
           }
         };
-        window.addEventListener("wheel", this.wheelH, { passive: false });
+        window.addEventListener("wheel", this.wheelH, { passive: false, signal });
 
         // client-scrolled buffers mirror their position into the
         // daemon (S1): scroll doesn't bubble, so capture it, and
@@ -3676,7 +3678,7 @@
             window.composRemeasure();
           }, 250));
         };
-        window.addEventListener("scroll", this.cscrollH, true);
+        window.addEventListener("scroll", this.cscrollH, { capture: true, signal });
         this.restoreClientScroll();
 
         this.focusH = () => {
@@ -3736,8 +3738,8 @@
           document.body.classList.add("unfocused");
           this.syncCursorFocus();
         };
-        window.addEventListener("focus", this.focusH);
-        window.addEventListener("blur", this.blurH);
+        window.addEventListener("focus", this.focusH, { signal });
+        window.addEventListener("blur", this.blurH, { signal });
 
         // "unfocused" hides every cursor, and only the focus event
         // above clears it. The line below sets it from a poll, and a
@@ -3753,13 +3755,13 @@
             this.focusH();
           }
         };
-        window.addEventListener("pointerdown", this.proveFocusH, true);
-        window.addEventListener("keydown", this.proveFocusH, true);
+        window.addEventListener("pointerdown", this.proveFocusH, { capture: true, signal });
+        window.addEventListener("keydown", this.proveFocusH, { capture: true, signal });
 
         // a click is the one thing that says the mark is gone: it
         // ends the run of keyboard motion the report above keeps
         this.pointerMarkH = () => { this._motionAt = 0; };
-        window.addEventListener("pointerdown", this.pointerMarkH, true);
+        window.addEventListener("pointerdown", this.pointerMarkH, { capture: true, signal });
 
         // A drawn Markdown link carries its target. Clicking the
         // text follows the link instead of putting the caret inside
@@ -3779,13 +3781,13 @@
             href: el.dataset.href
           });
         };
-        window.addEventListener("mousedown", this.linkDownH, true);
+        window.addEventListener("mousedown", this.linkDownH, { capture: true, signal });
         // a tab that comes back to the front re-reads the poll, and
         // by then the answer is the true one
         this.visibilityH = () => {
           if (document.visibilityState === "visible") this.proveFocusH();
         };
-        document.addEventListener("visibilitychange", this.visibilityH);
+        document.addEventListener("visibilitychange", this.visibilityH, { signal });
 
         if (!document.hasFocus()) document.body.classList.add("unfocused");
         this.syncCursorFocus();
@@ -4008,34 +4010,8 @@
       destroyed() {
         Telem.detach(this);
         this.clientErrorsConnected = false;
-        window.removeEventListener("error", this.jsErrH);
-        window.removeEventListener("unhandledrejection", this.jsErrH);
-        window.removeEventListener("keydown", this.handler);
-        window.removeEventListener("keyup", this.keyupH);
-        window.removeEventListener("keydown", this.tabWalkH, true);
-        window.removeEventListener("keyup", this.tabWalkH, true);
-        window.removeEventListener("keyup", this.flashEndH, true);
+        if (this.listeners) this.listeners.abort();
         clearTimeout(this.tabWalkT);
-        window.removeEventListener("resize", this.resizeH);
-        window.removeEventListener("wheel", this.wheelH);
-        window.removeEventListener("scroll", this.cscrollH, true);
-        window.removeEventListener("focus", this.focusH);
-        window.removeEventListener("blur", this.blurH);
-        window.removeEventListener("pointerdown", this.proveFocusH, true);
-        window.removeEventListener("pointerdown", this.pointerMarkH, true);
-        ["keydown", "pointerdown", "pointerup", "pointermove", "touchstart", "touchend"]
-          .forEach((t) => window.removeEventListener(t, this.gestureH, true));
-        window.removeEventListener("keydown", this.proveFocusH, true);
-        window.removeEventListener("mousedown", this.linkDownH, true);
-        document.removeEventListener("visibilitychange", this.visibilityH);
-        window.removeEventListener("paste", this.pasteH);
-        window.removeEventListener("copy", this.clipH);
-        window.removeEventListener("cut", this.clipH);
-        window.removeEventListener("beforeinput", this.beforeInputH, true);
-        window.removeEventListener("compositionstart", this.compStartH, true);
-        window.removeEventListener("compositionend", this.compEndH, true);
-        document.removeEventListener("selectionchange", this.selChangeH);
-        window.removeEventListener("mouseup", this.mouseH);
         if (this.sink) this.sink.remove();
       }
     }

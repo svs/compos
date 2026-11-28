@@ -385,13 +385,14 @@
         (else (apply append (map eval-read--binders (eval-read--items x))))))
 
 (define (eval-read--effects names)
-  "(NAME EFFECTS) for each of NAMES the catalog declares, in one pass"
+  "(NAME EFFECTS) for each of NAMES the catalog declares, in one pass;
+a command's stamp is the stamp of the procedure it binds"
   (let loop ((es *catalog*) (out '()))
     (if (null? es)
         out
         (let ((e (car es)))
           (loop (cdr es)
-                (if (and (equal? (plist-get e 'kind) "function")
+                (if (and (member (plist-get e 'kind) '("function" "command"))
                          (member (plist-get e 'name) names)
                          (not (assoc (plist-get e 'name) out)))
                     (cons (list (plist-get e 'name) (plist-get e 'effects)) out)

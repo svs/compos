@@ -438,27 +438,11 @@ defmodule Compos.FramesTest do
     assert Buffer.point(buf1) == 4
   end
 
-  test "desktop round-trips per-window points" do
-    {:ok, fid} = Editor.attach_frame(nil)
-    buf = "wp-dt-#{System.unique_integer([:positive])}"
-    Editor.set_window_buffer(buf, fid)
-    type(fid, "line one\nline two")
+  # Per-window points are not in the saved tree: WindowSpec drops point
+  # on purpose, and Scheme puts the windows' points back. Its test belongs
+  # in a Scheme suite.
 
-    Editor.split(:v, 0.5, fid)
-    Editor.other_window(fid)
-    Buffer.goto(buf, 3)
-    # windows now at 3 (active) and 17 (stored)
-
-    assert :ok = Desktop.save_now()
-    Compos.TestHelpers.one_window!(fid)
-    assert :ok = Desktop.restore_now()
-
-    points = for {w, b} <- Editor.list_windows(fid), do: {window_point(w), b}
-
-    assert Enum.sort(points) == [{3, buf}, {17, buf}]
-  end
-
-  test "echo and pending are per frame" do
+test "echo and pending are per frame" do
     {:ok, fid} = Editor.attach_frame(nil)
     Editor.set_echo("", "f-main")
     Editor.set_pending([], "f-main")

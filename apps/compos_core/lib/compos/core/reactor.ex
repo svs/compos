@@ -408,10 +408,13 @@ defmodule Compos.Core.Reactor do
     :exit, _ -> nil
   end
 
-  # the group tag is the 'group buffer-local; 'companion-of is the
-  # pre-group pointer that doubles as a tag (same fallback as buffer-group)
+  # the group is the 'group-id buffer-local. Scheme moves an older 'group
+  # tag into it and sets 'group to #f, so reading 'group alone found no
+  # group at all. 'companion-of is the pre-group pointer that doubles as a
+  # tag (same fallback as buffer-group).
   defp group_of(b) do
-    Compos.Core.Buffer.get_local(b, "group") ||
+    Compos.Core.Buffer.get_local(b, "group-id") ||
+      Compos.Core.Buffer.get_local(b, "group") ||
       Compos.Core.Buffer.get_local(b, "companion-of")
   rescue
     _ -> nil

@@ -1,14 +1,16 @@
-;;; canvas-overview.scm --- spatial HTML-in-Canvas overview of groups, panes,
-;;; window stacks, and buffers.
+;;; canvas-overview.scm --- spatial HTML-in-Canvas overview of groups, visible
+;;; panes, hidden panes, window stacks, and buffers.
 ;;;
-;;; M-x canvas-overview opens an interactive infinite canvas showing every
-;;; group, its panes, each pane's stack of windows, and its remaining buffers.
-;;; Expanding a pane stack spreads all stacked windows out as live-updating
-;;; HTML cards painted inside <canvas layoutsubtree> via drawElementImage
-;;; (with automatic CSS-transform fallback when the browser flag is off).
+;;; M-x overview opens a fullscreen spatial canvas over the current group's
+;;; real panes model: all visible panes (for example the three panes on screen)
+;;; plus every hidden pane and every pane's window stack. Real pane focus,
+;;; swap, shift, hide, restore, and stack-cycle commands operate directly on
+;;; the group's panes model and animate live on the canvas; quitting restores
+;;; the frame with every change applied.
 
 (require 'panes-mode)
 (require 'preview)
+(require 'advice)
 
 (domain! 'windows)
 (effects! '(read))
@@ -17,6 +19,8 @@
 (define *canvas-overview-lines* 16)
 (define *canvas-overview-max-unshown* 24)
 (define *canvas-overview-rev* 0)
+(define *canvas-overview-open?* #f)
+(define *canvas-overview-win* #f)
 (define *canvas-overview-watches* '())
 (define *canvas-overview-dirty* '())
 (define *canvas-overview-extra-watch* '())
@@ -36,6 +40,11 @@
 (define (canvas-overview--visible?)
   (and (buffer-known? *canvas-overview-buffer*)
        (and (find (lambda (w) (equal? (cadr w) *canvas-overview-buffer*)) (window-list)) #t)))
+
+(define (canvas-overview--active?)
+  (and *canvas-overview-open?*
+       (buffer-known? *canvas-overview-buffer*)
+       (equal? (window-buffer (active-window)) *canvas-overview-buffer*)))
 
 (define (canvas-overview--short-name buf)
   (cond ((not (string? buf)) "")
@@ -141,7 +150,7 @@
             (and b (group-color-hex (buffer-tab-color b))))))
       #f))
 
-(define (canvas-overview--window-data l k idx active-win)
+(define (canvas-overview--window-data l k idx active-win pane-focused?)
   (let* ((buf (panes-window-buffer l k))
          (bufs (or (panes-window-buffers l k) '()))
          (h (panes-handle l k))
@@ -150,15 +159,12 @@
          (mode (or (panes-window-mode l k)
                    (and buf (buffer-known? buf) (buffer-local-value 'mode-name buf))
                    "fundamental-mode"))
-         (preview (if (= idx 0)
-                      (canvas-overview--buffer-preview buf pos)
-                      ;; Stacked windows still send a real preview so opening a stack is instant.
-                      (canvas-overview--buffer-preview buf pos))))
+         (preview (canvas-overview--buffer-preview buf pos)))
     (list 'key k
           'index idx
           'front (= idx 0)
-          'live (and live? #t)
-          'selected (and live? (equal? h active-win))
+          'live (and (or live? (and (canvas-overview--active?) (= idx 0))) #t)
+          'selected (and (= idx 0) (or (and live? (equal? h active-win)) pane-focused?))
           'mode mode
           'shortMode (canvas-overview--short-mode mode)
           'buffer (or buf "")
@@ -168,20 +174,74 @@
           'point (or pos 0)
           'preview preview)))
 
+(define (canvas-overview--hidden-window-data w idx)
+  (let* ((k (plist-get w 'key))
+         (bufs (or (ignore-errors (lambda () (panes--names-of (or (plist-get w 'buffers) '())))) '()))
+         (buf (and (pair? bufs) (car bufs)))
+         (pos (or (plist-get w 'point) 0))
+         (mode (or (plist-get w 'mode)
+                   (and buf (buffer-known? buf) (buffer-local-value 'mode-name buf))
+                   "fundamental-mode"))
+         (preview (canvas-overview--buffer-preview buf pos)))
+    (list 'key k
+          'index idx
+          'front (= idx 0)
+          'live #f
+          'selected #f
+          'mode mode
+          'shortMode (canvas-overview--short-mode mode)
+          'buffer (or buf "")
+          'shortName (canvas-overview--short-name buf)
+          'buffers bufs
+          'bufferCount (length bufs)
+          'point pos
+          'preview preview)))
+
 (define (canvas-overview--pane-data l pane focus-id active-win)
   (let* ((pid (plist-get pane 'id))
          (share (or (plist-get pane 'share) 1))
+         (focused? (equal? pid focus-id))
          (keys (or (panes-pane-keys l pid) '()))
          (wins (let loop ((ks keys) (i 0) (acc '()))
                  (if (null? ks)
                      (reverse acc)
                      (loop (cdr ks) (+ i 1)
-                           (cons (canvas-overview--window-data l (car ks) i active-win) acc))))))
+                           (cons (canvas-overview--window-data l (car ks) i active-win focused?) acc))))))
     (list 'id pid
           'share share
-          'focused (equal? pid focus-id)
+          'hidden #f
+          'focused focused?
           'windowCount (length wins)
           'windows wins)))
+
+(define (canvas-overview--hidden-pane-data hp)
+  (let* ((pid (plist-get hp 'id))
+         (share (or (plist-get hp 'share) 1))
+         (at (or (plist-get hp 'at) 0))
+         (raw-wins (or (plist-get hp 'windows) '()))
+         (wins (let loop ((ws raw-wins) (i 0) (acc '()))
+                 (if (null? ws)
+                     (reverse acc)
+                     (loop (cdr ws) (+ i 1)
+                           (cons (canvas-overview--hidden-window-data (car ws) i) acc))))))
+    (list 'id pid
+          'share share
+          'at at
+          'hidden #t
+          'focused #f
+          'windowCount (length wins)
+          'windows wins)))
+
+(define (canvas-overview--hidden-buffers l)
+  (if (not l)
+      '()
+      (apply append
+             (map (lambda (hp)
+                    (apply append
+                           (map (lambda (w)
+                                  (or (ignore-errors (lambda () (panes--names-of (or (plist-get w 'buffers) '())))) '()))
+                                (or (plist-get hp 'windows) '()))))
+                  (or (panes-hidden l) '())))))
 
 (define (canvas-overview--group-data g active-g active-win all-bufs)
   (let* ((l (if (equal? g active-g)
@@ -191,17 +251,22 @@
                             (and (not (canvas-overview--internal? b))
                                  (equal? (buffer-group b) g)))
                           all-bufs))
-         (focus-id (and l (panes-focus l)))
+         (focus-id (and l (or (panes-focus l) (and (pair? (panes-pane-ids l)) (car (panes-pane-ids l))))))
          (cols (if l
                    (map (lambda (col)
                           (map (lambda (p) (canvas-overview--pane-data l p focus-id active-win)) col))
                         (panes-columns l))
                    '()))
-         (in-wins (if l
-                      (apply append
-                             (map (lambda (k) (or (panes-window-buffers l k) '()))
-                                  (or (panes-window-keys l) '())))
-                      '()))
+         (hidden-panes (if l
+                           (map canvas-overview--hidden-pane-data (or (panes-hidden l) '()))
+                           '()))
+         (in-wins (append
+                    (if l
+                        (apply append
+                               (map (lambda (k) (or (panes-window-buffers l k) '()))
+                                    (or (panes-window-keys l) '())))
+                        '())
+                    (canvas-overview--hidden-buffers l)))
          (unshown-all (filter (lambda (b) (not (member b in-wins))) members))
          (unshown-head (if (> (length unshown-all) *canvas-overview-max-unshown*)
                            (list-head unshown-all *canvas-overview-max-unshown*)
@@ -222,14 +287,15 @@
           'color (canvas-overview--group-color g members)
           'layoutName (if (symbol? layout-sym) (symbol->string layout-sym) (or layout-sym "free"))
           'focusPane (or focus-id "")
-          'hiddenPaneCount (if l (length (or (panes-hidden l) '())) 0)
+          'hiddenPaneCount (length hidden-panes)
+          'hiddenPanes hidden-panes
           'memberCount (length members)
           'columns cols
           'unshownBuffers unshown
           'unshownTotal (length unshown-all))))
 
 (define (canvas-overview-snapshot)
-  "Return the current spatial snapshot plist of groups, panes, window stacks, and buffers."
+  "Return the current spatial snapshot plist of groups, visible panes, hidden panes, window stacks, and buffers."
   (set! *canvas-overview-rev* (+ *canvas-overview-rev* 1))
   (let* ((active-g (frame-group))
          (active-win (active-window))
@@ -249,7 +315,7 @@
           'theme (canvas-overview--theme)
           'groups groups)))
 (public! 'canvas-overview-snapshot
-  "(canvas-overview-snapshot) -- spatial snapshot plist of all groups, panes, window stacks, and buffers")
+  "(canvas-overview-snapshot) -- spatial snapshot plist of all groups, visible panes, hidden panes, window stacks, and buffers")
 
 ;;; Live buffer watches and debounced pushes
 
@@ -289,8 +355,17 @@
                        (filter string?
                                (map (lambda (k) (panes-window-buffer l k))
                                     (or (panes-window-keys l) '())))
+                       '()))
+         (hid-bufs (if l
+                       (filter string?
+                               (map (lambda (hp)
+                                      (let* ((ws (or (plist-get hp 'windows) '()))
+                                             (bs (and (pair? ws)
+                                                      (ignore-errors (lambda () (panes--names-of (or (plist-get (car ws) 'buffers) '())))))))
+                                        (and (pair? bs) (car bs))))
+                                    (or (panes-hidden l) '())))
                        '())))
-    (let loop ((xs (append win-bufs *canvas-overview-extra-watch*)) (acc '()))
+    (let loop ((xs (append win-bufs hid-bufs *canvas-overview-extra-watch*)) (acc '()))
       (cond ((null? xs) (reverse acc))
             ((or (not (string? (car xs)))
                  (canvas-overview--internal? (car xs))
@@ -302,13 +377,11 @@
 (define (canvas-overview--sync-watches! &optional extra)
   (when (list? extra) (set! *canvas-overview-extra-watch* extra))
   (let ((want (canvas-overview--default-watch-buffers)))
-    ;; Remove watches for buffers no longer needed.
     (for-each (lambda (pair)
                 (unless (member (car pair) want)
                   (ignore-errors (lambda () (remove-on-change! (cdr pair))))
                   (set! *canvas-overview-watches* (alist-delete *canvas-overview-watches* (car pair)))))
               *canvas-overview-watches*)
-    ;; Add eager watches for newly tracked buffers so stacked and hidden windows stream live.
     (for-each (lambda (b)
                 (unless (assoc b *canvas-overview-watches*)
                   (let ((id (ignore-errors
@@ -321,17 +394,50 @@
               want)
     want))
 
-(define (canvas-overview--push-layout! _)
+(define (canvas-overview--push-now!)
   (when (canvas-overview--visible?)
     (canvas-overview--sync-watches!)
     (app-post! *canvas-overview-buffer*
                (list 'type "snapshot" 'snapshot (canvas-overview-snapshot)))))
 
+(define (canvas-overview--push-layout! _) (canvas-overview--push-now!))
+
 (define (canvas-overview--on-window-change!)
-  (when (canvas-overview--visible?)
+  (when (and (canvas-overview--visible?) (not (canvas-overview--active?)))
     (debounce! 'canvas-overview-layout 100 canvas-overview--push-layout! #f)))
 
 (add-hook! 'window-state-change-hook 'canvas-overview--on-window-change!)
+
+;;; Advice so every real pane command (swap, shift, focus, cycle, hide, restore,
+;;; layout undo/redo, eat) works directly on the group's panes model while
+;;; overview holds the frame fullscreen.
+
+(define (canvas-overview--focused-pane l)
+  (and l
+       (let ((f (panes-focus l)) (ids (panes-pane-ids l)))
+         (if (and f (member f ids)) f (and (pair? ids) (car ids))))))
+
+(advice-add! 'panes--current-pane 'around 'canvas-overview
+  (lambda (orig l)
+    (if (canvas-overview--active?)
+        (canvas-overview--focused-pane l)
+        (orig l))))
+
+(advice-add! 'panes-key-of-handle 'around 'canvas-overview
+  (lambda (orig l win)
+    (if (and (canvas-overview--active?) (equal? win (active-window)))
+        (let* ((pid (canvas-overview--focused-pane l))
+               (ks (and pid (panes-pane-keys l pid))))
+          (and (pair? ks) (car ks)))
+        (orig l win))))
+
+(advice-add! 'panes-apply! 'around 'canvas-overview
+  (lambda (orig layout)
+    (if (canvas-overview--active?)
+        (let ((stored (panes-layout-set! (panes-unique-buffers (panes--own-keys layout)))))
+          (canvas-overview--push-now!)
+          stored)
+        (orig layout))))
 
 ;;; Optional live-pulse spike demo buffer (only runs while toggled on by user)
 
@@ -368,9 +474,8 @@
           (buffer-create *canvas-overview-demo-buf*))
         (let ((g (frame-group)))
           (when g (buffer-move-to-group! *canvas-overview-demo-buf* g)))
-        (buffer-replace! *canvas-overview-demo-buf* (buffer-text *canvas-overview-demo-buf*)
-                         ";; Live pulse buffer for canvas-overview spike\n")
-        ;; Put the pulse buffer into the first pane stack behind its front window so the user can fan it open.
+        (buffer-delete-range! *canvas-overview-demo-buf* 0 (buffer-size *canvas-overview-demo-buf*))
+        (buffer-append! *canvas-overview-demo-buf* ";; Live pulse buffer for overview spike\n")
         (let* ((l (or (panes-layout) (panes-adopt)))
                (pids (and l (panes-pane-ids l))))
           (when (and l (pair? pids)
@@ -385,17 +490,101 @@
   (when (equal? buf *canvas-overview-buffer*)
     (canvas-overview--demo-stop!)
     (canvas-overview--unwatch-all!)
-    (set! *canvas-overview-extra-watch* '())))
+    (set! *canvas-overview-extra-watch* '())
+    (let ((was-open *canvas-overview-open?*))
+      (set! *canvas-overview-open?* #f)
+      (set! *canvas-overview-win* #f)
+      (when was-open
+        (let ((l (panes-layout)))
+          (when l (ignore-errors (lambda () (panes-apply! l)))))))))
 
 (add-hook! 'kill-buffer-hook 'canvas-overview--on-kill!)
 
-;;; App bridge actions
+;;; Direct pane actions from the canvas UI (same pure panes.scm edits)
 
-(define (canvas-overview--focus-target! group key buf)
+(define (canvas-overview--parse-dir s)
+  (cond ((equal? s "left") 'left)
+        ((equal? s "right") 'right)
+        ((equal? s "up") 'up)
+        ((equal? s "down") 'down)
+        (else #f)))
+
+(define (canvas-overview--focus-pane! pid)
+  (let ((l (panes-layout)))
+    (when (and l (string? pid) (panes-pane l pid))
+      (panes-apply! (panes-set-focus l pid)))))
+
+(define (canvas-overview--swap-panes! a b)
+  (let ((l (panes-layout)))
+    (when (and l (panes-pane l a) (panes-pane l b) (not (equal? a b)))
+      (panes-apply! (panes-set-focus (panes-swap-panes l a b) b)))))
+
+(define (canvas-overview--swap-dir! pid dir-str)
+  (let* ((dir (canvas-overview--parse-dir dir-str))
+         (l (panes-layout)))
+    (when (and l dir)
+      (when (and (string? pid) (panes-pane l pid))
+        (panes-layout-set! (panes-set-focus l pid)))
+      (panes--move-current-pane! dir))))
+
+(define (canvas-overview--shift-window! pid key dir-str)
+  (let* ((dir (canvas-overview--parse-dir dir-str))
+         (l (panes-layout))
+         (num-key (if (string? key) (or (string->number key) key) key)))
+    (when (and l dir)
+      (let* ((l (if (and (string? pid) (panes-pane l pid)) (panes-set-focus l pid) l))
+             (l (if (and num-key (panes-window l num-key)) (panes-focus-window l num-key) l)))
+        (panes-layout-set! l)
+        (panes--shift-window! dir)))))
+
+(define (canvas-overview--cycle-pane! pid step)
+  (let ((l (panes-layout)))
+    (when (and l (string? pid) (panes-pane l pid))
+      (panes-layout-set! (panes-set-focus l pid))
+      (panes--cycle-pane-window! (if (and (number? step) (< step 0)) -1 1)))))
+
+(define (canvas-overview--hide-pane! pid)
+  (let ((l (panes-layout)))
+    (when (and l (string? pid) (panes-pane l pid) (> (panes-pane-count l) 1))
+      (panes-apply! (panes-hide-pane l pid)))))
+
+(define (canvas-overview--restore-pane! pid)
+  (let ((l (panes-layout)))
+    (when l
+      (let ((r (if (and (string? pid) (> (string-length pid) 0))
+                   (panes-restore-pane l pid)
+                   (panes-restore-pane l))))
+        (when (cadr r)
+          (panes-apply! (panes-set-focus (car r) (cadr r))))))))
+
+(define (canvas-overview--swap-hidden! hid vid)
+  "Swap hidden pane HID directly with visible pane VID (or the focused pane)."
+  (let* ((l (panes-layout))
+         (target (or (and (string? vid) (panes-pane l vid) vid)
+                     (canvas-overview--focused-pane l))))
+    (when (and l target (string? hid) (> (string-length hid) 0))
+      (let ((restored (panes-restore-pane l hid)))
+        (when (cadr restored)
+          (let* ((l1 (car restored))
+                 (rpid (cadr restored))
+                 (l2 (panes-swap-panes l1 target rpid))
+                 (l3 (panes-hide-pane l2 rpid)))
+            (panes-apply! (panes-set-focus l3 target))))))))
+
+(define (canvas-overview--enter-target! group key buf hidden-pid)
+  "Exit overview and focus GROUP / KEY / BUF (restoring HIDDEN-PID if hidden) in the live frame."
+  (canvas-overview--demo-stop!)
+  (canvas-overview--unwatch-all!)
+  (set! *canvas-overview-open?* #f)
+  (set! *canvas-overview-win* #f)
   (when (and (string? group) (> (string-length group) 0)
              (not (equal? group (frame-group))))
     (ignore-errors (lambda () (switch-to-group! group))))
   (let* ((l (or (panes-layout) (panes-adopt)))
+         (l (if (and l (string? hidden-pid) (> (string-length hidden-pid) 0))
+                (let ((r (panes-restore-pane l hidden-pid)))
+                  (if (cadr r) (panes-set-focus (car r) (cadr r)) l))
+                l))
          (num-key (if (string? key) (or (string->number key) key) key)))
     (cond ((and l num-key (panes-window l num-key))
            (let* ((next (if (and (string? buf) (> (string-length buf) 0) (buffer-known? buf))
@@ -404,8 +593,10 @@
                   (applied (panes-apply! next))
                   (h (panes-handle applied num-key)))
              (when (and h (window-exists? h)) (select-window! h))))
-          ((and (string? buf) (buffer-known? buf))
-           (display-buffer-other-window! buf)))))
+          ((and l (string? buf) (buffer-known? buf))
+           (panes-apply! l)
+           (display-buffer-other-window! buf))
+          (l (panes-apply! l)))))
 
 (define (canvas-overview--app-request buf method body)
   (and (equal? buf *canvas-overview-buffer*)
@@ -423,9 +614,32 @@
                    (previews (map (lambda (b) (canvas-overview--buffer-preview b #f))
                                   (filter buffer-known? bs))))
               (list 200 (json-encode (list 'ok #t 'buffers previews)))))
-           ((equal? op "focus")
-            (canvas-overview--focus-target! (plist-get o 'group) (plist-get o 'key) (plist-get o 'buffer))
+           ((equal? op "select-pane")
+            (canvas-overview--focus-pane! (plist-get o 'pane))
             (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "swap-pane")
+            (if (and (plist-get o 'paneA) (plist-get o 'paneB))
+                (canvas-overview--swap-panes! (plist-get o 'paneA) (plist-get o 'paneB))
+                (canvas-overview--swap-dir! (plist-get o 'pane) (plist-get o 'dir)))
+            (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "shift-window")
+            (canvas-overview--shift-window! (plist-get o 'pane) (plist-get o 'key) (plist-get o 'dir))
+            (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "cycle-pane")
+            (canvas-overview--cycle-pane! (plist-get o 'pane) (plist-get o 'step))
+            (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "hide-pane")
+            (canvas-overview--hide-pane! (plist-get o 'pane))
+            (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "restore-pane")
+            (canvas-overview--restore-pane! (plist-get o 'pane))
+            (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "swap-hidden")
+            (canvas-overview--swap-hidden! (plist-get o 'hiddenPane) (plist-get o 'visiblePane))
+            (list 200 (json-encode (list 'ok #t 'snapshot (canvas-overview-snapshot)))))
+           ((equal? op "focus")
+            (canvas-overview--enter-target! (plist-get o 'group) (plist-get o 'key) (plist-get o 'buffer) (plist-get o 'hiddenPane))
+            (list 200 (json-encode (list 'ok #t))))
            ((equal? op "demo")
             (canvas-overview--demo-toggle! (and (plist-get o 'start) #t))
             (list 200 (json-encode (list 'ok #t 'demoRunning (and *canvas-overview-demo-on* #t)
@@ -445,9 +659,12 @@
 (effects! '(write display))
 
 (define (canvas-overview--fill! name)
-  (let ((cur (buffer-text name)))
-    (unless (equal? cur canvas-overview--html)
-      (buffer-replace! name cur canvas-overview--html))))
+  (unless (equal? (buffer-text name) canvas-overview--html)
+    (buffer-set-read-only! name #f)
+    (buffer-delete-range! name 0 (buffer-size name))
+    (buffer-append! name canvas-overview--html)
+    (buffer-mark-saved! name)
+    (buffer-set-read-only! name #t)))
 
 (define-mode "canvas-overview-mode"
   (lambda ()
@@ -457,55 +674,94 @@
       (buffer-set-local! name 'render-mode "app"))))
 
 (mode-doc! "canvas-overview-mode"
-  "Spatial HTML-in-Canvas overview of all groups, panes, window stacks, and buffers. Pan and zoom across the canvas, expand any pane stack to watch its windows live-update, and jump straight to any window or buffer.")
+  "Fullscreen HTML-in-Canvas overview of visible panes, hidden panes, window stacks, and buffers. Use your normal pane focus, swap, shift, hide, restore, and stack-cycle keys or drag and click on the canvas; q returns to the updated frame.")
 
 (define (canvas-overview-quit!)
-  "Close the canvas overview window and release its watches."
+  "Close the spatial canvas overview and redraw the frame with every pane edit applied."
   (canvas-overview--demo-stop!)
   (canvas-overview--unwatch-all!)
-  (let ((win (find (lambda (w) (equal? (cadr w) *canvas-overview-buffer*)) (window-list))))
-    (when win
-      (let ((prev (active-window)))
-        (select-window! (car win))
-        (quit-window)
-        (when (and prev (window-exists? prev) (not (equal? prev (car win))))
-          (select-window! prev))))))
+  (let ((was-open *canvas-overview-open?*))
+    (set! *canvas-overview-open?* #f)
+    (set! *canvas-overview-win* #f)
+    (if was-open
+        (let ((l (or (panes-layout) (panes-adopt))))
+          (when l (panes-apply! l)))
+        (let ((win (find (lambda (w) (equal? (cadr w) *canvas-overview-buffer*)) (window-list))))
+          (when win
+            (let ((prev (active-window)))
+              (select-window! (car win))
+              (quit-window)
+              (when (and prev (window-exists? prev) (not (equal? prev (car win))))
+                (select-window! prev))))))))
+
+(define (canvas-overview-enter!)
+  "Exit overview and focus the selected pane in the live frame."
+  (let* ((l (panes-layout))
+         (pid (canvas-overview--focused-pane l))
+         (ks (and l pid (panes-pane-keys l pid)))
+         (k (and (pair? ks) (car ks))))
+    (canvas-overview--enter-target! (frame-group) k #f #f)))
 
 (define-command "canvas-overview-quit" "Close the spatial canvas overview"
   (lambda () (canvas-overview-quit!))
   'modes '(canvas-overview-mode))
 
+(define-command "canvas-overview-enter" "Exit overview into the focused pane"
+  (lambda () (canvas-overview-enter!))
+  'modes '(canvas-overview-mode))
+
 (define-command "canvas-overview-refresh" "Refresh the spatial canvas overview"
-  (lambda ()
-    (when (buffer-known? *canvas-overview-buffer*)
-      (canvas-overview--sync-watches!)
-      (app-post! *canvas-overview-buffer*
-                 (list 'type "snapshot" 'snapshot (canvas-overview-snapshot)))))
+  (lambda () (canvas-overview--push-now!))
   'modes '(canvas-overview-mode))
 
 (mode-quit! "canvas-overview-mode" (lambda (_) (canvas-overview-quit!) #t))
 
 (mode-keys! "canvas-overview-mode"
   '(("q" "canvas-overview-quit")
-    ("g" "canvas-overview-refresh")))
+    ("RET" "canvas-overview-enter")
+    ("g" "canvas-overview-refresh")
+    ("k" "pane-remove")
+    ("r" "pane-restore")))
+
+(define (overview!)
+  "Open the fullscreen spatial HTML-in-Canvas overview over the current group's panes model."
+  (let ((name *canvas-overview-buffer*))
+    (if (canvas-overview--active?)
+        (canvas-overview--push-now!)
+        (let* ((l (or (panes-layout) (panes-adopt)))
+               (l (if l (panes--park-points! l (map car (window-list))) l))
+               (ov-win (or (and *canvas-overview-win* (window-exists? *canvas-overview-win*) *canvas-overview-win*)
+                           (window-id-new!))))
+          (when l (panes-layout-set! l))
+          (unless (buffer-known? name) (buffer-create name))
+          (let ((g (frame-group)))
+            (when (and g (not (equal? (buffer-group name) g)))
+              (buffer-move-to-group! name g)))
+          (unless (equal? (buffer-local-value 'mode-name name) "canvas-overview-mode")
+            (with-current-buffer name (lambda () (set-mode! "canvas-overview-mode"))))
+          (buffer-set-local! name 'app-directory (list (canvas-overview--own-dir)))
+          (canvas-overview--fill! name)
+          (app-reload! name)
+          (buffer-set-local! name 'render-mode "app")
+          (set! *canvas-overview-win* ov-win)
+          (set! *canvas-overview-open?* #t)
+          (set! panes--applying #t)
+          (unwind-protect
+            (lambda ()
+              (window-arrange! (list 'h '(1) (list (list ov-win name))))
+              (select-window! ov-win))
+            (lambda () (set! panes--applying #f)))
+          (canvas-overview--sync-watches!)
+          name))))
+
+;;;###autoload
+(define-command "overview"
+  "Open the fullscreen spatial HTML-in-Canvas overview of visible panes, hidden panes, window stacks, and buffers"
+  (lambda () (overview!)))
 
 ;;;###autoload
 (define-command "canvas-overview"
-  "Open the spatial HTML-in-Canvas overview of groups, panes, window stacks, and buffers"
-  (lambda ()
-    (let ((name *canvas-overview-buffer*))
-      (unless (buffer-known? name) (buffer-create name))
-      (let ((g (frame-group)))
-        (when (and g (not (equal? (buffer-group name) g)))
-          (buffer-move-to-group! name g)))
-      (unless (equal? (buffer-local-value 'mode-name name) "canvas-overview-mode")
-        (with-current-buffer name (lambda () (set-mode! "canvas-overview-mode"))))
-      (buffer-set-local! name 'app-directory (list (canvas-overview--own-dir)))
-      (canvas-overview--fill! name)
-      (app-reload! name)
-      (buffer-set-local! name 'render-mode "app")
-      (canvas-overview--sync-watches!)
-      (display-buffer-other-window! name)
-      name)))
+  "Open the fullscreen spatial HTML-in-Canvas overview of visible panes, hidden panes, window stacks, and buffers"
+  (lambda () (overview!)))
 
 (provide 'canvas-overview)

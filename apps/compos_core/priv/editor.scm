@@ -6232,6 +6232,9 @@
 (public! 'command-rows
   "(command-rows) -- the M-x rows for the current buffer, as the palette and M-x show them; kept per buffer until its keymaps, mode or the command table change")
 
+(public! 'command-candidates
+  "(command-candidates) -- the M-x command names for the current buffer, in scope and not internal, the editor's own first, then the packages', then the apps'")
+
 ;; ROWS with the names in history KEY first, newest first, like history-order.
 (define (command-rows-by-history key rows)
   (let ((hist (filter (lambda (h) (assoc h rows)) (history-items key))))

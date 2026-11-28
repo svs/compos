@@ -57,8 +57,6 @@ html, body {
   transform-origin: 0 0;
 }
 
-/* Cards live either inside <canvas layoutsubtree> (HTML-in-Canvas mode)
-   or inside #dom-layer (CSS-transform fallback mode). */
 .card {
   position: absolute;
   top: 0;
@@ -76,11 +74,7 @@ html, body {
   transition: border-color 140ms ease, box-shadow 180ms ease;
 }
 
-/* In HTML-in-Canvas mode, the canvas itself paints the drop shadow so
-   drawElementImage does not double-shadow or clip. */
-#stage .card {
-  box-shadow: none;
-}
+#stage .card { box-shadow: none; }
 
 .card:hover {
   border-color: color-mix(in srgb, var(--accent) 65%, var(--card-border));
@@ -88,35 +82,34 @@ html, body {
 
 .card.is-selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1.5px var(--accent), 0 14px 34px var(--card-shadow);
+  box-shadow: 0 0 0 2px var(--accent), 0 14px 34px var(--card-shadow);
 }
 
-#stage .card.is-selected {
-  box-shadow: none;
-}
+#stage .card.is-selected { box-shadow: none; }
 
 .card.is-stacked {
   border-style: dashed;
   border-color: color-mix(in srgb, var(--accent) 45%, var(--card-border));
 }
 
-.card.is-match {
-  border-color: #f5b942;
+.card.is-hidden-pane {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #f5b942 52%, var(--card-border));
 }
 
-.card.is-dimmed {
-  opacity: 0.3;
+.card.is-hidden-pane .card-head {
+  background: color-mix(in srgb, #f5b942 9%, var(--card-head));
 }
 
-.card.is-pulsing {
-  border-color: #4ade80;
-}
+.card.is-match { border-color: #f5b942; }
+.card.is-dimmed { opacity: 0.3; }
+.card.is-pulsing { border-color: #4ade80; }
 
 .card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 9px;
+  gap: 5px;
+  padding: 6px 8px;
   background: var(--card-head);
   border-bottom: 1px solid var(--card-border);
   min-height: 32px;
@@ -133,22 +126,15 @@ html, body {
   transition: background 140ms ease, transform 140ms ease, opacity 140ms ease;
 }
 
-.card.is-live .card-dot {
-  background: var(--accent);
-  opacity: 0.9;
-}
-
-.card.is-pulsing .card-dot {
-  background: #4ade80;
-  opacity: 1;
-  transform: scale(1.35);
-}
+.card.is-live .card-dot { background: var(--accent); opacity: 0.9; }
+.card.is-hidden-pane .card-dot { background: #f5b942; opacity: 0.9; }
+.card.is-pulsing .card-dot { background: #4ade80; opacity: 1; transform: scale(1.35); }
 
 .card-title {
   flex: 1;
   min-width: 0;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -172,14 +158,19 @@ html, body {
   flex-shrink: 0;
 }
 
+.card-badge.hidden-tag {
+  background: rgba(245, 185, 66, 0.16);
+  color: #f5b942;
+}
+
 .card-btn {
   appearance: none;
   border: 1px solid var(--card-border);
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   color: var(--fg);
   font: 500 10.5px/1 var(--font-ui);
-  padding: 4px 7px;
-  border-radius: 6px;
+  padding: 3.5px 6px;
+  border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -193,7 +184,6 @@ html, body {
 .card-btn.stack-btn {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--fg);
 }
 
 .card-btn.stack-btn.open {
@@ -201,6 +191,16 @@ html, body {
   color: #0b0d12;
   border-color: var(--accent);
   font-weight: 600;
+}
+
+.card-btn.restore-btn {
+  background: rgba(245, 185, 66, 0.16);
+  border-color: rgba(245, 185, 66, 0.5);
+  color: #f5b942;
+}
+
+.card-btn.restore-btn:hover {
+  background: rgba(245, 185, 66, 0.3);
 }
 
 .card-body {
@@ -215,11 +215,7 @@ html, body {
   background: var(--card-bg);
 }
 
-.card-lines {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
+.card-lines { margin: 0; padding: 0; list-style: none; }
 
 .card-line {
   display: flex;
@@ -244,18 +240,14 @@ html, body {
   flex-shrink: 0;
 }
 
-.card-txt {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
+.card-txt { flex: 1; min-width: 0; overflow: hidden; }
 
 .card-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 5px 9px;
+  gap: 6px;
+  padding: 4px 8px;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--dim);
@@ -264,10 +256,13 @@ html, body {
   flex-shrink: 0;
 }
 
-.card-live-tag {
-  color: #4ade80;
-  font-weight: 600;
+.card-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
+
+.card-live-tag { color: #4ade80; font-weight: 600; }
 
 .card-bufs-strip {
   display: flex;
@@ -293,33 +288,17 @@ html, body {
   white-space: nowrap;
 }
 
-.buf-chip:hover {
-  color: var(--fg);
-  border-color: var(--accent);
-}
-
+.buf-chip:hover { color: var(--fg); border-color: var(--accent); }
 .buf-chip.active {
   color: var(--fg);
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
-/* Compact buffer chip card in the unshown tray */
-.card.card-compact {
-  border-radius: 8px;
-}
+.card.card-compact { border-radius: 8px; }
+.card.card-compact .card-head { padding: 5px 8px; min-height: 28px; border-bottom: none; }
+.card.card-compact.is-expanded .card-head { border-bottom: 1px solid var(--card-border); }
 
-.card.card-compact .card-head {
-  padding: 5px 8px;
-  min-height: 28px;
-  border-bottom: none;
-}
-
-.card.card-compact.is-expanded .card-head {
-  border-bottom: 1px solid var(--card-border);
-}
-
-/* Floating HUD */
 #hud {
   position: fixed;
   top: 12px;
@@ -346,19 +325,8 @@ html, body {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
 }
 
-.hud-title {
-  font-weight: 700;
-  font-size: 12.5px;
-  letter-spacing: -0.01em;
-  padding: 0 4px;
-}
-
-.hud-sep {
-  width: 1px;
-  height: 16px;
-  background: var(--hud-border);
-  margin: 0 2px;
-}
+.hud-title { font-weight: 700; font-size: 12.5px; letter-spacing: -0.01em; padding: 0 4px; }
+.hud-sep { width: 1px; height: 16px; background: var(--hud-border); margin: 0 2px; }
 
 .hud-btn {
   appearance: none;
@@ -372,16 +340,11 @@ html, body {
   white-space: nowrap;
 }
 
-.hud-btn:hover {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-}
-
+.hud-btn:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
 .hud-btn.active {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: var(--fg);
 }
-
 .hud-btn.pulse-on {
   background: rgba(74, 222, 128, 0.18);
   border-color: rgba(74, 222, 128, 0.6);
@@ -389,7 +352,7 @@ html, body {
 }
 
 .hud-search {
-  width: 155px;
+  width: 150px;
   border: 1px solid var(--hud-border);
   background: color-mix(in srgb, var(--bg) 65%, transparent);
   color: var(--fg);
@@ -399,9 +362,7 @@ html, body {
   outline: none;
 }
 
-.hud-search:focus {
-  border-color: var(--accent);
-}
+.hud-search:focus { border-color: var(--accent); }
 
 .hud-pill {
   display: inline-flex;
@@ -416,22 +377,10 @@ html, body {
   cursor: pointer;
 }
 
-.hud-pill .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #f5b942;
-}
+.hud-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #f5b942; }
+.hud-pill.hic-live .dot { background: #4ade80; }
+.hud-pill:hover { border-color: var(--accent); }
 
-.hud-pill.hic-live .dot {
-  background: #4ade80;
-}
-
-.hud-pill:hover {
-  border-color: var(--accent);
-}
-
-/* Diagnostics popover */
 #diag-pop {
   position: fixed;
   top: 56px;
@@ -449,12 +398,7 @@ html, body {
 }
 
 #diag-pop.open { display: block; }
-
-#diag-pop h3 {
-  margin: 0 0 8px 0;
-  font-size: 12.5px;
-  font-weight: 700;
-}
+#diag-pop h3 { margin: 0 0 8px 0; font-size: 12.5px; font-weight: 700; }
 
 .diag-row {
   display: flex;
@@ -469,13 +413,7 @@ html, body {
 .diag-ok { color: #4ade80; font-weight: 600; }
 .diag-no { color: #f5b942; }
 
-.diag-note {
-  margin: 9px 0 0 0;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--dim);
-}
-
+.diag-note { margin: 9px 0 0 0; font-size: 11.5px; line-height: 1.45; color: var(--dim); }
 .diag-note code {
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -485,13 +423,8 @@ html, body {
   border-radius: 4px;
 }
 
-.diag-actions {
-  margin-top: 10px;
-  display: flex;
-  gap: 6px;
-}
+.diag-actions { margin-top: 10px; display: flex; gap: 6px; }
 
-/* Bottom status / help strip */
 #hint {
   position: fixed;
   left: 12px;

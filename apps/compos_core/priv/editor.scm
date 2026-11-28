@@ -67,6 +67,35 @@
 ;; DOMAIN is the subject area; EFFECTS say what invoking it may do.
 (define *catalog* '())
 
+;; Once the editor settles the catalog moves out of the environment table
+;; into a frozen term that is read in place, and *catalog* holds '(). So no
+;; caller ever sees the frozen form: every reader asks catalog--entries and
+;; every writer calls catalog--thaw! first. The key is this session's own,
+;; and survives a reload of this form, so a reload never hides the catalog.
+(define *catalog--frozen-key*
+  (if (boundp '*catalog--frozen-key*)
+      *catalog--frozen-key*
+      (list 'catalog (monotonic-ms))))
+
+(define (catalog--entries)
+  "every catalog entry, newest first, frozen or not"
+  (let ((f (and (boundp 'frozen) (frozen *catalog--frozen-key*))))
+    (if (and (pair? f) (eq? (car f) 'catalog)) (cdr f) *catalog*)))
+
+(define (catalog--thaw!)
+  "bring a frozen catalog back into *catalog* before a write"
+  (let ((f (and (boundp 'frozen) (frozen *catalog--frozen-key*))))
+    (when (and (pair? f) (eq? (car f) 'catalog))
+      (set! *catalog* (cdr f))
+      (frozen-put! *catalog--frozen-key* #f))))
+
+(define (catalog-freeze!)
+  "move the catalog out of the environment table; answer the entry count"
+  (when (and (pair? *catalog*) (boundp 'frozen-put!))
+    (frozen-put! *catalog--frozen-key* (cons 'catalog *catalog*))
+    (set! *catalog* '()))
+  (length (catalog--entries)))
+
 ;; Deriving an index from the catalog costs more than reading it, so a
 ;; reader caches what it built and checks this counter to know the cache
 ;; still answers. Every write to *catalog* moves it.
@@ -145,6 +174,7 @@
     (let* ((key (catalog--key k n qualified))
            (override (assoc key *catalog-overrides*))
            (entry (if override (catalog--source (catalog--merge entry (cdr override))) entry)))
+      (catalog--thaw!)
       (if (member key *catalog-keys*)
           (set! *catalog*
             (cons entry
@@ -159,6 +189,9 @@
 ;; every write ends here: the generation moves and apropos hears about it
 (define (catalog--changed! entry)
   (catalog--touch!)
+  ;; A burst of writes, such as a package load, freezes once it is over.
+  (when (boundp 'debounce!)
+    (debounce! "catalog-freeze" 3000 (lambda (_) (catalog-freeze!)) #f))
   (when (boundp (quote apropos-catalog-changed!))
     (apropos-catalog-changed! entry))
   entry)
@@ -175,18 +208,19 @@
         (let ((key (catalog--key k (catalog--get e 'name) (catalog--get e 'qualified-name))))
           (set! *catalog-overrides*
             (alist-delete *catalog-overrides* key)))
+        (catalog--thaw!)
         (set! *catalog*
           (remove-plists *catalog* 'kind k 'qualified-name (catalog--get e 'qualified-name)))
         (catalog--changed! #f)))
     (and e #t)))
 
-(define (catalog) (reverse *catalog*))
+(define (catalog) (reverse (catalog--entries)))
 
 (define (catalog-entry kind name)
   (let ((k (catalog--string kind)) (n (catalog--string name)))
     (if (and (equal? k "component") (string-contains? n "/"))
-        (find-plist *catalog* 'kind k 'qualified-name n)
-        (find-plist *catalog* 'kind k 'name n))))
+        (find-plist (catalog--entries) 'kind k 'qualified-name n)
+        (find-plist (catalog--entries) 'kind k 'name n))))
 
 (define (catalog--merge entry meta)
   (if (or (null? meta) (null? (cdr meta)))
@@ -221,6 +255,7 @@
           (set! *catalog-overrides*
             (cons (cons key (catalog--merge (if before (cdr before) '()) meta))
                   (alist-delete *catalog-overrides* key)))
+          (catalog--thaw!)
           (set! *catalog*
             (cons updated
                   (remove-plists *catalog* 'kind (catalog--get old 'kind)

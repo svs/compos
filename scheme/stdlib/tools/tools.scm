@@ -434,7 +434,7 @@
 (define (eval-read--effects names)
   "(NAME EFFECTS) for each of NAMES the catalog declares, in one pass;
 a command's stamp is the stamp of the procedure it binds"
-  (let loop ((es *catalog*) (out '()))
+  (let loop ((es (catalog--entries)) (out '()))
     (if (null? es)
         out
         (let ((e (car es)))

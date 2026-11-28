@@ -98,6 +98,7 @@
 (define (t--cache-forget-list-mode! name)
   (set! *list-modes* (alist-delete *list-modes* name))
   (mode-forget! name)
+  (catalog--thaw!)
   (set! *catalog* (remove (lambda (e) (equal? (plist-get e 'name) name)) *catalog*))
   name)
 

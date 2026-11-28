@@ -20,21 +20,36 @@ defmodule Compos.PackageSuiteTest do
 
   @moduletag :packages
 
-  # every clone goes on load-path, so a package finds the clones it
-  # requires; each name of SCHEME_TESTS that has a clone then loads, and its
-  # NAME-test.scm is found beside it
+  # Repo-only by default: local clones under COMPOS_PACKAGE_REPOS never enter
+  # load-path unless SCHEME_TESTS names them, so machine checkouts cannot
+  # shadow bundled packages or change the suite.
   setup_all do
-    repos = System.get_env("COMPOS_PACKAGE_REPOS") || Path.expand("~/.compos-dev/repos")
-    clones = for dir <- Path.wildcard(Path.join(repos, "*")), File.exists?(Path.join(dir, Path.basename(dir) <> ".scm")), do: dir
+    wanted =
+      (System.get_env("SCHEME_TESTS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
 
-    {:ok, _} =
-      Compos.Core.Session.eval(
-        ~s{(begin (set! load-path (append load-path (list #{Enum.map_join(clones, " ", &inspect/1)}))) #t)}
-      )
+    if wanted != [] do
+      repos = System.get_env("COMPOS_PACKAGE_REPOS") || Path.expand("~/.compos-dev/repos")
 
-    for name <- String.split(System.get_env("SCHEME_TESTS") || "", ",", trim: true),
-        Path.join(repos, name) in clones do
-      {:ok, _} = Compos.Core.Session.eval(~s{(begin (require '#{name}) #t)})
+      named =
+        for name <- wanted,
+            dir = Path.join(repos, name),
+            File.exists?(Path.join(dir, name <> ".scm")),
+            do: {name, dir}
+
+      if named != [] do
+        dirs = Enum.map_join(named, " ", fn {_, dir} -> inspect(dir) end)
+
+        {:ok, _} =
+          Compos.Core.Session.eval(
+            ~s{(begin (set! load-path (append load-path (list #{dirs}))) #t)}
+          )
+
+        for {name, _} <- named do
+          {:ok, _} = Compos.Core.Session.eval(~s{(begin (require '#{name}) #t)})
+        end
+      end
     end
 
     :ok

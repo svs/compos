@@ -2738,7 +2738,7 @@ defmodule Compos.Ui.EditorLive do
   defp source_text(%Compos.Core.Rope{} = rope), do: Compos.Core.Rope.to_binary(rope)
   defp source_text(bin) when is_binary(bin), do: bin
 
-  defp blocks_build(raw, source, memo, win, dirty_from \\ 0) do
+  defp blocks_build(raw, source, memo, win, dirty_from) do
     Enum.map_reduce(raw, {0, %{}}, &block_build(&1, source, {memo, win, dirty_from}, &2))
   end
 

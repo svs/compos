@@ -302,3 +302,18 @@
                     "a JSON tail draws in the json colours")
       (check-equal! (chat-view--tool-body "just text") '(content "just text" format "raw")
                     "other text draws as it is"))))
+
+(deftest 'chat-view-card-toggle-rebuilds-only-the-toggled-card
+  "toggling one tool card changes that card and keeps every other block view"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-toggle*")))
+      (chat-view-sync! buf)
+      (let ((before (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
+        (buffer-set-local! buf 'agent-open-cards '("t1"))
+        (chat-view-sync! buf)
+        (let ((after (chat-view-test--children (car (buffer-local-value 'render-blocks buf)))))
+          (check-equal! (nth 0 after) (nth 0 before) "user block view unchanged")
+          (check-equal! (nth 1 after) (nth 1 before) "prose block view unchanged")
+          (let ((details (car (chat-view-test--children (nth 2 after)))))
+            (check-equal! (plist-get details 'open) #t "toggled tool card opens"))))
+      (buffer-kill! buf))))

@@ -2113,7 +2113,12 @@ defmodule Compos.Core.Buffer do
   # everything the renderer needs, in one round trip; line geometry is
   # O(log n) rope lookups, not text scans
   defp on_call({:render_snapshot, win_id}, _from, state) do
-    {text, state} = fetch_text(state)
+    blocks_mode? =
+      Map.get(state.locals, "render-mode") == "blocks" and
+        match?([_ | _], Map.get(state.locals, "render-blocks"))
+
+    {text, state} =
+      if blocks_mode?, do: {Map.get(state, :bin) || "", state}, else: fetch_text(state)
 
     {point, mark} =
       case win_id && state.win_points[win_id] do
@@ -2127,16 +2132,18 @@ defmodule Compos.Core.Buffer do
     {:reply,
      %{
        text: text,
+       size: Rope.byte_size(state.rope),
        rope: state.rope,
+       edit_positions: Map.get(state, :edit_positions, []),
        fontification: state.fontify.cache,
        point: point,
        mark: mark,
        version: state.version,
        modified: state.version != state.saved_version,
        locals: state.locals,
-       overlays: all_overlays(state),
+       overlays: if(blocks_mode?, do: [], else: all_overlays(state)),
        overlay_gen: state.overlay_gen,
-       hidden: hidden_union(state),
+       hidden: if(blocks_mode?, do: [], else: hidden_union(state)),
        narrow_range: state.narrow_range,
        path: state.path,
        read_only: state.read_only,

@@ -227,16 +227,24 @@
 ;; two locals. It runs no mode setup, which is what lets a prompt change
 ;; shape with its table still standing, filter and row intact. SIDE #f
 ;; stops the float.
+(define (window-style-set! name prop val)
+  ;; one CSS custom property in the style NAME's window wears; VAL #f
+  ;; drops it. The popup size and the text scale share the local.
+  (let* ((old (buffer-local-value 'window-style name))
+         (kept (filter (lambda (d) (and (not (string=? d ""))
+                                        (not (string-prefix? (string-append prop ":") d))))
+                       (map string-trim (if (string? old) (string-split old ";") '()))))
+         (all (if val (append kept (list (string-append prop ":" val))) kept)))
+    (buffer-set-local! name 'window-style (if (null? all) #f (string-join all "; ")))))
+
 (define (window-float-class! name side &optional size)
-  (buffer-set-locals! name
-    (list 'window-class
-            (and side (string-append "popup popup-" (symbol->string side)
-                                     (float--extra-classes name)))
-          ;; the share is a number, and CSS cannot read a Scheme list —
-          ;; hand it over as a custom property the stylesheet already reads
-          'window-style
-            (and side size
-                 (string-append "--popup-size:" (number->string (* 100 size)) "%")))))
+  (buffer-set-local! name 'window-class
+    (and side (string-append "popup popup-" (symbol->string side)
+                             (float--extra-classes name))))
+  ;; the share is a number, and CSS cannot read a Scheme list —
+  ;; hand it over as a custom property the stylesheet already reads
+  (window-style-set! name "--popup-size"
+    (and side size (string-append (number->string (* 100 size)) "%"))))
 
 ;; the side a floating buffer wears, from its class, or #f. The class can
 ;; carry more words after the side, so the side is the first word.

@@ -31,7 +31,11 @@
 (define (text-scale-sync! buf)
   (let ((n (scale-clamp (or (buffer-local-value 'text-scale buf) 0))))
     (face-remap-in! buf 'text-scale
-      (if (= n 0) '() (list 'factor (scale-factor n))))))
+      (if (= n 0) '() (list 'factor (scale-factor n))))
+    ;; the window wears the factor too: the header line sits outside the
+    ;; buffer's own style and grows with it
+    (window-style-set! buf "--text-scale-factor"
+      (if (= n 0) #f (format "~a" (scale-factor n))))))
 
 (define (text-scale-apply! buf n0)
   (let ((n (scale-clamp n0)))
@@ -269,6 +273,9 @@
 (public! 'frame-ui-scale
   "(frame-ui-scale [FRAME]) — FRAME's own text scale step, or #f when it follows ui-scale")
 (catalog-meta! 'function "frame-ui-scale" 'domain 'ui 'effects '(read))
+(public! 'scale-factor
+  "(scale-factor N) — the zoom factor string of step N on the 1.2 ladder, clamped to -4..6: 1 is \"1.2\"")
+(catalog-meta! 'function "scale-factor" 'domain 'ui 'effects '(pure))
 (public! 'frame-ui-scale-apply!
   "(frame-ui-scale-apply! N [FRAME]) — give FRAME its own text scale step N; #f makes it follow ui-scale again")
 

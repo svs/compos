@@ -184,7 +184,7 @@
    and goes to capitals; a buffer name is case-significant and keeps its case. */
 .dash-persistent .dseg-chat-title .dseg-v {
   display: block; font-weight: 500; line-height: 1.2;
-  font-family: var(--font-sans); font-size: 13px; letter-spacing: -0.005em;
+  font-family: var(--font-sans); font-size: calc(13px * var(--text-scale-factor, 1)); letter-spacing: -0.005em;
   color: var(--text-strong); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
 .dash-persistent .dseg-chat-title:not(.dseg-title-mono) .dseg-v { text-transform: uppercase; }
@@ -205,7 +205,7 @@
 .dash-persistent .dseg-chat-title .dseg-title-stack .dseg-v { line-height: 1.1; }
 .dash-persistent .dseg-chat-title .dseg-title-stack .dseg-strong { font-weight: 600; }
 .dash-persistent .dseg-chat-title .dseg-path {
-  display: block; font-family: var(--font-mono); font-size: 9px;
+  display: block; font-family: var(--font-mono); font-size: calc(9px * var(--text-scale-factor, 1));
   line-height: 1.1; color: var(--text-dim); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .window.inactive .dash-persistent .dseg-chat-title .dseg-path { color: var(--text-faint); }

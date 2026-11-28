@@ -134,6 +134,9 @@ defmodule Compos.Core.Profiler do
       calls: calls,
       modules: r.modules,
       functions_seen: length(r.functions),
+      # how many of the covered modules ran at all: the hot list is capped,
+      # this count is not
+      modules_called: r.functions |> Enum.map(& &1.module) |> Enum.uniq() |> length(),
       functions: hot,
       # the Scheme call stacks, folded: (PATH SELF-US CALLS), heaviest first
       stacks:

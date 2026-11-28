@@ -19,6 +19,14 @@ COMPOS_DAEMON_REGISTRY=~/.compos-alt/daemons.json \
 Run it from the project root. `mkdir -p` the home first, because the
 redirection opens the log before the daemon creates the directory.
 
+A release reads its VM flags from `rel/vm.args.eex`. `mix run` does not, so
+give a dev daemon the same set through the environment:
+
+```sh
+ERL_FLAGS='+S 4:4 +SDcpu 2:2 +SDio 4 +MBas aobf +MHas aobf +MBlmbcs 512 +MHlmbcs 512 +MBsmbcs 128 +MHsmbcs 128' \
+ERL_FULLSWEEP_AFTER=20 mix run --no-halt
+```
+
 ## Why each variable is there
 
 | Variable | What it moves | Leave it out and |

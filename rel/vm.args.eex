@@ -1,0 +1,25 @@
+## Flags given to the VM: https://www.erlang.org/doc/man/erl.html
+## -mode/-name/-sname/-setcookie are configured via env vars, do not set them here.
+##
+## A smaller allocator footprint. Measured 2026-11-28 on a fresh boot after
+## collecting every process: allocator carriers 253 to 224 MB, erlang:memory
+## total 260 to 236 MB. Each scheduler owns an instance of every allocator, so
+## fewer schedulers leave fewer half-empty carriers. A dev daemon (mix run)
+## takes the same set through ERL_FLAGS; see the compos-boot skill.
+
+## four normal schedulers, two dirty CPU, four dirty IO
++S 4:4
++SDcpu 2:2
++SDio 4
+
+## address-order best fit and smaller carriers, so freed memory goes back
+## to the OS instead of idling in a 5 MB carrier
++MBas aobf
++MHas aobf
++MBlmbcs 512
++MHlmbcs 512
++MBsmbcs 128
++MHsmbcs 128
+
+## a full sweep every 20 minor collections, so old binaries go sooner
+-env ERL_FULLSWEEP_AFTER 20

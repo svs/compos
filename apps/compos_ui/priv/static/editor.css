@@ -453,7 +453,7 @@ body {
    to the raised paper, and its hairline goes with it (a brighter
    rule is a nearer edge). The state tag in the header line
    (dash-state-focus) is what this rule reads. */
-.window.active:has(.dash-state-focus) {
+.window.active:has(> .dash-top .dash-state-focus) {
   /* The design's float: the ground lifts one step off the raised
      paper, the hairline brightens toward the dim ink (a nearer
      edge), and the deep shadow does the rest. No accent anywhere.
@@ -476,7 +476,7 @@ body {
               0 0 0 1px var(--default-bg);
 }
 /* a sitting window: paper, a hairline, no lift */
-.window.active:has(.dash-state-editing) {
+.window.active:has(> .dash-top .dash-state-editing) {
   box-shadow: none;
 }
 /* The focus tag is an icon, the four arrows: the window can move.
@@ -1061,7 +1061,16 @@ body.unfocused .window.active .cursor {
   --ag-base: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
   font-size: var(--ag-base);
 }
-.ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
+.ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; contain: layout style; overflow-anchor: auto; }
+/* Skip layout and paint for off-screen transcript blocks so long chats stay fast
+   without splitting. `auto` remembers each block's measured height after first view. */
+.ag-scroll > * {
+  contain: layout style;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+.ag-scroll > .ag-prose { contain-intrinsic-size: auto 120px; }
+.ag-scroll > c-toolcall { contain-intrinsic-size: auto 34px; }
 .ag-label {
   font-family: var(--font-mono); font-size: calc(var(--ag-base) * 0.55); letter-spacing: 0.12em;
   color: var(--agent-meta-fg); flex-shrink: 0; padding-top: 3px;
@@ -1145,9 +1154,6 @@ body.unfocused .window.active .cursor {
 /* an agent's message (a task brief, a listener wake) wears ag-thought for
    its look, but it is a turn of the conversation: it stays, folded */
 .ag-thought.ag-event { display: block; }
-/* a hidden thought between two calls (Antigravity sends one before each)
-   still leaves them one burst */
-.ag-scroll.ag-verbosity-info > c-toolcall:has(+ c-toolcall, + .ag-thought:not(.ag-event) + c-toolcall) { display: none; }
 .ag-scroll.ag-verbosity-info > c-toolcall > .ag-tool {
   margin: 2px 0; border-color: transparent; background: transparent; opacity: .76;
 }

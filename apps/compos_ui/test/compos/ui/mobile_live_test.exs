@@ -116,7 +116,8 @@ defmodule Compos.Ui.MobileLiveTest do
   end
 
   test "a chat on show has the composer, and it sends to the chat", %{conn: conn} do
-    Compos.Core.Editor.set_window_buffer("ph-chat-#{System.unique_integer([:positive])}")
+    # the page's own frame may show any buffer: here every buffer is a chat
+    {:ok, _} = Compos.Core.Session.eval(~S{(define (phone-view buf) (list "ph-test-group" #t))})
     {:ok, view, _html} = live(conn, "/m")
 
     assert has_element?(view, "c-frame#hh > c-prompt input#composer")

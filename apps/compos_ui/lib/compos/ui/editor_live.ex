@@ -1048,22 +1048,25 @@ defmodule Compos.Ui.EditorLive do
     # a large tree arrives as the read model's stand-in: equal stand-ins
     # name the same tree, so a hit costs no copy and no deep compare
     ref = Map.get(leaf, :blocks) || []
-    text = leaf.text
+    source = Map.get(leaf, :rope) || leaf.text
+    size = Map.get(leaf, :size) || source_size(source)
     entry = cache[{:blocks, leaf.id}]
+    dirty_from = blocks_dirty_from(entry, leaf)
 
     entry =
       case entry do
-        %{raw: ^ref, span: span, bytes: bytes} = e
-        when span <= byte_size(text) and binary_part(text, 0, span) == bytes ->
-          e
+        %{raw: ^ref, buf: buf, span: span} = e
+        when buf == leaf.buffer and span <= size and
+               (dirty_from == :none or dirty_from >= span) ->
+          %{e | version: leaf.version}
 
         _ ->
           raw = Compos.Core.BufferView.big_value(ref) || []
-          memo = if is_map(entry), do: Map.get(entry, :memo, %{}), else: %{}
-          {blocks, {span, memo}} = blocks_build(raw, text, memo, leaf.id)
+          memo = if is_map(entry) and Map.get(entry, :buf) == leaf.buffer, do: Map.get(entry, :memo, %{}), else: %{}
+          {blocks, {span, memo}} = blocks_build(raw, source, memo, leaf.id, dirty_from)
           inputs = Enum.map(blocks, &block_input?/1)
 
-          %{raw: ref, span: span, bytes: binary_part(text, 0, min(span, byte_size(text))),
+          %{raw: ref, buf: leaf.buffer, version: leaf.version, span: span,
             blocks: blocks, memo: memo, marks: Enum.any?(blocks, &block_marks?/1),
             # point's line also steers the scroll: a page whose parts name
             # their lines scrolls the part holding it into view, and a page
@@ -1079,12 +1082,12 @@ defmodule Compos.Ui.EditorLive do
     follows = Map.get(entry, :follows, false)
     line =
       if entry.marks or follows,
-        do: Map.get(leaf, :line) || Compos.Core.Text.line_index(text, leaf.point) + 1,
+        do: Map.get(leaf, :line) || Compos.Core.Text.line_index(source_text(source), leaf.point) + 1,
         else: 0
 
     nlines =
       if follows and line > 0,
-        do: Map.get(leaf, :total_lines) || length(:binary.matches(text, "\n")) + 1,
+        do: Map.get(leaf, :total_lines) || length(:binary.matches(source_text(source), "\n")) + 1,
         else: 0
 
     {Map.merge(leaf, %{
@@ -1955,7 +1958,7 @@ defmodule Compos.Ui.EditorLive do
         <c-group :if={@node.dash} class="dash-live">
           <c-text>L{@line}:C{@col}</c-text>
           <c-text>point {@node.point}</c-text>
-          <c-text>{ml_bytes(@node.text)}</c-text>
+          <c-text>{ml_bytes(Map.get(@node, :size) || @node.text)}</c-text>
           <c-text>{pct(@node)}</c-text>
           <c-text :if={@node.modified} class="dash-live-mod">modified</c-text>
         </c-group>
@@ -2691,14 +2694,58 @@ defmodule Compos.Ui.EditorLive do
   # A tree as the window draws it: every range filled from TEXT, every
   # isolated list's children kept in MEMO by position, plist and bytes.
   # The accumulator is {last range end, the memo for the next build}.
-  defp blocks_build(raw, text, memo, win) do
-    Enum.map_reduce(raw, {0, %{}}, &block_build(&1, text, {memo, win}, &2))
+  defp blocks_dirty_from(%{buf: buf, version: v1}, %{buffer: buf, version: v2} = leaf) do
+    cond do
+      v1 == v2 -> :none
+      v2 < v1 -> 0
+      true -> min_edit_pos(v1, v2, Map.get(leaf, :edit_positions, []))
+    end
   end
 
-  defp block_build(pl, text, memo, acc) when not is_tuple(memo),
-    do: block_build(pl, text, {memo, nil}, acc)
+  defp blocks_dirty_from(_, _), do: 0
 
-  defp block_build(pl, text, {memo, win}, acc) do
+  # Walk the buffer's recent {version, pos} entries back to v1. Returns the
+  # lowest edited byte offset when every edit since v1 is accounted for, else 0.
+  defp min_edit_pos(v1, v2, edits) do
+    need = v2 - v1
+
+    Enum.reduce_while(edits, {0, :none}, fn
+      {v, pos}, {count, lo} when v > v1 and v <= v2 ->
+        lo = if lo == :none, do: pos, else: min(lo, pos)
+        count = count + 1
+        if count == need, do: {:halt, {:ok, lo}}, else: {:cont, {count, lo}}
+
+      _, acc ->
+        {:cont, acc}
+    end)
+    |> case do
+      {:ok, lo} -> lo
+      _ -> 0
+    end
+  end
+
+  defp source_size(%Compos.Core.Rope{size: size}), do: size
+  defp source_size(bin) when is_binary(bin), do: byte_size(bin)
+
+  defp source_slice(%Compos.Core.Rope{size: size} = rope, a, b) do
+    a = a |> max(0) |> min(size)
+    b = b |> max(a) |> min(size)
+    if a < b, do: Compos.Core.Rope.slice(rope, a, b - a), else: ""
+  end
+
+  defp source_slice(bin, a, b) when is_binary(bin), do: Text.slice(bin, a, b)
+
+  defp source_text(%Compos.Core.Rope{} = rope), do: Compos.Core.Rope.to_binary(rope)
+  defp source_text(bin) when is_binary(bin), do: bin
+
+  defp blocks_build(raw, source, memo, win, dirty_from \\ 0) do
+    Enum.map_reduce(raw, {0, %{}}, &block_build(&1, source, {memo, win, dirty_from}, &2))
+  end
+
+  defp block_build(pl, source, memo, acc) when not is_tuple(memo),
+    do: block_build(pl, source, {memo, nil, 0}, acc)
+
+  defp block_build(pl, source, {memo, win, dirty_from}, acc) do
     view = block_node(pl)
     {span, fresh} = acc
     span = if view.range, do: max(span, elem(view.range, 1)), else: span
@@ -2710,40 +2757,66 @@ defmodule Compos.Ui.EditorLive do
           isolated_children(
             raw_children,
             pget(pl, "index-base") || 0,
-            text,
-            {memo, win},
+            source,
+            {memo, win, dirty_from},
             {span, fresh}
           ),
-        else: Enum.map_reduce(raw_children, {span, fresh}, &block_build(&1, text, {memo, win}, &2))
+        else:
+          Enum.map_reduce(
+            raw_children,
+            {span, fresh},
+            &block_build(&1, source, {memo, win, dirty_from}, &2)
+          )
 
-    {block_fill(%{view | children: Enum.reject(children, & &1.empty)}, text), acc}
+    {block_fill(%{view | children: Enum.reject(children, & &1.empty)}, source), acc}
   end
 
   # BASE is the first child's place in the whole list. A mode that draws
   # only the tail of a long list (the chat transcript window) passes it,
   # so an index names the same block while the window moves: the memo key
   # holds, and the reader's saved place still finds its block.
-  defp isolated_children(raw_children, base, text, {memo, win}, acc) do
+  #
+  # Unchanged children with all ranges before DIRTY_FROM reuse their cached
+  # view in O(1) without slicing bytes from the rope.
+  defp isolated_children(raw_children, base, source, {memo, win, dirty_from}, acc) do
     raw_children
     |> Enum.with_index(base)
     |> Enum.map_reduce(acc, fn {c, i}, {span, fresh} ->
-      ranges = block_ranges(c, [])
-      key = {i, c, Enum.map(ranges, fn {a, b} -> Text.slice(text, a, b) end)}
+      case Map.get(memo, i) do
+        {^c, max_end, view} when dirty_from == :none or max_end <= dirty_from ->
+          {view, {max(span, max_end), Map.put(fresh, i, {c, max_end, view})}}
 
-      view =
-        case Map.get(memo, key) do
-          nil ->
-            {v, _} = block_build(c, text, {%{}, win}, {0, %{}})
-            v = %{v | attrs: v.attrs ++ [{"data-index", Integer.to_string(i)}]}
-            Map.put(v, :frozen, frozen_html(v, win))
+        prev ->
+          ranges = block_ranges(c, [])
+          max_end = Enum.reduce(ranges, 0, fn {_, b}, m -> max(m, b) end)
 
-          v ->
-            v
-        end
+          view =
+            case prev do
+              {^c, ^max_end, v} ->
+                slices = Enum.map(ranges, fn {a, b} -> source_slice(source, a, b) end)
+                if Map.get(v, :range_slices) == slices, do: v, else: build_isolated_child(c, i, ranges, slices, source, win)
 
-      span = Enum.reduce(ranges, span, fn {_, b}, m -> max(m, b) end)
-      {view, {span, Map.put(fresh, key, view)}}
+              _ ->
+                slices = Enum.map(ranges, fn {a, b} -> source_slice(source, a, b) end)
+                build_isolated_child(c, i, ranges, slices, source, win)
+            end
+
+          {view, {max(span, max_end), Map.put(fresh, i, {c, max_end, view})}}
+      end
     end)
+  end
+
+  defp build_isolated_child(c, i, _ranges, slices, source, win) do
+    {v, _} = block_build(c, source, {%{}, win, 0}, {0, %{}})
+    v = %{v | attrs: v.attrs ++ [{"data-index", Integer.to_string(i)}]}
+    stream_key = if v.class == "ag-earlier", do: "earlier", else: "i-\#{i}"
+    parts = frozen_parts(v, win)
+
+    v
+    |> Map.put(:stream_key, stream_key)
+    |> Map.put(:frozen_parts, parts)
+    |> Map.put(:frozen, frozen_html(v, win))
+    |> Map.put(:range_slices, slices)
   end
 
   # A list child drawn once, as HTML: the list component then holds one
@@ -2755,6 +2828,96 @@ defmodule Compos.Ui.EditorLive do
     |> blk_node()
     |> Phoenix.HTML.Safe.to_iodata()
     |> IO.iodata_to_binary()
+  end
+
+  # Split an isolated list child into {tag, attrs, inner} so BlockList can
+  # stream it directly under phx-update="stream" without an extra wrapper.
+  defp frozen_parts(%{empty: true}, _win), do: %{tag: "c-group", attrs: [], inner: ""}
+
+  defp frozen_parts(%{html: html} = view, _win) when is_binary(html) do
+    %{tag: view.tag, attrs: clean_outer_attrs([{"class", view.class} | view.attrs]), inner: html}
+  end
+
+  defp frozen_parts(%{tag: "details"} = view, win) do
+    attrs =
+      [{"class", view.class}, if(view.open, do: {"open", ""}) | view.attrs]
+      |> clean_outer_attrs()
+
+    %{tag: "details", attrs: attrs, inner: frozen_children(view.children, win)}
+  end
+
+  defp frozen_parts(%{tag: "button"} = view, win) do
+    attrs =
+      ([{"type", "button"}, {"class", view.class}] ++ click_attrs(view.click, win) ++ view.attrs)
+      |> clean_outer_attrs()
+
+    %{tag: "button", attrs: attrs, inner: frozen_escape(view.text) <> frozen_children(view.children, win)}
+  end
+
+  defp frozen_parts(%{tag: "pre"} = view, _win) do
+    %{tag: "pre", attrs: clean_outer_attrs([{"class", view.class} | view.attrs]), inner: frozen_escape(view.text)}
+  end
+
+  defp frozen_parts(%{tag: "span"} = view, win) do
+    %{tag: "c-text", attrs: clean_outer_attrs([{"class", view.class} | view.attrs]), inner: frozen_body(view, win)}
+  end
+
+  defp frozen_parts(view, win) do
+    tag = if view.tag == "div", do: "c-group", else: view.tag
+
+    attrs =
+      ([
+         {"class", view.class},
+         {"data-anchor", view.anchor},
+         {"data-lines", blk_lines_attr(view.lines)},
+         if(view.anchor, do: {"selected", "false"})
+       ] ++ click_attrs(view.click, win) ++ view.attrs)
+      |> clean_outer_attrs()
+
+    %{tag: tag, attrs: attrs, inner: frozen_body(view, win)}
+  end
+
+  defp clean_outer_attrs(list) do
+    Enum.filter(list, fn
+      nil -> false
+      {_, nil} -> false
+      {"id", _} -> false
+      {"class", ""} -> false
+      {_, _} -> true
+    end)
+  end
+
+  defp click_attrs(nil, _win), do: []
+
+  defp click_attrs(click, win),
+    do: [{"phx-click", "block_click"}, {"phx-value-win", to_string(win)}, {"phx-value-id", click}]
+
+  defp frozen_escape(nil), do: ""
+
+  defp frozen_escape(text),
+    do: text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
+  defp frozen_children([], _win), do: ""
+
+  defp frozen_children(children, win) do
+    children
+    |> Enum.map(&frozen_html(&1, win))
+    |> IO.iodata_to_binary()
+  end
+
+  defp frozen_body(view, win) do
+    mark =
+      if {"marked", "true"} in view.attrs,
+        do: ~s(<c-text class="list-mark" aria-label="Marked">✱</c-text>),
+        else: ""
+
+    segs =
+      Enum.map(view.semantic_segs, fn {c, t, tag} ->
+        faces = block_faces(c)
+        ["<", tag, " class=\"", frozen_escape(c), "\" face=\"", frozen_escape(faces), "\">", frozen_escape(t), "</", tag, ">"]
+      end)
+
+    IO.iodata_to_binary([mark, segs, frozen_escape(view.text), frozen_children(view.children, win)])
   end
 
   defp block_ranges(pl, acc) do
@@ -2769,9 +2932,9 @@ defmodule Compos.Ui.EditorLive do
 
   # Fill a block's range and file. A range that draws nothing and has no
   # children is empty, and the renderer skips it.
-  defp block_fill(%{range: {a, b}} = view, text) do
+  defp block_fill(%{range: {a, b}} = view, source) do
     view =
-      case range_content(Map.get(view, :content) || Text.slice(text, a, b), view.format) do
+      case range_content(Map.get(view, :content) || source_slice(source, a, b), view.format) do
         {:html, html} -> %{view | html: html}
         {:text, t} -> %{view | text: t}
       end
@@ -2808,8 +2971,10 @@ defmodule Compos.Ui.EditorLive do
   defp caret_input(_leaf, nil), do: nil
 
   defp caret_input(leaf, start) do
-    start = start |> min(byte_size(leaf.text)) |> max(0)
-    live = binary_part(leaf.text, start, byte_size(leaf.text) - start)
+    source = Map.get(leaf, :rope) || leaf.text
+    size = Map.get(leaf, :size) || source_size(source)
+    start = start |> min(size) |> max(0)
+    live = source_slice(source, start, size)
 
     rel =
       if leaf.point >= start do
@@ -3088,7 +3253,19 @@ defmodule Compos.Ui.EditorLive do
 
   defp ml_segs(_), do: []
 
-  defp ml_bytes(text) do
+  defp ml_bytes(b) when is_integer(b) do
+    cond do
+      b >= 1_048_576 -> "\#{Float.round(b / 1_048_576, 1)} MB"
+      b >= 1024 -> "\#{Float.round(b / 1024, 1)} kB"
+      true -> "\#{b} B"
+    end
+  end
+
+  defp ml_bytes(text) when is_binary(text), do: ml_bytes(Kernel.byte_size(text))
+
+  defp ml_bytes(_), do: "0 B"
+
+  defp _ml_bytes_unused(text) do
     b = Kernel.byte_size(text)
 
     cond do
@@ -3129,7 +3306,7 @@ defmodule Compos.Ui.EditorLive do
   # the %-constructs of Emacs's mode-line-format that the view alone knows
   defp ml_fill(text, node) when is_binary(text) do
     Regex.replace(~r/%[Ilcp%]/, text, fn
-      "%I" -> ml_bytes(node.text)
+      "%I" -> ml_bytes(Map.get(node, :size) || node.text)
       "%l" -> to_string(node.line)
       "%c" -> to_string(node.col)
       "%p" -> pct(node)

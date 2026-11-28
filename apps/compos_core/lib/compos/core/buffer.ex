@@ -1288,8 +1288,14 @@ defmodule Compos.Core.Buffer do
       props: state.props,
       narrow_range: state.narrow_range,
       win_points: state.win_points,
-      fontification: Map.get(state, :fontify, %{cache: []}).cache
+      fontification: Map.get(state, :fontify, %{cache: []}).cache,
+      edit_positions: Map.get(state, :edit_positions, [])
     }
+  end
+
+  defp track_edit_pos(state, pos) do
+    entries = [{state.version, pos} | Map.get(state, :edit_positions, [])]
+    Map.put(state, :edit_positions, Enum.take(entries, 64))
   end
 
   defp on_cast({:fontify, version, start, stop}, state) do
@@ -2778,7 +2784,7 @@ defmodule Compos.Core.Buffer do
     rope = if inserted != "", do: Rope.insert(rope, pos, inserted), else: rope
     added = Kernel.byte_size(inserted)
 
-    state = %{state | rope: rope, bin: nil, version: state.version + 1}
+    state = %{state | rope: rope, bin: nil, version: state.version + 1} |> track_edit_pos(pos)
     state = ts_track(state, old_rope, pos, pos + removed, pos + added)
 
     state =
@@ -3151,7 +3157,7 @@ defmodule Compos.Core.Buffer do
       | rope: Rope.insert(state.rope, pos, text),
         bin: nil,
         version: state.version + 1
-    }
+    } |> track_edit_pos(pos)
 
     state = ts_track(state, old_rope, pos, pos, pos + len)
     state = adjust_point_insert(state, pos, len)
@@ -3212,7 +3218,7 @@ defmodule Compos.Core.Buffer do
       | rope: Rope.delete(state.rope, pos, len),
         bin: nil,
         version: state.version + 1
-    }
+    } |> track_edit_pos(pos)
 
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)

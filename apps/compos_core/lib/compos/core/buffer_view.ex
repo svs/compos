@@ -377,18 +377,29 @@ defmodule Compos.Core.BufferView do
 
     cursor_line = Rope.byte_to_line(view.rope, point)
 
+    # A blocks buffer (such as a rich chat) slices only its dirty ranges and
+    # caret input directly from the rope, and ignores overlays and folds.
+    blocks_mode? =
+      Map.get(view.locals, "render-mode") == "blocks" and
+        case Map.get(view.locals, "render-blocks") do
+          [_ | _] -> true
+          other -> big_ref?(other)
+        end
+
     %{
-      text: text(view),
+      text: if(blocks_mode?, do: Map.get(view, :bin) || "", else: text(view)),
+      size: view.size,
       rope: view.rope,
+      edit_positions: Map.get(view, :edit_positions, []),
       fontification: Map.get(view, :fontification, []),
       point: point,
       mark: mark,
       version: view.version,
       modified: view.modified,
       locals: view.locals,
-      overlays: overlays(view),
+      overlays: if(blocks_mode?, do: [], else: overlays(view)),
       overlay_gen: view.overlay_gen,
-      hidden: hidden(view),
+      hidden: if(blocks_mode?, do: [], else: hidden(view)),
       # A hot-loaded daemon can still hold rows published under the first
       # display-range name. Preserve that narrowing until the owner republishes.
       narrow_range: Map.get(view, :narrow_range, Map.get(view, :display_range)),

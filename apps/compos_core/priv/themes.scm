@@ -1181,8 +1181,8 @@
 /* Nothing is painted. A box is four dashed rules with a + at each corner,
    the way a person draws one with the keys they have. */
 .window, .window.active, .window.inactive,
-.window.active:has(.dash-state-focus),
-.window.active:has(.dash-state-editing) { box-shadow: none; }
+.window.active:has(> .dash-top .dash-state-focus),
+.window.active:has(> .dash-top .dash-state-editing) { box-shadow: none; }
 .window { border: 1px dashed var(--border-soft-bg); }
 .window.active { border-color: var(--border-bg); }
 .window::before {
@@ -1308,8 +1308,8 @@
 (define-theme-skin! "crt" "
 /* No pane lifts: a terminal has no depth. Every box is rules. */
 .window, .window.active, .window.inactive,
-.window.active:has(.dash-state-focus),
-.window.active:has(.dash-state-editing) { box-shadow: none; }
+.window.active:has(> .dash-top .dash-state-focus),
+.window.active:has(> .dash-top .dash-state-editing) { box-shadow: none; }
 .window { border: 1px solid var(--border-soft-bg); }
 .window.active { border-color: var(--border-bg); }
 /* the status line curses draws: the ink and the ground change places */
@@ -1437,8 +1437,8 @@
   border: 3px double var(--border-soft-bg);
   box-shadow: 8px 8px 0 #000000;
 }
-.window.active, .window.active:has(.dash-state-focus),
-.window.active:has(.dash-state-editing) {
+.window.active, .window.active:has(> .dash-top .dash-state-focus),
+.window.active:has(> .dash-top .dash-state-editing) {
   border: 3px double var(--border-bg);
   box-shadow: 8px 8px 0 #000000;
 }
@@ -1562,8 +1562,8 @@
   border: 3px double var(--border-soft-bg);
   box-shadow: 6px 6px 0 #000066;
 }
-.window.active, .window.active:has(.dash-state-focus),
-.window.active:has(.dash-state-editing) {
+.window.active, .window.active:has(> .dash-top .dash-state-focus),
+.window.active:has(> .dash-top .dash-state-editing) {
   border: 3px double var(--border-bg);
   box-shadow: 6px 6px 0 #0000aa;
 }
@@ -1855,11 +1855,11 @@
 }
 .window.inactive { box-shadow: 4px 4px 0 var(--border-bg); }
 .window.active { box-shadow: 6px 6px 0 var(--border-bg); }
-.window.active:has(.dash-state-focus) {
+.window.active:has(> .dash-top .dash-state-focus) {
   box-shadow: 10px 10px 0 var(--border-bg);
   border-color: var(--border-bg);
 }
-.window.active:has(.dash-state-editing) { box-shadow: 6px 6px 0 var(--border-bg); }
+.window.active:has(> .dash-top .dash-state-editing) { box-shadow: 6px 6px 0 var(--border-bg); }
 /* the desk shows between the cards, so the cards need room to drop */
 .windows { gap: 12px; padding: 4px 12px 12px 4px; }
 
@@ -2052,15 +2052,15 @@
 }
 /* a panel is ink around the edge and a hard drop, never a soft lift */
 .window, .window.active, .window.inactive,
-.window.active:has(.dash-state-focus),
-.window.active:has(.dash-state-editing) { box-shadow: none; }
+.window.active:has(> .dash-top .dash-state-focus),
+.window.active:has(> .dash-top .dash-state-editing) { box-shadow: none; }
 .window {
   border: 2px solid var(--border-bg);
   box-shadow: 4px 4px 0 rgba(36, 20, 7, 0.55);
 }
 .window.inactive { box-shadow: 2px 2px 0 rgba(36, 20, 7, 0.30); }
 .window.active { box-shadow: 5px 5px 0 var(--accent-fg); }
-.window.active:has(.dash-state-focus) { box-shadow: 6px 6px 0 var(--accent-fg); }
+.window.active:has(> .dash-top .dash-state-focus) { box-shadow: 6px 6px 0 var(--accent-fg); }
 /* the medallion at each corner, on every panel alike */
 .window::before {
   content: ''; position: absolute; inset: 0; z-index: 7;

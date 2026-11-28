@@ -2863,7 +2863,9 @@ defmodule Compos.Core.Editor do
         Map.get(locals, "dismissible") != true or
           "caret-browsing-mode" in (Map.get(locals, "minor-modes") || []),
       text: text,
+      size: Map.get(snap, :size, byte_size(text)),
       rope: Map.get(snap, :rope),
+      edit_positions: Map.get(snap, :edit_positions, []),
       fontification: Map.get(snap, :fontification, []),
       point: point,
       mark: snap.mark,

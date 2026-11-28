@@ -47,6 +47,9 @@ defmodule Compos.Ui.Endpoint do
   # trusted networks and refuses the rest before anything else runs
   plug(Compos.Ui.Reach)
 
+  # http://HOST on port 80 (tailscale serve) goes to the HTTPS MagicDNS name
+  plug(Compos.Ui.ShortName)
+
   # LiveView's browser JS is shipped prebuilt inside the hex packages —
   # serve it straight from deps; no node/esbuild toolchain.
   plug(Plug.Static, at: "/phx", from: {:phoenix, "priv/static"})

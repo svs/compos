@@ -1153,6 +1153,9 @@
           (set! *chat-log-files-newest* (list key paths))
           paths))))
 
+(public! 'chat-log-files-newest
+  "(chat-log-files-newest) — every archived .chat path, newest first; kept until a chats folder changes")
+
 (define (chat-log-leaf path)
   (cadr (path-split path)))
 

@@ -3327,6 +3327,94 @@ defmodule Compos.Ui.EditorLive do
     text |> binary_part(line_start, len - line_start) |> String.length()
   end
 
+  @doc """
+  Render the body of a decorated leaf to static HTML using the editor's own
+  block and semantic-line renderers, with isolated lists drawn in place.
+  """
+  def render_static_body(leaf) when is_map(leaf) do
+    %{node: leaf, __changed__: nil}
+    |> static_window_body()
+    |> Phoenix.HTML.Safe.to_iodata()
+    |> IO.iodata_to_binary()
+  end
+
+  defp static_window_body(%{node: %{render_mode: "blocks", blk: _}} = assigns) do
+    ~M"""
+    <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
+    <c-buffer :if={@node.blk_root.tag == "c-buffer"} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} {@node.blk_root.attrs}>
+      <c-buffer class="blocks-scroll"><.blk
+          :for={{b, input?} <- Enum.zip(@node.blk, @node.blk_inputs)}
+          b={b}
+          line={@node.blk_line}
+          win={@node.id}
+          ctx={static_blk_ctx(@node, input?)}
+        /></c-buffer>
+    </c-buffer>
+    <.dynamic_tag :if={@node.blk_root.tag != "c-buffer"} tag_name={@node.blk_root.tag} class={"blocks-view #{@node.blk_root.class}"} style={@node.style} {@node.blk_root.attrs}>
+      <c-buffer class="blocks-scroll"><.blk
+          :for={{b, input?} <- Enum.zip(@node.blk, @node.blk_inputs)}
+          b={b}
+          line={@node.blk_line}
+          win={@node.id}
+          ctx={static_blk_ctx(@node, input?)}
+        /></c-buffer>
+    </.dynamic_tag>
+    <c-group :if={@node.footer_line || Map.get(@node, :footer_line_blocks)} class="buffer-footer">
+      <.blk :for={b <- Map.get(@node, :footer_line_blocks) || []} b={block_view(b)} line={-1} win={@node.id} ctx={%{live: false}} />
+      {@node.footer_line}
+    </c-group>
+    """
+  end
+
+  defp static_window_body(assigns) do
+    ~M"""
+    <c-headerline :if={@node.header_line} class="buffer-header">{@node.header_line}</c-headerline>
+    <.dynamic_tag tag_name={block_root(Map.get(@node, :text_root)).tag}
+      {block_root(Map.get(@node, :text_root)).attrs}
+      class={"buf #{if Map.get(@node, :client_scroll?, false), do: "client-scroll"}"}
+      style={@node.style}
+      data-visual-lines={to_string(Map.get(@node, :visual_line_mode, false))}
+      data-hl-line={to_string(Map.get(@node, :hl_line, true))}
+      data-ws={to_string(Compos.Core.Display.whitespace?(@node))}
+    >
+      <%= for group <- semantic_line_groups(Map.get(@node, :lines, []), Map.get(@node, :semantic_records)) do %>
+      <%= if group.direct do %>
+        <.dynamic_tag :for={ln <- group.lines} tag_name={group.tag} {group.attrs}
+          class={"line line-content semantic-direct #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
+          data-s={ln.start} data-line={ln.num} {[{"selected", to_string(ln.current)}]}><.semantic_line id_prefix={"ov-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} direct={true} /></.dynamic_tag>
+      <% else %>
+      <.dynamic_tag tag_name={group.tag} class="semantic-record" style="display: contents" {group.attrs}>
+      <c-line
+        :for={ln <- group.lines}
+        class={"line #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
+        data-s={ln.start}
+      >
+        <c-text class="linenum">{ln.num}</c-text>
+        <c-text class="line-content"><.semantic_line id_prefix={"ov-#{@node.id}-#{ln.num}"} segs={ln.segs} start={ln.start} fields={group.fields} base={@node.buffer} win={@node.id} /><br :if={ln.segs == []} class="empty-row" /></c-text>
+      </c-line>
+      </.dynamic_tag>
+      <% end %>
+      <% end %>
+    </.dynamic_tag>
+    <c-group :if={@node.footer_line || Map.get(@node, :footer_line_blocks)} class="buffer-footer">
+      <.blk :for={b <- Map.get(@node, :footer_line_blocks) || []} b={block_view(b)} line={-1} win={@node.id} ctx={%{live: false}} />
+      {@node.footer_line}
+    </c-group>
+    """
+  end
+
+  defp static_blk_ctx(node, input?) do
+    base = %{
+      live: false,
+      buf: node.buffer,
+      follow: Map.get(node, :blocks_follow),
+      cursor: false,
+      completion: nil
+    }
+
+    if input?, do: Map.put(base, :input, Map.get(node, :blk_input)), else: base
+  end
+
   @impl true
   def render(assigns), do: Compos.Ui.Representation.live(__MODULE__, assigns)
 

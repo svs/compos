@@ -20,13 +20,13 @@
 * { box-sizing: border-box; }
 
 html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--bg);
-  color: var(--fg);
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  background: var(--bg) !important;
+  color: var(--fg) !important;
   font: 13px/1.4 var(--font-ui);
   -webkit-font-smoothing: antialiased;
 }
@@ -80,7 +80,13 @@ html, body {
   border-color: color-mix(in srgb, var(--accent) 65%, var(--card-border));
 }
 
+.card { z-index: 3; }
+.card.is-hidden-pane { z-index: 2; }
+.card.card-compact { z-index: 2; }
+.card.is-stacked { z-index: 1; }
+
 .card.is-selected {
+  z-index: 4;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), 0 14px 34px var(--card-shadow);
 }
@@ -441,3 +447,91 @@ html, body {
 }
 
 #hint strong { color: var(--fg); font-weight: 600; }
+
+/* Rendered compos window surfaces inside HTML-in-Canvas cards */
+.card-body.is-rendered {
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+  background: var(--window-bg, var(--card-bg));
+}
+
+.ov-rendered-stage {
+  transform-origin: top left;
+  pointer-events: none;
+  overflow: hidden;
+  background: var(--window-bg, var(--card-bg));
+  color: var(--default-fg, var(--fg));
+}
+
+.ov-rendered-win {
+  position: static !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--window-bg, var(--card-bg)) !important;
+  color: var(--default-fg, var(--fg)) !important;
+  overflow: hidden !important;
+}
+
+.ov-rendered-win > .blocks-view,
+.ov-rendered-win > .buf {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.ov-rendered-stage.is-follow .blocks-view {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.ov-rendered-stage.is-follow .blocks-scroll {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-end !important;
+}
+
+.ov-preview-doc {
+  padding: 14px 18px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--window-bg, var(--card-bg));
+  color: var(--default-fg, var(--fg));
+}
+
+.ov-external-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 20px;
+  color: var(--dim-fg, var(--dim));
+}
+
+.ov-ext-kind {
+  font: 600 11px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-fg, var(--accent)) 18%, transparent);
+  color: var(--accent-fg, var(--accent));
+}
+
+.ov-ext-detail {
+  font: 500 13px/1.4 var(--font-mono);
+  color: var(--default-fg, var(--fg));
+  word-break: break-all;
+}

@@ -2569,24 +2569,24 @@
                       'children (map (lambda (c) (list 'tag "span" 'class "lg-cell" 'text (string-append (car c) (list-sort-mark buf c)))) cols)))))))
 
 (define-style! 'list-grid "
-.lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: 12.5px; }
+.lg-row { display: grid; column-gap: 1ch; align-items: center; padding: 3px 0; font-family: var(--font-sans); font-size: calc(12.5px * var(--text-scale-factor, 1)); }
 /* a row is also a semantic item: keep the list's own height, not the item's padding */
 .semantic-list > .lg-row { padding: 3px 0; }
 /* a marked row is tinted whole: a grid has no mark column to show it */
 .lg-row[marked=true] { background: var(--list-marked-bg, color-mix(in srgb, var(--accent-fg, #7aa2f7) 22%, transparent)); }
 .lg-row > .lg-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.lg-head { color: var(--dim-fg); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-bg); }
+.lg-head { color: var(--dim-fg); font-size: calc(11px * var(--text-scale-factor, 1)); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border-bg); }
 .lg-head-title { display: flex; justify-content: space-between; gap: 2ch; padding: 6px 0 2px; font-family: var(--font-sans); font-weight: 600; white-space: pre; overflow: hidden; }
 .lg-head-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .lg-head-title > span + span { flex: none; font-weight: 400; }
-.lg-head-line { font-family: var(--font-sans); font-size: 12px; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.lg-head-line { font-family: var(--font-sans); font-size: calc(12px * var(--text-scale-factor, 1)); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .lg-title { font-weight: 600; color: var(--default-fg); }
 .lg-dim, .lg-date { color: var(--dim-fg); }
 .lg-number, .lg-date { font-variant-numeric: tabular-nums; }
 .lg-number { text-align: right; }
-.lg-stars { color: var(--warn-fg); letter-spacing: -1px; font-size: 11px; }
+.lg-stars { color: var(--warn-fg); letter-spacing: -1px; font-size: calc(11px * var(--text-scale-factor, 1)); }
 .lg-badge { display: flex; align-items: center; }
-.lg-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: 10px; font-weight: 600; letter-spacing: .03em; line-height: 17px; text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.lg-pill.c-badge { border-radius: 999px; padding: 0 8px; font-size: calc(10px * var(--text-scale-factor, 1)); font-weight: 600; letter-spacing: .03em; line-height: calc(17px * var(--text-scale-factor, 1)); text-transform: lowercase; color: var(--dim-fg); background: var(--hl-line-bg); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .lg-pill.c-badge.good { color: var(--ok-fg); background: color-mix(in srgb, var(--ok-fg) 16%, transparent); }
 .lg-pill.c-badge.warn { color: var(--warn-fg); background: color-mix(in srgb, var(--warn-fg) 16%, transparent); }
 .lg-pill.c-badge.bad { color: var(--alert-fg); background: color-mix(in srgb, var(--alert-fg) 16%, transparent); }

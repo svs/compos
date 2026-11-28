@@ -57,6 +57,24 @@ defmodule Compos.Ui.AppServer do
     with_body(conn, fn conn, body -> app_request(conn, tok, buf, "POST", body) end)
   end
 
+  # Editor stylesheets and rendered buffer HTML for trusted editor surfaces
+  # (e.g. canvas-overview) that Scheme explicitly marks with 'app-allow-render.
+  get "/a/:tok/b/:buf/_compos/editor.css" do
+    if Plug.Crypto.secure_compare(tok, token()) and render_allowed?(buf) do
+      respond(conn, "text/css", Compos.Ui.BufferHtml.styles_css())
+    else
+      send_resp(conn, 404, "no")
+    end
+  end
+
+  post "/a/:tok/b/:buf/_compos/render" do
+    if Plug.Crypto.secure_compare(tok, token()) and render_allowed?(buf) do
+      with_body(conn, fn conn, body -> render_buffers(conn, body) end)
+    else
+      send_resp(conn, 404, "no")
+    end
+  end
+
   get "/a/:tok/b/:buf/*rest" do
     cond do
       not Plug.Crypto.secure_compare(tok, token()) ->
@@ -121,6 +139,49 @@ defmodule Compos.Ui.AppServer do
   catch
     :exit, _ -> false
   end
+
+  defp render_allowed?(buffer) do
+    if Buffer.exists?(buffer) do
+      locals = Buffer.locals(buffer)
+      locals["render-mode"] == "app" and locals["app-allow-render"] == true
+    else
+      false
+    end
+  catch
+    :exit, _ -> false
+  end
+
+  defp render_buffers(conn, body) do
+    case Jason.decode(body) do
+      {:ok, %{"buffers" => list}} when is_list(list) ->
+        rendered =
+          list
+          |> Enum.take(48)
+          |> Enum.map(&render_one_buffer/1)
+          |> Enum.reject(&is_nil/1)
+
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(%{ok: true, buffers: rendered}))
+
+      _ ->
+        send_resp(conn, 400, ~s({"error":"expected {buffers: [...]}"}))
+    end
+  end
+
+  defp render_one_buffer(name) when is_binary(name), do: Compos.Ui.BufferHtml.render(name)
+
+  defp render_one_buffer(%{"name" => name} = spec) when is_binary(name) do
+    opts = [
+      point: if(is_integer(spec["point"]), do: spec["point"]),
+      rows: if(is_integer(spec["rows"]), do: spec["rows"], else: 32)
+    ]
+
+    Compos.Ui.BufferHtml.render(name, opts)
+  end
+
+  defp render_one_buffer(_), do: nil
 
   defp safe_path(buffer, rest) do
     Enum.find_value(app_roots(buffer), fn root ->

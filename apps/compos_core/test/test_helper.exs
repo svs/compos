@@ -69,6 +69,11 @@ for app <- ~w(title decide) do
   {:ok, _} = Compos.Core.Session.eval(~s{(load "#{app}.scm")})
 end
 
+# One adapter per chat in the suite: a shared adapter outlives its test by a
+# linger and would hold the previous test's transport. acp_hub_test turns
+# sharing back on for itself.
+Application.put_env(:compos_core, :acp_share_adapters, false)
+
 ExUnit.start()
 
 # Most agent tests exercise chat behavior against this repository checkout.

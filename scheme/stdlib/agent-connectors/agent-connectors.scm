@@ -40,6 +40,10 @@ nonstandard install out of the built-in connector catalog."
   ;; @agentclientprotocol/claude-agent-acp ships this executable. Resolve it
   ;; through PATH so npm, pnpm, bun, asdf, and other installers all work.
   '(cmd "claude-agent-acp"
+    ;; one adapter process serves every chat whose env matches, one ACP
+    ;; session each (acp_hub.ex); the adapter closes a parked chat's
+    ;; session with session/close
+    share #t
     ;; the model family it serves; the adapter lists only some of these
     ;; ids (no [1m] forms), and its list is the menu
     accepts "^(claude-|opus|sonnet|haiku|default)"

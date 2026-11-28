@@ -233,10 +233,22 @@
 
 (define (am-pop-queue s)
   (let ((queue (am-get s 'queue)))
-    (if (and (pair? queue) (eq? (am-get s 'status) 'idle))
-        (let ((next (car queue)))
-          (am-send (am-set s 'queue (cdr queue)) (car next) (cadr next) (caddr next)))
-        s)))
+    (cond ((and (am-get s 'lost) (eq? (am-get s 'status) 'idle)) (am-park-lost s))
+          ((and (pair? queue) (eq? (am-get s 'status) 'idle))
+           (let ((next (car queue)))
+             (am-send (am-set s 'queue (cdr queue)) (car next) (cadr next) (caddr next))))
+          (else s))))
+
+;; The shared adapter under this thread died (acp.ex adapter-lost). The
+;; thread parks on its session the moment it is idle, as an idle park does;
+;; with prompts waiting it opens a new adapter at once, and the ready of
+;; the loaded session sends them.
+(define (am-park-lost s)
+  (let ((s (am-set (am-set (am-disarm s 'idle) 'lost #f) 'parked #t)))
+    (if (pair? (am-get s 'queue))
+        (am-status (am-fx (am-fx (am-set s 'parked #f) '(park)) (list 'revive (am-get s 'resume)))
+                   'starting)
+        (am-fx s '(park)))))
 
 (define (am-finish-turn s event)
   ;; a turn that ends with a request still open (the agent gave up, the
@@ -374,6 +386,13 @@
    ((equal? type "session") (am-emit (am-set s 'resume (am-pget event 'id)) event))
    ;; the thread stays registered so the transcript keeps working
    ((equal? type "dead") (am-emit (am-set (am-disarm s 'idle) 'status 'dead) event))
+   ;; a shared adapter died under a resumable session: park, never die. A
+   ;; running turn parks when its turn-failed ends it (am-pop-queue).
+   ((equal? type "adapter-lost")
+    (cond ((not (string? (am-get s 'resume)))
+           (am-emit (am-set (am-disarm s 'idle) 'status 'dead) event))
+          ((am-running? s) (am-emit (am-set s 'lost #t) event))
+          (else (am-emit (am-pop-queue (am-set s 'lost #t)) event))))
    (else (am-emit s event))))
 
 ;; --- calls --------------------------------------------------------------------

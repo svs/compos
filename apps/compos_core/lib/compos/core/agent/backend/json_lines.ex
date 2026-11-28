@@ -12,8 +12,7 @@ defmodule Compos.Core.Agent.Backend.JsonLines do
   alias Compos.Core.JsonRpc
 
   @doc "Open the adapter CONFIG names, DEFAULT-CMD when it names none, for this process: the transport fields of a state."
-  def open(config, default_cmd) do
-    transport = Compos.Core.Agent.Transport.impl()
+  def open(config, default_cmd, transport \\ Compos.Core.Agent.Transport.impl()) do
     cmd = Map.get(config, "cmd", default_cmd)
 
     {:ok, tp} =

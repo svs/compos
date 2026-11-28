@@ -74,6 +74,8 @@
       (check-true! (string-contains? (buffer-text buf) "canvas-overview.js") "links external JS")
       (check-true! (string-contains? (buffer-text buf) "canvas-overview.css") "links external CSS")
       (check-true! (pair? (buffer-local-value 'app-directory buf)) "sets app-directory")
+      (check-true! (buffer-local-value 'app-allow-render buf) "sets app-allow-render")
+      (check-true! (string-contains? (buffer-text buf) "_compos/editor.css") "links editor stylesheet")
       (buffer-kill! buf))))
 
 (deftest 'canvas-overview-pane-commands-work-on-model-while-active
@@ -132,3 +134,28 @@
           (buffer-kill! b1)
           (buffer-kill! b2)
           (buffer-kill! b3))))))
+
+(deftest 'canvas-overview-mx-visibility-and-buffer-safety
+  "M-x offers overview and canvas-overview publicly, hides canvas-overview-mode outside overview buffers, and never takes over the current buffer"
+  (lambda ()
+    (let* ((buf (test-buffer! "*zz-ov-chat*" "user text stays intact\n"))
+           (saved-layout (panes-layout))
+           (saved-open *canvas-overview-open?*))
+      (unwind-protect
+        (lambda ()
+          (let ((cands (with-current-buffer buf (lambda () (command-candidates)))))
+            (check-true! (and (member "overview" cands) #t) "M-x offers overview")
+            (check-true! (and (member "canvas-overview" cands) #t) "M-x offers canvas-overview")
+            (check-false! (and (member "canvas-overview-mode" cands) #t) "M-x hides canvas-overview-mode in other buffers"))
+          (with-current-buffer buf (lambda () (run-command "canvas-overview-mode")))
+          (check-equal! (buffer-text buf) "user text stays intact\n" "current buffer text is untouched")
+          (check-false! (equal? (buffer-local-value 'mode-name buf) "canvas-overview-mode") "current buffer mode is untouched")
+          (check-true! (buffer-known? *canvas-overview-buffer*) "overview opens its own buffer")
+          (check-true! (canvas-overview--active?) "overview becomes active in its own buffer")
+          (canvas-overview-quit!))
+        (lambda ()
+          (set! *canvas-overview-open?* saved-open)
+          (when (buffer-known? *canvas-overview-buffer*)
+            (ignore-errors (lambda () (buffer-kill! *canvas-overview-buffer*))))
+          (when saved-layout (ignore-errors (lambda () (panes-apply! saved-layout))))
+          (buffer-kill! buf))))))

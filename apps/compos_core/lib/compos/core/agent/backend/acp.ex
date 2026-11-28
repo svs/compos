@@ -68,7 +68,17 @@ defmodule Compos.Core.Agent.Backend.ACP do
       loading: false
     }
 
-    state = Map.merge(state, JsonLines.open(config, "claude-code-acp"))
+    # a connector that declares 'share runs its chats as sessions of one
+    # adapter process (Agent.ACPHub); every other one owns its own
+    shared = shared?(config)
+
+    transport =
+      if shared, do: Compos.Core.Agent.Transport.Shared, else: Compos.Core.Agent.Transport.impl()
+
+    state =
+      state
+      |> Map.put(:shared, shared)
+      |> Map.merge(JsonLines.open(config, "claude-code-acp", transport))
 
     {:ok,
      request(state, "initialize", %{
@@ -819,15 +829,38 @@ defmodule Compos.Core.Agent.Backend.ACP do
   # settingSources: [] needs.
   defp meta_json(plist), do: Compos.Core.Plist.to_json(plist)
 
-  defp adapter_exit(state, status) do
-    # a turn that was running when the adapter died still ends
-    state =
-      if "session/prompt" in Map.values(state.pending_rpc),
-        do: report_usage(state, nil, "crashed"),
-        else: state
+  defp shared?(config) do
+    Map.get(config, "share") in [true, "t", "true"] and
+      Application.get_env(:compos_core, :acp_share_adapters, true) != false
+  end
 
-    emit(state, type: :dead, exit: status)
-    {:noreply, %{state | partial: ""}}
+  defp adapter_exit(state, status) do
+    running? = "session/prompt" in Map.values(state.pending_rpc)
+
+    # a turn that was running when the adapter died still ends
+    state = if running?, do: report_usage(state, nil, "crashed"), else: state
+
+    if Map.get(state, :shared) and is_binary(state.session_id) and Map.get(state, :can_load) do
+      # A shared adapter took every chat on it down, none of them by its own
+      # doing. Each one parks on its session instead of dying: the next
+      # prompt opens a new adapter and brings the conversation back with
+      # session/load, as after an idle park. The loss goes first, so the
+      # machine parks as soon as the lost turn's end leaves it idle.
+      state = emit(state, type: :"adapter-lost", session: state.session_id, exit: status)
+
+      state =
+        if running?,
+          do:
+            state
+            |> emit(type: :error, text: "the shared agent adapter exited (#{inspect(status)}); this turn was lost")
+            |> emit(type: :"turn-failed"),
+          else: state
+
+      {:noreply, %{state | partial: "", pending_rpc: %{}}}
+    else
+      emit(state, type: :dead, exit: status)
+      {:noreply, %{state | partial: ""}}
+    end
   end
 
   # mcp_servers config (Scheme plists via mcp-acp-servers) -> ACP session/new

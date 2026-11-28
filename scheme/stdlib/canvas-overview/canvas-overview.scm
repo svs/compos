@@ -29,7 +29,7 @@
 (define *canvas-overview-demo-seq* 0)
 
 (define canvas-overview--html
-  "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><link rel=\"stylesheet\" href=\"canvas-overview.css\"></head><body><script src=\"canvas-overview.js\"></script></body></html>")
+  "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap\"><link id=\"compos-editor-css\" rel=\"stylesheet\" href=\"_compos/editor.css\"><link rel=\"stylesheet\" href=\"canvas-overview.css\"></head><body><script src=\"canvas-overview.js\"></script></body></html>")
 
 (define (canvas-overview--own-dir)
   (let ((ds (filter (lambda (d) (string-suffix? "/canvas-overview" d)) (stdlib-dirs))))
@@ -338,15 +338,13 @@
 
 (define (canvas-overview--flush-dirty! _)
   (when (and (canvas-overview--visible?) (pair? *canvas-overview-dirty*))
-    (let* ((batch (reverse *canvas-overview-dirty*)))
+    (let* ((batch (filter buffer-known? (reverse *canvas-overview-dirty*))))
       (set! *canvas-overview-dirty* '())
-      (let ((updates (map (lambda (b) (canvas-overview--buffer-preview b #f))
-                          (filter buffer-known? batch))))
-        (when (pair? updates)
-          (app-post! *canvas-overview-buffer*
-                     (list 'type "buffers"
-                           'ts (monotonic-ms)
-                           'buffers updates)))))))
+      (when (pair? batch)
+        (app-post! *canvas-overview-buffer*
+                   (list 'type "dirty"
+                         'ts (monotonic-ms)
+                         'buffers batch))))))
 
 (define (canvas-overview--default-watch-buffers)
   (let* ((g (frame-group))
@@ -670,8 +668,16 @@
   (lambda ()
     (let ((name (current-buffer)))
       (buffer-set-local! name 'app-directory (list (canvas-overview--own-dir)))
+      (buffer-set-local! name 'app-allow-render #t)
       (canvas-overview--fill! name)
       (buffer-set-local! name 'render-mode "app"))))
+
+;; Keep canvas-overview-mode out of M-x in other buffers and redirect direct
+;; calls to overview! so it never overwrites the current buffer.
+(define-command "canvas-overview-mode"
+  "Open the spatial canvas overview in its own *canvas-overview* buffer"
+  (lambda () (overview!))
+  'modes '(canvas-overview-mode))
 
 (mode-doc! "canvas-overview-mode"
   "Fullscreen HTML-in-Canvas overview of visible panes, hidden panes, window stacks, and buffers. Use your normal pane focus, swap, shift, hide, restore, and stack-cycle keys or drag and click on the canvas; q returns to the updated frame.")
@@ -740,6 +746,7 @@
           (unless (equal? (buffer-local-value 'mode-name name) "canvas-overview-mode")
             (with-current-buffer name (lambda () (set-mode! "canvas-overview-mode"))))
           (buffer-set-local! name 'app-directory (list (canvas-overview--own-dir)))
+          (buffer-set-local! name 'app-allow-render #t)
           (canvas-overview--fill! name)
           (app-reload! name)
           (buffer-set-local! name 'render-mode "app")
@@ -757,11 +764,13 @@
 ;;;###autoload
 (define-command "overview"
   "Open the fullscreen spatial HTML-in-Canvas overview of visible panes, hidden panes, window stacks, and buffers"
-  (lambda () (overview!)))
+  (lambda () (overview!))
+  'public #t)
 
 ;;;###autoload
 (define-command "canvas-overview"
   "Open the fullscreen spatial HTML-in-Canvas overview of visible panes, hidden panes, window stacks, and buffers"
-  (lambda () (overview!)))
+  (lambda () (overview!))
+  'public #t)
 
 (provide 'canvas-overview)

@@ -2,6 +2,7 @@
 // hidden panes, window stacks, and buffers.
 (() => {
   const API = "_compos/app";
+  const RENDER_API = "_compos/render";
 
   // --- Feature detection for WICG HTML-in-Canvas (<canvas layoutsubtree>) ---
   const probe = document.createElement("canvas");
@@ -28,11 +29,14 @@
   let searchQuery = "";
   let selectedCardId = null;
 
-  const expandedPanes = new Set();     // "groupId::paneId" or "groupId::hidden::paneId"
+  const collapsedPanes = new Set();    // "groupId::paneId" or "groupId::hidden::paneId" (open by default)
   const expandedBufStacks = new Set(); // "groupId::windowKey"
   const expandedUnshown = new Set();   // "groupId::bufName"
   const liveBuffers = new Map();       // bufName -> preview object
+  const renderedBuffers = new Map();   // bufName -> rendered compos HTML object
+  const pendingRender = new Set();     // bufName currently in flight
   const pulseUntil = new Map();        // bufName -> perf.now() timestamp
+  let lastThemeKey = "";
 
   const cam = {
     x: 40, y: 76, zoom: 0.92,
@@ -55,6 +59,7 @@
   let rafHandle = 0;
   let dirtyPaint = true;
   let didInitialFit = false;
+  let whooshArmed = false;
 
   // --- DOM scaffolding ---
   const mk = (tag, cls, parent, text) => {
@@ -109,7 +114,7 @@
   const btnThisGroup = mk("button", "hud-btn active", hudLeft, "This group");
   const btnAllGroups = mk("button", "hud-btn", hudLeft, "All groups");
   mk("span", "hud-sep", hudLeft);
-  const btnExpandAll = mk("button", "hud-btn", hudLeft, "Expand stacks");
+  const btnExpandAll = mk("button", "hud-btn active", hudLeft, "Collapse stacks");
   const btnFit = mk("button", "hud-btn", hudLeft, "Fit");
   const btnPulse = mk("button", "hud-btn", hudLeft, "Pulse test");
   const searchInput = mk("input", "hud-search", hudLeft);
@@ -154,6 +159,12 @@
     r.setProperty("--card-shadow", dark ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.14)");
     r.setProperty("--hud-bg", dark ? "rgba(20,22,28,0.88)" : "rgba(248,247,244,0.92)");
     r.setProperty("--hud-border", dark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.12)");
+    const tKey = (dark ? "1" : "0") + "|" + (theme.bg || "") + "|" + (theme.fg || "") + "|" + (theme.accent || "");
+    if (lastThemeKey && lastThemeKey !== tKey) {
+      const link = document.getElementById("compos-editor-css");
+      if (link) link.href = "_compos/editor.css?v=" + Date.now();
+    }
+    lastThemeKey = tKey;
   }
 
   // --- Diagnostics HUD ---
@@ -261,7 +272,7 @@
       for (const col of (g.columns || [])) {
         for (const p of col) {
           const pKey = g.id + "::" + p.id;
-          const isOpen = expandedPanes.has(pKey);
+          const isOpen = !collapsedPanes.has(pKey);
           for (let i = 0; i < (p.windows || []).length; i++) {
             const w = p.windows[i];
             if ((i === 0 || isOpen) && w.buffer) set.add(w.buffer);
@@ -270,7 +281,7 @@
       }
       for (const hp of (g.hiddenPanes || [])) {
         const hKey = g.id + "::hidden::" + hp.id;
-        const isOpen = expandedPanes.has(hKey);
+        const isOpen = !collapsedPanes.has(hKey);
         for (let i = 0; i < (hp.windows || []).length; i++) {
           const w = hp.windows[i];
           if ((i === 0 || isOpen) && w.buffer) set.add(w.buffer);
@@ -283,17 +294,46 @@
     return Array.from(set);
   }
 
+  async function fetchRenderedBuffers(bufNames, countAsLive) {
+    const names = [];
+    for (const n of bufNames) {
+      if (n && !names.includes(n)) names.push(n);
+    }
+    if (!names.length) return;
+    for (const n of names) pendingRender.add(n);
+    try {
+      const res = await fetch(RENDER_API, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ buffers: names.map((name) => ({ name, rows: 32 })) })
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && Array.isArray(data.buffers)) applyRenderedUpdates(data.buffers, countAsLive);
+    } catch (_) {
+    } finally {
+      for (const n of names) pendingRender.delete(n);
+    }
+  }
+
+  function fetchMissingRendered(forceAll) {
+    const bufs = collectWatchedBuffers();
+    const want = forceAll ? bufs : bufs.filter((b) => !renderedBuffers.has(b) && !pendingRender.has(b));
+    if (want.length) fetchRenderedBuffers(want, false);
+  }
+
   let watchTimer = null;
   function syncWatchesSoon() {
     clearTimeout(watchTimer);
     watchTimer = setTimeout(async () => {
       const bufs = collectWatchedBuffers();
       if (!bufs.length) return;
+      fetchMissingRendered(false);
       try {
         const res = await apiPost({ op: "watch", buffers: bufs });
         if (res && Array.isArray(res.buffers)) applyBufferUpdates(res.buffers, false);
       } catch (_) {}
-    }, 60);
+    }, 40);
   }
 
   // --- Layout engine ---
@@ -314,8 +354,8 @@
     const GROUP_HEAD = 44;
     const COL_GAP = 24;
     const PANE_GAP = 22;
-    const CARD_W = 365;
-    const CARD_H = 256;
+    const CARD_W = 420;
+    const CARD_H = 300;
     const STACK_W = 330;
     const STACK_H = 220;
     const STACK_GAP = 16;
@@ -355,7 +395,7 @@
           const wins = p.windows || [];
           const front = wins[0] || null;
           const stacked = wins.slice(1);
-          const isOpen = expandedPanes.has(pKey);
+          const isOpen = !collapsedPanes.has(pKey);
           const cardX = innerX;
           const cardY = py;
 
@@ -429,15 +469,13 @@
           let blockBottom = cardY + CARD_H + (stacked.length > 0 && !isOpen ? 18 : 0);
 
           if (isOpen && stacked.length > 0) {
-            const fanCols = Math.min(2, stacked.length);
-            const fanStartY = cardY + CARD_H + 34;
-            const fanW = Math.max(300, Math.min(STACK_W, colW));
+            const fanStartY = cardY + CARD_H + 22;
+            const fanW = colW;
+            const stackCardH = Math.round(CARD_H * 0.8);
             for (let si = 0; si < stacked.length; si++) {
               const sw = stacked[si];
-              const fc = si % fanCols;
-              const fr = Math.floor(si / fanCols);
-              const sx = cardX + fc * (fanW + STACK_GAP);
-              const sy = fanStartY + fr * (STACK_H + STACK_GAP);
+              const sx = cardX;
+              const sy = fanStartY + si * (stackCardH + STACK_GAP);
               outCards.push({
                 id: "win:" + g.id + ":" + sw.key,
                 kind: "stacked-window",
@@ -461,8 +499,8 @@
                 live: false,
                 selected: false,
                 preview: liveBuffers.get(sw.buffer) || sw.preview,
-                x: sx, y: sy, w: fanW, h: STACK_H,
-                originX: cardX + 12, originY: cardY + 12
+                x: sx, y: sy, w: fanW, h: stackCardH,
+                originX: cardX, originY: cardY
               });
               outConnectors.push({
                 fromX: cardX + colW * 0.5,
@@ -472,7 +510,7 @@
                 color: g.color || theme.accent
               });
               colRight = Math.max(colRight, sx + fanW);
-              blockBottom = Math.max(blockBottom, sy + STACK_H);
+              blockBottom = Math.max(blockBottom, sy + stackCardH);
             }
           }
 
@@ -501,7 +539,7 @@
           const hWins = hp.windows || [];
           const hFront = hWins[0] || null;
           const hStacked = hWins.slice(1);
-          const hOpen = expandedPanes.has(hKey);
+          const hOpen = !collapsedPanes.has(hKey);
           let colRight = hx + H_W;
 
           if (hFront) {
@@ -528,7 +566,7 @@
               selected: false,
               preview: liveBuffers.get(hFront.buffer) || hFront.preview,
               x: hx, y: hy, w: H_W, h: H_H,
-              originX: hx, originY: hy
+              originX: hx, originY: panesTop + 28
             });
           }
 
@@ -544,15 +582,13 @@
           let hBottom = hy + H_H + (hStacked.length > 0 && !hOpen ? 16 : 0);
 
           if (hOpen && hStacked.length > 0) {
-            const fanCols = Math.min(2, hStacked.length);
-            const fanStartY = hy + H_H + 30;
-            const fanW = 310;
+            const fanStartY = hy + H_H + 20;
+            const fanW = H_W;
+            const hStackH = 208;
             for (let si = 0; si < hStacked.length; si++) {
               const sw = hStacked[si];
-              const fc = si % fanCols;
-              const fr = Math.floor(si / fanCols);
-              const sx = hx + fc * (fanW + STACK_GAP);
-              const sy = fanStartY + fr * (STACK_H + STACK_GAP);
+              const sx = hx;
+              const sy = fanStartY + si * (hStackH + STACK_GAP);
               outCards.push({
                 id: "win:" + g.id + ":" + sw.key,
                 kind: "stacked-window",
@@ -574,8 +610,8 @@
                 live: false,
                 selected: false,
                 preview: liveBuffers.get(sw.buffer) || sw.preview,
-                x: sx, y: sy, w: fanW, h: STACK_H,
-                originX: hx + 12, originY: hy + 12
+                x: sx, y: sy, w: fanW, h: hStackH,
+                originX: hx, originY: panesTop + 28
               });
               outConnectors.push({
                 fromX: hx + H_W * 0.5,
@@ -585,7 +621,7 @@
                 color: "#f5b942"
               });
               colRight = Math.max(colRight, sx + fanW);
-              hBottom = Math.max(hBottom, sy + STACK_H);
+              hBottom = Math.max(hBottom, sy + hStackH);
             }
           }
 
@@ -676,10 +712,24 @@
     }
     if (!Number.isFinite(minX)) { minX = 0; minY = 0; maxX = 800; maxY = 500; }
 
+    let fMinX = Infinity, fMinY = Infinity, fMaxX = -Infinity, fMaxY = -Infinity;
+    for (const c of outCards) {
+      if (c.groupActive && !c.hiddenPane && (c.kind === "window" || c.kind === "empty-pane")) {
+        fMinX = Math.min(fMinX, c.x);
+        fMinY = Math.min(fMinY, c.y);
+        fMaxX = Math.max(fMaxX, c.x + c.w);
+        fMaxY = Math.max(fMaxY, c.y + c.h);
+      }
+    }
+    const frontRowBounds = Number.isFinite(fMinX)
+      ? { x: fMinX, y: fMinY, w: Math.max(200, fMaxX - fMinX), h: Math.max(160, fMaxY - fMinY) }
+      : { x: minX, y: minY, w: Math.max(200, maxX - minX), h: Math.max(200, maxY - minY) };
+
     scene = {
       groups: outGroups,
       connectors: outConnectors,
       cards: outCards,
+      frontRowBounds,
       bounds: { x: minX, y: minY, w: Math.max(200, maxX - minX), h: Math.max(200, maxY - minY) }
     };
 
@@ -698,6 +748,30 @@
       (card.paneId && card.paneId.toLowerCase().includes(q)) ||
       (card.groupName && card.groupName.toLowerCase().includes(q))
     );
+  }
+
+  function renderComposHtml(bodyEl, card, rendered) {
+    const virtualW = 640;
+    const innerW = Math.max(200, (card.w || 420) - 2);
+    const scale = Math.min(1, innerW / virtualW);
+    bodyEl.classList.add("is-rendered");
+    bodyEl.innerHTML = "";
+    const stage = mk("div", "ov-rendered-stage" + (rendered.follow ? " is-follow" : ""), bodyEl);
+    stage.style.width = virtualW + "px";
+    stage.style.height = Math.round(((card.h || 300) - 58) / scale) + "px";
+    stage.style.transform = "scale(" + scale.toFixed(4) + ")";
+    const win = document.createElement("c-window");
+    const cls = ["window", "inactive", "ov-rendered-win"];
+    if (rendered.lineNumbers === false) cls.push("no-nums");
+    if (rendered.windowClass) cls.push(rendered.windowClass);
+    win.className = cls.join(" ");
+    win.dataset.buffer = rendered.name || "";
+    win.innerHTML = rendered.html;
+    stage.appendChild(win);
+    if (rendered.follow) {
+      const sc = win.querySelector(".blocks-scroll") || win.querySelector(".blocks-view") || win;
+      sc.scrollTop = sc.scrollHeight;
+    }
   }
 
   function renderPreviewLines(bodyEl, preview) {
@@ -738,10 +812,11 @@
       e.stopPropagation();
       const cur = cardById.get(card.id);
       if (!cur || !cur.paneKey) return;
-      if (expandedPanes.has(cur.paneKey)) expandedPanes.delete(cur.paneKey);
-      else expandedPanes.add(cur.paneKey);
+      if (collapsedPanes.has(cur.paneKey)) collapsedPanes.delete(cur.paneKey);
+      else collapsedPanes.add(cur.paneKey);
       computeLayout();
       syncWatchesSoon();
+      fitScene(false);
     });
 
     const bufsBtn = mk("button", "card-btn", head);
@@ -954,10 +1029,22 @@
     rec.btnSwapHidden.style.display = isHiddenFront ? "" : "none";
 
     if (!isCompact) {
-      const pts = preview ? (preview.ts || 1) : 0;
-      if (pts !== rec.lastPreviewTs) {
-        rec.lastPreviewTs = pts;
-        renderPreviewLines(rec.bodyEl, preview);
+      const rendered = card.buffer ? renderedBuffers.get(card.buffer) : null;
+      if (rendered && rendered.html) {
+        const rKey = (rendered.ts || 1) + "|" + Math.round(card.w);
+        if (rKey !== rec.lastRenderKey) {
+          rec.lastRenderKey = rKey;
+          rec.lastPreviewTs = -1;
+          renderComposHtml(rec.bodyEl, card, rendered);
+        }
+      } else {
+        const pts = preview ? (preview.ts || 1) : 0;
+        if (pts !== rec.lastPreviewTs) {
+          rec.lastPreviewTs = pts;
+          rec.lastRenderKey = "";
+          rec.bodyEl.classList.remove("is-rendered");
+          renderPreviewLines(rec.bodyEl, preview);
+        }
       }
       const loc = card.kind === "window"
         ? (card.paneId + (card.paneFocused ? " *" : "") + (preview && preview.totalLines ? " | L" + preview.pointLine : ""))
@@ -993,6 +1080,39 @@
   }
 
   // --- Live delta updates ---
+  function applyRenderedUpdates(updates, countAsLive) {
+    const now = performance.now();
+    let changed = false;
+    for (const r of updates) {
+      if (!r || !r.name) continue;
+      renderedBuffers.set(r.name, r);
+      if (countAsLive) {
+        pulseUntil.set(r.name, now + 950);
+        liveUpdateCount += 1;
+        lastLiveBuf = r.shortName || r.name;
+      }
+      changed = true;
+    }
+    if (!changed) return;
+    for (const card of scene.cards) {
+      if (renderedBuffers.has(card.buffer)) {
+        const rec = cardDom.get(card.id);
+        if (rec) updateCardContent(rec, card);
+      }
+    }
+    updateHudStatus();
+    schedulePaint();
+    if (countAsLive) {
+      setTimeout(() => {
+        for (const card of scene.cards) {
+          const rec = cardDom.get(card.id);
+          if (rec) updateCardContent(rec, card);
+        }
+        schedulePaint();
+      }, 980);
+    }
+  }
+
   function applyBufferUpdates(updates, countAsLive) {
     const now = performance.now();
     let changed = false;
@@ -1047,14 +1167,26 @@
     swooshTo(tx, ty, z);
   }
 
+  function snapCameraToBox(b, padX, padTop, padBottom, maxZoom) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const availW = Math.max(120, vw - padX * 2);
+    const availH = Math.max(120, vh - padTop - padBottom);
+    const z = Math.min(maxZoom || 1.6, Math.max(0.12, Math.min(availW / b.w, availH / b.h)));
+    cam.x = padX + (availW - b.w * z) * 0.5 - b.x * z;
+    cam.y = padTop + (availH - b.h * z) * 0.5 - b.y * z;
+    cam.zoom = z;
+    cam.targetX = cam.targetY = cam.targetZoom = null;
+  }
+
   function fitScene(instant) {
     const b = scene.bounds;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const padX = 48, padTop = 72, padBottom = 56;
+    const padX = 44, padTop = 68, padBottom = 52;
     const availW = Math.max(120, vw - padX * 2);
     const availH = Math.max(120, vh - padTop - padBottom);
-    const z = Math.min(1.02, Math.max(0.18, Math.min(availW / b.w, availH / b.h)));
+    const z = Math.min(1.0, Math.max(0.12, Math.min(availW / b.w, availH / b.h)));
     const tx = padX + (availW - b.w * z) * 0.5 - b.x * z;
     const ty = padTop + (availH - b.h * z) * 0.5 - b.y * z;
     if (instant) {
@@ -1066,6 +1198,28 @@
     }
   }
 
+  function startOpeningWhoosh() {
+    const front = scene.frontRowBounds || scene.bounds;
+    // Frame 0: start tightly framed on the live visible panes row with stacks tucked behind them
+    whooshArmed = false;
+    snapCameraToBox(front, 8, 8, 8, 1.55);
+    for (const card of scene.cards) {
+      const rec = cardDom.get(card.id);
+      if (!rec) continue;
+      rec.animX = card.originX;
+      rec.animY = card.originY;
+    }
+    schedulePaint();
+    // Next frame: whoosh camera out while stacks cascade smoothly down below every pane
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        whooshArmed = true;
+        fitScene(false);
+        schedulePaint();
+      });
+    });
+  }
+
   function stepPhysics() {
     let moving = false;
 
@@ -1073,10 +1227,10 @@
       const dx = cam.targetX - cam.x;
       const dy = cam.targetY - cam.y;
       const dz = cam.targetZoom - cam.zoom;
-      cam.x += dx * 0.22;
-      cam.y += dy * 0.22;
-      cam.zoom += dz * 0.22;
-      if (Math.abs(dx) < 0.4 && Math.abs(dy) < 0.4 && Math.abs(dz) < 0.0015) {
+      cam.x += dx * 0.14;
+      cam.y += dy * 0.14;
+      cam.zoom += dz * 0.14;
+      if (Math.abs(dx) < 0.4 && Math.abs(dy) < 0.4 && Math.abs(dz) < 0.0012) {
         cam.x = cam.targetX; cam.y = cam.targetY; cam.zoom = cam.targetZoom;
         cam.targetX = cam.targetY = cam.targetZoom = null;
       } else {
@@ -1092,18 +1246,23 @@
       cam.vx = 0; cam.vy = 0;
     }
 
-    for (const card of scene.cards) {
-      const rec = cardDom.get(card.id);
-      if (!rec) continue;
-      const dx = card.x - rec.animX;
-      const dy = card.y - rec.animY;
-      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-        rec.animX += dx * 0.26;
-        rec.animY += dy * 0.26;
-        moving = true;
-      } else {
-        rec.animX = card.x;
-        rec.animY = card.y;
+    if (whooshArmed) {
+      for (const card of scene.cards) {
+        const rec = cardDom.get(card.id);
+        if (!rec) continue;
+        const dx = card.x - rec.animX;
+        const dy = card.y - rec.animY;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          const stagger = card.kind === "stacked-window"
+            ? 0.18 / (1 + (card.windowIndex || 1) * 0.14)
+            : 0.18;
+          rec.animX += dx * stagger;
+          rec.animY += dy * stagger;
+          moving = true;
+        } else {
+          rec.animX = card.x;
+          rec.animY = card.y;
+        }
       }
     }
 
@@ -1239,7 +1398,16 @@
     ctx.restore();
 
     if (renderMode === "hic" && DRAW_METHOD) {
-      for (const card of scene.cards) {
+      // Paint deeper stacked cards first so they slide cleanly out from behind their front pane
+      const paintOrder = scene.cards.slice().sort((a, b) => {
+        const rank = (c) =>
+          c.kind === "stacked-window" ? 10 - Math.min(9, c.windowIndex || 1)
+          : c.kind === "buffer" ? 20
+          : c.kind === "hidden-pane" ? 30
+          : c.selected ? 50 : 40;
+        return rank(a) - rank(b);
+      });
+      for (const card of paintOrder) {
         const rec = cardDom.get(card.id);
         if (!rec) continue;
         const sx = rec.animX * cam.zoom + cam.x;
@@ -1487,11 +1655,11 @@
         if ((hp.windows || []).length > 1) allKeys.push(g.id + "::hidden::" + hp.id);
       }
     }
-    const anyClosed = allKeys.some((k) => !expandedPanes.has(k));
+    const anyClosed = allKeys.some((k) => collapsedPanes.has(k));
     if (anyClosed) {
-      for (const k of allKeys) expandedPanes.add(k);
+      for (const k of allKeys) collapsedPanes.delete(k);
     } else {
-      for (const k of allKeys) expandedPanes.delete(k);
+      for (const k of allKeys) collapsedPanes.add(k);
     }
     btnExpandAll.classList.toggle("active", anyClosed);
     btnExpandAll.textContent = anyClosed ? "Collapse stacks" : "Expand stacks";
@@ -1512,7 +1680,7 @@
         const ag = visibleGroups()[0];
         const firstPane = ag && ag.columns && ag.columns[0] && ag.columns[0][0];
         if (ag && firstPane) {
-          expandedPanes.add(ag.id + "::" + firstPane.id);
+          collapsedPanes.delete(ag.id + "::" + firstPane.id);
           computeLayout();
           syncWatchesSoon();
         }
@@ -1620,9 +1788,10 @@
     }
 
     computeLayout();
+    fetchMissingRendered(!initial);
     if (initial && !didInitialFit) {
       didInitialFit = true;
-      fitScene(true);
+      startOpeningWhoosh();
     }
     updateHudStatus();
   }
@@ -1631,7 +1800,9 @@
     const d = e.data;
     if (!(d && d.compos === "message" && d.data)) return;
     const msg = d.data;
-    if (msg.type === "buffers" && Array.isArray(msg.buffers)) {
+    if (msg.type === "dirty" && Array.isArray(msg.buffers)) {
+      fetchRenderedBuffers(msg.buffers, true);
+    } else if (msg.type === "buffers" && Array.isArray(msg.buffers)) {
       applyBufferUpdates(msg.buffers, true);
     } else if (msg.type === "snapshot" && msg.snapshot) {
       applySnapshot(msg.snapshot, false);

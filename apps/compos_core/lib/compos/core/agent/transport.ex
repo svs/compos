@@ -26,7 +26,10 @@ defmodule Compos.Core.Agent.Transport.Port do
 
   @impl true
   def open(cmd, opts, _owner) do
-    [exe | args] = String.split(cmd, " ", trim: true)
+    # the installed program itself, not the npx or version-manager shim
+    # that would wrap it (Agent.Launch)
+    {exe_path, args} = Compos.Core.Agent.Launch.resolve(cmd, Keyword.get(opts, :cd))
+    exe = Path.basename(exe_path)
 
     env =
       case Keyword.get(opts, :env) do
@@ -57,7 +60,6 @@ defmodule Compos.Core.Agent.Transport.Port do
         # (false in a port env deletes the var from the child)
         [env: [{~c"CLAUDECODE", false} | env]]
 
-    exe_path = System.find_executable(exe) || raise "agent adapter not found: #{exe}"
     port = Port.open({:spawn_executable, exe_path}, port_opts)
     {:ok, port}
   end

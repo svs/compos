@@ -2809,13 +2809,12 @@ defmodule Compos.Ui.EditorLive do
   defp build_isolated_child(c, i, _ranges, slices, source, win) do
     {v, _} = block_build(c, source, {%{}, win, 0}, {0, %{}})
     v = %{v | attrs: v.attrs ++ [{"data-index", Integer.to_string(i)}]}
-    stream_key = if v.class == "ag-earlier", do: "earlier", else: "i-\#{i}"
+    stream_key = if v.class == "ag-earlier", do: "earlier", else: "i-#{i}"
     parts = frozen_parts(v, win)
 
     v
     |> Map.put(:stream_key, stream_key)
     |> Map.put(:frozen_parts, parts)
-    |> Map.put(:frozen, frozen_html(v, win))
     |> Map.put(:range_slices, slices)
   end
 
@@ -2860,6 +2859,14 @@ defmodule Compos.Ui.EditorLive do
 
   defp frozen_parts(%{tag: "span"} = view, win) do
     %{tag: "c-text", attrs: clean_outer_attrs([{"class", view.class} | view.attrs]), inner: frozen_body(view, win)}
+  end
+
+  defp frozen_parts(%{tag: "img"} = view, _win) do
+    attrs =
+      ([{"class", view.class}, {"loading", "lazy"}, {"referrerpolicy", "no-referrer"}] ++ view.attrs)
+      |> clean_outer_attrs()
+
+    %{tag: "img", attrs: attrs, inner: ""}
   end
 
   defp frozen_parts(view, win) do
@@ -3255,25 +3262,15 @@ defmodule Compos.Ui.EditorLive do
 
   defp ml_bytes(b) when is_integer(b) do
     cond do
-      b >= 1_048_576 -> "\#{Float.round(b / 1_048_576, 1)} MB"
-      b >= 1024 -> "\#{Float.round(b / 1024, 1)} kB"
-      true -> "\#{b} B"
+      b >= 1_048_576 -> "#{Float.round(b / 1_048_576, 1)} MB"
+      b >= 1024 -> "#{Float.round(b / 1024, 1)} kB"
+      true -> "#{b} B"
     end
   end
 
   defp ml_bytes(text) when is_binary(text), do: ml_bytes(Kernel.byte_size(text))
 
   defp ml_bytes(_), do: "0 B"
-
-  defp _ml_bytes_unused(text) do
-    b = Kernel.byte_size(text)
-
-    cond do
-      b >= 1_048_576 -> "#{Float.round(b / 1_048_576, 1)} MB"
-      b >= 1024 -> "#{Float.round(b / 1024, 1)} kB"
-      true -> "#{b} B"
-    end
-  end
 
   defp pct(%{top: 0, rows: rows, total_lines: total}) when total <= rows, do: "All"
   defp pct(%{top: 0}), do: "Top"

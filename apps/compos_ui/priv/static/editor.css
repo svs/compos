@@ -2399,3 +2399,12 @@ body.frame-arrive .window { animation: frame-arrive calc(var(--chrome-anim, 0ms)
     app-region: no-drag;
   }
 }
+
+/* a touch screen has no hover: every action takes a tap as it is,
+   at once, with no double-tap zoom and no hover state to reach first */
+@media (hover: none), (pointer: coarse) {
+  button, c-action, .c-action, .ag-btn, [phx-click], [data-pick] {
+    pointer-events: auto; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+}

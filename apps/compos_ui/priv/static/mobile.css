@@ -238,3 +238,12 @@ body {
 .ag-activity { display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; font-size: 10.5px; color: var(--faint); }
 .ag-activity-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hh-blink { display: inline-block; width: 7px; height: 14px; background: var(--indigo); animation: hh-blink var(--chrome-anim, 0s) step-end infinite; }
+
+/* a touch screen has no hover: every action takes a tap as it is,
+   at once, with no double-tap zoom and no hover state to reach first */
+@media (hover: none), (pointer: coarse) {
+  button, c-action, .c-action, .ag-btn, [phx-click], [data-pick] {
+    pointer-events: auto; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+}

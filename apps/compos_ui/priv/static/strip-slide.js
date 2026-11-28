@@ -50,18 +50,69 @@
     return d > 0 ? { vertical, d } : null;
   }
 
-  // the scroll offsets of the old panes, by element index, so the copy
-  // shows each buffer at the place the user left it
+  const SCROLL_SEL = "[data-block-list], .blocks-scroll, .ag-scroll, .buf, .xterm-viewport";
+
+  // the scroll offsets of the old panes, by scroll-container index, so the copy
+  // shows each buffer at the place the user left it without scanning every node
   function scrolls(root) {
     const out = [];
-    root.querySelectorAll("*").forEach((el, i) => {
+    root.querySelectorAll(SCROLL_SEL).forEach((el, i) => {
       if (el.scrollTop || el.scrollLeft) out.push([i, el.scrollTop, el.scrollLeft]);
     });
     return out;
   }
 
+  function cloneListViewport(list) {
+    const kids = list.children;
+    if (kids.length <= 30) return list.cloneNode(true);
+    const g = list.cloneNode(false);
+    const top = list.scrollTop;
+    const bot = top + (list.clientHeight || window.innerHeight);
+    let lo = 0, hi = kids.length - 1, first = kids.length;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (kids[mid].offsetTop + kids[mid].offsetHeight > top) {
+        first = mid;
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    const from = Math.max(0, first - 2);
+    let to = from;
+    while (to < kids.length && kids[to].offsetTop < bot) to++;
+    to = Math.min(kids.length, to + 2);
+    const headH = from > 0 ? kids[from].offsetTop : 0;
+    if (headH > 0) {
+      const sp = document.createElement("c-group");
+      sp.style.cssText = `display:block;height:${headH}px;flex-shrink:0;`;
+      g.appendChild(sp);
+    }
+    for (let i = from; i < to; i++) g.appendChild(kids[i].cloneNode(true));
+    const last = to > from ? kids[to - 1] : null;
+    const tailY = last ? last.offsetTop + last.offsetHeight : headH;
+    const tailH = Math.max(0, list.scrollHeight - tailY);
+    if (tailH > 0) {
+      const sp = document.createElement("c-group");
+      sp.style.cssText = `display:block;height:${tailH}px;flex-shrink:0;`;
+      g.appendChild(sp);
+    }
+    return g;
+  }
+
+  function cloneNodeFast(node) {
+    if (node.nodeType !== 1) return node.cloneNode(true);
+    if (node.hasAttribute("data-block-list") && node.children.length > 30) {
+      return cloneListViewport(node);
+    }
+    if (!node.querySelector("[data-block-list]")) return node.cloneNode(true);
+    const copy = node.cloneNode(false);
+    for (let c = node.firstChild; c; c = c.nextSibling) copy.appendChild(cloneNodeFast(c));
+    return copy;
+  }
+
   function ghostOf(root) {
-    const g = root.cloneNode(true);
+    const g = cloneNodeFast(root);
     g.removeAttribute("data-slide");
     g.removeAttribute("role");
     g.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
@@ -82,7 +133,8 @@
   }
 
   function restore(ghost, offsets) {
-    const all = ghost.querySelectorAll("*");
+    if (!offsets.length) return;
+    const all = ghost.querySelectorAll(SCROLL_SEL);
     offsets.forEach(([i, top, left]) => {
       const el = all[i];
       if (el) { el.scrollTop = top; el.scrollLeft = left; }

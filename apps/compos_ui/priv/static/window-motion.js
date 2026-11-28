@@ -65,26 +65,78 @@
     };
   }
 
-  // the scroll offsets inside a pane, by element index, so the copy
-  // shows the buffer at the place the user left it
+  const SCROLL_SEL = '[data-block-list], .blocks-scroll, .ag-scroll, .buf, .xterm-viewport';
+
+  // the scroll offsets inside a pane, by scroll-container index, so the copy
+  // shows the buffer at the place the user left it without scanning every node
   function scrolls(el) {
     const out = [];
-    el.querySelectorAll('*').forEach((e, i) => {
+    el.querySelectorAll(SCROLL_SEL).forEach((e, i) => {
       if (e.scrollTop || e.scrollLeft) out.push([i, e.scrollTop, e.scrollLeft]);
     });
     return out;
   }
 
   function restore(el, offsets) {
-    const all = el.querySelectorAll('*');
+    if (!offsets.length) return;
+    const all = el.querySelectorAll(SCROLL_SEL);
     offsets.forEach(([i, top, left]) => {
       const e = all[i];
       if (e) { e.scrollTop = top; e.scrollLeft = left; }
     });
   }
 
+  function cloneListViewport(list) {
+    const kids = list.children;
+    if (kids.length <= 30) return list.cloneNode(true);
+    const g = list.cloneNode(false);
+    const top = list.scrollTop;
+    const bot = top + (list.clientHeight || window.innerHeight);
+    let lo = 0, hi = kids.length - 1, first = kids.length;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (kids[mid].offsetTop + kids[mid].offsetHeight > top) {
+        first = mid;
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    const from = Math.max(0, first - 2);
+    let to = from;
+    while (to < kids.length && kids[to].offsetTop < bot) to++;
+    to = Math.min(kids.length, to + 2);
+    const headH = from > 0 ? kids[from].offsetTop : 0;
+    if (headH > 0) {
+      const sp = document.createElement('c-group');
+      sp.style.cssText = `display:block;height:${headH}px;flex-shrink:0;`;
+      g.appendChild(sp);
+    }
+    for (let i = from; i < to; i++) g.appendChild(kids[i].cloneNode(true));
+    const last = to > from ? kids[to - 1] : null;
+    const tailY = last ? last.offsetTop + last.offsetHeight : headH;
+    const tailH = Math.max(0, list.scrollHeight - tailY);
+    if (tailH > 0) {
+      const sp = document.createElement('c-group');
+      sp.style.cssText = `display:block;height:${tailH}px;flex-shrink:0;`;
+      g.appendChild(sp);
+    }
+    return g;
+  }
+
+  function cloneNodeFast(node) {
+    if (node.nodeType !== 1) return node.cloneNode(true);
+    if (node.hasAttribute('data-block-list') && node.children.length > 30) {
+      return cloneListViewport(node);
+    }
+    if (!node.querySelector('[data-block-list]')) return node.cloneNode(true);
+    const c = node.cloneNode(false);
+    for (let child = node.firstChild; child; child = child.nextSibling) c.appendChild(cloneNodeFast(child));
+    return c;
+  }
+
   function copy(w) {
-    const g = w.cloneNode(true);
+    const g = cloneNodeFast(w);
     ['id', 'phx-hook', 'data-win-id', 'data-buffer', 'buffer'].forEach((a) => g.removeAttribute(a));
     g.querySelectorAll('[id]').forEach((e) => e.removeAttribute('id'));
     g.querySelectorAll('[phx-hook]').forEach((e) => e.removeAttribute('phx-hook'));

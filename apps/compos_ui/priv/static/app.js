@@ -1802,18 +1802,18 @@
           }
           this.stick = tail;
           this.mark();
-          // A modal overlay covers the hit test point. Keep the
-          // place the reader left rather than dropping it.
-          const anchor = this.lastVisible();
-          if (anchor) {
-            this.anchor = anchor.index;
-            this.offset = Math.round(anchor.offset);
-          }
           // the report belongs to the step it was made after; one that
           // lands after a newer step (M-<up>) is stale and is dropped
           const seq = this.followSeq;
           clearTimeout(this.report);
           this.report = setTimeout(() => {
+            // A modal overlay covers the hit test point. Keep the
+            // place the reader left rather than dropping it.
+            const anchor = this.lastVisible();
+            if (anchor) {
+              this.anchor = anchor.index;
+              this.offset = Math.round(anchor.offset);
+            }
             this.pushEvent("follow_place", {
               buf: this.el.dataset.buf,
               seq: seq,
@@ -1851,7 +1851,7 @@
           const h = this.scroller.offsetHeight;
           return (h && this.scroller.getBoundingClientRect().height / h) || 1;
         };
-        this.scroller.addEventListener("scroll", this.scrollH);
+        this.scroller.addEventListener("scroll", this.scrollH, { passive: true });
         // A scroll event is an effect and cannot tell the
         // reader's hand from the hook's own assignment. A
         // gesture is the cause, so it is what ends the settle.
@@ -1871,7 +1871,7 @@
             if (this.stick) this.place();
           });
         });
-        this.mo.observe(this.el, { childList: true, subtree: true, characterData: true });
+        this.mo.observe(this.el, { childList: true });
         this.mark();
         this.settle();
       },
@@ -2019,13 +2019,24 @@
         const r = s.getBoundingClientRect();
         const hit = document.elementFromPoint(r.left + r.width / 2, Math.max(r.top, 0) + 2);
         let block = hit && hit.closest && hit.closest("[data-index]");
-        // the reveal row at the top has no index: pin the first
-        // block below the top edge. The window bounds this walk.
+        // the reveal row at the top has no index: binary-search the
+        // first child whose bottom extends past scrollTop.
         if (!block || !s.contains(block)) {
           block = null;
-          for (const b of s.querySelectorAll("[data-index]")) {
-            if (b.getBoundingClientRect().bottom > r.top) { block = b; break; }
+          const kids = s.children;
+          const top = s.scrollTop;
+          let lo = 0, hi = kids.length - 1;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const el = kids[mid];
+            if (el.offsetTop + el.offsetHeight > top) {
+              block = el;
+              hi = mid - 1;
+            } else {
+              lo = mid + 1;
+            }
           }
+          while (block && !block.hasAttribute("data-index")) block = block.nextElementSibling;
         }
         if (!block) return;
         // offsetTop, not a screen rect: it moves only when content

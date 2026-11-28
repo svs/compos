@@ -591,7 +591,7 @@
         ;; take the chat buffer process down or delete text that replaced the
         ;; waiting line while events crossed.
         (when (and (>= start 0) (>= end start) (<= end size)
-                   (equal? (substring-bytes (buffer-text buf) start end)
+                   (equal? (chat-view--slice buf start end)
                            "⋯ thinking\n"))
           ;; excise, not a bare delete: the line's own overlay must leave
           ;; 'agent-overlays, or the next overlay-set! re-applies its face
@@ -638,7 +638,7 @@
                          (begin (buffer-set-local! buf 'agent-prose-from #f)
                                 #f)))))
     (when from0
-      (let* ((tail (substring-bytes (buffer-text buf) from0 (agent-mark slug)))
+      (let* ((tail (chat-view--slice buf from0 (agent-mark slug)))
              (keep (if partial?
                        (let ((brk (string-rindex tail "\n\n")))
                          (if brk (+ brk 2) #f))
@@ -656,7 +656,7 @@
     (lambda (b)
       (let ((start (nth 0 b)) (end (nth 1 b)))
         (when (and (>= start 0) (>= end start) (<= end (buffer-size buf))
-                   (equal? (substring-bytes (buffer-text buf) start end)
+                   (equal? (chat-view--slice buf start end)
                            "⋯ thinking\n"))
           (agent-excise-range! buf start end))))
     (filter (lambda (b) (equal? (nth 2 b) "waiting")) (agent-blocks buf)))
@@ -1324,11 +1324,28 @@
 
 ;; the views of RAW, newest first. The common events push a block or change
 ;; the newest one; both reuse every older view without a walk.
+(define (chat-view--tool-open-changed? b old-open open)
+  (and (equal? (nth 2 b) "tool")
+       (> (length b) 3)
+       (let* ((id (nth 3 b))
+              (full (string-append "full:" id)))
+         (or (not (equal? (and (member id old-open) #t) (and (member id open) #t)))
+             (not (equal? (and (member full old-open) #t) (and (member full open) #t)))))))
+
 (define (chat-view--views buf raw open m)
-  (let ((old-raw (and m (nth 0 m))) (old-views (and m (nth 2 m))))
+  (let ((old-raw (and m (nth 0 m))) (old-open (and m (nth 1 m))) (old-views (and m (nth 2 m))))
     (cond
-      ((not (and m (equal? (nth 1 m) open)))
+      ((not m)
        (map (lambda (b) (chat-view-block buf b open)) raw))
+      ((not (equal? old-open open))
+       (if (equal? raw old-raw)
+           (map (lambda (pair)
+                  (let ((b (car pair)) (v (cadr pair)))
+                    (if (chat-view--tool-open-changed? b old-open open)
+                        (chat-view-block buf b open)
+                        v)))
+                (chat-view--zip raw old-views))
+           (map (lambda (b) (chat-view-block buf b open)) raw)))
       ((equal? raw old-raw) old-views)
       ((and (pair? raw) (equal? (cdr raw) old-raw))
        (cons (chat-view-block buf (car raw) open) old-views))

@@ -2812,6 +2812,20 @@
                   (todo-update (plist-get t 'id) (list 'log line 'by "summary")))))
             (todo-list (list 'assignee (chat-stable-id! buf)))))))))
 
+;; a chat that starts a turn on its task is working it: a task still in the
+;; inbox or todo moves to doing. review, waiting, done and cancelled stay as
+;; they are; the chat moves those itself.
+(define (todo--on-turn-start! buf)
+  (let ((id (buffer-local-value 'chat-id buf)))
+    (when id
+      (for-each
+        (lambda (t)
+          (when (member (plist-get t 'state) '("inbox" "todo"))
+            (todo-update (plist-get t 'id)
+                         (list 'state "doing" 'log "its chat started a turn" 'by id))))
+        (todo-list (list 'assignee id))))))
+(add-hook! 'chat-turn-start-hook 'todo--on-turn-start!)
+
 (add-hook! 'chat-status-hook 'todo--on-chat-status!)
 
 (define (todo--show-chat-task! chat)

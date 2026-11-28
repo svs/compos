@@ -188,7 +188,11 @@
        ;; chat.scm listens: the first prompt names the chat, from the
        ;; prompt itself. It runs once and the name never moves again.
        (when (boundp (quote chat-title-first-prompt!))
-         (chat-title-first-prompt! buf)))
+         (chat-title-first-prompt! buf))
+       ;; a turn starts: listeners get the chat, such as todo, whose task
+       ;; the chat works moves to doing
+       (report-errors "chat-turn-start-hook"
+         (lambda () (run-hook-with-args 'chat-turn-start-hook buf))))
 
       ((equal? type 'chunk)
        ;; the assistant's prose accumulates across the turn; turn-end

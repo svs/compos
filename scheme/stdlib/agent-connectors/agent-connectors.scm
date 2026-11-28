@@ -44,6 +44,11 @@ nonstandard install out of the built-in connector catalog."
     ;; session each (acp_hub.ex); the adapter closes a parked chat's
     ;; session with session/close
     share #t
+    ;; the model is set per session (session/new configOptions, then
+    ;; set_config_option), never through ANTHROPIC_MODEL in the process
+    ;; env: env is part of the sharing key, so a pinned env would give every
+    ;; model its own adapter process
+    model-config #t
     ;; the model family it serves; the adapter lists only some of these
     ;; ids (no [1m] forms), and its list is the menu
     accepts "^(claude-|opus|sonnet|haiku|default)"

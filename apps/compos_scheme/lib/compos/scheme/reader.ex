@@ -20,6 +20,64 @@ defmodule Compos.Scheme.Reader do
     read_forms(tokens, [])
   end
 
+  @doc """
+  Read all top-level forms with the lines each spans: `[{form, first, last}]`,
+  1-based. A native closure keeps these instead of its source, and reads
+  the source again on demand. When the line scan disagrees with the reader
+  on how many forms there are, FIRST and LAST are nil for every form.
+  """
+  def read_all_lines(src) do
+    forms = read_all(src)
+    spans = spans(src, 1, 0, nil, [])
+
+    if length(spans) == length(forms),
+      do: Enum.zip_with(forms, spans, fn f, {a, z} -> {f, a, z} end),
+      else: Enum.map(forms, &{&1, nil, nil})
+  end
+
+  # The lexical rules are tok/2's, so a form starts and ends where the
+  # tokenizer's tokens do: LINE is the line at BIN, DEPTH the open parens,
+  # START the line the form being read began on.
+  defp spans(<<>>, _line, _depth, _start, acc), do: Enum.reverse(acc)
+  defp spans(<<"\n", rest::binary>>, line, d, st, acc), do: spans(rest, line + 1, d, st, acc)
+  defp spans(<<c, rest::binary>>, line, d, st, acc) when c in ~c[ \t\r], do: spans(rest, line, d, st, acc)
+
+  defp spans(<<";", rest::binary>> = bin, line, d, st, acc) do
+    rest = skip_line(rest)
+    spans(rest, line + newlines(bin, rest), d, st, acc)
+  end
+
+  defp spans(<<"(", rest::binary>>, line, d, st, acc), do: spans(rest, line, d + 1, st || line, acc)
+  defp spans(<<")", rest::binary>>, line, 1, st, acc), do: spans(rest, line, 0, nil, [{st, line} | acc])
+  defp spans(<<")", rest::binary>>, line, d, st, acc), do: spans(rest, line, max(d - 1, 0), st, acc)
+  defp spans(<<"'", rest::binary>>, line, d, st, acc), do: spans(rest, line, d, st || line, acc)
+
+  defp spans(<<"\"", more::binary>> = bin, line, d, st, acc) do
+    {_str, rest} = tok_string(more, [])
+    span_atom(bin, rest, line, d, st, acc)
+  end
+
+  defp spans(<<"#\\", c::utf8, more::binary>> = bin, line, d, st, acc) do
+    {_name, rest} = tok_atom(more, [<<c::utf8>>])
+    span_atom(bin, rest, line, d, st, acc)
+  end
+
+  defp spans(bin, line, d, st, acc) do
+    {_atom, rest} = tok_atom(bin, [])
+    span_atom(bin, rest, line, d, st, acc)
+  end
+
+  # an atom, a string or a character: at depth 0 it is a whole form
+  defp span_atom(bin, rest, line, d, st, acc) do
+    last = line + newlines(bin, rest)
+    if d == 0, do: spans(rest, last, 0, nil, [{st || line, last} | acc]), else: spans(rest, last, d, st, acc)
+  end
+
+  defp newlines(bin, rest) do
+    consumed = binary_part(bin, 0, byte_size(bin) - byte_size(rest))
+    length(:binary.matches(consumed, "\n"))
+  end
+
   @doc "Read a single form; returns {form, remaining_tokens}."
   def read_one(src) do
     src |> tokenize() |> read_expr()

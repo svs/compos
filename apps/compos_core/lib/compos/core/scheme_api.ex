@@ -31,6 +31,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(event_log_primitives())
     |> Map.merge(workflow_primitives())
     |> Map.merge(sysmon_primitives())
+    |> Map.merge(frozen_primitives())
     |> Map.merge(profiler_primitives())
     |> Map.merge(discovery_primitives())
     |> Map.merge(irc_primitives())
@@ -647,6 +648,41 @@ defmodule Compos.Core.SchemeAPI do
       {"vm-process-kill!",
        "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive."} =>
         fn [pid] -> SysMon.kill(sysmon_text(pid)) end
+    }
+  end
+
+  # Read-mostly Scheme data (the apropos index, rows and sources) lives in
+  # :persistent_term, not in the environment table. A global in the table is
+  # copied out on every read; a persistent term is read in place. A put copies
+  # the value once and replacing it costs a global scan, so it suits data that
+  # changes when the catalog changes, never per keystroke.
+  @frozen :compos_scheme_frozen
+
+  defp frozen_primitives do
+    %{
+      {"frozen",
+       "(frozen KEY [DEFAULT]) — the value frozen-put! last kept under KEY, read in place without a copy; DEFAULT (#f) when there is none."} =>
+        fn
+          [key] -> :persistent_term.get({@frozen, key}, false)
+          [key, default] -> :persistent_term.get({@frozen, key}, default)
+        end,
+      {"frozen-put!",
+       "(frozen-put! KEY VALUE) — keep VALUE under KEY outside the environment table for zero-copy reads; #f erases it. Return VALUE. For read-mostly data only: each replacement scans every process."} =>
+        fn
+          [key, false] ->
+            :persistent_term.erase({@frozen, key})
+            false
+
+          [key, value] ->
+            :persistent_term.put({@frozen, key}, value)
+            value
+        end,
+      {"frozen-keys",
+       "(frozen-keys) — every KEY frozen-put! holds, with its size in words: a list of (KEY WORDS)."} =>
+        fn [] ->
+          for {{@frozen, key}, value} <- :persistent_term.get(),
+              do: [key, :erts_debug.flat_size(value)]
+        end
     }
   end
 

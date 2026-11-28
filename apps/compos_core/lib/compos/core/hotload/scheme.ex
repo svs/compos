@@ -104,7 +104,7 @@ defmodule Compos.Core.Hotload.Scheme do
       else
         current = stamp_load_unit(current, path, reload_origin(path))
 
-        case Scheme.eval_forms(current, forms) do
+        case Compos.Scheme.Native.with_native(fn -> Scheme.eval_forms(current, forms) end) do
           {:ok, value, next} -> {:cont, {:ok, value, next}}
           {:error, message} -> {:halt, {:error, message, current}}
         end

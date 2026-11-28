@@ -297,6 +297,12 @@ defmodule Compos.Core.Agent.Backend.ACP do
             meta -> Map.put(params, "_meta", meta_json(meta))
           end
 
+        # an agent that takes configOptions on its setup requests (the
+        # session-options capability; claude-agent-acp) opens the session on
+        # the chat's model, session/load included. The model rides the
+        # session, not the adapter's env, so one adapter serves every model.
+        params = with_initial_model(params, state.config, result)
+
         state = Map.put(state, :session_params, params)
         can_load? = get_in(result, ["agentCapabilities", "loadSession"]) == true
         # the chat plans its next reattach from this: an adapter that cannot
@@ -804,6 +810,15 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp push_pinned_mode(state), do: state
+
+  defp with_initial_model(params, config, init_result) do
+    model = Map.get(config, "model")
+
+    if is_binary(model) and
+         is_map(get_in(init_result, ["agentCapabilities", "sessionCapabilities", "options"])),
+       do: Map.put(params, "configOptions", [%{"configId" => "model", "value" => model}]),
+       else: params
+  end
 
   defp push_pinned_model(state) do
     model = Map.get(state.config, "model")

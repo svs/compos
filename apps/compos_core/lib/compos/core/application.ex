@@ -19,6 +19,10 @@ defmodule Compos.Core.Application do
         # the home keeps the user's data only; state and cache go to their
         # own folders before anything opens a file
         Compos.Core.HomeSplit.run()
+        # native Scheme modules are files compos can make again: they go
+        # with the cache, which outlives a reboot, unless config names a place
+        unless Application.get_env(:compos_scheme, :native_cache),
+          do: Application.put_env(:compos_scheme, :native_cache, Path.join(Compos.Core.cache_dir(), "scheme-native"))
         Compos.Core.ErrorFeed.install()
         # ~/.compos/chrome-extension: the folder Chrome's Load unpacked points at.
         Task.start(&Compos.Core.ChromeExtension.install/0)

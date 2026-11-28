@@ -970,7 +970,7 @@ defmodule Compos.Core.Session do
           # *Messages* buffer, and the editor comes up without that file.
           t0 = System.monotonic_time(:millisecond)
 
-          case safe_eval_string(interp, File.read!(path), file) do
+          case safe_eval_string(interp, File.read!(path), file, path) do
             {:ok, _, interp} ->
               # a bootstrap file is provided like a loaded one, so a
               # (require 'editor) is free and the autoload harvest skips it
@@ -1042,8 +1042,11 @@ defmodule Compos.Core.Session do
   # so the ask becomes a GenServer.call from this process to itself. Turn
   # every one of those into the same {:error, msg} the reader produces, so
   # one bad file costs that file and nothing more.
-  defp safe_eval_string(interp, source, file) do
-    Scheme.eval_string(interp, source)
+  defp safe_eval_string(interp, source, file, path \\ nil) do
+    # a file is a package: native :packages compiles its lambdas to BEAM
+    if is_binary(path),
+      do: Compos.Scheme.Native.with_native(fn -> Scheme.eval_string(interp, source, path) end),
+      else: Scheme.eval_string(interp, source, path)
   rescue
     error -> {:error, "#{file}: #{Exception.message(error)}"}
   catch
@@ -1194,11 +1197,17 @@ defmodule Compos.Core.Session do
   def docs, do: Prim.docs(session_primitives(nil))
 
   defp session_primitives(global) do
-    eval_src = fn src, store ->
-      Enum.reduce(Compos.Scheme.Reader.read_all(src), {:void, store}, fn form, {_v, store} ->
-        Compos.Scheme.Eval.eval(form, global, store)
+    # compiled together, so a file's native lambdas are one module; FILE,
+    # when the text is a file's, is where they find their source again
+    eval_file = fn src, file, store ->
+      src
+      |> Compos.Scheme.Eval.compile_source(file)
+      |> Enum.reduce({:void, store}, fn node, {_v, store} ->
+        Compos.Scheme.Eval.run_compiled(node, global, store)
       end)
     end
+
+    eval_src = fn src, store -> eval_file.(src, nil, store) end
 
     %{
       {"message", "(message TEXT [LEVEL]) — log TEXT and show it in the echo area."} => fn
@@ -2010,10 +2019,15 @@ defmodule Compos.Core.Session do
             # after it, and the editor came up missing half of itself.
             # Boot records the error and goes on. After boot, a load is a
             # command the user ran and its error belongs to the caller.
+            # a loaded file is a package: native :packages compiles it to BEAM
+            from_file = fn src, store ->
+              Compos.Scheme.Native.with_native(fn -> eval_file.(src, expanded, store) end)
+            end
+
             if ready?() do
-              eval_src.(src, store)
+              from_file.(src, store)
             else
-              boot_load(eval_src, src, store, Path.basename(expanded))
+              boot_load(from_file, src, store, Path.basename(expanded))
             end
 
           {:error, reason} ->

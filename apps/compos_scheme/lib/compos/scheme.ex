@@ -148,7 +148,17 @@ defmodule Compos.Scheme do
   `{:error, message}`. Definitions made before the failing form persist —
   the store is shared and mutable, as in Emacs.
   """
-  def eval_string(%__MODULE__{} = interp, src) do
+  def eval_string(interp, src, file \\ nil)
+
+  # FILE names where SRC came from: a native lambda keeps its lines there
+  # instead of its source (Eval.compile_source/2)
+  def eval_string(%__MODULE__{} = interp, src, file) when is_binary(file) do
+    run_nodes(interp, Eval.compile_source(src, file))
+  rescue
+    e in Reader.Error -> {:error, Exception.message(e)}
+  end
+
+  def eval_string(%__MODULE__{} = interp, src, nil) do
     eval_forms(interp, Reader.read_all(src))
   rescue
     # eval_forms rescues what evaluation raises, but the read runs before
@@ -160,9 +170,14 @@ defmodule Compos.Scheme do
 
   @doc "Evaluate already parsed top-level forms."
   def eval_forms(%__MODULE__{} = interp, forms) when is_list(forms) do
+    # compiled together, so a file's native lambdas are one module
+    run_nodes(interp, Eval.compile_forms(forms))
+  end
+
+  defp run_nodes(interp, nodes) do
     {val, store} =
-      Enum.reduce(forms, {:void, interp.store}, fn form, {_val, store} ->
-        Eval.eval(form, interp.global, store)
+      Enum.reduce(nodes, {:void, interp.store}, fn node, {_val, store} ->
+        Eval.run_compiled(node, interp.global, store)
       end)
 
     {:ok, val, %{interp | store: store}}

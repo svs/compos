@@ -458,6 +458,10 @@ defmodule Compos.Scheme.Env do
   end
 
   @doc "Deep-scan a term for closures, accumulating their captured frame refs."
+  # a native closure holds its locals in the fun itself
+  def closure_refs({:closure, _params, {:ncode, fun, _source}, ref}, acc),
+    do: closure_refs(fun_env(fun), [ref | acc])
+
   def closure_refs({:closure, _params, _body, {:lex, vars, ref}}, acc), do: closure_refs(vars, [ref | acc])
   def closure_refs({:closure, _params, _body, ref}, acc), do: [ref | acc]
 
@@ -479,6 +483,13 @@ defmodule Compos.Scheme.Env do
     do: Enum.reduce(map, acc, fn {k, v}, a -> closure_refs(v, closure_refs(k, a)) end)
 
   def closure_refs(_other, acc), do: acc
+
+  defp fun_env(fun) do
+    case :erlang.fun_info(fun, :env) do
+      {:env, env} -> env
+      _ -> []
+    end
+  end
 
   @doc "Every name bound directly in one frame, both tiers, deduplicated."
   def frame_names(%__MODULE__{tid: tid, local: local}, ref) do
@@ -508,7 +519,11 @@ defmodule Compos.Scheme.Env do
 
     parents = :ets.select(tid, [{{{:frame, :"$1"}, v}, [], [{{:"$1", v}}]}])
     var_refs = :ets.select(tid, [{{{:var, :"$1", :_}, :_}, [], [:"$1"]}])
-    closures = :ets.select(tid, [{{{:var, :"$1", :_}, {:closure, :_, :_, v}}, [], [{{:"$1", v}}]}])
+    body = :"$3"
+    not_native = {:orelse, {:not, {:is_tuple, body}}, {:"=/=", {:element, 1, body}, :ncode}}
+    closures = :ets.select(tid, [{{{:var, :"$1", :_}, {:closure, :_, body, v}}, [not_native], [{{:"$1", v}}]}])
+    # a native closure's frames are in its fun: scan the whole value
+    natives = :ets.select(tid, [{{{:var, :"$1", :_}, {:closure, :_, {:ncode, :_, :_}, :_}}, [], [:"$_"]}])
 
     not_closure_tuple =
       {:andalso, {:is_tuple, v},
@@ -528,6 +543,7 @@ defmodule Compos.Scheme.Env do
     shared = graph |> Map.keys() |> MapSet.new()
     graph = Enum.reduce(closures, graph, fn {ref, c}, acc -> add.(acc, ref, closure_refs({:closure, nil, nil, c}, [])) end)
     graph = Enum.reduce(compound, graph, fn {ref, val}, acc -> add.(acc, ref, closure_refs(val, [])) end)
+    graph = Enum.reduce(natives, graph, fn {{:var, ref, _}, c}, acc -> add.(acc, ref, closure_refs(c, [])) end)
 
     # the local tier shadows the shared one
     graph =

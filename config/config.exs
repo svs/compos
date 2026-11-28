@@ -9,6 +9,12 @@
 # move said applications out of the umbrella.
 import Config
 
+# The Scheme compiler backend: :off, :packages or :always (Compos.Scheme.Native).
+# :packages, the default, compiles every loaded file (bootstrap, load, hot
+# reload) and leaves ad-hoc evals interpreted. COMPOS_NATIVE=off|always overrides;
+# always runs a test suite with every lexical lambda native.
+config :compos_scheme, native: String.to_atom(System.get_env("COMPOS_NATIVE", "packages"))
+
 config :compos_ui, Compos.Ui.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],

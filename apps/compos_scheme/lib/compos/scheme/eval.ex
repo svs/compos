@@ -70,7 +70,8 @@ defmodule Compos.Scheme.Eval do
   # Called before a closure body runs, from the one place nesting deepens.
   # It must stay a separate statement: the body's evaluation is a tail call,
   # and wrapping it would cost the evaluator its proper tail calls.
-  defp count_nesting!(body) do
+  @doc false
+  def count_nesting!(body) do
     n = Process.get(@applies, 0) + 1
     Process.put(@applies, n)
 
@@ -108,6 +109,7 @@ defmodule Compos.Scheme.Eval do
     if String.length(text) > 120, do: String.slice(text, 0, 120) <> "...", else: text
   end
 
+  defp source_hint({:at, _, _, _, _, _, _} = at), do: source_hint(Compos.Scheme.Native.source(at))
   defp source_hint(_), do: "a closure with an empty body"
 
   @doc "Evaluate one form. Returns {value, store}."
@@ -117,6 +119,9 @@ defmodule Compos.Scheme.Eval do
   def source({:code, _compiled, source}), do: source
   def source({:lcode, _compiled, source}), do: source
   def source({:lcode, _compiled, source, _names}), do: source
+  # a native closure from a file keeps where its source is, not the source
+  def source({:ncode, _fun, {:at, _, _, _, _, _, _} = at}), do: Compos.Scheme.Native.source(at)
+  def source({:ncode, _fun, source}), do: source
   def source(body), do: body
 
   # --- compile ----------------------------------------------------------------
@@ -159,6 +164,7 @@ defmodule Compos.Scheme.Eval do
     case code(params, body, sc) do
       # a lambda in a lexical body names the locals it reads: see captured/2
       {:lcode, _, _, _} = code when is_map(sc) -> {:lambda, params, code, captured(code, sc)}
+      {:lcode, _, _, _} = code -> native(params, code, {:lambda, params, code}, :lambda)
       code -> {:lambda, params, code}
     end
   end
@@ -173,7 +179,14 @@ defmodule Compos.Scheme.Eval do
   defp comp([{:sym, "let"}, {:sym, name}, bindings | body], sc) do
     {names, forms} = bindings(bindings)
     params = {names, [], nil}
-    {:named_let, name, params, seq(forms, sc), code(params, body, sc, name)}
+    inits = seq(forms, sc)
+    code = code(params, body, sc, name)
+    plain = {:named_let, name, params, inits, code}
+
+    case code do
+      {:lcode, _, _, _} when sc == :dyn -> native(params, code, plain, {:named_let, inits})
+      _ -> plain
+    end
   end
 
   defp comp([{:sym, "let"}, bindings | body], :dyn) do
@@ -282,6 +295,90 @@ defmodule Compos.Scheme.Eval do
   defp call_name({:sym, name}), do: name
   defp call_name(_), do: "(lambda)"
 
+  # A top-level lexical lambda lowers to BEAM code when Native is on. Inside
+  # a batch (compile_forms/1) it queues, and resolve/2 puts the compiled
+  # node in its place once the whole batch is one module.
+  defp native(params, code, plain, kind) do
+    alias Compos.Scheme.Native
+
+    cond do
+      # a batch queues whatever the mode: source/1 replays a compile in one
+      Native.batching?() ->
+        {:pending, Native.enqueue(params, code), plain, kind}
+
+      not Native.enabled?() ->
+        plain
+
+      true ->
+        case Native.compile(params, code) do
+          {:ok, made} -> native_node(kind, made)
+          :error -> plain
+        end
+    end
+  end
+
+  defp native_node(:lambda, made), do: {:nlambda, made}
+  defp native_node({:named_let, inits}, made), do: {:nnamed_let, inits, made}
+
+  @doc """
+  Compile FORMS for run_compiled/3, every top-level lambda in them lowered
+  into one native module when Native is on: a file pays the BEAM compiler's
+  per-module cost once. Forms compile before any runs, which is sound
+  because compiling reads no binding: there are no macros.
+  """
+  def compile_forms(forms) do
+    if Compos.Scheme.Native.enabled?() and not Compos.Scheme.Native.batching?() do
+      {nodes, table} = Compos.Scheme.Native.batch(fn -> Enum.map(forms, &compile/1) end)
+      resolve(nodes, table)
+    else
+      Enum.map(forms, &compile/1)
+    end
+  end
+
+  @doc """
+  Compile the text SRC of FILE for run_compiled/3, as compile_forms/1 does.
+  A native lambda then keeps the lines of its form in FILE instead of its
+  source, and `source/1` reads them again on demand. FILE nil keeps the source.
+  """
+  def compile_source(src, nil), do: compile_forms(Compos.Scheme.Reader.read_all(src))
+
+  def compile_source(src, file) do
+    alias Compos.Scheme.{Native, Reader}
+
+    if Native.enabled?() and not Native.batching?() do
+      triples = Reader.read_all_lines(src)
+
+      {nodes, table} =
+        Native.batch(fn ->
+          Enum.map(triples, fn {form, first, last} -> Native.at(file, first, last, fn -> compile(form) end) end)
+        end)
+
+      resolve(nodes, table)
+    else
+      compile_forms(Reader.read_all(src))
+    end
+  end
+
+  @doc "Run one node from compile_forms/1. Returns {value, store}."
+  def run_compiled(node, env, store), do: run(node, env, store)
+
+  # put the batch's compiled lambdas, or their interpreted nodes, in place
+  defp resolve({:pending, i, plain, kind}, table) do
+    case table do
+      %{^i => made} -> native_node(resolve(kind, table), made)
+      _ -> resolve(plain, table)
+    end
+  end
+
+  # source forms and quoted data hold no compiled node
+  defp resolve({:quote, _} = node, _table), do: node
+  defp resolve({:lcode, body, source, slots}, table), do: {:lcode, resolve(body, table), source, slots}
+  defp resolve({:code, body, source}, table), do: {:code, resolve(body, table), source}
+  defp resolve({:fail, _, _} = node, _table), do: node
+  defp resolve(node, table) when is_tuple(node), do: node |> Tuple.to_list() |> resolve(table) |> List.to_tuple()
+  defp resolve([head | tail], table), do: [resolve(head, table) | resolve(tail, table)]
+  defp resolve(leaf, _table), do: leaf
+
   # --- run --------------------------------------------------------------------
 
   defp run({:sym, name}, env, store), do: {gated(Env.lookup(store, env, name), name), store}
@@ -312,15 +409,14 @@ defmodule Compos.Scheme.Eval do
   defp run({:call, op, arg_forms, name}, env, store) do
     {f, store} = run(op, env, store)
     {args, store} = run_args(arg_forms, env, store, [])
+    call_native(f, args, store, name)
+  end
 
-    # a call the agent's permission was given for runs its insides unchecked
-    case Process.get(@call_gate) do
-      {_refuse, trust} when is_map_key(trust, name) ->
-        trusted(fn -> profiled_apply(f, args, store, name) end)
+  defp run({:nlambda, made}, env, store), do: {Compos.Scheme.Native.make(made, env), store}
 
-      _ ->
-        profiled_apply(f, args, store, name)
-    end
+  defp run({:nnamed_let, inits, mod}, env, store) do
+    {vals, store} = run_args(inits, env, store, [])
+    apply_fn(Compos.Scheme.Native.make(mod, env), vals, store)
   end
 
   defp run({:if, c, t, e}, env, store) do
@@ -411,6 +507,19 @@ defmodule Compos.Scheme.Eval do
     end
   end
 
+  @doc false
+  # one application by NAME, under the call gate and the profiler; native code calls it
+  def call_native(f, args, store, name) do
+    # a call the agent's permission was given for runs its insides unchecked
+    case Process.get(@call_gate) do
+      {_refuse, trust} when is_map_key(trust, name) ->
+        trusted(fn -> profiled_apply(f, args, store, name) end)
+
+      _ ->
+        profiled_apply(f, args, store, name)
+    end
+  end
+
   # --- the call gate -----------------------------------------------------------
   #
   # An agent's eval runs under a gate (with-call-gate): REFUSE maps each name
@@ -446,6 +555,10 @@ defmodule Compos.Scheme.Eval do
   @doc "The call gate armed in this process, or nil."
   def current_call_gate, do: Process.get(@call_gate)
 
+  @doc false
+  # a free name, read by native code
+  def gvar(store, ref, name), do: gated(Env.lookup(store, ref, name), name)
+
   defp gated(value, name) do
     case Process.get(@call_gate) do
       nil ->
@@ -477,6 +590,9 @@ defmodule Compos.Scheme.Eval do
   def apply_fn({:interposed, original, wrapper}, args, store) do
     apply_fn(wrapper, [original, args], store)
   end
+
+  # a native closure binds its arguments and counts its nesting itself
+  def apply_fn({:closure, _params, {:ncode, fun, _source}, _env}, args, store), do: fun.(args, store)
 
   def apply_fn({:closure, {req, opt, rest}, {:code, body, source}, closure_env}, args, store) do
     count_nesting!(source)

@@ -299,19 +299,66 @@
                           (tool--format-suggestions (take named 5))))))
     (else "")))
 
+;; Scratch globals. A (define helper ...) in an agent's eval stayed bound for
+;; the life of the daemon: 7 MB of audit--* rows outlived the chats that made
+;; them. A name an eval binds that was free before is that chat's scratch. It
+;; lives while the chat does, the newest tool--scratch-limit names of it, and
+;; is unbound once the chat is gone. A name a package defines is never touched.
+(define tool--scratch-limit 64)
+(define *tool--scratch-globals* '())
+
+;; the names CODE writes as (define NAME or (define (NAME, at any depth
+(define (tool--defined-names code)
+  (map (lambda (p)
+         (cadr (re-match "^\\(define\\s+\\(?([^\\s()]+)" (substring-bytes code (car p) (cadr p)))))
+       (re-find* "\\(define\\s+\\(?[^\\s()]+" code)))
+
+;; the names CODE defines that have no global binding yet
+(define (tool--free-names code)
+  (let loop ((ns (tool--defined-names code)) (acc '()))
+    (cond ((null? ns) (reverse acc))
+          ((or (member (car ns) acc) (boundp (string->symbol (car ns)))) (loop (cdr ns) acc))
+          (else (loop (cdr ns) (cons (car ns) acc))))))
+
+(define (tool--unbind-scratch! names)
+  (for-each (lambda (n)
+              (let ((s (string->symbol n)))
+                (when (and (boundp s) (not (symbol-file s))) (unbind-global! s))))
+            names))
+
+;; CHAT's eval bound FRESH: keep its newest names, drop the rest, and drop
+;; every name of a chat that is gone
+(define (tool--note-scratch! chat fresh)
+  (let ((bound (filter (lambda (n) (boundp (string->symbol n))) fresh))
+        (gone (filter (lambda (e) (not (buffer-exists? (car e)))) *tool--scratch-globals*)))
+    (unless (and (null? bound) (null? gone))
+      (let* ((live (remove (lambda (e) (member e gone)) *tool--scratch-globals*))
+             (old (let ((e (assoc chat live))) (if e (cdr e) '())))
+             (names (append bound (remove (lambda (n) (member n bound)) old)))
+             (keep (take-n names tool--scratch-limit)))
+        (for-each (lambda (e) (tool--unbind-scratch! (cdr e))) gone)
+        (tool--unbind-scratch! (list-tail names (length keep)))
+        (set! *tool--scratch-globals*
+              (if (null? keep)
+                  (alist-delete live chat)
+                  (cons (cons chat keep) (alist-delete live chat))))))))
+
 (define-tool! 'eval-scheme
   "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos first. Returns the printed value; on an unbound name the error suggests the nearest real API. Evaluation runs with this chat as the logical current buffer, so switch-to-buffer! retargets that context and changes no window; to change or observe the frame's real windows, wrap the code in (with-frame-windows (lambda () ...))."
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (let* ((code (plist-get args 'code))
+           (chat (current-buffer))
+           (fresh (tool--free-names code))
            ;; A tool has a logical current buffer, never a claim on the
            ;; user's selected window. Inside this binding switch-to-buffer!
            ;; retargets subsequent point-relative operations without display.
-           (r (with-current-buffer (current-buffer)
+           (r (with-current-buffer chat
                 (lambda ()
                   (if (boundp 'decide-with-payload)
                       (decide-with-payload code (lambda () (eval-string-safe code)))
                       (eval-string-safe code))))))
+      (tool--note-scratch! chat fresh)
       (if (equal? (car r) 'ok)
           (value->string (cadr r))
           (string-append "error: " (cadr r) (tool--error-hint (cadr r) code)))))
@@ -651,40 +698,61 @@ a command's stamp is the stamp of the procedure it binds"
 ;; a 1275 entry catalog, paid on every call. The catalog only changes when
 ;; a package registers something, so keep the index and rebuild it when
 ;; the generation moves.
-(define *apropos--index-cache* #f)
+;;
+;; The index, rows and sources are frozen, not globals: a global is copied
+;; out of the environment table on every read, 9 MB a search, and the three
+;; held 25 MB of it. A frozen value is read in place. Its record carries this
+;; environment's token, so another Session, or this file reloaded, never reads
+;; a value it did not build.
+(define *apropos--frozen-token* (list 'apropos (monotonic-ms) (random 1000000000)))
+;; frozen, frozen-keys and frozen-put! are builtins with no catalog entry of
+;; their own, so catalog-meta! alone stamps nothing: public! makes the entry.
+(public! 'frozen "(frozen KEY [DEFAULT]) — the value frozen-put! last kept under KEY, read in place without a copy; DEFAULT (#f) when there is none.")
+(catalog-meta! 'function "frozen" 'domain 'system 'effects '(read))
+(public! 'frozen-keys "(frozen-keys) — every KEY frozen-put! holds, with its size in words: a list of (KEY WORDS).")
+(catalog-meta! 'function "frozen-keys" 'domain 'diagnostics 'effects '(read))
+(public! 'frozen-put! "(frozen-put! KEY VALUE) — keep VALUE under KEY outside the environment table for zero-copy reads; #f erases it. Return VALUE. For read-mostly data only: each replacement scans every process.")
+(catalog-meta! 'function "frozen-put!" 'domain 'system 'effects '(write))
 (define *apropos--index-gen* -1)
-(define *apropos--rows-cache* #f)
 (define *apropos--rows-gen* -1)
 
+;; the value frozen under KEY for generation GEN, any generation when GEN is
+;; #f; #f when this environment built none
+(define (apropos--frozen key gen)
+  (let ((r (frozen key)))
+    (and (pair? r) (equal? (car r) *apropos--frozen-token*)
+         (or (not gen) (equal? (cadr r) gen))
+         (caddr r))))
+
+(define (apropos--freeze! key gen value)
+  (frozen-put! key (list *apropos--frozen-token* gen value))
+  value)
+
 (define (apropos--ensure-index! gen)
-  (unless (and *apropos--index-cache* (equal? gen *apropos--index-gen*))
-    (set! *apropos--index-cache* (apropos--index))
-    (set! *apropos--index-gen* gen))
-  *apropos--index-cache*)
+  (or (apropos--frozen 'apropos-index gen)
+      (let ((index (apropos--index)))
+        (apropos--freeze! 'apropos-index gen index)
+        (set! *apropos--index-gen* gen)
+        index)))
 
 (define (apropos--index-cached)
-  (let ((gen (catalog-generation)))
-    (if (and *apropos--index-cache* (equal? gen *apropos--index-gen*))
-        *apropos--index-cache*
-        (with-scheme-lock 'apropos-cache
-          (lambda () (apropos--ensure-index! (catalog-generation)))))))
+  (or (apropos--frozen 'apropos-index (catalog-generation))
+      (with-scheme-lock 'apropos-cache
+        (lambda () (apropos--ensure-index! (catalog-generation))))))
 
 ;; Search used to rebuild names, docs, metadata plists, and lowercase strings
 ;; on every query. Publish those rows once for the catalog generation instead:
 ;; each query then performs only word checks and ranking over immutable data.
 (define (apropos--rows-cached)
-  (let ((gen (catalog-generation)))
-    (if (and *apropos--rows-cache* (equal? gen *apropos--rows-gen*))
-        *apropos--rows-cache*
-        (with-scheme-lock 'apropos-cache
-          (lambda ()
-            (let ((locked-gen (catalog-generation)))
-              (unless (and *apropos--rows-cache*
-                           (equal? locked-gen *apropos--rows-gen*))
-                (let ((index (apropos--ensure-index! locked-gen)))
-                  (set! *apropos--rows-cache* (apropos--rows index))
-                  (set! *apropos--rows-gen* locked-gen)))
-              *apropos--rows-cache*))))))
+  (or (apropos--frozen 'apropos-rows (catalog-generation))
+      (with-scheme-lock 'apropos-cache
+        (lambda ()
+          (let ((gen (catalog-generation)))
+            (or (apropos--frozen 'apropos-rows gen)
+                (let ((rows (apropos--rows (apropos--ensure-index! gen))))
+                  (apropos--freeze! 'apropos-rows gen rows)
+                  (set! *apropos--rows-gen* gen)
+                  rows)))))))
 
 (define (apropos--bucket-key name)
   (let* ((n (catalog--string (or name "")))
@@ -1031,8 +1099,6 @@ a command's stamp is the stamp of the procedure it binds"
 ;; Rebuilding 1800 strings on every query cost more than a second, and the
 ;; vectors they name are already on disk. Publish them once per generation,
 ;; the way the rows are published.
-(define *apropos--sources-cache* #f)
-(define *apropos--texts-cache* #f)
 (define *apropos--sources-gen* -1)
 
 ;; Keep query embedding behind one seam. Tests replace it without a network
@@ -1084,12 +1150,11 @@ a command's stamp is the stamp of the procedure it binds"
 
 (define (apropos--sources-cached rows)
   (let ((gen (catalog-generation)))
-    (unless (and *apropos--sources-cache* (equal? gen *apropos--sources-gen*))
-      (let ((sources (apropos--semantic-sources rows)))
-        (set! *apropos--sources-cache* sources)
-        (set! *apropos--texts-cache* (map apropos--embedding-text sources))
-        (set! *apropos--sources-gen* gen)))
-    (list *apropos--sources-cache* *apropos--texts-cache*)))
+    (or (apropos--frozen 'apropos-sources gen)
+        (let ((sources (apropos--semantic-sources rows)))
+          (set! *apropos--sources-gen* gen)
+          (apropos--freeze! 'apropos-sources gen
+                            (list sources (map apropos--embedding-text sources)))))))
 
 ;; A failed sync tells the user once, not once per retry: every catalog
 ;; change retries, and a bad key or a dead network fails each time. A sync
@@ -1615,10 +1680,9 @@ a command's stamp is the stamp of the procedure it binds"
                            (when *apropos--warm-again* (apropos-warm!))))))))
 
 (define (apropos--rows-stale-ok)
-  (cond ((and *apropos--rows-cache* (equal? (catalog-generation) *apropos--rows-gen*))
-         *apropos--rows-cache*)
-        (*apropos--rows-cache* (apropos-warm!) *apropos--rows-cache*)
-        (else (apropos--rows-cached))))
+  (or (apropos--frozen 'apropos-rows (catalog-generation))
+      (let ((old (apropos--frozen 'apropos-rows #f)))
+        (if old (begin (apropos-warm!) old) (apropos--rows-cached)))))
 
 ;; A lexical apropos that never waits for a rebuild: rows from just before
 ;; a catalog change will do, for a caller that asks many times a second.
@@ -1632,9 +1696,9 @@ a command's stamp is the stamp of the procedure it binds"
 ;; the current one waited on the rebuild's lock, seconds, and a search task
 ;; gave up at five
 (define (apropos--index-stale-ok)
-  (if (and *apropos--index-cache* (not (equal? (catalog-generation) *apropos--index-gen*)))
-      (begin (apropos-warm!) *apropos--index-cache*)
-      (apropos--index-cached)))
+  (or (apropos--frozen 'apropos-index (catalog-generation))
+      (let ((old (apropos--frozen 'apropos-index #f)))
+        (if old (begin (apropos-warm!) old) (apropos--index-cached)))))
 
 ;; apropos wants every word, which is precision: a sentence finds five
 ;; entries or none. A model choosing among entries wants recall, so this

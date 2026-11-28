@@ -1256,6 +1256,9 @@
                 (list (plist-put v 'class (string-append (or (plist-get v 'class) "") " ag-selected"))))
               (list-tail views (+ i 1)))))
 
+;; The views of the chats synced last, newest first. A chat past the bound
+;; builds its views afresh at its next sync; every chat ever open held 9 MB.
+(define chat-view--memo-chats 6)
 (define *chat-view-memo* '())
 
 (define (chat-view--memo buf)
@@ -1263,9 +1266,10 @@
 
 (define (chat-view--memo-set! buf entry)
   (set! *chat-view-memo*
-    (cons (list buf entry)
-          (filter (lambda (m) (and (not (equal? (car m) buf)) (buffer-exists? (car m))))
-                  *chat-view-memo*))))
+    (take-n (cons (list buf entry)
+                  (filter (lambda (m) (and (not (equal? (car m) buf)) (buffer-exists? (car m))))
+                          *chat-view-memo*))
+            chat-view--memo-chats)))
 
 (define (chat-view--zip a b)
   (if (or (null? a) (null? b))

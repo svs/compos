@@ -337,6 +337,9 @@
 ;; has not changed keeps its task and only moves, so an edit to one task
 ;; parses that task alone. Most sections stay where they were, so the walk
 ;; tries the next old one before it searches the rest.
+;; The parse caches keep the files read last, not every file ever read: each
+;; holds a whole file's sections, and a global is copied on every read.
+(define todo--cache-files 8)
 (define *todo-section-cache* '())
 
 (define (todo--moved t line pos)
@@ -371,8 +374,9 @@
     (if (null? caps)
         (let ((secs (reverse secs)))
           (set! *todo-section-cache*
-                (cons (list path secs)
-                      (alist-delete *todo-section-cache* path)))
+                (take-n (cons (list path secs)
+                              (alist-delete *todo-section-cache* path))
+                        todo--cache-files))
           (filter (lambda (t) (and t (plist-get t 'id))) (map cadr secs)))
         (let* ((s (cadr (car caps)))
                (line (+ line (- (length (string-split (substring-bytes text at s) "\n")) 1)))
@@ -409,14 +413,16 @@
 (define *todo-parse-cache* '())
 
 (define (todo--parsed f)
-  (let ((text (todo--text f))
-        (hit (assoc f *todo-parse-cache*)))
-    (if (and hit (equal? (cadr hit) text))
+  (let* ((text (todo--text f))
+         (key (content-hash text))
+         (hit (assoc f *todo-parse-cache*)))
+    (if (and hit (equal? (cadr hit) key))
         (caddr hit)
         (let ((tasks (todo--parse f text)))
           (set! *todo-parse-cache*
-                (cons (list f text tasks)
-                      (alist-delete *todo-parse-cache* f)))
+                (take-n (cons (list f key tasks)
+                              (alist-delete *todo-parse-cache* f))
+                        todo--cache-files))
           tasks))))
 
 (define (todo--all)

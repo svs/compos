@@ -32,6 +32,14 @@ defmodule Compos.DesktopRestoreTest do
     assert eventually(fn -> not Buffer.exists?(name) end)
   end
 
+  # The buffer up and in the active window, made the Elixir way: from an
+  # eval with no frame, switch-to-buffer! goes through the panes and shows
+  # nothing, and these tests are about the desktop, not about switching.
+  defp show(name) do
+    Compos.Core.ensure_buffer(name)
+    Editor.set_window_buffer(name)
+  end
+
   # a fresh process, exactly as the supervisor starts one after a crash
   defp restart_desktop do
     pid = Process.whereis(Desktop)
@@ -119,123 +127,9 @@ defmodule Compos.DesktopRestoreTest do
     assert Editor.list_windows_all() == before
   end
 
-  test "desktop-clear saves modified files and removes the cleared desktop" do
-    n = System.unique_integer([:positive])
-    path = Path.join(System.tmp_dir!(), "desktop-clear-#{n}.txt")
-    clean = "*desktop-clear-#{n}*"
-    File.write!(path, "saved\n")
-
-    on_exit(fn ->
-      File.rm(path)
-      for b <- [path, clean], Buffer.exists?(b), do: Compos.Core.kill_buffer(b)
-    end)
-
-    eval!(~s{(begin (visit "#{path}")
-                    (insert! "agent ")
-                    (buffer-create "#{clean}"))})
-
-    KeyDispatch.handle_key("M-x")
-    Enum.each(String.graphemes("desktop-clear"), &KeyDispatch.handle_key/1)
-    KeyDispatch.handle_key("RET")
-
-    assert Editor.render_state().minibuffer.prompt ==
-             "Save #{path}? (y, n, A all, N none) "
-
-    KeyDispatch.handle_key("y")
-
-    assert File.read!(path) == "agent saved\n"
-    refute Buffer.exists?(path)
-    refute Buffer.exists?(clean)
-    assert Editor.current_buffer() == "*scratch*"
-    assert eval!("*minibuffer-history*") == "()"
-
-    assert :ok = Desktop.save_now()
-    assert :ok = Desktop.restore_now()
-    refute Buffer.exists?(path)
-    refute Buffer.exists?(clean)
-  end
-
-  test "desktop-clear keeps a modified file that the user does not save" do
-    n = System.unique_integer([:positive])
-    path = Path.join(System.tmp_dir!(), "desktop-keep-#{n}.txt")
-    clean = "*desktop-doomed-#{n}*"
-    File.write!(path, "saved\n")
-
-    on_exit(fn ->
-      File.rm(path)
-      for b <- [path, clean], Buffer.exists?(b), do: Compos.Core.kill_buffer(b)
-    end)
-
-    eval!(~s{(begin (visit "#{path}")
-                    (insert! "unsaved ")
-                    (buffer-create "#{clean}"))})
-
-    eval!(~s{(run-command "desktop-clear")})
-    KeyDispatch.handle_key("n")
-
-    assert Buffer.exists?(path)
-    assert Buffer.text(path) == "unsaved saved\n"
-    assert File.read!(path) == "saved\n"
-    refute Buffer.exists?(clean)
-  end
-
-  test "C-g quits desktop-clear without killing buffers" do
-    n = System.unique_integer([:positive])
-    path = Path.join(System.tmp_dir!(), "desktop-quit-#{n}.txt")
-    clean = "*desktop-quit-#{n}*"
-    File.write!(path, "saved\n")
-
-    on_exit(fn ->
-      File.rm(path)
-      for b <- [path, clean], Buffer.exists?(b), do: Compos.Core.kill_buffer(b)
-    end)
-
-    eval!(~s{(begin (visit "#{path}")
-                    (insert! "unsaved ")
-                    (buffer-create "#{clean}")
-                    (run-command "desktop-clear"))})
-
-    KeyDispatch.handle_key("C-g")
-
-    refute Editor.render_state().minibuffer
-    assert Buffer.exists?(path)
-    assert Buffer.exists?(clean)
-    assert Buffer.text(path) == "unsaved saved\n"
-    assert File.read!(path) == "saved\n"
-  end
-
-  test "A saves every remaining file and N saves none" do
-    n = System.unique_integer([:positive])
-    a = Path.join(System.tmp_dir!(), "desktop-all-a-#{n}.txt")
-    b = Path.join(System.tmp_dir!(), "desktop-all-b-#{n}.txt")
-    File.write!(a, "a\n")
-    File.write!(b, "b\n")
-
-    on_exit(fn ->
-      for path <- [a, b] do
-        File.rm(path)
-        if Buffer.exists?(path), do: Compos.Core.kill_buffer(path)
-      end
-    end)
-
-    eval!(~s{(begin (visit "#{a}") (insert! "saved ")
-                    (visit "#{b}") (insert! "also ")
-                    (run-command "desktop-clear"))})
-    KeyDispatch.handle_key("A")
-
-    assert File.read!(a) == "saved a\n"
-    assert File.read!(b) == "also b\n"
-    refute Buffer.exists?(a)
-    refute Buffer.exists?(b)
-
-    File.write!(a, "original\n")
-    eval!(~s{(begin (visit "#{a}") (insert! "discarded ")
-                    (run-command "desktop-clear"))})
-    KeyDispatch.handle_key("N")
-
-    assert File.read!(a) == "original\n"
-    refute Buffer.exists?(a)
-  end
+  # desktop-clear's questions (y, n, A, N, a quit) are Scheme behavior:
+  # priv/tests/desktop-clear-test.scm tests them on stubbed prompts. Driven
+  # from here, they typed into the current buffer and saved every file.
 
   # S2: one restore path. The mode setup fn rebuilds presentation from
   # the locals it finds, so the locals MUST be on the buffer before it
@@ -251,9 +145,10 @@ defmodule Compos.DesktopRestoreTest do
     name = "*probe-#{System.unique_integer([:positive])}*"
     on_exit(fn -> Compos.Core.kill_buffer(name) end)
 
+    show(name)
+
     eval!("""
-    (begin (switch-to-buffer! "#{name}")
-           (set-mode! "zz-probe-mode")
+    (begin (set-mode! "zz-probe-mode")
            (buffer-set-local! (current-buffer) 'probe "marker"))
     """)
 
@@ -320,9 +215,10 @@ defmodule Compos.DesktopRestoreTest do
       Session.eval(~s{(group-record-delete! "#{group}")})
     end)
 
+    show(name)
+
     eval!("""
     (begin
-      (switch-to-buffer! "#{name}")
       (buffer-add-group! "#{name}" "#{original}")
       (group-rename! "#{original}" "#{group}")
       (switch-to-group! "#{group}"))
@@ -355,9 +251,10 @@ defmodule Compos.DesktopRestoreTest do
     name = "*skip-#{System.unique_integer([:positive])}*"
     on_exit(fn -> Compos.Core.kill_buffer(name) end)
 
+    show(name)
+
     eval!("""
-    (begin (switch-to-buffer! "#{name}")
-           (buffer-set-local! (current-buffer) 'keep "small")
+    (begin (buffer-set-local! (current-buffer) 'keep "small")
            (buffer-set-local! (current-buffer) 'heavy "HUGE DERIVED STATE")
            (buffer-set-local! (current-buffer) 'desktop-skip-locals '(heavy)))
     """)
@@ -461,7 +358,13 @@ defmodule Compos.DesktopRestoreTest do
   # to nothing. Scan the sources for literal writers, check the registry.
   test "every literal mode-name write names a registered mode" do
     priv = to_string(:code.priv_dir(:compos_core))
-    src = priv |> Path.join("**/*.scm") |> Path.wildcard() |> Enum.map_join("\n", &File.read!/1)
+    # a test fixture may write a mode it defines only inside its own test
+    src =
+      priv
+      |> Path.join("**/*.scm")
+      |> Path.wildcard()
+      |> Enum.reject(&String.contains?(&1, "/tests/"))
+      |> Enum.map_join("\n", &File.read!/1)
 
     written =
       ~r/'mode-name\s+"([^"]+)"/
@@ -484,9 +387,10 @@ defmodule Compos.DesktopRestoreTest do
     name = "*card-#{System.unique_integer([:positive])}*"
     on_exit(fn -> Compos.Core.kill_buffer(name) end)
 
+    show(name)
+
     eval!("""
-    (begin (switch-to-buffer! "#{name}")
-           (buffer-append! "#{name}" "> run tool\\nbody line one\\nbody line two\\n")
+    (begin (buffer-append! "#{name}" "> run tool\\nbody line one\\nbody line two\\n")
            (buffer-set-local! "#{name}" 'agent-tool-bodies (list (list "t1" 11)))
            (agent-add-fold! "#{name}" 11 39)
            (agent-card-set-open! "#{name}" "t1" #t))
@@ -635,7 +539,7 @@ defmodule Compos.DesktopRestoreTest do
   test "LLM configuration history survives desktop restore" do
     eval!(~s{
       (set! *llm-config-history*
-        '(("codex-app-server" "gpt-5.6-terra" "high")))
+        '((connector "codex-app-server" model "gpt-5.6-terra" effort "high")))
     })
     assert :ok = Desktop.save_now()
 
@@ -643,7 +547,7 @@ defmodule Compos.DesktopRestoreTest do
     assert :ok = Desktop.restore_now()
 
     assert eval!("*llm-config-history*") ==
-             ~s{(("codex-app-server" "gpt-5.6-terra" "high"))}
+             ~s{((connector "codex-app-server" model "gpt-5.6-terra" effort "high"))}
   end
 
   # unsaved edits are state: a modified file buffer's text rides the

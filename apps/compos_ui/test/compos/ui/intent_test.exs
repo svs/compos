@@ -169,6 +169,16 @@ defmodule Compos.Ui.IntentTest do
     view |> element("#editor") |> render_hook("key", %{"k" => "C-g"})
   end
 
+  test "with the minibuffer open, Enter over a selection is RET", %{conn: conn} do
+    buf = fresh_buffer("ab")
+    {:ok, view, _} = live(conn, "/")
+    view |> element("#editor") |> render_hook("key", %{"k" => "M-x"})
+    intent(view, "insertText", 2, 2, "forward-char")
+    intent(view, "insertParagraph", 0, 2, "")
+    refute render(view) =~ "mb-input"
+    assert Buffer.text(buf) == "ab"
+  end
+
   test "the native selection sets point and mark as bytes", %{conn: conn} do
     buf = fresh_buffer("hello brävo")
     {:ok, view, _} = live(conn, "/")

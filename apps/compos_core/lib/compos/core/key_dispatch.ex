@@ -85,6 +85,11 @@ defmodule Compos.Core.KeyDispatch do
       (at_point? or chord?) and intent_key(type, text) != nil ->
         handle_key(intent_key(type, text))
 
+      # Enter over a selection is still RET while a prompt is up: it
+      # accepts the prompt and never types a newline into the buffer
+      routed? and type in ~w(insertParagraph insertLineBreak) ->
+        handle_key("RET")
+
       # a routed surface (minibuffer, completion) takes text one key at a
       # time: an input method commits a word, the prompt sees its letters
       routed? and type in ~w(insertText insertReplacementText insertCompositionText) ->

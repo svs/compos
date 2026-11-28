@@ -1154,11 +1154,15 @@ a command's stamp is the stamp of the procedure it binds"
   ;; ~4 MB of persistent_term, because each frozen-put! copies its value.
   (let* ((gen (catalog-generation))
          (sources (apropos--semantic-sources rows))
-         (texts (or (apropos--frozen 'apropos-sources gen)
+         (texts (or (apropos--frozen 'apropos-texts gen)
                     (let ((texts (map apropos--embedding-text sources)))
                       (set! *apropos--sources-gen* gen)
-                      (apropos--freeze! 'apropos-sources gen texts)))))
+                      (apropos--freeze! 'apropos-texts gen texts)))))
     (list sources texts)))
+
+;; apropos-sources held the hits and the texts; a daemon that ran the old
+;; code keeps it until this erases it.
+(when (boundp 'frozen-put!) (frozen-put! 'apropos-sources #f))
 
 ;; A failed sync tells the user once, not once per retry: every catalog
 ;; change retries, and a bad key or a dead network fails each time. A sync

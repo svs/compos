@@ -181,6 +181,14 @@ if llm_db_snapshot do
   config :llm_db, snapshot_path: llm_db_snapshot
 end
 
+# Load only the providers compos talks to. The published catalog carries
+# every provider in the world (244, ~10k models), and llm_db keeps all of it in
+# :persistent_term, ~32 MB, plus the model-rules table built from it. A spec
+# outside this list still works: Compos.Core.LLM hands ReqLLM an inline model
+# map for a model the catalog does not carry. Add a provider here to price it.
+config :llm_db,
+  allow: [:anthropic, :openai, :openrouter, :deepseek, :moonshotai, :google]
+
 # Models newer than the newest published catalog. llm_db merges these over
 # the snapshot, so a refresh keeps them; drop an entry once the catalog has it.
 config :llm_db,

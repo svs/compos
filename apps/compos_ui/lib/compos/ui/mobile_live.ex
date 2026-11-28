@@ -4,7 +4,7 @@ defmodule Compos.Ui.MobileLive do
 
   It attaches a frame of its own, reads `Compos.Core.Editor.render_state/1`,
   and draws the frame's one window. The bar at the bottom has four places:
-  the chats, a new chat, the buffers and the groups. The composer under a
+  the chats, the buffers, the groups and M-x. The composer under a
   chat sends to it. A prompt the editor opens is a sheet of rows to tap.
   `phone.scm` answers every list and does every tap; this module only
   draws.
@@ -71,6 +71,13 @@ defmodule Compos.Ui.MobileLive do
   # New chat at the top of the chats starts one at once
   def handle_event("nav", %{"to" => "new"}, socket) do
     call(socket, "phone-new-chat!", [])
+    {:noreply, socket |> close_sheet() |> drain() |> refresh()}
+  end
+
+  # M-x: the editor's own prompt, its commands most recently run first;
+  # the phone draws it as a sheet of rows to tap
+  def handle_event("nav", %{"to" => "mx"}, socket) do
+    call(socket, "run-command", ["execute-extended-command"])
     {:noreply, socket |> close_sheet() |> drain() |> refresh()}
   end
 
@@ -310,10 +317,12 @@ defmodule Compos.Ui.MobileLive do
   defp nav_items,
     do: [
       # each icon one stroked path on a 24 grid: a speech bubble, a page
-      # with lines, four squares
+      # with lines, four squares, a prompt
       {"chats", "M4 5h16v11H9l-5 4z", "Chats"},
       {"buffers", "M6 3h9l3 3v15H6zM9 10h6M9 14h6M9 18h4", "Buffers"},
-      {"groups", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z", "Groups"}
+      {"groups", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z", "Groups"},
+      # a prompt: a chevron and a line
+      {"mx", "M4 7l5 5-5 5M12 17h8", "M-x"}
     ]
 
   defp on?("chats", nil, true), do: true

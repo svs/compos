@@ -2,8 +2,9 @@ defmodule Compos.EndpointRedisTest do
   @moduledoc """
   The tcp transport carrying a real service.
 
-  The exec transport has psql to prove it. This is the same proof for tcp:
-  a Redis client written in Scheme, in the test, over one endpoint. It uses
+  The exec transport has psql to prove it. This is the same proof for tcp.
+  The Redis client over endpoint-register! and endpoint-ask is the endpoint
+  package's, and that package's suite tests it. It uses
   `delimiter "\\r\\n"` framing because RESP terminates every line that way,
   and the same sentinel pattern as the psql connector — Redis pipelines, so
   a trailing ECHO marks the end of a reply.
@@ -48,53 +49,6 @@ defmodule Compos.EndpointRedisTest do
       {:ok, redis: true}
     else
       :ok
-    end
-  end
-
-  test "a Scheme client drives Redis over one tcp endpoint", ctx do
-    if ctx[:redis] == nil do
-      IO.puts("skipped: no redis-server")
-    else
-      # the whole client: register, connect once, ask with a sentinel.
-      # RESP replies are lines, so Scheme reads them as frames.
-      eval!("""
-      (endpoint-register! "redis-test"
-        (list 'host "127.0.0.1" 'port #{@port} 'framing "delimiter" 'delimiter "\\r\\n"))
-
-      (define (redis name cmd k)
-        (endpoint-ask name
-          (string-append cmd "\\r\\nECHO #{@sentinel}")
-          "#{@sentinel}"
-          (lambda (ok frames)
-            ;; drop RESP length prefixes ($3, *2) and the trailing marker line
-            (k ok (if ok (filter (lambda (l) (not (string-prefix? "$" l))) frames) frames)))))
-      """)
-
-      eval!(~s|(endpoint-ensure! "redis-test")|)
-      wait_until(fn -> eval!(~s|(endpoint-connected? "redis-test")|) == "#t" end)
-      on_exit(fn -> Endpoint.stop("redis-test") end)
-
-      eval!("(define r1 'pending)")
-      eval!("(define r2 'pending)")
-      eval!("(define r3 'pending)")
-
-      eval!(~s|(redis "redis-test" "SET greeting hello" (lambda (ok v) (set! r1 (list ok v))))|)
-      eval!(~s|(redis "redis-test" "GET greeting" (lambda (ok v) (set! r2 (list ok v))))|)
-
-      eval!(
-        ~s|(redis "redis-test" "INCR counter\\r\\nINCR counter" (lambda (ok v) (set! r3 (list ok v))))|
-      )
-
-      wait_until(fn -> eval!("r3") != "pending" end)
-
-      assert eval!("r1") == ~s|(#t ("+OK"))|
-      assert eval!("r2") == ~s|(#t ("hello"))|
-      # two commands pipelined on the one live connection
-      assert eval!("r3") == ~s|(#t (":1" ":2"))|
-
-      # one connection served all three: that is the point of an endpoint
-      assert eval!(~s|(conn-detail (quote endpoint) "redis-test")|) =~ ~s|status "ready"|
-      assert eval!(~s|(conn-detail (quote endpoint) "redis-test")|) =~ ~s|transport "tcp"|
     end
   end
 

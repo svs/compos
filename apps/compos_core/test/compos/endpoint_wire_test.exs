@@ -87,9 +87,10 @@ defmodule Compos.EndpointWireTest do
         eval!("(define got '())")
 
         eval!("""
-        (add-hook! (list 'endpoint-event "wire-test")
+        (on-event! 'endpoint
           (lambda (name kind text)
-            (when (equal? kind "frame") (set! got (cons text got)))))
+            (when (and (equal? name "pg-wire") (equal? kind "frame"))
+              (set! got (cons text got)))))
         """)
 
         eval!(~s|(endpoint-send! "pg-wire" pg-startup)|)

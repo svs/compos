@@ -6,42 +6,20 @@ defmodule Compos.PeerSyncTest do
   moves them here is the socket the daemon already listens on, because eval is
   the API. A peer is a home, named by its socket.
 
-  These drive the real socket. `peer-eval` against this daemon's own socket is
-  a loopback: the reply travels the same path a remote peer's would, and a
-  replica syncing with itself must be a no-op, which is the strongest thing one
-  process can say about a two-process protocol.
+  These are the exchange primitives the sync rides on. Reaching a peer over
+  the socket is tested in compos_rpc (PeerTest), where the socket listens;
+  peer-sync! and peer-pull! live in their package, and its suite tests them.
   """
 
   use Compos.Case, async: false
 
-  alias Compos.Core.{Buffer, BufferHistory, Peer}
-
-  defp sock, do: Application.get_env(:compos_rpc, :socket_path)
+  alias Compos.Core.{Buffer, BufferHistory}
 
   defp buffer(text) do
     name = "peer-#{System.unique_integer([:positive])}"
     {:ok, _} = Compos.Core.create_buffer(name, text: text)
     on_exit(fn -> Compos.Core.kill_buffer(name) end)
     name
-  end
-
-  describe "reaching a peer" do
-    test "eval crosses the socket and comes back" do
-      assert {:ok, "3"} = Peer.eval(sock(), "(+ 1 2)")
-    end
-
-    test "a peer that is not there is an error, not a crash" do
-      assert {:error, _} = Peer.eval("/tmp/no-such-daemon-#{System.unique_integer()}.sock", "1")
-    end
-
-    test "an error on the far side comes back as one" do
-      assert {:error, message} = Peer.eval(sock(), "(no-such-function)")
-      assert message =~ "no-such-function"
-    end
-
-    test "peer-eval reaches it from Scheme too" do
-      assert eval!(~s{(peer-eval "#{sock()}" "(+ 2 2)")}) == "\"4\""
-    end
   end
 
   describe "the exchange primitives" do
@@ -72,33 +50,6 @@ defmodule Compos.PeerSyncTest do
       updates = Base.url_encode64(BufferHistory.export_all(weave), padding: false)
       assert eval!(~s{(buffer-merge! "#{name}" "#{updates}")}) == "#t"
       assert Buffer.text(name) == "from far away"
-    end
-  end
-
-  describe "the loop" do
-    # A replica syncing with itself must change nothing. Every step is real:
-    # the token, the export, the merge and both round trips over the socket.
-    test "syncing a buffer with its own daemon is a no-op" do
-      name = buffer("unchanged")
-      before = Buffer.text(name)
-      changes = length(Buffer.change_log(name))
-
-      eval!(~s{(peer-sync! "#{sock()}" "#{name}")})
-
-      assert Buffer.text(name) == before
-      assert length(Buffer.change_log(name)) == changes
-    end
-
-    test "a pull asks only for what is missing" do
-      name = buffer("base")
-      eval!(~s{(peer-pull! "#{sock()}" "#{name}")})
-      assert Buffer.text(name) == "base"
-    end
-
-    test "peer-token reads the peer's version" do
-      name = buffer("base")
-      token = eval!(~s{(peer-token "#{sock()}" "#{name}")})
-      refute token == "#f"
     end
   end
 end

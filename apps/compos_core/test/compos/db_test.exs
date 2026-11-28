@@ -145,15 +145,18 @@ defmodule Compos.DBTest do
       else
         open!("t-tx-scope")
 
-        assert eval!("""
-               (define escaped-tx #f)
-               (db-with-transaction "t-tx-scope"
-                 (lambda (tx)
-                   (set! escaped-tx tx)
-                   'committed))
-               """) == "committed"
+        # one eval, so one lane: a second eval may run on another lane, and
+        # the handle then fails the owner check before the scope check
+        assert {:error, message} =
+                 Session.eval("""
+                 (define escaped-tx #f)
+                 (db-with-transaction "t-tx-scope"
+                   (lambda (tx)
+                     (set! escaped-tx tx)
+                     'committed))
+                 (db-query escaped-tx "select 1")
+                 """)
 
-        assert {:error, message} = Session.eval(~s|(db-query escaped-tx "select 1")|)
         assert message =~ "no longer active"
       end
     end

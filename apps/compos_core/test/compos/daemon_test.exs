@@ -25,6 +25,19 @@ defmodule Compos.DaemonTest do
     assert script =~ "2>&1"
   end
 
+  test "a dev respawn boots with the flags of rel/vm.args.eex" do
+    root = Path.join(System.tmp_dir!(), "vm-args-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "rel"))
+    File.write!(Path.join(root, "rel/vm.args.eex"), "## comment\n+S 4:4\n+MBas aobf\n-env ERL_FULLSWEEP_AFTER 20\n")
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert Daemon.vm_args_env(root) == " ERL_FLAGS='+S 4:4 +MBas aobf' ERL_FULLSWEEP_AFTER='20'"
+    script = Daemon.respawn_script(root, "/tmp/home", "7")
+    assert script =~ "ERL_FLAGS="
+    assert {"", 0} = System.cmd("/bin/sh", ["-n", "-c", script], stderr_to_stdout: true)
+    assert Daemon.vm_args_env(Path.join(root, "missing")) == ""
+  end
+
   test "the respawn script is valid shell with quoted paths" do
     script = Daemon.respawn_script("/src/my repo", "/tmp/user's home", "7")
 

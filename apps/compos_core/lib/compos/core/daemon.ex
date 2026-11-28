@@ -376,7 +376,7 @@ defmodule Compos.Core.Daemon do
       "while kill -0 #{pid} 2>/dev/null; do sleep 0.1; done; " <>
         "cd #{shq(root)}; " <>
         @raise_fd_limit <>
-        "exec env COMPOS_HOME=#{shq(home)} mix run --no-halt >> #{shq(log)} 2>&1"
+        "exec env COMPOS_HOME=#{shq(home)}#{vm_args_env(root)} mix run --no-halt >> #{shq(log)} 2>&1"
 
     "nohup /bin/sh -c #{shq(relaunch)} </dev/null >/dev/null 2>&1 &"
   end
@@ -385,6 +385,35 @@ defmodule Compos.Core.Daemon do
   # and the release scripts would take RELEASE_ROOT, an unpacked directory an
   # install may have pruned, as given.
   @doc false
+  @doc """
+  The flags of ROOT's rel/vm.args.eex as env assignments for `mix run`, which
+  reads no vm.args: the `+` lines go into ERL_FLAGS and each `-env NAME VALUE`
+  becomes NAME=VALUE. Each starts with a space; "" when the file is missing.
+  A release reads the same file itself, so both boot with one set of flags.
+  """
+  def vm_args_env(root) do
+    case File.read(Path.join(root, "rel/vm.args.eex")) do
+      {:ok, text} ->
+        lines =
+          text
+          |> String.split("\n")
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
+
+        flags = lines |> Enum.filter(&String.starts_with?(&1, "+")) |> Enum.join(" ")
+
+        envs =
+          for "-env " <> rest <- lines,
+              [name, value] <- [String.split(rest, ~r/\s+/, parts: 2)],
+              do: " #{name}=#{shq(value)}"
+
+        if(flags == "", do: "", else: " ERL_FLAGS=#{shq(flags)}") <> Enum.join(envs)
+
+      _ ->
+        ""
+    end
+  end
+
   def release_respawn_script(bin, home, pid, state \\ nil) do
     log = Path.join(state || home, "daemon.log")
 

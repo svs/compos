@@ -659,6 +659,14 @@ defmodule Compos.Ui.EditorLive do
   def handle_info({:buffer_display, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
 
+  # see compact_heap/0: by now the render that followed the refresh is
+  # done, and only the current socket is live
+  def handle_info(:compact_heap, socket) do
+    Process.delete(:compos_compact_heap)
+    :erlang.garbage_collect()
+    {:noreply, socket}
+  end
+
   # coalesce bursts: drain all queued change notifications, render once
   defp drain(socket), do: LiveShared.drain(socket)
 
@@ -679,7 +687,30 @@ defmodule Compos.Ui.EditorLive do
       %{frame: socket.assigns[:frame]}
     )
 
+    compact_heap()
     socket
+  end
+
+  # Every refresh builds a new window tree of a few MiB, and the old one
+  # becomes garbage. The generational collector promotes that garbage to
+  # the old heap and sweeps it only every 65535 minor collections, so a
+  # busy tab's heap grew to 36 MiB on a live set of a few. Phoenix spawns
+  # this process, so fullsweep_after cannot be set on it; instead, once
+  # the heap passes @heap_limit, a full sweep runs as the next message,
+  # after the render, when the old tree is no longer referenced. It costs
+  # about a millisecond and runs only when the heap has grown.
+  @heap_limit 8 * 1024 * 1024
+
+  defp compact_heap do
+    {:total_heap_size, words} = Process.info(self(), :total_heap_size)
+
+    if words * :erlang.system_info(:wordsize) > @heap_limit and
+         Process.get(:compos_compact_heap) == nil do
+      Process.put(:compos_compact_heap, true)
+      send(self(), :compact_heap)
+    end
+
+    :ok
   end
 
   # A real debounce. The CSS animation only made the panel INVISIBLE for the

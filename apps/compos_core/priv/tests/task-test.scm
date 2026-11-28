@@ -47,12 +47,16 @@
 (deftest 'apropos-is-safe-in-parallel-tasks
   "read-only discovery has no shared per-search scratch state"
   (lambda ()
-    (check-equal!
-      (chat-parallel-map
-        (lambda (query) (pair? (apropos query)))
-        '("buffer read" "code read" "replace code" "apropos"))
-      '(#t #t #t #t)
-      "all concurrent searches return hits")))
+    (let ((rows (list (list "buffer read read a buffer" '(kind "function" name "buffer-text" doc "read a buffer"))
+                      (list "code read read code" '(kind "function" name "code-read" doc "read code"))
+                      (list "replace code edit code" '(kind "function" name "code-replace!" doc "edit code"))
+                      (list "apropos search catalog" '(kind "function" name "apropos" doc "search catalog")))))
+      (check-equal!
+        (chat-parallel-map
+          (lambda (query) (pair? (apropos--search query '(lexical #t) '() rows)))
+          '("buffer read" "code read" "replace code" "apropos"))
+        '(#t #t #t #t)
+        "all concurrent searches return hits"))))
 
 (deftest 'eval-scheme-read-runs-only-declared-reads
   "the read-only eval refuses a write, a definition and code that does not read"

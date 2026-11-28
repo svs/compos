@@ -50,13 +50,13 @@
     (t--ga-done!)))
 
 (deftest 'a-relative-path-resolves-beside-the-file-then-from-the-project-root
-  "docs/BLOCKS.md in a file deep in the repo is the repository's docs/BLOCKS.md"
+  "docs/README.md in a file deep in the repo is the repository's docs/README.md"
   (lambda ()
     (let ((name (string-append (compos-priv-dir) "/editor/zz-ga-relative.txt")))
-      (test-buffer! name "see docs/BLOCKS.md and ./blocks/block.scm here\n")
+      (test-buffer! name "see docs/README.md and ./blocks/block.scm here\n")
       (goto-address-paint! name)
       (check-equal! (goto-address-href-at name 5)
-                    (string-append (project-root-cached (compos-priv-dir)) "/docs/BLOCKS.md")
+                    (string-append (project-root-cached (compos-priv-dir)) "/docs/README.md")
                     "not beside the file, so the project root answers")
       (check-equal! (goto-address-href-at name 24)
                     (string-append (compos-priv-dir) "/editor/blocks/block.scm")
@@ -199,23 +199,23 @@
       (buffer-kill! buf))))
 
 (deftest 'insert-file-link-writes-the-modes-syntax
-  "an Org buffer gets [[file:PATH][LABEL]], the selection as the label"
+  "a Morg buffer gets [LABEL](PATH), the selection as the label"
   (lambda ()
-    (let ((buf (t--ga-insert-buffer! "zz-ga-insert.org" "Read this" "org-mode")))
+    (let ((buf (t--ga-insert-buffer! "zz-ga-insert.md" "Read this" "morg-mode")))
       (with-current-buffer buf
         (lambda ()
           (goto-char! 4)
           (set-mark! 0)
           (run-command "insert-file-link")
           (t--ga-confirm! t--ga-insert-target)))
-      (check-equal! (buffer-text buf) "[[file:../editor.scm][Read]] this"
+      (check-equal! (buffer-text buf) "[Read](../editor.scm) this"
                     "the selection became the label")
       (buffer-kill! buf))))
 
 (deftest 'insert-file-link-offers-the-file-name-as-the-label
   "with no selection an empty answer to the label prompt takes the file's name"
   (lambda ()
-    (let ((buf (t--ga-insert-buffer! "zz-ga-insert-default.org" "" "org-mode")))
+    (let ((buf (t--ga-insert-buffer! "zz-ga-insert-default.md" "" "morg-mode")))
       (with-current-buffer buf
         (lambda ()
           (set-mark! #f)
@@ -224,7 +224,7 @@
       (check-contains! (plist-get (minibuffer-state) 'prompt) "editor.scm"
                        "the prompt names the default")
       (t--ga-confirm! "")
-      (check-equal! (buffer-text buf) "[[file:../editor.scm][editor.scm]]"
+      (check-equal! (buffer-text buf) "[editor.scm](../editor.scm)"
                     "the file name is the label")
       (buffer-kill! buf))))
 

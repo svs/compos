@@ -31,7 +31,8 @@
 (deftest 'a-bind-sentence-is-the-first-palette-candidate
   "the intent candidate leads the palette results"
   (lambda ()
-    (let ((cands (command-palette-candidates "bind <f9> z to zz-palette-bind")))
+    (let ((cands (with-stub 'command-palette--search (lambda (q) '())
+                     (lambda () (command-palette-candidates "bind <f9> z to zz-palette-bind")))))
       (check-true! (pair? cands) "there is at least one candidate")
       (check-equal! (car (car cands)) "bind <f9> z to zz-palette-bind"
                     "the first candidate names the bind sentence"))))

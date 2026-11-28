@@ -1391,6 +1391,8 @@ A take said again after the pause is a retake: its first words match words just 
       (video-edit--timeline-fill! name)
       (buffer-set-local! name 'render-mode "app"))))
 (define-mode "video-edit-timeline-mode" video-edit-timeline-mode-setup)
+(mode-doc! "video-edit-timeline-mode"
+  "Visual timeline view paired with a video-edit buffer.")
 
 (define (video-edit-timeline! edit)
   "(video-edit-timeline! EDIT) -- the timeline of EDIT, shown in the other window; it draws the filmstrips it lacks in a task"

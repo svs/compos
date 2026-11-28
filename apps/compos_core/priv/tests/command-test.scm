@@ -114,7 +114,7 @@
       (lambda (n) (set! *command-test-got* n))
       'modes '(morg-mode))
     (define-command "zz-command-test-bound" "Test: bound in a mode map"
-      (lambda () #t))
+      (lambda () #t) 'public #t)
     (define-key (mode-keymap "morg-mode") "<f9> b" "zz-command-test-bound")
     (let ((buf (command-test-buffer! "x")))
       (check-false! (command-applicable? "zz-command-test-scoped" buf) "not offered in fundamental-mode")
@@ -149,8 +149,9 @@
   "the row of a command with no spec names the closure in the command table; a reload on the same name still rebinds it, and undefine frees the name"
   (lambda ()
     (define-command "zz-command-test-row" "Test: a row with no copy" (lambda () 'one))
-    (check-equal! (cadr (assoc "zz-command-test-row" *command-functions*)) 'entry
-                  "the row names the command's closure")
+    (let ((row (assoc "zz-command-test-row" *command-functions*)))
+      (check-true! (and row (procedure? (cadr row)) (eq? (cadr row) (caddr row)))
+                   "the row shares the command's closure with no wrapper copy"))
     (check-equal! (zz-command-test-row) 'one "the name calls the command")
     (define-command "zz-command-test-row" "Test: a row with no copy" (lambda () 'two))
     (check-equal! (zz-command-test-row) 'two "a second define rebinds the name")

@@ -103,18 +103,14 @@
 (deftest 'the-command-prompt-hints-show-the-keybinding-and-the-doc
   "a doc-only command keeps the binding column blank, so the docs line up"
   (lambda ()
-    (run-command "execute-extended-command")
-    (minibuffer-change! "next-line")
-    (check-contains! (t--marg-hint "next-line") "C-n" "a bound command shows its key")
-    (minibuffer-cancel!)
-
-    (define-command "zzmarg-docful" "Do the docful thing" (lambda () #t))
-    (run-command "execute-extended-command")
-    (minibuffer-change! "zzmarg-docful")
-    (let ((hint (t--marg-hint "zzmarg-docful")))
-      (check-contains! hint "Do the docful thing" "an unbound one shows its doc")
-      (check-true! (string-prefix? " " hint) "after a blank binding column"))
-    (minibuffer-cancel!)
+    (define-command "zzmarg-docful" "Do the docful thing" (lambda () #t) 'public #t)
+    (let* ((rows (annotate 'command '("next-line" "zzmarg-docful")))
+           (next-hint (cadr (assoc "next-line" rows)))
+           (doc-hint (cadr (assoc "zzmarg-docful" rows))))
+      (check-contains! next-hint "C-n" "a bound command shows its key")
+      (check-contains! doc-hint "Do the docful thing" "an unbound one shows its doc")
+      (check-true! (string-prefix? " " doc-hint) "after a blank binding column"))
+    (undefine-command "zzmarg-docful")
     (test-forget-catalog! "command" "zzmarg-docful")))
 
 ;;; --- projects --------------------------------------------------------------------

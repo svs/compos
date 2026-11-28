@@ -2550,7 +2550,11 @@
 (public! 'define-key
   "(define-key KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap. COMMAND may be (keymap NAME): SEQ is then a prefix key that leads to that keymap.")
 (define (define-key name seq command)
-  (let ((r (keymap--update! name (lambda (b) (alist-put b (keymap--seq seq) (keymap--value command))))))
+  (let ((r (keymap--update! name
+             (lambda (b)
+               (if command
+                   (alist-put b (keymap--seq seq) (keymap--value command))
+                   (alist-delete b (keymap--seq seq)))))))
     (cmd-keys--touched! name seq)
     r))
 
@@ -7359,7 +7363,6 @@
     ("=" "window-layout-halves")
     ("c" "window-layout-columns")
     ("+" "window-layout-two-chat")
-    ("f" "window-layout-free")
     ;; the arrows walk the stack of this pane
     ("<right>" "layout-forward")
     ("<left>" "layout-backward")))

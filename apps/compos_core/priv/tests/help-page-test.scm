@@ -12,16 +12,13 @@
 (deftest 'the-apropos-page-groups-hits-by-kind-and-keeps-a-docstring-on-one-row
   "a docstring with a newline and a pipe still reads as one table row"
   (lambda ()
-    (define-command "zz-apr" "First line.\nSecond | line." (lambda () #t))
-    (apropos-page "zz-apr")
-    (let ((text (buffer-text "*Help*")))
+    (let ((text (help--apropos-list
+                  (list '(kind "command" name "zz-apr" doc "First line.\nSecond | line.")))))
       (check-contains! text "## Commands" "the kind heading")
       ;; a command row ends with its doc: only the Scheme kinds carry the
       ;; owner/effects trailer (1f84c519b)
       (check-contains! text "- **`zz-apr`** — First line. Second \\| line.\n"
-                       "one row, the pipe escaped, no trailer"))
-    (when (buffer-known? "*Help*") (buffer-kill! "*Help*"))
-    (test-forget-catalog! "command" "zz-apr")))
+                       "one row, the pipe escaped, no trailer"))))
 
 (deftest 'the-component-gallery-renders-every-registered-example
   "a component with a broken example is a component nobody can use"

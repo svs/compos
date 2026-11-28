@@ -92,6 +92,7 @@
   (lambda ()
     (test-buffer! "*zz-icon-chat2*" "")
     (buffer-set-local! "*zz-icon-chat2*" 'mode-name "chat-mode")
+    (buffer-meta-label! (list "*zz-icon-chat2*"))
     (let ((note (cadr (car (annotate 'buffer (list "*zz-icon-chat2*"))))))
       (check-contains! note t--icon-chat "the annotation wears the chat icon")
       (check-contains! note "chat-mode" "the annotation names the mode")

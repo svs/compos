@@ -238,7 +238,12 @@
       (else
         (begin
           (set! *test-failures* '())
-          ((car (cdr (cdr t))))
+          (unwind-protect
+            (lambda () ((car (cdr (cdr t)))))
+            (lambda ()
+              (when (and (boundp 'minibuffer-state) (minibuffer-state))
+                (ignore-errors (lambda () (minibuffer-cancel!))))
+              (when (boundp '*editing-quit*) (set! *editing-quit* #f))))
           (let ((out *test-failures*))
             (set! *test-failures* '())
             out))))))

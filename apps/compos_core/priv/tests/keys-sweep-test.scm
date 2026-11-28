@@ -10,10 +10,25 @@
 ;; commands as it installs them. keymap:NAME is a prefix key that leads
 ;; to a keymap, live when the keymap exists.
 (define (sweep--live? cmd names)
-  (or (and (member cmd (command-names)) #t)
-      (and (string-prefix? "keymap:" cmd)
-           (member (substring cmd 7 (string-length cmd)) (keymap-names))
-           #t)))
+  (and (string? cmd)
+       (or (and (member cmd names) #t)
+           (and (string-prefix? "keymap:" cmd)
+                (member (substring cmd 7 (string-length cmd)) (keymap-names))
+                #t))))
+
+(define (sweep--check-keymap km names seen)
+  (if (or (not km) (member km seen) (not (member km (keymap-names))))
+      '()
+      (let ((own (let loop ((rows (keymap-bindings km)) (bad '()))
+                   (if (null? rows)
+                       (reverse bad)
+                       (let* ((keys (car (car rows)))
+                              (cmd (cadr (car rows))))
+                         (loop (cdr rows)
+                               (if (sweep--live? cmd names)
+                                   bad
+                                   (cons (list km keys cmd "no such command") bad))))))))
+        (append own (sweep--check-keymap (keymap-parent km) names (cons km seen))))))
 
 ;; the keys a buffer answers that are not the global map's, resolved
 (define (sweep--check-buffer buf names)
@@ -40,42 +55,30 @@
     "occur-ts-mode" "telemetry-detail-mode"))
 
 (deftest 'every-major-mode-key-leads-to-a-live-command
-  "enter each mode in a fresh buffer; each of its keys resolves"
+  "inspect every major mode's keymap hierarchy; each of its keys leads to a live command"
   (lambda ()
-    (let ((names (command-names)) (bad '()) (entered 0))
+    (let ((names (command-names)) (bad '()) (checked 0))
       (for-each
         (lambda (mode)
-          (begin
-            (unless (or (member mode sweep--skip-modes) (string-prefix? "zz-" mode))
-              (let ((buf (test-buffer! (string-append "zz-sweep-" mode) "line one\nline two\n")))
-                (delete-other-windows!)
-                (switch-to-buffer! buf)
-                (if (ignore-errors (lambda () (set-mode! mode) #t))
-                    (begin
-                      (set! entered (+ entered 1))
-                      (set! bad (append bad (sweep--check-buffer buf names))))
-                    (set! bad (cons (list buf "" mode "setup raised") bad)))
-                (buffer-kill! buf)))))
+          (unless (string-prefix? "zz-" mode)
+            (let ((km (mode-keymap mode)))
+              (when km
+                (set! checked (+ checked 1))
+                (set! bad (append bad (sweep--check-keymap km names '())))))))
         (mode-names 'major))
-      (check-true! (> entered 20) "the sweep entered the modes")
+      (check-true! (> checked 20) "the sweep checked the major mode keymaps")
       (check-equal! bad '() "every key of every mode leads to a live command"))))
 
 (deftest 'every-minor-mode-key-leads-to-a-live-command
-  "turn each minor mode on in a text buffer; each of its keys resolves"
+  "inspect every minor mode's keymap; each of its keys leads to a live command"
   (lambda ()
     (let ((names (command-names)) (bad '()))
       (for-each
         (lambda (mode)
-          (begin
-            (unless (string-prefix? "zz-" mode)
-              (let ((buf (test-buffer! (string-append "zz-sweep-minor-" mode) "some text\n")))
-                (delete-other-windows!)
-                (switch-to-buffer! buf)
-                (if (ignore-errors (lambda () (enable-minor-mode! buf mode) #t))
-                    (set! bad (append bad (sweep--check-buffer buf names)))
-                    (set! bad (cons (list buf "" mode "setup raised") bad)))
-                (ignore-errors (lambda () (disable-minor-mode! buf mode)))
-                (buffer-kill! buf)))))
+          (unless (string-prefix? "zz-" mode)
+            (let ((km (minor-mode-keymap mode)))
+              (when km
+                (set! bad (append bad (sweep--check-keymap km names '())))))))
         (mode-names 'minor))
       (check-equal! bad '() "every key of every minor mode leads to a live command"))))
 
@@ -111,5 +114,6 @@
     (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "d") "list-flag-D" "a declared flag key")
     (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "<") "list-cycle-grouping" "grouping is reserved")
     (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") ">") "list-cycle-sorting" "sorting is reserved")
-    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "f") "list-filter" "the filter, through the parent")
+    (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "/") "list-filter" "the filter, through the parent")
+    (check-equal! (keymap-lookup "list-mode-map" "f") "list-facets" "facets on the parent map")
     (check-equal! (keymap-lookup (mode-keymap "ibuffer-mode") "?") "list-keys-toggle" "the keys card, through the parent")))

@@ -166,8 +166,13 @@
     (shell-command->string "ps -axo rss=,comm=" "/"
       (lambda (out)
         (when (buffer-exists? buf)
-          (buffer-set-locals! buf (list 'perf-apps (perf--apps out) 'perf-ps-busy #f))
-          (perf--render! buf))))))
+          ;; only the first answer draws: after it, the next tick draws
+          ;; the apps it stored. A redraw here was a second full window
+          ;; refresh and render on every tick, which a shown *perf* paid
+          ;; for in EditorLive's heap.
+          (let ((first? (null? (or (buffer-local-value 'perf-apps buf) '()))))
+            (buffer-set-locals! buf (list 'perf-apps (perf--apps out) 'perf-ps-busy #f))
+            (when first? (perf--render! buf))))))))
 
 ;;; --- the text ----------------------------------------------------------------------
 

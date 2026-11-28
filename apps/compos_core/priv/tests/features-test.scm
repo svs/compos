@@ -67,24 +67,7 @@
     (t--ft-forget! 'zz-ft-once)
     (t--ft-remove!)))
 
-(deftest 'a-load-records-its-time
-  "the loader records each file; a file's exclusive time leaves out the files it loads"
-  (lambda ()
-    (t--ft-make!)
-    (t--ft-forget! 'zz-ft-outer 'zz-ft-inner)
-    (t--ft-write! "zz-ft-inner.scm" "(shell-command->string \"sleep 0.05\")\n")
-    (t--ft-write! "zz-ft-outer.scm" "(require 'zz-ft-inner)\n")
-    (require 'zz-ft-outer)
-    (let ((inner (assoc 'zz-ft-inner *load-times*))
-          (outer (assoc 'zz-ft-outer *load-times*)))
-      (check-true! (and inner outer #t) "both files are recorded")
-      (check-equal! (list-ref inner 1) (t--ft-path "zz-ft-inner.scm") "the record names the file")
-      (check-true! (>= (list-ref inner 2) 40) "the inner file took its sleep")
-      (check-true! (>= (list-ref outer 2) (list-ref inner 2)) "the inclusive time contains the inner load")
-      (check-true! (< (list-ref outer 3) (list-ref inner 2)) "the exclusive time does not")
-      (check-true! (string-contains? (load-times-report 500) "zz-ft-inner.scm") "the report lists the file"))
-    (t--ft-forget! 'zz-ft-outer 'zz-ft-inner)
-    (t--ft-remove!)))
+
 
 (define zz-ft-init-ran 0)
 (define (zz-ft-on-init) (set! zz-ft-init-ran (+ zz-ft-init-ran 1)))

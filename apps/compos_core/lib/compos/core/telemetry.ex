@@ -166,12 +166,21 @@ defmodule Compos.Core.Telemetry do
     emit(collector, event, measurements, metadata)
   end
 
+  # The row is built here, in the process that emitted the event, and only
+  # the row travels. The metadata does not: a LiveView event carries the
+  # whole socket and a Finch send the whole request, megabytes each, and
+  # every copy of them landed on the collector's heap. Its live set stayed
+  # at half a megabyte while its heap grew to fit those messages: 47 MiB
+  # within minutes of a collection.
+  #
+  # A row that cannot be built is dropped: a raise here would make
+  # :telemetry detach the handler, and every later row would be lost.
   defp emit(collector, event, measurements, metadata) do
-    send(
-      collector,
-      {:telemetry_event, event, measurements, Map.put_new(metadata, :tid, current_tid()),
-       System.system_time(:millisecond)}
-    )
+    metadata = Map.put_new(metadata, :tid, current_tid())
+    row = normalize(event, measurements, metadata, System.system_time(:millisecond))
+    send(collector, {:row, row})
+  rescue
+    _ -> :ok
   end
 
   @impl true

@@ -1149,12 +1149,16 @@ a command's stamp is the stamp of the procedure it binds"
     (and backend (cdr backend))))
 
 (define (apropos--sources-cached rows)
-  (let ((gen (catalog-generation)))
-    (or (apropos--frozen 'apropos-sources gen)
-        (let ((sources (apropos--semantic-sources rows)))
-          (set! *apropos--sources-gen* gen)
-          (apropos--freeze! 'apropos-sources gen
-                            (list sources (map apropos--embedding-text sources)))))))
+  ;; Only the texts are frozen. The hits are the ones apropos-rows already
+  ;; holds: freezing them here as well kept a second copy of every hit,
+  ;; ~4 MB of persistent_term, because each frozen-put! copies its value.
+  (let* ((gen (catalog-generation))
+         (sources (apropos--semantic-sources rows))
+         (texts (or (apropos--frozen 'apropos-sources gen)
+                    (let ((texts (map apropos--embedding-text sources)))
+                      (set! *apropos--sources-gen* gen)
+                      (apropos--freeze! 'apropos-sources gen texts)))))
+    (list sources texts)))
 
 ;; A failed sync tells the user once, not once per retry: every catalog
 ;; change retries, and a bad key or a dead network fails each time. A sync

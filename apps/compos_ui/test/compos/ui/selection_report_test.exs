@@ -20,7 +20,7 @@ defmodule Compos.Ui.SelectionReportTest do
     const domByte = () => 2;
     const markCurrentRow = () => {};
     let reports = 0;
-    const hook = {_gestureAt: 100, _patchAt: 50, sendSelection: () => reports++};
+    const hook = {_gestureAt: 100, _patchAt: 50, measureSelection: () => null, sendSelection: () => reports++};
     (function () { this.selChangeH = () => {#{body} }).call(hook);
     hook.selChangeH();
     assert.equal(hook._selPending, true);

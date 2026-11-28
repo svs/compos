@@ -872,7 +872,10 @@
       (buffer-delete-range! target 0 (buffer-size target))
       (buffer-insert! target 0 source-text))
     (workspace--stamp! target id workspace primary)
-    (buffer-set-local! target 'group workspace)
+    (if (boundp 'buffer-add-group!)
+        (let ((gid (buffer-add-group! target workspace)))
+          (when (and gid (boundp 'switch-to-group!)) (switch-to-group! gid)))
+        (buffer-set-local! target 'group workspace))
     ;; Replace every visible copy of this source. Other primary buffers stay
     ;; available, but this coding task never edits through their windows.
     (for-each
@@ -926,7 +929,7 @@
   (let ((owners
           (filter (lambda (b)
                     (and (not (equal? b chat))
-                         (equal? (buffer-local-value 'workspace-root b) group)))
+                         (string? (buffer-local-value 'workspace-root b))))
                   (group-buffers group))))
     (when (pair? owners)
       (let ((owner (car owners)))

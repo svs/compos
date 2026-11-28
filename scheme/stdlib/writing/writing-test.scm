@@ -197,24 +197,26 @@
     bufs))
 
 (deftest 'disabling-writing-mode-restores-the-previous-look
-  "it composes with a major mode: org's look comes back exactly"
+  "it composes with a major mode: the major mode's look comes back exactly"
   (lambda ()
-    ;; org is a package of its own now; the suite has its clone on load-path
-    (require 'org)
-    (let ((buf (test-buffer! "zz-writing.org" "* head\nbody\n")))
-      (with-current-buffer buf (lambda () (set-mode! "org-mode")))
-      (let ((org-style (buffer-local-value 'style buf)))
-        (check-contains! org-style "--default-family:Spectral" "org's own family")
-        (check-false! (string-contains? org-style "--default-size")
-                      "org names no size: it reads at the default face's")
+    (define-mode "zz-writing-serif-mode"
+      (lambda ()
+        (face-remap-in! (current-buffer) 'default '(family "Spectral, Georgia, serif"))))
+    (let ((buf (test-buffer! "zz-writing.serif" "* head\nbody\n")))
+      (with-current-buffer buf (lambda () (set-mode! "zz-writing-serif-mode")))
+      (let ((mode-style (buffer-local-value 'style buf)))
+        (check-contains! mode-style "--default-family:Spectral" "the mode's own family")
+        (check-false! (string-contains? mode-style "--default-size")
+                      "the mode names no size: it reads at the default face's")
 
         ;; writing-mode toggles the look; write only ever enters the workspace
         (with-current-buffer buf (lambda () (run-command "writing-mode")))
-        ;; writing draws the page, and the page's type is the preview's
-        (check-contains! (buffer-local-value 'style buf) (string-append "--default-family:" preview-font-family) "the page's type")
+        ;; writing draws the page with its measure while keeping the serif family
+        (check-contains! (buffer-local-value 'style buf) "--writing-measure:" "the page's measure")
+        (check-contains! (buffer-local-value 'style buf) "--default-family:" "the page's type")
 
         (with-current-buffer buf (lambda () (run-command "writing-mode")))
-        (check-equal! (buffer-local-value 'style buf) org-style "org's look is back")
+        (check-equal! (buffer-local-value 'style buf) mode-style "the mode's look is back")
         (check-equal! (buffer-local-value 'minor-modes buf) '() "and no minor mode is left")
         (check-equal! (t--wr-locals buf)
                       '((window-class #f) (modeline-info #f) (line-numbers #f)

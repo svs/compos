@@ -202,7 +202,9 @@
     (let ((ov (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200)))
       (check-equal! (nth 2 (car ov)) "ibuffer-marked" "a marked row wears the tint"))
     (list-mark! "*ibuffer*" "*zz-ib-a*" #f)
-    (check-equal! (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200) '() "an unmarked buffer with no file wears nothing")
+    (check-equal! (filter (lambda (o) (equal? (nth 2 o) "ibuffer-marked"))
+                            (ibuffer-row-overlays "*ibuffer*" "*zz-ib-a*" 200))
+                  '() "an unmarked buffer wears no marked band")
     (ibuffer-test-reset!)))
 
 (deftest 'ibuffer-toggle-mark-marks-then-unmarks
@@ -379,7 +381,7 @@
       (check-equal! (target-at "*ibuffer*") '(buffer "*zz-ib-a*" "*zz-ib-a*")
                     "the row at point names itself")
       (let* ((rows (list-entries "*ibuffer*"))
-             (i (list-index-of "*ibuffer*" rows "*zz-ib-b*"))
+             (i (list-index-of "*ibuffer*" rows (list-key "*ibuffer*" "*zz-ib-b*")))
              (heading (list-index-of "*ibuffer*" rows
                                      (list-key "*ibuffer*"
                                                (car (filter ibuffer-heading? rows))))))

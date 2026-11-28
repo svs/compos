@@ -654,6 +654,251 @@ defmodule Compos.Core.SysMon do
     end
   end
 
+  @doc """
+  BEAM `alloc_util` carrier usage and fragmentation, plus `:persistent_term`
+  and `mseg_alloc` cached segments, as a Scheme plist.
+  """
+  def allocators do
+    rows =
+      :erlang.system_info(:alloc_util_allocators)
+      |> Enum.flat_map(&allocator_row/1)
+      |> Enum.sort_by(&(-&1.carriers))
+
+    {blocks, carriers, mbcs_blocks, mbcs_carriers, sbcs_carriers, pool_carriers} =
+      Enum.reduce(rows, {0, 0, 0, 0, 0, 0}, fn r, {b, c, mb, mc, sc, pc} ->
+        {b + r.blocks, c + r.carriers, mb + r.mbcs_blocks, mc + r.mbcs_carriers,
+         sc + r.sbcs_carriers, pc + r.pool_carriers}
+      end)
+
+    pt = :persistent_term.info()
+
+    to_plist(%{
+      total_blocks: blocks,
+      total_carriers: carriers,
+      utilization: alloc_pct(blocks, carriers),
+      mbcs_blocks: mbcs_blocks,
+      mbcs_carriers: mbcs_carriers,
+      sbcs_carriers: sbcs_carriers,
+      pool_carriers: pool_carriers,
+      mseg_cached: mseg_cached(),
+      persistent_term: %{count: pt.count, bytes: pt.memory},
+      allocators:
+        Enum.map(rows, fn r ->
+          [
+            r.name,
+            r.instances,
+            r.blocks,
+            r.carriers,
+            r.utilization,
+            r.mbcs_blocks,
+            r.mbcs_carriers,
+            r.sbcs_carriers,
+            r.pool_carriers
+          ]
+        end)
+    })
+  end
+
+  defp allocator_row(name) do
+    case :erlang.system_info({:allocator, name}) do
+      instances when is_list(instances) ->
+        {count, mb, mc, sb, sc, pb, pc} =
+          Enum.reduce(instances, {0, 0, 0, 0, 0, 0, 0}, fn
+            {:instance, _n, props}, {cnt, mb, mc, sb, sc, pb, pc} when is_list(props) ->
+              {m_b, m_c} = section_usage(Keyword.get(props, :mbcs, []))
+              {s_b, s_c} = section_usage(Keyword.get(props, :sbcs, []))
+              {p_b, p_c} = section_usage(Keyword.get(props, :mbcs_pool, []))
+              {cnt + 1, mb + m_b, mc + m_c, sb + s_b, sc + s_c, pb + p_b, pc + p_c}
+
+            _, acc ->
+              acc
+          end)
+
+        blocks = mb + sb + pb
+        carriers = mc + sc + pc
+
+        [
+          %{
+            name: Atom.to_string(name),
+            instances: count,
+            blocks: blocks,
+            carriers: carriers,
+            utilization: alloc_pct(blocks, carriers),
+            mbcs_blocks: mb,
+            mbcs_carriers: mc,
+            sbcs_carriers: sc,
+            pool_carriers: pc
+          }
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp section_usage(props) when is_list(props) do
+    carriers =
+      case List.keyfind(props, :carriers_size, 0) do
+        {:carriers_size, cur, _, _} -> cur
+        {:carriers_size, cur} -> cur
+        _ -> 0
+      end
+
+    blocks =
+      case List.keyfind(props, :blocks, 0) do
+        {:blocks, entries} when is_list(entries) ->
+          Enum.reduce(entries, 0, fn
+            {_type, entry_props}, acc when is_list(entry_props) ->
+              case List.keyfind(entry_props, :size, 0) do
+                {:size, cur, _, _} -> acc + cur
+                {:size, cur} -> acc + cur
+                _ -> acc
+              end
+
+            {_type, {:size, cur, _, _}, _}, acc ->
+              acc + cur
+
+            _, acc ->
+              acc
+          end)
+
+        _ ->
+          case List.keyfind(props, :blocks_size, 0) do
+            {:blocks_size, cur, _, _} -> cur
+            {:blocks_size, cur} -> cur
+            _ -> 0
+          end
+      end
+
+    {blocks, carriers}
+  end
+
+  defp section_usage(_), do: {0, 0}
+
+  defp mseg_cached do
+    case :erlang.system_info({:allocator, :mseg_alloc}) do
+      instances when is_list(instances) ->
+        Enum.reduce(instances, 0, fn
+          {:instance, _n, props}, acc when is_list(props) ->
+            Enum.reduce(props, acc, fn
+              {:memkind, mk}, a when is_list(mk) ->
+                status = Keyword.get(mk, :status, [])
+
+                case List.keyfind(status, :cached_segments, 0) do
+                  {:cached_segments, n} when is_integer(n) -> a + n
+                  _ -> a
+                end
+
+              _, a ->
+                a
+            end)
+
+          _, acc ->
+            acc
+        end)
+
+      _ ->
+        0
+    end
+  end
+
+  defp alloc_pct(_used, 0), do: 0
+  defp alloc_pct(used, total), do: round(used * 100 / total)
+
+  @doc """
+  Diagnostic breakdown of `:persistent_term`, process-referenced refc
+  binaries, and loaded BEAM code by module prefix.
+  """
+  def memory_breakdown(limit \\ 20) do
+    word = :erlang.system_info(:wordsize)
+
+    pt_rows =
+      :persistent_term.get()
+      |> Enum.map(fn {k, v} ->
+        bytes = :erts_debug.size(v) * word
+        {inspect(k, limit: 8, printable_limit: 80), bytes}
+      end)
+      |> Enum.sort_by(fn {_, b} -> -b end)
+
+    {bin_proc_rows, unique_proc_bins} =
+      Process.list()
+      |> Enum.reduce({[], %{}}, fn pid, {rows, seen} ->
+        case Process.info(pid, [:binary, :registered_name, :initial_call]) do
+          [{:binary, bins}, {:registered_name, reg}, {:initial_call, ic}] when bins != [] ->
+            {sum, seen} =
+              Enum.reduce(bins, {0, seen}, fn {id, size, _refc}, {s, acc} ->
+                {s + size, Map.put_new(acc, id, size)}
+              end)
+
+            if sum >= 65_536 do
+              label =
+                case reg do
+                  [] -> inspect(ic)
+                  name -> inspect(name)
+                end
+
+              {[{pid_string(pid), label, length(bins), sum} | rows], seen}
+            else
+              {rows, seen}
+            end
+
+          _ ->
+            {rows, seen}
+        end
+      end)
+
+    bin_proc_rows =
+      bin_proc_rows
+      |> Enum.sort_by(fn {_, _, _, b} -> -b end)
+      |> Enum.take(limit)
+      |> Enum.map(&Tuple.to_list/1)
+
+    unique_proc_bin_bytes = unique_proc_bins |> Map.values() |> Enum.sum()
+
+    code_groups =
+      :code.all_loaded()
+      |> Enum.reduce(%{}, fn {mod, path}, acc ->
+        bytes =
+          case path do
+            p when is_list(p) ->
+              case File.stat(p) do
+                {:ok, %{size: sz}} -> sz
+                _ -> 0
+              end
+
+            _ ->
+              0
+          end
+
+        group = code_group(Atom.to_string(mod))
+        Map.update(acc, group, {1, bytes}, fn {c, b} -> {c + 1, b + bytes} end)
+      end)
+      |> Enum.map(fn {g, {c, b}} -> [g, c, b] end)
+      |> Enum.sort_by(fn [_, _, b] -> -b end)
+      |> Enum.take(limit)
+
+    to_plist(%{
+      persistent_term_count: length(pt_rows),
+      persistent_term_top: pt_rows |> Enum.take(limit) |> Enum.map(&Tuple.to_list/1),
+      binary_total: :erlang.memory(:binary),
+      binary_in_procs_unique: unique_proc_bin_bytes,
+      binary_procs_top: bin_proc_rows,
+      code_memory: :erlang.memory(:code),
+      code_modules_count: length(:code.all_loaded()),
+      code_by_prefix_disk: code_groups
+    })
+  end
+
+  defp code_group("Elixir." <> rest) do
+    case String.split(rest, ".") do
+      ["Compos", "Scheme", "Native" | _] -> "Compos.Scheme.Native"
+      ["Compos", sub | _] -> "Compos." <> sub
+      [top | _] -> top
+    end
+  end
+
+  defp code_group(other), do: ":" <> (other |> String.split("_") |> hd())
+
   # --- Scheme values -----------------------------------------------------------
 
   @doc "A map as a Scheme plist: keys become symbols, underscores become dashes."

@@ -130,7 +130,11 @@ defmodule Compos.Core.BufferStore do
 
   @doc "The locals small enough to index with their buffer's row."
   def small_locals(locals) do
-    for {k, v} <- locals, :erlang.external_size(v) <= @local_index_bytes, into: %{}, do: {k, v}
+    for {k, v} <- locals,
+        not Compos.Core.BufferView.big_ref?(v),
+        :erlang.external_size(v) <= @local_index_bytes,
+        into: %{},
+        do: {k, v}
   end
 
   # The auto-revert base is the text a buffer last agreed with its file on.
@@ -155,7 +159,10 @@ defmodule Compos.Core.BufferStore do
 
     # A local set to #f reads as unset in Scheme, so a cleared key is not
     # kept: dead keys leave the desktop at the next checkpoint.
-    locals |> Map.drop(skip) |> Map.filter(fn {_k, v} -> v != false and serializable?(v) end)
+    locals
+    |> Map.drop(skip)
+    |> Map.new(fn {k, v} -> {k, Compos.Core.BufferView.big_value(v)} end)
+    |> Map.filter(fn {_k, v} -> v != false and serializable?(v) end)
   end
 
   defp local_key({:sym, key}), do: key

@@ -992,18 +992,54 @@ defmodule Compos.Core.Editor do
   # whole map is replaced.
   def handle_call({:set_wrap_maps, map, fid}, _from, state) when is_map(map) do
     f = frame(state, fid)
-    {:reply, :ok, put_frame(state, Map.put(f, :wrap_maps, map))}
+
+    tagged =
+      Map.new(map, fn {win, {version, rows}} ->
+        buf = case find_leaf(f.tree, win) do
+          %{buffer: b} -> b
+          _ -> nil
+        end
+
+        {win, {buf, version, rows}}
+      end)
+
+    {:reply, :ok, put_frame(state, Map.put(f, :wrap_maps, tagged))}
   end
 
   def handle_call({:set_wrap_map, win, version, rows, fid}, _from, state) do
     f = frame(state, fid)
-    maps = Map.put(Map.get(f, :wrap_maps, %{}), win, {version, rows})
+
+    buf =
+      case find_leaf(f.tree, win) do
+        %{buffer: b} -> b
+        _ -> nil
+      end
+
+    maps = Map.put(Map.get(f, :wrap_maps, %{}), win, {buf, version, rows})
     {:reply, :ok, put_frame(state, Map.put(f, :wrap_maps, maps))}
   end
 
   def handle_call({:wrap_map, win, fid}, _from, state) do
     f = frame(state, fid)
-    {:reply, Map.get(Map.get(f, :wrap_maps, %{}), win || f.active), state}
+    target = win || f.active
+
+    reply =
+      case Map.get(Map.get(f, :wrap_maps, %{}), target) do
+        {nil, version, rows} ->
+          {version, rows}
+
+        {buf, version, rows} ->
+          case find_leaf(f.tree, target) do
+            %{buffer: ^buf} -> {version, rows}
+            nil -> {version, rows}
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    {:reply, reply, state}
   end
 
   # a list lays itself out for the window it is IN, whichever frame that

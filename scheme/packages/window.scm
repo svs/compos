@@ -1808,7 +1808,9 @@ the focus; #f for a window or a buffer."
 (effects! '(read))
 (public! 'window-quit-restore!
   "(window-quit-restore! WIN) — undo what a display did to WIN: delete the window it made, or put back the buffer it replaced")
+(effects! '(write display))
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window, as the user asked: an agent's way to show a buffer")
+(effects! '(read))
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'window-buffer-any
   "(window-buffer-any WIN) — the buffer of window WIN, on screen or waiting in the panes model, or #f")

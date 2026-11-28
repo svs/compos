@@ -156,7 +156,9 @@ if config_env() == :test do
     machine_cache_dir: "/tmp/compos-test-home-#{suffix}/machine-cache",
     desktop_autorestore: false,
     # a visit of a file in a worktree checkout must not boot a daemon for it
-    workspace_daemons: false
+    workspace_daemons: false,
+    # never spawn a real ACP adapter subprocess in tests unless a test overrides
+    default_acp_transport: Compos.Core.Agent.Transport.Null
 
   config :logger, level: :warning
 

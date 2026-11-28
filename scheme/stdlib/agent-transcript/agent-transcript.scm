@@ -1204,8 +1204,19 @@
 (define (chat-view--block-at-index buf i)
   (let ((m (chat-view--memo buf)))
     (and m (integer? i)
-         (let ((drawn (reverse (filter (lambda (rv) (cadr rv)) (chat-view--zip (nth 0 m) (nth 2 m))))))
-           (and (>= i 0) (< i (length drawn)) (car (nth i drawn)))))))
+         (let* ((raw (nth 0 m))
+                (sk (nth 2 m)))
+           (and (list? sk) (or (null? sk) (integer? (car sk)))
+                (let ((drawn
+                        (let loop ((rs raw) (idx 0) (s sk) (acc '()))
+                          (cond
+                            ((null? rs) acc)
+                            ((and (pair? s) (= (car s) idx))
+                             (loop (cdr rs) (+ idx 1) (cdr s) acc))
+                            (else
+                             (loop (cdr rs) (+ idx 1) s (cons (car rs) acc)))))))
+                  (and (>= i 0) (< i (length drawn)) (nth i drawn))))))))
+
 
 ;; the fence M-RET and C-c C-o act on: the first in the block M-up/M-down
 ;; stepped to, else the newest in the chat
@@ -1341,10 +1352,39 @@
          (or (not (equal? (and (member id old-open) #t) (and (member id open) #t)))
              (not (equal? (and (member full old-open) #t) (and (member full open) #t)))))))
 
+;; newest-first indices of VIEWS that drew nothing (#f)
+(define (chat-view--skipped views)
+  (let loop ((vs views) (i 0) (acc '()))
+    (if (null? vs)
+        (reverse acc)
+        (loop (cdr vs) (+ i 1) (if (car vs) acc (cons i acc))))))
+
+;; rebuild newest-first VIEWS from BUF's single 'render-blocks copy using SKIPPED
+;; so *chat-view-memo* holds no second copy of every rendered block tree
+(define (chat-view--restore-views buf old-raw skipped old-sig)
+  (let* ((old-nav (nth 5 old-sig))
+         (old-per (or (nth 6 old-sig) 0))
+         (tree (and (not old-nav) (<= old-per 0) (buffer-local-value 'render-blocks buf)))
+         (children (and (pair? tree) (plist-get (car tree) 'children))))
+    (and (list? children)
+         (list? skipped)
+         (or (null? skipped) (integer? (car skipped)))
+         (= (+ (length children) (length skipped)) (length old-raw))
+         (let loop ((i 0) (n (length old-raw)) (cs (reverse children)) (sk skipped) (acc '()))
+           (cond
+             ((>= i n) (reverse acc))
+             ((and (pair? sk) (= (car sk) i))
+              (loop (+ i 1) n cs (cdr sk) (cons #f acc)))
+             ((pair? cs)
+              (loop (+ i 1) n (cdr cs) sk (cons (car cs) acc)))
+             (else #f))))))
+
 (define (chat-view--views buf raw open m)
-  (let ((old-raw (and m (nth 0 m))) (old-open (and m (nth 1 m))) (old-views (and m (nth 2 m))))
+  (let* ((old-raw (and m (nth 0 m)))
+         (old-open (and m (nth 1 m)))
+         (old-views (and m (chat-view--restore-views buf old-raw (nth 2 m) (nth 3 m)))))
     (cond
-      ((not m)
+      ((not old-views)
        (map (lambda (b) (chat-view-block buf b open)) raw))
       ((not (equal? old-open open))
        (if (equal? raw old-raw)
@@ -1449,21 +1489,25 @@
            (verbosity (or (buffer-local-value 'agent-verbosity buf) "info"))
            (queued (or (buffer-local-value 'chat-queued buf) '()))
            (activity (chat-activity-live buf))
-           (sig (list raw open verbosity queued activity
+           (sig (list verbosity queued activity
                       (buffer-local-value 'chat-pending-images buf)
                       (buffer-local-value 'chat-view-reveal buf)
                       (buffer-local-value 'chat-view-nav buf)
                       chat-view-window-bytes))
            (m (chat-view--memo buf)))
-      (unless (and m (equal? (nth 3 m) sig)
+      (unless (and m (equal? (nth 0 m) raw)
+                   (equal? (nth 1 m) open)
+                   (equal? (nth 3 m) sig)
                    (buffer-local-value 'render-blocks buf))
         (let* ((views (chat-view--views buf raw open m))
                (win (chat-view--window buf raw views))
-               ;; the drawn cards shaped; the memo keeps them, so a sync
-               ;; shapes only a card it has not drawn before
+               ;; the drawn cards shaped; the memo keeps only skipped indices
+               ;; and reads unchanged views back from 'render-blocks
                (drawn (map (lambda (v) (chat-view--drawn buf v open)) (car win)))
                (views (append drawn (list-tail views (length drawn)))))
-          (chat-view--memo-set! buf (list raw open views sig))
+          (chat-view--memo-set! buf (list raw open (chat-view--skipped views) sig))
+          (unless (member 'render-blocks (or (buffer-local-value 'desktop-skip-locals buf) '()))
+            (desktop-skip! buf 'render-blocks))
           (buffer-set-locals! buf
             (list 'render-root '(tag "c-buffer" class "agent-view")
                   'render-input "agent-saved-mark"

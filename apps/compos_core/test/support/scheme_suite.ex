@@ -39,9 +39,31 @@ defmodule Compos.SchemeSuite do
   def loader(:core), do: "(load-tests-once!)"
   def loader(:packages), do: "(load-package-tests-once!)"
 
+  @doc "The files of KIND matched by SCHEME_TESTS, or all of them when unset."
+  def active_files(kind) do
+    case System.get_env("SCHEME_TESTS") do
+      nil ->
+        files(kind)
+
+      words ->
+        words = Enum.map(String.split(words, ",", trim: true), &String.trim/1)
+        Enum.filter(files(kind), fn path -> Enum.any?(words, &String.contains?(Path.basename(path), &1)) end)
+    end
+  end
+
   @doc "Every test name the loaded suites registered."
   def names(kind) do
-    eval!("(begin #{loader(kind)} (test-names))")
+    load_expr =
+      case System.get_env("SCHEME_TESTS") do
+        nil ->
+          loader(kind)
+
+        _ ->
+          paths = Enum.map_join(active_files(kind), " ", &inspect/1)
+          "(load-test-files! (list #{paths}))"
+      end
+
+    eval!("(begin #{load_expr} (test-names))")
     |> String.trim_leading("(")
     |> String.trim_trailing(")")
     |> String.split(" ", trim: true)
@@ -114,24 +136,45 @@ defmodule Compos.SchemeSuite do
 
   @doc "Every declared test of KIND that did not register."
   def missing(kind, found) do
-    for path <- files(kind),
+    for path <- active_files(kind),
         name <- declared(path),
         name not in found,
         do: "#{Path.basename(path)}: #{name}"
   end
 
-  @doc "Run NAMES one eval each; answers the failures, and prints times on SCHEME_TIMES."
+  @doc "Run NAMES in Scheme batches (falling back to 1-by-1 on timeout); answers failures and prints times on SCHEME_TIMES."
   def run(names) do
+    want_times = System.get_env("SCHEME_TIMES") != nil
+
     {failures, times} =
-      Enum.reduce(names, {[], []}, fn name, {fails, times} ->
-        {us, result} = :timer.tc(fn -> eval("(run-test '#{name})") end)
-        reduced = reduce(name, result)
-        {if(reduced, do: [reduced | fails], else: fails), [{div(us, 1000), name} | times]}
+      names
+      |> Enum.chunk_every(50)
+      |> Enum.reduce({[], []}, fn chunk, {fails, times} ->
+        syms = Enum.map_join(chunk, " ", & &1)
+        flag = if want_times, do: "#t", else: "#f"
+
+        case eval("(run-tests-batch '(#{syms}) #{flag})") do
+          {:ok, "()"}
+          when not want_times ->
+            {fails, times}
+
+          {:ok, out} ->
+            {chunk_fails, chunk_times} = parse_batch(out, want_times)
+            {Enum.reverse(chunk_fails, fails), Enum.reverse(chunk_times, times)}
+
+          {:error, _} ->
+            # A batch timed out or crashed the process: re-run its tests one by one to isolate the offender.
+            Enum.reduce(chunk, {fails, times}, fn name, {f_acc, t_acc} ->
+              {us, result} = :timer.tc(fn -> eval("(run-test '#{name})") end)
+              reduced = reduce(name, result)
+              {if(reduced, do: [reduced | f_acc], else: f_acc), [{div(us, 1000), name} | t_acc]}
+            end)
+        end
       end)
 
     # SCHEME_TIMES=1 prints the slowest tests, for work on the editor's cost;
     # SCHEME_TIMES=all prints every test that ran
-    if System.get_env("SCHEME_TIMES") do
+    if want_times do
       times
       |> Enum.sort(:desc)
       |> Enum.take(if System.get_env("SCHEME_TIMES") == "all", do: length(times), else: 25)
@@ -140,6 +183,28 @@ defmodule Compos.SchemeSuite do
 
     Enum.reverse(failures)
   end
+
+  defp parse_batch(out, want_times) do
+    case Compos.Scheme.Reader.read_all(out) do
+      [parsed] ->
+        if want_times do
+          [raw_fails, raw_times] = parsed
+          {Enum.map(raw_fails, &format_batch_fail/1),
+           Enum.map(raw_times, fn [ms, {:sym, name}] -> {ms, name} end)}
+        else
+          {Enum.map(parsed, &format_batch_fail/1), []}
+        end
+
+      _ ->
+        {["  <batch parse error>\n      #{out}"], []}
+    end
+  end
+
+  defp format_batch_fail([{:sym, name}, {:sym, "error"}, msg]),
+    do: "  #{name}\n      raised: #{msg}"
+
+  defp format_batch_fail([{:sym, name}, {:sym, "fail"}, msgs]),
+    do: "  #{name}\n      #{Compos.Scheme.Printer.print(msgs)}"
 
   # "()" is a pass. Anything else is the test's own report, or the eval
   # died — which is a failure of that test and not of this one.

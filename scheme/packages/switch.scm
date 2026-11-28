@@ -327,7 +327,8 @@
 
 (define (switch-preview! buf e)
   (let ((b (car e))
-        (w (switch-home-window buf)))
+        (w (switch-home-window buf))
+        (sw (active-window)))
     (when (and w (not (switch-container? e)) (buffer-known? b))
       (let ((sleeping (not (buffer-exists? b))))
         (preview-show b 'here w)
@@ -335,7 +336,9 @@
         ;; switch-to-buffer! later sees the buffer live and skips it
         (when (and sleeping (buffer-exists? b))
           (restore-buffer-runtime! b)
-          (switch-note-woken! buf b))))))
+          (switch-note-woken! buf b))
+        (when (and sw (window-exists? sw) (not (equal? (active-window) sw)))
+          (select-window! sw))))))
 
 ;; put HOME back to what it showed at open — the cancel path, and the
 ;; guard before a kill takes the previewed buffer off screen
@@ -347,10 +350,11 @@
 ;; sealed groups): the home window takes back what it showed, and the
 ;; switch that follows finds the buffer off screen
 (define (switch-close! buf keep)
-  (switch-sleep-woken! buf keep)
-  ;; the look ends: a pick keeps it, a foreign pick or none gives it back
-  (preview-end (and keep (not (display-foreign? keep)) #t))
-  (run-command "quit-window"))
+  (let ((woken (or (buffer-local-value 'switch-woken buf) '())))
+    (buffer-set-local! buf 'switch-woken '())
+    (preview-end (and keep (not (display-foreign? keep)) #t))
+    (run-command "quit-window")
+    (for-each (lambda (b) (unless (equal? b keep) (buffer-sleep! b))) woken)))
 
 ;;; --- typing is the filter -------------------------------------------------------
 

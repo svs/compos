@@ -752,7 +752,7 @@
         "  doc \"read a workbook by buffer name without displaying it\"))\n"
         "```\n")
       "property keys stay beside their values and rows start on separate lines")
-    (check-equal! (morg-ts-lang "result-scheme") "scheme"
+    (check-equal! (fence-kind-get "result-scheme" 'ts-lang #f) "scheme"
                   "the Scheme result uses the Scheme highlighter")
     (t--morg-done!)))
 

@@ -622,6 +622,15 @@ defmodule Compos.Core.SchemeAPI do
           [] -> Enum.map(SysMon.ets(), &Tuple.to_list/1)
           [limit] -> Enum.map(SysMon.ets(trunc(limit)), &Tuple.to_list/1)
         end,
+      {"vm-allocators",
+       "(vm-allocators) — BEAM alloc_util carrier usage and fragmentation, plus persistent_term and mseg cached segments, as a plist."} =>
+        fn [] -> SysMon.allocators() end,
+      {"vm-memory-breakdown",
+       "(vm-memory-breakdown [LIMIT]) — top persistent_term entries, process-referenced refc binaries, and loaded BEAM modules by prefix."} =>
+        fn
+          [] -> SysMon.memory_breakdown(20)
+          [limit] -> SysMon.memory_breakdown(trunc(limit))
+        end,
       {"vm-scheme-env",
        "(vm-scheme-env [LIMIT]) — what the Scheme environment table holds: (FRAMES VARS GLOBAL-VARS ROWS); ROWS are the binding names that hold the most memory over every frame, as (NAME COUNT GLOBAL-COUNT BYTES). Copies every row: a diagnostic, not a sampler."} =>
         fn args ->
@@ -2744,6 +2753,18 @@ defmodule Compos.Core.SchemeAPI do
           _, _ -> {false, store}
         end
       end,
+      {"try-call",
+       "(try-call THUNK) — (ok VALUE) when THUNK returns, or (error MESSAGE) when it raises."} =>
+        fn [thunk], store ->
+          try do
+            {val, store} = Compos.Scheme.Eval.apply_fn(thunk, [], store)
+            {[{:sym, "ok"}, val], store}
+          rescue
+            e -> {[{:sym, "error"}, Exception.message(e)], store}
+          catch
+            kind, reason -> {[{:sym, "error"}, "#{kind}: #{inspect(reason)}"], store}
+          end
+        end,
       # the ignore-errors for a failure that is a bug: the lane goes on, and
       # *Messages* and the daemon log say what broke and where
       {"report-errors",

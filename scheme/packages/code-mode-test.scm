@@ -17,9 +17,9 @@
                      (catalog-entry 'function "display-buffer-other-window!")
                      'effects))
           (quiet (llm-tool-call "apropos"
-                   (list 'query "display-buffer-other-window!")))
+                   (list 'query "show buffer without leaving this window")))
           (present (llm-tool-call "apropos"
-                     (list 'query "display-buffer-other-window!"
+                     (list 'query "show buffer without leaving this window"
                            'include-display #t))))
       (check-true! (member "display" effects) "the effect is checked-in metadata")
       (check-false! (string-contains? quiet "display-buffer-other-window!")
@@ -118,9 +118,11 @@
   (lambda ()
     (let ((buf (t--cm-on!)))
       (check-contains!
-        (with-current-buffer buf
+        (with-stub 'llm-tool-buffer (lambda () buf)
           (lambda ()
-            (llm-tool-call "eval-scheme" (list 'code "(tab-list (lambda (tabs) tabs))"))))
+            (with-current-buffer buf
+              (lambda ()
+                (llm-tool-call "eval-scheme" (list 'code "(tab-list (lambda (tabs) tabs))"))))))
         "browser category denied in code-mode" "the call is refused")
 
       (switch-to-buffer! buf)
@@ -294,7 +296,12 @@
         ;; A chat is named for where it lives, and a worktree is its own
         ;; checkout, so the name is the worktree's, not the whole path.
         (switch-to-buffer! task)
-        (run-command "chat-companion")
+        (with-stub 'chat-attach-agent!
+          (lambda (b c &optional m o)
+            (let ((s (string-append "zz-cm:" b)))
+              (buffer-set-local! b 'agent-slug s)
+              s))
+          (lambda () (run-command "chat-companion")))
         (let ((chat (current-buffer)))
           (check-equal! chat (group-chat-name workspace) "the chat is the workspace's")
           (check-equal! (buffer-local-value 'workspace-root chat) workspace "and carries its root")
@@ -311,16 +318,29 @@
             (check-equal! second-workspace (string-append root "-worktrees/a2")
                           "the second is a sibling, not a child")
             (switch-to-buffer! second)
-            (run-command "chat-companion")
+            (with-stub 'chat-attach-agent!
+              (lambda (b c &optional m o)
+                (let ((s (string-append "zz-cm:" b)))
+                  (buffer-set-local! b 'agent-slug s)
+                  s))
+              (lambda () (run-command "chat-companion")))
             (check-false! (equal? (current-buffer) chat) "with a chat of its own")
             (check-true! (buffer-known? chat) "and the first chat survives")
             (check-equal! (length (worktree-list root)) 3 "three worktrees: the checkout and two"))))
 
       ;; leave nothing behind
       (for-each (lambda (b)
-                  (when (or (string-prefix? root b) (string-contains? b (string-append root "-worktrees")))
+                  (when (or (string-prefix? root b)
+                            (string-contains? b (string-append root "-worktrees"))
+                            (string-contains? b "zz-cm-proj")
+                            (equal? b "*chat:a1*")
+                            (equal? b "*chat:a2*"))
                     (buffer-kill! b)))
                 (buffer-list))
+      (for-each (lambda (g)
+                  (let ((rec (group-record-by-name g)))
+                    (when rec (group-record-delete! (plist-get rec 'id)))))
+                '("zz-cm-proj" "a1" "a2"))
       (shell-command->string (string-append "rm -rf " root " " root "-worktrees"))
       (customize-set! 'lsp-auto-start saved-lsp)
       (t--cm-off!))))

@@ -18,20 +18,31 @@ defmodule Compos.Ui.ComposMLListTest do
 
     eval!(~S"""
     (begin
-      (define zz-semantic-preview nm--maybe-preview!)
       (define zz-semantic-previewed #f)
-      (set! nm--maybe-preview! (lambda (buf) (set! zz-semantic-previewed (car (list-current buf)))))
       (define zz-semantic-rows '(("one" "Subject <one>" "Alice" ("inbox" "unread") "Today")
                                 ("two" "Subject two" "Bob" ("inbox") "Yesterday")))
+      (define (zz-semantic-composml buf row)
+        (let* ((id (car row))
+               (subj (cadr row))
+               (from (caddr row))
+               (tags (cadddr row))
+               (marked? (and (assoc id (list-marks buf)) #t)))
+          (list 'tag "mail-thread"
+                'attrs (append (list (list "record-id" id))
+                               (if marked? '(("marked" "true")) '()))
+                'children
+                (append (if marked? (list (list 'tag "span" 'class "list-mark" 'text "✱")) '())
+                        (list (list 'tag "mail-subject" 'attrs '(("field" "primary")) 'text subj)
+                              (list 'tag "mail-from" 'text from))
+                        (map (lambda (t) (list 'tag "mail-tag" 'text t)) tags)))))
       (define-list-mode! "zz-semantic-list-mode"
         (list 'rows (lambda (buf) zz-semantic-rows)
               'key (lambda (buf row) (car row))
-              'row-columns (lambda (buf) (nm--search-columns buf))
-              'row-cells (lambda (buf row) (nm--search-cells buf row))
-              'on-click (lambda (buf th) (nm--click-thread! buf th))
+              'render (lambda (buf row) (string-append (caddr row) "  " (cadr row)))
+              'on-click (lambda (buf row) (set! zz-semantic-previewed (car row)))
               'composml-root (lambda (buf) (list 'tag "mailbox" 'attrs '(("source" "test") ("query" "tag:inbox"))))
               'collection "mail-threads"
-              'composml (lambda (buf row) (nm--thread-composml buf row))
+              'composml (lambda (buf row) (zz-semantic-composml buf row))
               'title (lambda (buf) "Mail")))
       (buffer-create "*semantic-list-test*")
       (switch-to-buffer! "*semantic-list-test*")
@@ -39,7 +50,6 @@ defmodule Compos.Ui.ComposMLListTest do
     """)
 
     on_exit(fn ->
-      Session.eval("(set! nm--maybe-preview! zz-semantic-preview)")
       if Buffer.exists?(buf), do: Compos.Core.kill_buffer(buf)
     end)
 
@@ -107,11 +117,16 @@ defmodule Compos.Ui.ComposMLListTest do
     assert Enum.count(LazyHTML.query(LazyHTML.from_document(html), "mail-thread")) == 2
   end
 
-  test "mailboxes and plain messages preserve typed fields and identities" do
+  test "semantic render-blocks preserve typed fields and identities" do
     eval!(~S"""
     (buffer-set-local! "*semantic-list-test*" 'render-blocks
       (list (list 'tag "mailboxes" 'class "semantic-list"
-                  'children (list (nm--mailbox-composml "*semantic-list-test*" '("Inbox" "tag:inbox" 184 12))))))
+                  'children
+                  (list (list 'tag "mailbox" 'attrs '(("query" "tag:inbox"))
+                              'children
+                              (list (list 'tag "mailbox-name" 'attrs '(("field" "primary")) 'text "Inbox")
+                                    (list 'tag "unread-count" 'attrs '(("field" "count")) 'text "12")
+                                    (list 'tag "message-count" 'attrs '(("field" "count")) 'text "184")))))))
     """)
 
     {:ok, view, _} = live(build_conn(), "/")
@@ -124,15 +139,6 @@ defmodule Compos.Ui.ComposMLListTest do
 
     assert has_element?(view, ~s(mailbox unread-count[field="count"]), "12")
     assert has_element?(view, ~s(mailbox message-count[field="count"]), "184")
-
-    result =
-      eval!(
-        ~S|(nm--msg-composml '(id "message-1" headers (From "Alice" To "Bob") body ((id 1 content-type "text/plain" content "Hello <Bob>"))))|
-      )
-
-    assert result =~ "mail-message"
-    assert result =~ "message-1"
-    assert result =~ "Hello <Bob>"
   end
 
   test "lists without a semantic callback retain text rendering" do
@@ -152,20 +158,18 @@ defmodule Compos.Ui.ComposMLListTest do
     assert has_element?(view, "c-list.buf c-item c-line")
   end
 
-  test "marking a semantic row shows a visible indicator and clearing removes it", %{buf: buf} do
-    Editor.local_bind_key(buf, ["<f8>"], "notmuch-mark-toggle")
-    KeyDispatch.handle_key("<f8>")
-    assert eval!(~S|(nm--any-marked? "*semantic-list-test*")|) == "#t"
+  test "marking a semantic row shows a visible indicator and clearing removes it" do
+    eval!(~S|(begin (list-marks-set! "*semantic-list-test*" '(("one" "*"))) (list-refresh! "*semantic-list-test*"))|)
+    assert eval!(~S|(list-marks "*semantic-list-test*")|) == ~s{(("one" "*"))}
     {:ok, view, _} = live(build_conn(), "/")
     assert has_element?(view, ~s(mail-thread[record-id="one"][marked="true"] .list-mark), "✱")
-    Editor.local_bind_key(buf, ["<f7>"], "notmuch-unmark-all")
-    KeyDispatch.handle_key("<f7>")
+    eval!(~S|(begin (list-marks-set! "*semantic-list-test*" '()) (list-refresh! "*semantic-list-test*"))|)
     {:ok, view, _} = live(build_conn(), "/")
     refute has_element?(view, "mail-thread .list-mark")
   end
 
   test "clicking a thread follows the keyboard preview path without changing marks" do
-    eval!(~S|(nm--toggle-selection! "*semantic-list-test*" "one")|)
+    eval!(~S|(begin (list-marks-set! "*semantic-list-test*" '(("one" "*"))) (list-refresh! "*semantic-list-test*"))|)
     {:ok, view, _} = live(build_conn(), "/")
     row = ~s(mail-thread[record-id="two"])
     view |> element(row) |> render_click()

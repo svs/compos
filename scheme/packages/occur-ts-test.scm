@@ -63,7 +63,7 @@
     (occur-ts-open t--occur-src "json" t--occur-query)
     (list-goto-first-entry "*occur-ts*")
     (let ((second (string-index t--occur-json "\"two\"")))
-      (run-command "list-next")
+      (with-stub 'debounce-delay 0 (lambda () (run-command "list-next")))
       (check-equal! (buffer-point t--occur-src) second "the move previews the second capture")
 
       (check-equal! (cadr (assoc "RET" (plist-get (list-mode-opts "occur-ts-mode") 'keys)))

@@ -125,6 +125,49 @@ defmodule Compos.Ui.BlockListStreamTest do
     refute list_id.(html2) == id1
   end
 
+  # LiveView's stream reset stashes existing items whose dom_id reappears
+  # and morphs them detached; morphdom cannot swap tag names on a detached
+  # node and leaves the previous element empty. Buffer switches rotate the
+  # list element, and item dom_ids encode their tag name.
+  test "buffer switch rotates list_id and tag changes never reuse a dom_id", %{conn: conn} do
+    {buf1, p1} = make_list_buf("*blist-stream-5a*", "Reply one\n")
+    list_id = fn html ->
+      [_, id] = Regex.run(~r/<c-transcript[^>]*\sid="([^"]+)"/, html)
+      id
+    end
+    item_ids = fn html ->
+      Regex.scan(~r/\sid="([^"]+-i-\d+[^"]*)"/, html) |> Enum.map(&Enum.at(&1, 1))
+    end
+
+    {:ok, view, html1} = live(conn, "/b/" <> URI.encode_www_form(buf1))
+    id1 = list_id.(html1)
+    [dom0_a] = item_ids.(html1)
+    assert String.ends_with?(dom0_a, "-i-0-c-agent")
+
+    # Same buffer, index 0 changes tag from c-agent to details
+    Buffer.set_local(buf1, "render-blocks", [
+      pl(tag: "c-transcript", class: "ag-scroll", isolate: true, follow: true, anchor: "t",
+        children: [
+          pl(tag: "details", class: "ag-thought", children: [
+            pl(tag: "summary", text: "thought"),
+            pl(tag: "c-group", class: "ag-thought-text", range: [0, p1])
+          ])
+        ])
+    ])
+    html2 = render(view)
+    assert list_id.(html2) == id1
+    [dom0_b] = item_ids.(html2)
+    assert String.ends_with?(dom0_b, "-i-0-details")
+    refute dom0_b == dom0_a
+
+    # Switching to another buffer rotates the list element
+    {buf2, _} = make_list_buf("*blist-stream-5b*", "Second chat\n")
+    Editor.set_window_buffer(buf2)
+    html3 = render(view)
+    refute list_id.(html3) == id1
+    assert html3 =~ "Second chat"
+  end
+
   test "blocks mode snapshot skips full rope flattening and overlays" do
     {buf, _p1} = make_list_buf("*blist-stream-2*")
     Buffer.insert(buf, "tail")

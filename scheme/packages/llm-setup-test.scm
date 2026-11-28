@@ -55,8 +55,8 @@
     (let ((buf (test-buffer! "zz-llm-perm" "")))
       (chat-permission-mode-set! buf 'ask)
       (check-equal! (chat-permission-mode buf) 'ask "the stance is buffer-local")
-      (check-contains! (buffer-local-value 'modeline-info buf) "ask"
-                       "and the modeline says what will stop to ask")
+      (check-false! (buffer-local-value 'modeline-info buf)
+                    "chat buffers keep the bottom modeline free of LLM config")
       (check-equal! (agent-mode-set! buf "plan") "plan"
                     "a buffer with no session parks the mode for the session to come")
       (buffer-kill! buf))))
@@ -111,13 +111,13 @@ a hang, and the user never learns there was anything to answer."
   (lambda ()
     (let ((buf (test-buffer! "zz-llm-mline" "")))
       (chat-presets-set! buf '(compos web))
-      (check-contains! (buffer-local-value 'modeline-info buf) " · web"
-                       "a preset beyond the bridge shows")
+      (check-true! (and (member 'web (chat-presets-of buf)) #t)
+                   "a preset beyond the bridge is recorded")
       (chat-presets-set! buf '())
-      (check-false! (string-contains? (buffer-local-value 'modeline-info buf) " · web")
+      (check-false! (member 'web (chat-presets-of buf))
                     "and leaves when it is off")
-      (check-false! (string-contains? (buffer-local-value 'modeline-info buf) "compos")
-                    "the ever-present bridge says nothing")
+      (check-true! (and (member 'compos (chat-presets-of buf)) #t)
+                   "the ever-present bridge stays")
       (buffer-kill! buf))))
 
 (deftest 'the-permission-report-answers-am-i-seeing-everything

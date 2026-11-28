@@ -91,9 +91,11 @@
 (deftest 'a-buffer-without-the-mode-binds-none-of-the-keys
   "the dispatcher commands are global; only a local map reaches them"
   (lambda ()
-    (let ((buf (test-buffer! "zz-paredit-plain" "(a)\n")))
-      (check-equal! (local-keys buf) '() "the buffer's own map is empty")
-      (buffer-kill! buf))))
+    (with-custom 'vscode-mode #f
+      (lambda ()
+        (let ((buf (test-buffer! "zz-paredit-plain" "(a)\n")))
+          (check-equal! (local-keys buf) '() "the buffer's own map is empty")
+          (buffer-kill! buf))))))
 
 (deftest 'every-paredit-key-falls-back-to-something-real
   "the table is the map; a fallback that moved would break silently"

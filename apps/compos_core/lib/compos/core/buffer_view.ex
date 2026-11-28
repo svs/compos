@@ -48,6 +48,8 @@ defmodule Compos.Core.BufferView do
   alias Compos.Core.{BufferStore, Rope}
 
   @table :compos_buffer_view
+  @big_table :compos_buffer_big
+  @big_holder :compos_buffer_big_holder
 
   # a local larger than this many bytes, serialized, gets a row of its own
   @big_bytes 16_384
@@ -57,6 +59,46 @@ defmodule Compos.Core.BufferView do
 
   @doc "The read model table."
   def table, do: @table
+
+  @doc """
+  The ETS table that holds large locals once, outside both the buffer
+  process heap and the main row. Owned by a silent holder process so a
+  BufferView restart never drops offloaded locals.
+  """
+  def big_table do
+    case :ets.whereis(@big_table) do
+      :undefined ->
+        start_big_holder()
+        @big_table
+
+      _tid ->
+        @big_table
+    end
+  end
+
+  defp start_big_holder do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        try do
+          :ets.new(@big_table, [:named_table, :public, :set, read_concurrency: true])
+          Process.register(self(), @big_holder)
+          send(parent, {:big_table, :ok})
+          receive do
+            :stop -> :ok
+          end
+        rescue
+          _ -> send(parent, {:big_table, :exists})
+        end
+      end)
+
+    receive do
+      {:big_table, _} -> :ok
+    after
+      1_000 -> Process.exit(pid, :kill)
+    end
+  end
 
   @doc """
   Watch PID so its row settles when it goes. A buffer calls this once,
@@ -74,7 +116,7 @@ defmodule Compos.Core.BufferView do
 
     :ets.delete(@table, name)
     :ets.delete(@table, {:use, name})
-    :ets.match_delete(@table, {{:big_local, name, :_}, :_})
+    delete_big_for(name)
     Process.delete({__MODULE__, :big, name})
     # the one place a row goes: a kill or the name a rename leaves
     Compos.Core.Events.broadcast_meta(name, %{killed: true})
@@ -439,36 +481,111 @@ defmodule Compos.Core.BufferView do
 
   def text_of(_), do: :error
 
-  # Move each large local to its own row. The writer remembers what it
-  # decided for each value it published, so a value that is the same term
-  # as last time costs one identity compare: no size walk, no new row.
+  @doc """
+  Store VALUE in `:compos_buffer_big` when it exceeds `@big_bytes`,
+  returning its small stand-in so the buffer process never holds a second
+  copy on its heap. Unchanged big values reuse PREV's stand-in. Overwriting
+  a big local with a small value removes its big row.
+  """
+  def store_big(name, key, value, prev \\ nil) do
+    cond do
+      big_ref?(value) ->
+        value
+
+      :erlang.external_size(value) > @big_bytes ->
+        if match?({@big, ^name, ^key, _}, prev) and big_value(prev) == value do
+          prev
+        else
+          :ets.insert(big_table(), {{:big_local, name, key}, value})
+          if :ets.whereis(@table) != :undefined, do: :ets.delete(@table, {:big_local, name, key})
+          {@big, name, key, :erlang.unique_integer([:monotonic])}
+        end
+
+      true ->
+        if big_ref?(prev), do: delete_big(name, key)
+        value
+    end
+  end
+
+  @doc "Offload every large value in INCOMING into `:compos_buffer_big`."
+  def offload_locals(name, incoming, existing \\ %{}) when is_map(incoming) do
+    Map.new(incoming, fn {k, v} -> {k, store_big(name, k, v, Map.get(existing, k))} end)
+  end
+
+  @doc "Move every offloaded local of OLD to NEW on rename, rewriting stand-ins."
+  def move_big(old_name, new_name, locals) when is_map(locals) do
+    tbl = big_table()
+
+    Map.new(locals, fn
+      {k, {@big, ^old_name, k, gen} = ref} ->
+        val = big_value(ref)
+        :ets.insert(tbl, {{:big_local, new_name, k}, val})
+        delete_big(old_name, k)
+        {k, {@big, new_name, k, gen}}
+
+      entry ->
+        entry
+    end)
+  end
+
+  def delete_big(name, key) do
+    if :ets.whereis(@big_table) != :undefined, do: :ets.delete(@big_table, {:big_local, name, key})
+    if :ets.whereis(@table) != :undefined, do: :ets.delete(@table, {:big_local, name, key})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  def delete_big_for(name) do
+    if :ets.whereis(@big_table) != :undefined,
+      do: :ets.match_delete(@big_table, {{:big_local, name, :_}, :_})
+
+    if :ets.whereis(@table) != :undefined,
+      do: :ets.match_delete(@table, {{:big_local, name, :_}, :_})
+
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  # Move each large local to its own row. Buffers offload big locals on write,
+  # so the common path sees a stand-in already and copies nothing.
   defp split_big(%{name: name, locals: locals} = view) when is_map(locals) do
     last = Process.get({__MODULE__, :big, name}, %{})
 
     {small, seen} =
       Enum.reduce(locals, {%{}, %{}}, fn {k, v}, {small, seen} ->
-        decision =
-          case Map.get(last, k) do
-            {old, decided} when old === v ->
-              decided
+        if big_ref?(v) do
+          {Map.put(small, k, v), Map.put(seen, k, :ref)}
+        else
+          decision =
+            case Map.get(last, k) do
+              {old, decided} when old === v ->
+                decided
 
-            _ ->
-              if :erlang.external_size(v) > @big_bytes do
-                :ets.insert(@table, {{:big_local, name, k}, v})
-                {@big, name, k, :erlang.unique_integer([:monotonic])}
-              else
-                :small
-              end
-          end
+              _ ->
+                if :erlang.external_size(v) > @big_bytes do
+                  :ets.insert(big_table(), {{:big_local, name, k}, v})
+                  {@big, name, k, :erlang.unique_integer([:monotonic])}
+                else
+                  :small
+                end
+            end
 
-        shown = if decision == :small, do: v, else: decision
-        {Map.put(small, k, shown), Map.put(seen, k, {v, decision})}
+          shown = if decision == :small, do: v, else: decision
+          {Map.put(small, k, shown), Map.put(seen, k, {v, decision})}
+        end
       end)
 
     for {k, {_, ref}} <- last, ref != :small, not match?({_, ^ref}, Map.get(seen, k)),
-        do: if(not big_seen?(seen, k), do: :ets.delete(@table, {:big_local, name, k}))
+        do: if(not big_seen?(seen, k), do: delete_big(name, k))
 
-    Process.put({__MODULE__, :big, name}, seen)
+    if Enum.all?(seen, fn {_, v} -> v == :ref or match?({_, :small}, v) end) do
+      Process.delete({__MODULE__, :big, name})
+    else
+      Process.put({__MODULE__, :big, name}, seen)
+    end
+
     %{view | locals: small}
   end
 
@@ -476,6 +593,7 @@ defmodule Compos.Core.BufferView do
 
   defp big_seen?(seen, k) do
     case Map.get(seen, k) do
+      :ref -> true
       {_, :small} -> false
       {_, _ref} -> true
       nil -> false
@@ -492,7 +610,7 @@ defmodule Compos.Core.BufferView do
   on it and copy the value only when the generation moves.
   """
   def big_value({@big, name, key, _gen}) do
-    case :ets.lookup(@table, {:big_local, name, key}) do
+    case lookup_big(name, key) do
       [{_, value}] -> value
       [] -> nil
     end
@@ -502,16 +620,29 @@ defmodule Compos.Core.BufferView do
 
   def big_value(value), do: value
 
+  defp lookup_big(name, key) do
+    case :ets.whereis(@big_table) do
+      :undefined ->
+        :ets.lookup(@table, {:big_local, name, key})
+
+      _tid ->
+        case :ets.lookup(@big_table, {:big_local, name, key}) do
+          [{_, _}] = hit -> hit
+          [] -> if :ets.whereis(@table) != :undefined, do: :ets.lookup(@table, {:big_local, name, key}), else: []
+        end
+    end
+  end
+
   @doc "Whether VALUE is a large local's stand-in."
   def big_ref?({@big, _, _, _}), do: true
   def big_ref?(_), do: false
 
-  defp resolve_locals(name, locals, lazy \\ [])
+  def resolve_locals(name, locals, lazy \\ [])
 
-  defp resolve_locals(name, locals, lazy) when is_map(locals),
+  def resolve_locals(name, locals, lazy) when is_map(locals),
     do: Map.new(locals, fn {k, v} -> {k, if(k in lazy, do: v, else: resolve(name, v))} end)
 
-  defp resolve_locals(_name, locals, _lazy), do: locals
+  def resolve_locals(_name, locals, _lazy), do: locals
 
   defp resolve_view(%{name: name, locals: locals} = view) when is_map(locals),
     do: %{view | locals: resolve_locals(name, locals)}
@@ -611,7 +742,7 @@ defmodule Compos.Core.BufferView do
                 forget(name)
 
               row ->
-                :ets.match_delete(@table, {{:big_local, name, :_}, :_})
+                delete_big_for(name)
                 put(row)
             end
         end

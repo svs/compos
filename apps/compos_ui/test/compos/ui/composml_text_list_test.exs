@@ -26,12 +26,14 @@ defmodule Compos.Ui.ComposMLTextListTest do
     assert has_element?(view, "buffers.buf > buffer[record-id]")
     assert has_element?(view, "buffers.buf c-headline.line")
     assert has_element?(view, "buffers > buffer .ibuffer-name", "zz-semantic-buffer")
-    html = view |> element(~s(buffer[record-id="*zz-semantic-buffer*"])) |> render()
+    {:ok, raw_key} = Session.eval(~S|(list-key "*ibuffer*" "*zz-semantic-buffer*")|)
+    key = String.trim(raw_key, "\"")
+    html = view |> element(~s(buffer[record-id="#{key}"])) |> render()
     assert html =~ "ibuffer-info ibuffer-mode"
     assert html =~ "ibuffer-info ibuffer-file"
     [_, win, line] = Regex.run(~r/id="ln-(\d+)-(\d+)"/, html)
     view |> element("#editor") |> render_hook("mouse", %{"win" => String.to_integer(win), "line" => String.to_integer(line), "col" => 0})
-    assert has_element?(view, ~s(buffer[record-id="*zz-semantic-buffer*"].hl-line))
+    assert has_element?(view, ~s(buffer[record-id="#{key}"].hl-line))
     assert row_text.() == text
     view |> element("#editor") |> render_hook("key", %{"k" => "n"})
     assert row_text.() == text
@@ -79,7 +81,9 @@ defmodule Compos.Ui.ComposMLTextListTest do
       Session.eval("(when (minibuffer-state) (minibuffer-cancel!))")
       Compos.Core.kill_buffer("*picker-direct*")
     end)
-    row = ~s(buffers > buffer[record-id="*picker-direct*"])
+    {:ok, raw_key} = Session.eval(~S|(list-key " *buffers*" "*picker-direct*")|)
+    key = String.trim(raw_key, "\"")
+    row = ~s(buffers > buffer[record-id="#{key}"])
     assert has_element?(view, row <> ".semantic-direct.line")
     assert has_element?(view, row <> " > .ibuffer-mode", "text-mode")
     refute has_element?(view, row <> " c-line")

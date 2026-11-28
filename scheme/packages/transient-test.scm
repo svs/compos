@@ -151,7 +151,7 @@
             (check-equal! (car (cadr groups)) "this chat · config"
                           "the right column says whose config it shows")
             (check-equal! (map (lambda (i) (plist-get i 'key)) (cdr (cadr groups)))
-                          '("M-b" "M-m" "M-e" "M-p" "+")
+                          '("M-b" "M-m" "M-e" "M-p" "+" "M-u" "M-s" "M-d")
                           "the config holds backend, model, effort, tools, and more")
             (check-equal! (llm-config--columns buf)
                           '(("Presets") ("this chat · config" "More"))
@@ -253,7 +253,7 @@
               (transient-setup "llm-configure" buf)
               ((plist-get (llm-config-test--named "zz-a" buf) 'command))
               (check-equal! (llm-config--selected-name) "zz-a" "RET selects the row")
-              (check-equal! ((plist-get (llm-config-test--named "zz-a" buf) 'value-fn) buf) "selected"
+              (check-equal! ((plist-get (llm-config-test--named "zz-a" buf) 'value-fn) buf) "✓ "
                             "and the row says selected")
               (llm-config--on-select buf (llm-config-test--named "zz-b" buf))
               (run-command "transient-quit-one")))
@@ -273,9 +273,9 @@
             (lambda ()
               (transient-setup "llm-configure" buf)
               (check-equal! (transient-dispatch-key "d")
-                            (list "command" (llm-config--filter-command "d"))
+                            (list "command" "llm-config-filter-char")
                             "on the preset column a letter types into the filter")
-              (run-command (llm-config--filter-command "d"))
+              (llm-config--filter-set! "d")
               (check-equal! (map (lambda (i) (plist-get i 'description))
                                  (cdr (car (llm-config--groups buf))))
                             '("zz-coding")
@@ -441,7 +441,7 @@ The full text list is still one key deeper (l), for actual reading."
       ;; child menu for a prefix name, and runs a command otherwise
       (let* ((t-row (let loop ((is (llm-config--more-items)))
                       (cond ((null? is) #f)
-                            ((equal? (plist-get (car is) 'key) "t") (car is))
+                            ((equal? (plist-get (car is) 'key) (llm-config--row-key "t")) (car is))
                             (else (loop (cdr is)))))))
         (check-equal! (plist-get t-row 'command) "chat-tools"
                       "t names the child prefix")

@@ -1031,13 +1031,17 @@ span.perf-warm { color: var(--perf-amber-fg, #b07a2a); }
   "(vm-roots) — the Scheme values that Elixir holds as GC roots, grouped by kind, largest first: a list of (KIND COUNT BYTES LARGEST-KEY)")
 (public! 'vm-ets
   "(vm-ets [LIMIT]) — the ETS tables that hold the most memory, largest first: a list of (NAME OWNER ROWS BYTES)")
+(public! 'vm-allocators
+  "(vm-allocators) — BEAM alloc_util carrier usage and fragmentation, plus persistent_term and mseg cached segments, as a plist")
+(public! 'vm-memory-breakdown
+  "(vm-memory-breakdown [LIMIT]) — top persistent_term entries, process-referenced refc binaries, and loaded BEAM modules by prefix")
 (public! 'vm-scheme-env
   "(vm-scheme-env [LIMIT]) — what the Scheme environment table holds: (FRAMES VARS GLOBAL-VARS ROWS); ROWS are the binding names that hold the most memory over every frame, as (NAME COUNT GLOBAL-COUNT BYTES). Copies every row: a diagnostic, not a sampler")
 (public! 'perf-refresh!
   "(perf-refresh! BUF) — sample the VM and redraw the monitor in BUF")
 (for-each
   (lambda (name) (catalog-meta! 'function name 'domain 'diagnostics 'effects '(read)))
-  '("vm-sample" "vm-processes" "vm-process-info" "vm-process-state" "vm-roots" "vm-ets" "vm-scheme-env" "perf-refresh!"))
+  '("vm-sample" "vm-processes" "vm-process-info" "vm-process-state" "vm-roots" "vm-ets" "vm-allocators" "vm-memory-breakdown" "vm-scheme-env" "perf-refresh!"))
 
 (effects! '(destroy))
 (public! 'vm-process-kill!

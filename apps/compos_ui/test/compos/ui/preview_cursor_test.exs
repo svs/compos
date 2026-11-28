@@ -8,7 +8,7 @@ defmodule Compos.Ui.PreviewCursorTest do
   @pt ~s(<span class="pt"></span>)
 
   defp strip_anchors(html),
-    do: String.replace(html, ~r/<span class="ln" data-p="\d+"><\/span>/, "")
+    do: String.replace(html, ~r/<span class="ln"[^>]*><\/span>/, "")
 
   test "the caret is painted, not just present" do
     # It once carried width:0. The span was in the page, in the right place,
@@ -17,8 +17,8 @@ defmodule Compos.Ui.PreviewCursorTest do
     css = preview("hi\n", 0)
 
     assert [rule] = Regex.run(~r/\.pt\{[^}]*\}/, css)
-    assert rule =~ ~r/width:\s*(?!0[;\s}])/, "the caret has no width: #{rule}"
-    assert rule =~ ~r/height:\s*(?!0[;\s}])/, "the caret has no height: #{rule}"
+    assert rule =~ ~r/(?:width|border-left):\s*(?!0[;\s}])/, "the caret has no width: #{rule}"
+    assert rule =~ ~r/(?:height:\s*(?!0[;\s}])|display:\s*inline)/, "the caret has no height: #{rule}"
   end
 
   test "the cursor span sits at point in rendered markdown" do
@@ -198,7 +198,7 @@ defmodule Compos.Ui.PreviewCursorTest do
     text = "# Title\n\nbody line\n\n| a | b |\n| --- | --- |\n| c | d |\n"
     html = preview(text, 0)
 
-    at = Regex.scan(~r/<span class="ln" data-p="(\d+)"><\/span>/, html) |> Enum.map(&List.last/1)
+    at = Regex.scan(~r/<span class="ln" data-p="(\d+)"[^>]*><\/span>/, html) |> Enum.map(&List.last/1)
 
     # every line start, the blank lines and the alignment row included: a
     # key in the page reads the line it moved to from the nearest anchor
@@ -210,8 +210,8 @@ defmodule Compos.Ui.PreviewCursorTest do
     html = preview(text, 0)
 
     # the anchor stands at the head of its line, the cursor inside it
-    assert html =~ ~s(<span class="ln" data-p="0"></span><span class="pt"></span>one)
-    assert html =~ ~s(<span class="ln" data-p="5"></span>two)
+    assert html =~ ~r/<span class="ln" data-p="0"[^>]*><\/span><span class="pt"><\/span>one/
+    assert html =~ ~r/<span class="ln" data-p="5"[^>]*><\/span>two/
   end
 
   test "the code block head is chrome, not source" do
@@ -270,10 +270,10 @@ defmodule Compos.Ui.PreviewCursorTest do
 
   test "a result CSV preview line limit is configurable" do
     text = "```result-csv :lines 2\nname,value\none,1\ntwo,2\n```\n"
-    html = preview(text, byte_size(text))
+    body = text |> preview(byte_size(text)) |> blocks()
 
-    assert html =~ "one"
-    refute html =~ "two"
+    assert body =~ "one"
+    refute body =~ "two"
   end
 
   test "a tangled CSV source ignores the preview file reader" do
@@ -357,7 +357,7 @@ defmodule Compos.Ui.PreviewCursorTest do
     html
     |> String.split("<body>")
     |> List.last()
-    |> String.replace(~r/<span class="ln" data-p="\d+"><\/span>/, "")
+    |> String.replace(~r/<span class="ln"[^>]*><\/span>/, "")
     |> String.replace("\n", "")
   end
 
@@ -417,7 +417,7 @@ defmodule Compos.Ui.PreviewCursorTest do
   test "the point's blank line names its own byte offset" do
     html = preview("para1\n\npara2\n", 6)
 
-    assert html =~ ~s(<span class="ln" data-p="6"></span>#{@pt})
+    assert html =~ ~r/<span class="ln" data-p="6"[^>]*><\/span>#{Regex.escape(@pt)}/
   end
 
   test "an llm overlay keeps the blank lines it quotes" do

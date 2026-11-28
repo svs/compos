@@ -1083,7 +1083,7 @@ defmodule Compos.Core.Buffer do
     # is the default answer. A caller that owns a visible but throwaway
     # buffer, like *Messages*, says so with :persistent.
     persistent? = Keyword.get(opts, :persistent, not String.starts_with?(name, " "))
-    state = %{state | persistent: persistent?}
+    state = %{state | persistent: persistent?, locals: BufferView.offload_locals(state.name, state.locals)}
     state = state |> attach_provenance() |> attach_history()
     {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
     state = state |> schedule_checkpoint() |> reset_idle_timer()
@@ -1346,6 +1346,8 @@ defmodule Compos.Core.Buffer do
   # BufferView restarted with an empty table and asked for our row back.
   # `publish/2` writes only what changed, so the row has to be forced.
   defp on_info(:republish_view, state) do
+    state = %{state | locals: BufferView.offload_locals(state.name, state.locals)}
+    Process.delete({BufferView, :big, state.name})
     BufferView.track(self(), state.name, state.id)
     BufferView.put(view(state))
     {:noreply, state}
@@ -1499,9 +1501,10 @@ defmodule Compos.Core.Buffer do
       {:ok, _} ->
         Registry.unregister(@registry, state.name)
         old = state.name
+        locals = BufferView.move_big(old, new_name, state.locals)
         # the row moves with the name; the name it leaves keeps no row
         BufferView.forget(old)
-        state = %{state | name: new_name, path: new_path} |> checkpoint_later() |> touch_state()
+        state = %{state | name: new_name, path: new_path, locals: locals} |> checkpoint_later() |> touch_state()
         state = write_checkpoint(state)
         BufferStore.renamed(old, new_name)
         {:reply, :ok, state}
@@ -1545,7 +1548,8 @@ defmodule Compos.Core.Buffer do
     do: {:reply, :ok, state |> Map.put(:read_only, bool) |> checkpoint_later()}
 
   defp on_call({:set_locals, locals}, _from, state) do
-    merged = Map.merge(state.locals, locals)
+    offloaded = BufferView.offload_locals(state.name, locals, state.locals)
+    merged = Map.merge(state.locals, offloaded)
 
     # A local that holds its value is not a change. The broadcast is a
     # frame refresh and a render, and a list redraws its locals on every
@@ -1568,7 +1572,8 @@ defmodule Compos.Core.Buffer do
   end
 
   defp on_call({:set_local, key, val}, _from, state) do
-    state = %{state | locals: Map.put(state.locals, key, val)}
+    stored = BufferView.store_big(state.name, key, val, Map.get(state.locals, key))
+    state = %{state | locals: Map.put(state.locals, key, stored)}
     state = if key == "ts-lang", do: init_ts(state, val), else: state
     # Locals feed rendering ('style, mode-name, 'render-blocks) and
     # persistence. The editor firehose reaches the Desktop; the buffer's own
@@ -1582,13 +1587,16 @@ defmodule Compos.Core.Buffer do
   end
 
   defp on_call({:get_local, key}, _from, state),
-    do: {:reply, Map.get(state.locals, key), state}
+    do: {:reply, BufferView.big_value(Map.get(state.locals, key)), state}
 
-  defp on_call(:locals, _from, state), do: {:reply, state.locals, state}
+  defp on_call(:locals, _from, state),
+    do: {:reply, BufferView.resolve_locals(state.name, state.locals), state}
 
   defp on_call({:read_metadata, fields, keys}, _from, state) do
     view = view(state)
-    values = Enum.map(fields, &Map.get(view, &1)) ++ Enum.map(keys, &Map.get(state.locals, &1))
+    values =
+      Enum.map(fields, &Map.get(view, &1)) ++
+        Enum.map(keys, &BufferView.big_value(Map.get(state.locals, &1)))
     {:reply, values, state}
   end
 
@@ -1767,7 +1775,8 @@ defmodule Compos.Core.Buffer do
   defp on_call({:insert_at, pos, text, src, author, locals}, _from, state) do
     # locals first: do_insert broadcasts, and the frame it paints must
     # already see them
-    state = %{state | locals: Map.merge(state.locals, locals)}
+    offloaded = BufferView.offload_locals(state.name, locals, state.locals)
+    state = %{state | locals: Map.merge(state.locals, offloaded)}
 
     {:reply, :ok,
      state |> do_insert(pos, text, src, author) |> touch_state() |> checkpoint_later()}
@@ -2115,7 +2124,10 @@ defmodule Compos.Core.Buffer do
   defp on_call({:render_snapshot, win_id}, _from, state) do
     blocks_mode? =
       Map.get(state.locals, "render-mode") == "blocks" and
-        match?([_ | _], Map.get(state.locals, "render-blocks"))
+        case Map.get(state.locals, "render-blocks") do
+          [_ | _] -> true
+          other -> BufferView.big_ref?(other)
+        end
 
     {text, state} =
       if blocks_mode?, do: {Map.get(state, :bin) || "", state}, else: fetch_text(state)
@@ -2140,7 +2152,7 @@ defmodule Compos.Core.Buffer do
        mark: mark,
        version: state.version,
        modified: state.version != state.saved_version,
-       locals: state.locals,
+       locals: BufferView.resolve_locals(state.name, state.locals),
        overlays: if(blocks_mode?, do: [], else: all_overlays(state)),
        overlay_gen: state.overlay_gen,
        hidden: if(blocks_mode?, do: [], else: hidden_union(state)),

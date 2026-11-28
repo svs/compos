@@ -71,8 +71,8 @@
 ;; file does not double the suite.
 (define (deftest name doc thunk)
   (set! *tests*
-    (append (alist-delete *tests* name)
-            (list (list name doc thunk))))
+    (cons (list name doc thunk)
+          (if (assoc name *tests*) (alist-delete *tests* name) *tests*)))
   (when *test-file-needs-disposable*
     (set! *disposable-only-tests*
       (cons (list name *test-file-needs-disposable*) *disposable-only-tests*)))
@@ -215,7 +215,7 @@
 
 (effects! '(read))
 
-(define (test-names) (map car *tests*))
+(define (test-names) (reverse (map car *tests*)))
 
 (define (test-doc name)
   (let ((t (assoc name *tests*)))
@@ -247,6 +247,29 @@
           (let ((out *test-failures*))
             (set! *test-failures* '())
             out))))))
+
+;; Run a batch of test names inside one eval, catching exceptions per test.
+;; When WANT-TIMES? is #f, returns only failures ((NAME 'fail MSGS) | (NAME 'error MSG)) — () on green.
+;; When WANT-TIMES? is #t, returns (FAILURES TIMES) where TIMES is ((MS NAME) ...).
+(define (run-tests-batch names &optional want-times?)
+  (let ((fails '())
+        (times '()))
+    (for-each
+      (lambda (name)
+        (let* ((t0 (if want-times? (monotonic-ms) 0))
+               (res (try-call (lambda () (run-test name))))
+               (ms (if want-times? (- (monotonic-ms) t0) 0)))
+          (when want-times?
+            (set! times (cons (list ms name) times)))
+          (cond
+            ((equal? (car res) 'error)
+             (set! fails (cons (list name 'error (cadr res)) fails)))
+            ((pair? (cadr res))
+             (set! fails (cons (list name 'fail (cadr res)) fails))))))
+      names)
+    (if want-times?
+        (list (reverse fails) (reverse times))
+        (reverse fails))))
 
 ;; Two suites, as in Emacs. The kernel's tests live in priv/tests. A
 ;; package's tests live beside it: scheme/packages/NAME-test.scm, or

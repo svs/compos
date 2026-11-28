@@ -15,6 +15,7 @@
   (when (minor-mode-on? t--kinds-buf "preview-mode")
     (disable-minor-mode! t--kinds-buf "preview-mode"))
   (buffer-goto! t--kinds-buf point)
+  (morg-arm-block-keys! t--kinds-buf)
   t--kinds-buf)
 
 (define (t--kinds-done!)
@@ -216,7 +217,7 @@
   (lambda ()
     (define-fence-kind! "zz-keyed-kind" "Keys test." 'runnable #f
       'keys '(("<f9> k" "morg-babel")))
-    (t--kinds! "```zz-keyed-kind\nx\n```\n" 0)
+    (t--kinds! "```zz-keyed-kind\nx\n```\n" 18)
     ;; read the keymap as data, buffer-explicit: the reverse lookup
     (check-true!
       (string-index (key-for-command "morg-babel" t--kinds-buf) "<f9>")

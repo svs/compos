@@ -12,7 +12,27 @@ defmodule Compos.Core.Agent.Transport do
   @callback send_frame(state :: term, data :: iodata) :: :ok
   @callback close(state :: term) :: :ok
 
-  def impl, do: Application.get_env(:compos_core, :acp_transport, __MODULE__.Port)
+  def impl do
+    Application.get_env(:compos_core, :acp_transport) ||
+      Application.get_env(:compos_core, :default_acp_transport, __MODULE__.Port)
+  end
+end
+
+defmodule Compos.Core.Agent.Transport.Null do
+  @moduledoc """
+  Inert ACP transport used as the test-env default so tests never spawn a real
+  external adapter binary unless they explicitly opt in.
+  """
+  @behaviour Compos.Core.Agent.Transport
+
+  @impl true
+  def open(_cmd, _opts, _owner), do: {:ok, :null}
+
+  @impl true
+  def send_frame(_state, _data), do: :ok
+
+  @impl true
+  def close(_state), do: :ok
 end
 
 defmodule Compos.Core.Agent.Transport.Port do

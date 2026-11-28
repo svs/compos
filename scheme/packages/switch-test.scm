@@ -58,15 +58,15 @@
 (deftest 'the-tab-row-marks-the-tab
   "the tabs name every view and mark the one you are on"
   (lambda ()
-    (check-equal! (switch-tab-row 'group) '(("All" #f) ("Group" #t) ("Window" #f)) "group")
-    (check-equal! (switch-tab-row 'all) '(("All" #t) ("Group" #f) ("Window" #f)) "all")))
+    (check-equal! (switch-tab-row 'group) '(("All" #f) ("Group" #t) ("Window" #f) ("Pane" #f) ("Mode" #f)) "group")
+    (check-equal! (switch-tab-row 'all) '(("All" #t) ("Group" #f) ("Window" #f) ("Pane" #f) ("Mode" #f)) "all")))
 
 (deftest 'the-side-arrows-wrap-the-tabs
   "right from the last tab reaches the first, and left from the first the last"
   (lambda ()
     (check-equal! (switch-tab-step 'group 1) 'window "right")
-    (check-equal! (switch-tab-step 'window 1) 'all "right wraps")
-    (check-equal! (switch-tab-step 'all -1) 'window "left wraps")))
+    (check-equal! (switch-tab-step 'mode 1) 'all "right wraps")
+    (check-equal! (switch-tab-step 'all -1) 'mode "left wraps")))
 
 (deftest 'a-tab-keeps-its-own-rows
   "Group keeps the group's buffers and chats, All keeps every row"

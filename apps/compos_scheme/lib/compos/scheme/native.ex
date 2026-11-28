@@ -95,11 +95,11 @@ defmodule Compos.Scheme.Native do
     end
   rescue
     e in Unsupported ->
-      Logger.debug("native: \#{e.message}")
+      Logger.debug("native: #{e.message}")
       :error
 
     e ->
-      Logger.warning("native compile failed: \#{Exception.message(e)}")
+      Logger.warning("native compile failed: #{Exception.message(e)}")
       :error
   end
 
@@ -159,7 +159,7 @@ defmodule Compos.Scheme.Native do
       |> Enum.with_index()
       |> Enum.map_reduce(%{}, fn {{p, c, where}, i}, seen ->
         k = Map.get(seen, where, 0)
-        {{make_name(i), p, c, where && Tuple.append(where, k)}, Map.put(seen, where, k + 1)}
+        {{make_name(i), p, c, where && Tuple.insert_at(where, tuple_size(where), k)}, Map.put(seen, where, k + 1)}
       end)
 
     case load(mod, fn -> module(mod, named) end) do
@@ -168,11 +168,11 @@ defmodule Compos.Scheme.Native do
     end
   rescue
     e in Unsupported ->
-      Logger.debug("native: \#{e.message}")
+      Logger.debug("native: #{e.message}")
       %{}
 
     e ->
-      Logger.warning("native batch compile failed: \#{Exception.message(e)}")
+      Logger.warning("native batch compile failed: #{Exception.message(e)}")
       %{}
   end
 
@@ -211,7 +211,7 @@ defmodule Compos.Scheme.Native do
             load_binary(mod, bin)
 
           other ->
-            Logger.warning("native compile refused: \#{inspect(other, limit: 20)}")
+            Logger.warning("native compile refused: #{inspect(other, limit: 20)}")
             :error
         end
     end
@@ -303,7 +303,7 @@ defmodule Compos.Scheme.Native do
           {[{:cerl.c_fname(name, 1), make} | defs], [i | ok]}
         rescue
           e in Unsupported ->
-            Logger.debug("native: \#{e.message}")
+            Logger.debug("native: #{e.message}")
             {defs, ok}
         end
       end)
@@ -326,7 +326,7 @@ defmodule Compos.Scheme.Native do
   end
 
   # One lambda: a local function of (Args, Store) answering {Value, Store}.
-  defp lambda_def({_req, opt, rest} = params, {:lcode, body, source, {rs, os, rst, self}} = code, ctx) do
+  defp lambda_def({_req, opt, rest} = params, {:lcode, body, _source, {rs, os, rst, self}} = code, ctx) do
     f = :cerl.c_fname(fname(), 2)
     args = var()
     s = var()
@@ -395,10 +395,10 @@ defmodule Compos.Scheme.Native do
          true <- :erlang.phash2(source) == hash do
       source
     else
-      _ -> ["source not found: \#{file}:\#{first} changed since it loaded"]
+      _ -> ["source not found: #{file}:#{first} changed since it loaded"]
     end
   rescue
-    _ -> ["source not found: \#{file}:\#{first}"]
+    _ -> ["source not found: #{file}:#{first}"]
   end
 
   # compile FORM again without building anything: the K-th lambda it queues

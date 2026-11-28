@@ -244,7 +244,7 @@
           (buffer-set-local! buf 'text-scale 1)
           (text-scale-sync! buf)
           (run-command "preview-mode")
-          (check-contains! (buffer-local-value 'style buf) "--default-family:Spectral"
+          (check-contains! (buffer-local-value 'style buf) (string-append "--default-family:" preview-font-family)
                            "preview applies its variable font")
           (run-command "preview-mode")
           (check-contains! (buffer-local-value 'style buf) "--default-family:JetBrains Mono"
@@ -256,7 +256,7 @@
             (list (buffer-local-value 'face-remap buf) (buffer-local-value 'style buf)))
           (run-command "preview-mode")
           (check-false! (string-contains? (or (buffer-local-value 'style buf) "")
-                                          "--default-family:Spectral")
+                                          (string-append "--default-family:" preview-font-family))
                         "the variable font leaves with preview")
           (check-contains! (buffer-local-value 'style buf) "--text-scale-factor:1.2"
                            "an unrelated source remap remains")

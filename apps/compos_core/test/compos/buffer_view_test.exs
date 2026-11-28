@@ -372,5 +372,31 @@ defmodule Compos.BufferViewTest do
     Buffer.set_local(name, "big-tree", 1)
     assert Buffer.get_local(name, "big-tree") == 1
     assert :ets.lookup(BufferView.table(), {:big_local, name, "big-tree"}) == []
+    assert :ets.lookup(BufferView.big_table(), {:big_local, name, "big-tree"}) == []
+  end
+
+  test "a large local is stored once in big_table, not duplicated in the buffer heap, and survives BufferView restart and rename", %{name: name} do
+    big = for i <- 1..2000, do: ["block", i, String.duplicate("x", 20)]
+    Buffer.set_local(name, "big-tree", big)
+
+    [{pid, _}] = Registry.lookup(Compos.Core.BufferRegistry, name)
+    state = :sys.get_state(pid)
+    assert BufferView.big_ref?(state.locals["big-tree"])
+    assert [{_, ^big}] = :ets.lookup(BufferView.big_table(), {:big_local, name, "big-tree"})
+
+    # survives BufferView restart
+    view = Process.whereis(BufferView)
+    Process.exit(view, :kill)
+    wait_until(fn -> Process.whereis(BufferView) not in [nil, view] end)
+    wait_until(fn -> match?({:ok, _}, BufferView.fetch(name)) end)
+    assert Buffer.get_local(name, "big-tree") == big
+
+    # rename moves the big row cleanly
+    renamed = name <> "-moved"
+    :ok = Buffer.rename(name, renamed, nil)
+    on_exit(fn -> Compos.Core.kill_buffer(renamed) end)
+    assert Buffer.get_local(renamed, "big-tree") == big
+    assert :ets.lookup(BufferView.big_table(), {:big_local, name, "big-tree"}) == []
+    assert [{_, ^big}] = :ets.lookup(BufferView.big_table(), {:big_local, renamed, "big-tree"})
   end
 end

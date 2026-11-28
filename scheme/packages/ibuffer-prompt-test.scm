@@ -64,7 +64,7 @@
 
 ;; the plain prompt's candidates, by label
 (define (ibp-candidates)
-  (map (lambda (c) (plist-get c 'label)) (plist-get (minibuffer-state) 'candidates)))
+  (map (lambda (r) (if (pair? r) (car r) r)) (minibuffer--filtered)))
 
 (define (ibp-my-candidates)
   (filter (lambda (b) (member b *ibp-bufs*)) (ibp-candidates)))

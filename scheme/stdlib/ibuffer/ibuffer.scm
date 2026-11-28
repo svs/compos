@@ -2760,7 +2760,7 @@
     'separator? (lambda (buf b) (ibuffer-separator? buf b))
     'section? (lambda (buf b) (ibuffer-heading? b))
     ;; a row sits under its listed parent; the name cell takes the indent
-    'parent (lambda (buf b) (and (string? b) (ibuffer-row-parent b)))
+    'parent (lambda (buf b) (let ((p (and (string? b) (ibuffer-row-parent b)))) (and p (list-key buf p))))
     ;; the name cell: after the dot and the icon, or the icon alone
     'nest-cell (lambda (buf) (if (ibuffer-dot? buf (ibuffer-layout-tags buf)) 2 1))
     'nest-flat? (lambda (buf) (ibuffer-nest-flat? buf))

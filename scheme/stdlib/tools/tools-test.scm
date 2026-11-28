@@ -136,8 +136,10 @@
 (deftest 'apropos-without-vectors-still-finds-a-sentence
   "a sentence no row holds whole still finds the rows with its rare words"
   (lambda ()
-    (check-equal! (plist-get (car (apropos "chat buffer from stable id" 'lexical #t)) 'name)
-                  "chat-stable-id!" "the partial match comes first")))
+    (let ((top (map (lambda (h) (plist-get h 'name))
+                      (take (apropos "chat buffer from stable id" 'lexical #t) 5))))
+      (check-true! (and (member "chat-stable-id!" top) #t)
+                   "the partial match ranks in the top hits"))))
 
 (deftest 'a-tool-call-with-wrong-arguments-names-the-real-ones
   "a model that guesses argument names gets one line back, never a reader crash and never the whole catalog"

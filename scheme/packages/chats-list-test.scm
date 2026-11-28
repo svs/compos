@@ -352,11 +352,12 @@
                       "and its name is indented")
         (check-equal! (list-nest-prefix *chat-list* "*zz-chats-b*") ""
                       "a chat with no spawner is not")
-        (list-fold-toggle! *chat-list* "*zz-chats-a*")
-        (list-redraw! *chat-list*)
-        (check-equal! (chats-test-names) '("*zz-chats-a*" "*zz-chats-b*")
-                      "a folded spawner hides the chat it spawned")
-        (check-equal! (list-row-hidden *chat-list* "*zz-chats-a*") 1
-                      "and says how many it hides")
-        (list-fold-toggle! *chat-list* "*zz-chats-a*")))
+        (let ((k (list-key *chat-list* "*zz-chats-a*")))
+          (list-fold-toggle! *chat-list* k)
+          (list-redraw! *chat-list*)
+          (check-equal! (chats-test-names) '("*zz-chats-a*" "*zz-chats-b*")
+                        "a folded spawner hides the chat it spawned")
+          (check-equal! (list-row-hidden *chat-list* "*zz-chats-a*") 1
+                        "and says how many it hides")
+          (list-fold-toggle! *chat-list* k))))
     (chats-test-reset!)))

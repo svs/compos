@@ -4132,11 +4132,15 @@
 ;; text with it, as killing a folded line does in Emacs: the reader chose
 ;; the line they see, and what it stands for goes with it.
 (define (region-lift-hidden buf start end)
-  (let loop ((hidden (sort (buffer-hidden buf))) (end end))
-    (cond ((null? hidden) (list start end))
-          ((and (< start end) (<= start (car (car hidden))) (>= end (car (car hidden))))
-           (loop (cdr hidden) (max end (cadr (car hidden)))))
-          (else (loop (cdr hidden) end)))))
+  (let ((at-bol? (or (= start 0) (equal? (substring-bytes (buffer-text buf) (- start 1) start) "\n"))))
+    (let loop ((hidden (sort (buffer-hidden buf))) (end end))
+      (cond ((null? hidden) (list start end))
+            ((and (< start end)
+                  (<= start (car (car hidden)))
+                  (or (> end (car (car hidden)))
+                      (and at-bol? (= end (car (car hidden))))))
+             (loop (cdr hidden) (max end (cadr (car hidden)))))
+            (else (loop (cdr hidden) end))))))
 
 ;; what START..END stands for in BUF: the mode's lifter, then the folds
 (define (region-lift-bounds buf start end)
@@ -7890,6 +7894,7 @@
 (effects! '(pure))
 (public! 'plist-get "(plist-get PLIST KEY) — the value after KEY in the flat PLIST; #f when KEY is absent")
 (public! 'ignore-errors "(ignore-errors THUNK) — THUNK's value, or #f when it raises")
+(public! 'try-call "(try-call THUNK) — (ok VALUE) when THUNK returns, or (error MESSAGE) when it raises")
 (public! 'boundp "(boundp 'NAME) — return #t when the symbol has a global binding.")
 (public! 'expt "(expt BASE POWER) — return BASE to POWER; an integer when both are integers and POWER is not negative.")
 (public! 'round "(round N) — return the nearest integer to N; a half rounds away from zero.")

@@ -34,11 +34,17 @@ defmodule Compos.Ui.BlockList do
         socket
       end
 
-    # The list's element is new with each instance of the component. A
-    # stream reset removes only the items of the stream that reset, so a
-    # new instance (after the socket rejoins) that reused the element
-    # left the old instance's items in it, emptied, above the new ones.
-    fresh? = not Map.has_key?(socket.assigns, :list_id)
+    # The list's element is new with each instance of the component and on
+    # every buffer or tag switch. LiveView's stream reset stashes existing
+    # items whose dom_id reappears and morphs them detached; when another
+    # buffer or a reindexed list puts a different tag at the same index,
+    # morphdom cannot swap tags on a detached node and leaves the old
+    # element empty. Putting the tag in the item id prevents same-buffer
+    # collisions; rotating list_id prevents cross-buffer and rejoin carryover.
+    fresh? =
+      not Map.has_key?(socket.assigns, :list_id) or
+        socket.assigns[:prev_buf] != assigns.buf or
+        socket.assigns[:prev_tag] != assigns.b.tag
 
     socket =
       if fresh?,
@@ -62,7 +68,7 @@ defmodule Compos.Ui.BlockList do
   defp stream_item(c) do
     key = Map.get(c, :stream_key) || "i-#{System.unique_integer([:positive])}"
     parts = Map.get(c, :frozen_parts) || %{tag: "c-group", attrs: [], inner: Map.get(c, :frozen, "")}
-    %{id: key, parts: parts}
+    %{id: "#{key}-#{parts.tag}", parts: parts}
   end
 
   defp sync_stream(socket, true, _prefix, items, _new_keys, _buf, _tag) do

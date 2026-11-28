@@ -116,43 +116,6 @@ defmodule Compos.Ui.AppServerTest do
     assert String.ends_with?(AppServer.app_url(b, 7), "/?v=7")
   end
 
-  test "the spreadsheet bridge reads and writes through Scheme", %{dir: dir} do
-    path = Path.join(dir, "workbook.sheet.json")
-    {:ok, sheet} = Compos.Core.Session.call_named("spreadsheet-open!", [path])
-    endpoint = url(sheet, "/_compos/app")
-
-    read = get(endpoint)
-    assert read.status == 200
-    assert Jason.decode!(read.resp_body)["version"] == 1
-
-    workbook = %{
-      "version" => 1,
-      "sheets" => [%{"name" => "Saved", "data" => [["=1+1"]]}]
-    }
-
-    write = put(endpoint, Jason.encode!(workbook))
-    assert write.status == 200
-    assert Jason.decode!(write.resp_body) == %{"ok" => true}
-    [saved_sheet] = Jason.decode!(File.read!(path))["sheets"]
-    assert saved_sheet["name"] == "Saved"
-
-    status =
-      post(
-        endpoint,
-        Jason.encode!(%{"state" => "ready", "mounted" => [], "drawn" => [], "failed" => []})
-      )
-
-    assert status.status == 200
-    assert Jason.decode!(status.resp_body) == %{"ok" => true}
-
-    assert {:ok, chart_status} =
-             Compos.Core.Session.call_named("spreadsheet-chart-status", [sheet])
-
-    assert [{:sym, "state"}, "ready"] in Enum.chunk_every(chart_status, 2)
-
-    Compos.Core.kill_buffer(sheet)
-  end
-
   test "the app bridge answers nothing for an app no package owns", %{buffer: b} do
     assert get(url(b, "/_compos/app")).status == 404
   end

@@ -1264,6 +1264,7 @@
    to the front; the pane stays."
   (panes-drop-buffer layout buf))
 
+(public! 'panes-empty "(panes-empty [CAPACITY]) -> LAYOUT: a layout with no pane and no window, showing at most CAPACITY panes; pure")
 (public! 'panes-show-buffer "(panes-show-buffer LAYOUT BUF MODE [PANE]) -> (LAYOUT KEY): BUF to the front of its mode's window, that window to the front of its pane; a mode with no window gets a new one in PANE")
 (catalog-meta! 'function "panes-show-buffer" 'effects '(read))
 (public! 'panes-default-layout "(panes-default-layout BUFS MODE-OF) -> LAYOUT: one pane per buffer, left to right, equal shares, each a window of the buffer's mode; pure")

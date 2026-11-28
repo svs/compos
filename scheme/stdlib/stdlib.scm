@@ -69,6 +69,7 @@
     (git)
     (panes-board)
     (pane-overview)
+    (canvas-overview)
     (window-flash)
     (help)
     (howto)

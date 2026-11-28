@@ -990,6 +990,11 @@
                ((chat-view--event-notice? text) (chat-view--event-notice text))
                ((chat-view--agent-notice? text) (chat-view--agent-notice text))
                (else (chat-view--user "queued" "ag-user ag-queued" text)))))
+      ;; a streamed part with no text yet, or none at all, draws nothing:
+      ;; no empty bubble, no empty thought box
+      ((and (member kind '("prose" "thought"))
+            (equal? (string-trim (chat-view--slice buf s e)) ""))
+       #f)
       ((equal? kind "prose") (chat-view--prose buf s e))
       ((equal? kind "thought")
        (list 'tag "details" 'class "ag-thought"

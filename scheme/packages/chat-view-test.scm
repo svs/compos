@@ -143,6 +143,25 @@
     (check-equal! (chat-view-token-label 400) "~100 tok" "tokens")
     (check-equal! (chat-view-token-label 6000) "~1.5k tok" "thousands")))
 
+(deftest 'chat-view-empty-parts-draw-nothing
+  "a streamed thought or prose part with no text draws no box"
+  (lambda ()
+    (let ((buf (chat-view-test--buffer "*zz-chat-view-empty*")))
+      (check-false! (chat-view-block buf '(34 34 "prose") '()) "an empty prose part")
+      (check-false! (chat-view-block buf '(5 6 "prose") '()) "a blank prose part")
+      (check-false! (chat-view-block buf '(34 34 "thought") '()) "an empty thought")
+      (check-false! (chat-view-block buf '(5 6 "thought") '()) "a blank thought")
+      (check-equal! (plist-get (chat-view-block buf '(6 26 "thought") '()) 'class) "ag-thought"
+                    "a thought with text still draws")
+      (buffer-set-local! buf 'agent-blocks
+        (append '((34 34 "thought") (34 34 "prose")) (buffer-local-value 'agent-blocks buf)))
+      (chat-view-sync! buf)
+      (check-equal! (map (lambda (r) (plist-get r 'tag))
+                         (chat-view-test--children (car (buffer-local-value 'render-blocks buf))))
+                    '("c-user" "c-agent" "c-toolcall")
+                    "the transcript draws only the parts with text")
+      (buffer-kill! buf))))
+
 (deftest 'chat-view-reuses-views-after-an-excise
   "a change deep in the model keeps the views of the unchanged blocks"
   (lambda ()

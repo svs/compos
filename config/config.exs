@@ -137,6 +137,11 @@ if config_env() == :test do
     Integer.to_string(:erlang.phash2(Path.expand(".")), 36) <>
       (System.get_env("MIX_TEST_PARTITION") || "") <> "-r" <> run
 
+  # Share the content-addressed native Scheme cache across test runs so boot
+  # does not recompile ~150 Scheme files to Core Erlang from scratch (~20s).
+  # Native.cache!/2 writes to a unique temp file and renames atomically.
+  config :compos_scheme, native_cache: Path.expand("../_build/test/scheme-native", __DIR__)
+
   config :compos_rpc, socket_path: "/tmp/compos-rpc-test-#{suffix}.sock"
 
   config :compos_core,

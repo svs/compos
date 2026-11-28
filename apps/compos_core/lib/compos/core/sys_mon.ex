@@ -496,6 +496,59 @@ defmodule Compos.Core.SysMon do
   defp ancestor(other), do: inspect(other)
 
   @doc """
+  What the state of a waiting gen_server holds, for a memory hunt: the
+  state term split by map key, struct field and small-tuple slot, to DEPTH
+  levels, as `{path, bytes}` rows of at least MIN_BYTES, largest first.
+  The first row, path "", is the whole state. Sizes count shared data
+  once within a row, but two rows that share data each count it. A
+  process that does not answer within 2 s, or a dead pid, gives `[]`.
+  """
+  def state_sizes(text, depth \\ 3, min_bytes \\ 16_384) do
+    word = :erlang.system_info(:wordsize)
+
+    with {:ok, pid} <- parse_pid(text),
+         {:ok, state} <- get_state(pid) do
+      [{"", :erts_debug.size(state) * word} | split_state("", state, depth, word)]
+      |> Enum.filter(fn {path, bytes} -> path == "" or bytes >= min_bytes end)
+      |> Enum.sort_by(fn {path, bytes} -> {-bytes, path} end)
+    else
+      _ -> []
+    end
+  end
+
+  defp get_state(pid) do
+    {:ok, :sys.get_state(pid, 2000)}
+  catch
+    _, _ -> :error
+  end
+
+  defp split_state(_path, _term, 0, _word), do: []
+
+  defp split_state(path, %{__struct__: _} = s, depth, word),
+    do: split_state(path, Map.from_struct(s), depth, word)
+
+  defp split_state(path, m, depth, word) when is_map(m),
+    do: Enum.flat_map(m, fn {k, v} -> state_row(path, state_key(k), v, depth, word) end)
+
+  defp split_state(path, t, depth, word) when is_tuple(t) and tuple_size(t) <= 8 do
+    t
+    |> Tuple.to_list()
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {v, i} -> state_row(path, Integer.to_string(i), v, depth, word) end)
+  end
+
+  defp split_state(_path, _term, _depth, _word), do: []
+
+  defp state_row(path, key, value, depth, word) do
+    p = path <> "/" <> key
+    [{p, :erts_debug.size(value) * word} | split_state(p, value, depth - 1, word)]
+  end
+
+  defp state_key(k) when is_atom(k), do: Atom.to_string(k)
+  defp state_key(k) when is_binary(k) and byte_size(k) <= 40, do: k
+  defp state_key(k), do: inspect(k, limit: 4, printable_limit: 40)
+
+  @doc """
   Collect the heap of each process that waits for a message and holds
   more than MIN_BYTES. An idle process keeps its garbage until its next
   collection, and a process that gets few messages has none for hours.

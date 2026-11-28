@@ -6276,6 +6276,10 @@
     (append (map (lambda (h) (assoc h rows)) hist)
             (filter (lambda (r) (not (member (car r) hist))) rows))))
 
+(effects! '(read))
+(public! 'command-rows-by-history
+  "(command-rows-by-history KEY ROWS) -- ROWS with the ones named in history KEY first, most recent first, then the rest in their order")
+
 (effects! '(write))
 
 (define (command-modes! name modes)

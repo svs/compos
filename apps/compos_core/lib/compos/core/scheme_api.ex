@@ -645,6 +645,21 @@ defmodule Compos.Core.SchemeAPI do
       {"vm-process-info",
        "(vm-process-info PID) — a plist of one process's state, or #f when the pid is gone."} =>
         fn [pid] -> SysMon.process_info(sysmon_text(pid)) end,
+      {"vm-process-state",
+       "(vm-process-state PID [DEPTH] [MIN-BYTES]) — what a gen_server's state holds, split by key to DEPTH levels (default 3): (PATH BYTES) rows of at least MIN-BYTES (default 16 KiB), largest first; the first row is the whole state. Suspends the process for the copy: a diagnostic."} =>
+        fn args ->
+          {pid, rest} = List.pop_at(args, 0)
+
+          opts =
+            case rest do
+              [] -> []
+              [d] -> [trunc(d)]
+              [d, m | _] -> [trunc(d), trunc(m)]
+            end
+
+          apply(SysMon, :state_sizes, [sysmon_text(pid) | opts])
+          |> Enum.map(fn {path, bytes} -> [path, bytes] end)
+        end,
       {"vm-process-kill!",
        "(vm-process-kill! PID) — exit the process with reason kill; #t when it was alive."} =>
         fn [pid] -> SysMon.kill(sysmon_text(pid)) end

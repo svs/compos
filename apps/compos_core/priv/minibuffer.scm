@@ -1186,3 +1186,4 @@
 (domain! 'interaction)
 (effects! '(read))
 (public! 'history-order "(history-order KEY CANDIDATES) — CANDIDATES with remembered ones first, newest first")
+(public! 'history-items "(history-items KEY) — the remembered inputs of the history KEY, newest first")

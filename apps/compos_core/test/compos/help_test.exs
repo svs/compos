@@ -13,6 +13,13 @@ defmodule Compos.HelpTest do
 
     on_exit(fn ->
       for b <- ["*Help*", "*switch*", "*zz-help*"], do: Compos.Core.kill_buffer(b)
+
+      # A link test lands in the real priv/editor.scm. Left open, it became
+      # the current buffer of the next test, whose insert! typed into the
+      # stdlib, and a later save wrote it to disk: no Session could boot.
+      Session.eval(~s{(for-each buffer-kill!
+                         (filter (lambda (b) (string-suffix? "/editor.scm" b))
+                                 (buffer-list)))})
       Compos.TestHelpers.one_window!()
     end)
 

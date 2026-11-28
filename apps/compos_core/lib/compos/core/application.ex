@@ -136,7 +136,15 @@ defmodule Compos.Core.Application do
       }
     ]
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: Compos.Core.Supervisor)
+    # The default intensity, 3 restarts in 5 s, lets a few quick Session
+    # crashes shut the whole application down: every registry and
+    # supervisor above goes with it, and nothing can recover.
+    Supervisor.start_link(children,
+      strategy: :one_for_one,
+      name: Compos.Core.Supervisor,
+      max_restarts: 20,
+      max_seconds: 10
+    )
   end
 
   # --- one daemon per home ----------------------------------------------------

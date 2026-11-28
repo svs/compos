@@ -134,7 +134,11 @@ defmodule Compos.DesktopSessionRestartTest do
     assert "groups-v2" in keys
   end
 
+  # Kill only a booted Session: a kill during the stdlib load is a second
+  # crash inside one boot, and quick crashes spend the supervisor's
+  # restart intensity.
   defp kill_session do
+    assert eventually(fn -> Session.ready?() and booted?(nil) end)
     session = Process.whereis(Session)
     ref = Process.monitor(session)
     Process.exit(session, :kill)
@@ -249,10 +253,7 @@ defmodule Compos.DesktopSessionRestartTest do
     # its copy of the record
     assert :ok = Desktop.save_now()
 
-    session = Process.whereis(Session)
-    ref = Process.monitor(session)
-    Process.exit(session, :kill)
-    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 10_000
+    session = kill_session()
 
     # Session.ready? reads the published handle, and that is still the dead
     # interpreter until the replacement finishes its own init. Wait for the

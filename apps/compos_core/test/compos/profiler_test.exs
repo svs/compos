@@ -56,9 +56,10 @@ defmodule Compos.ProfilerTest do
     assert fetch(report, "at-ms") > 0
     assert fetch(report, "calls") >= 200
     assert fetch(report, "functions-seen") >= 1
-    # the prefix covers SysMon and its submodules; only SysMon itself ran
+    # the prefix covers SysMon and its submodules, and the editor's own
+    # monitors may call those while the profile runs
     assert fetch(report, "modules") >= 1
-    assert fetch(report, "modules-called") == 1
+    assert fetch(report, "modules-called") >= 1
     assert fetch(report, "reductions") > 0
     assert is_integer(fetch(report, "gcs"))
     assert is_integer(fetch(report, "memory"))
